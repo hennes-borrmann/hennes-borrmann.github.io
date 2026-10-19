@@ -1,0 +1,4 @@
+Instrument Sans, Instrument Serif (c) The Instrument Sans/Serif Project Authors
+Geist Mono (c) Vercel
+Alle Schriften lizenziert unter der SIL Open Font License 1.1 (https://openfontlicense.org).
+Lokal eingebunden (Subset Latin), keine Verbindung zu Google Fonts o. Ä.
