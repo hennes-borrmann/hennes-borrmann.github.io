@@ -1033,14 +1033,21 @@ async function main() {
     await h7.page.click('#btn-start');
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 1, null, { timeout: 30000 });
     // Ebbe: Anna fährt durch die Senke, so schnell sie kann (aus dem Stand, 2 s Gas).
+    // Gemessen wird das Tempo nach 20 m Weg, nicht nach einer festen Zeit – ein Hänger der Testmaschine verfälscht das nicht.
     const dip = async () => {
       await kart(h7.page, 'place(0, 1290, 0)');
       await sleep(200);
+      const from = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
       await h7.page.keyboard.down('ArrowUp');
-      await sleep(2000);
-      const e = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
+      let speed = 0;
+      for (const until = Date.now() + 8000; Date.now() < until; ) {
+        const e = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
+        speed = Math.hypot(e.vx, e.vz);
+        if (Math.hypot(e.x - from.x, e.z - from.z) >= 20) break;
+        await sleep(30);
+      }
       await h7.page.keyboard.up('ArrowUp');
-      return Math.hypot(e.vx, e.vz);
+      return speed;
     };
     const [tideH0, tideC0] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
     check('Das Rennen beginnt bei Ebbe', tideH0 && tideH0.phase === 0, tideH0 ? `Stand ${tideH0.phase}, Wasser ${tideH0.level.toFixed(2)} m` : 'keine Gezeit');
