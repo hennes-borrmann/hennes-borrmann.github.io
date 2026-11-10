@@ -3,8 +3,10 @@ import { AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import {
   DRAFT_FULL,
   DRAFT_PULL_FROM,
+  FLAT_FACTOR,
   FLOOD_FROM,
   PULSE_BOMB,
+  PULSE_PRESS,
   PULSE_VENT,
   VEH_BUS,
   VEH_TAXI,
@@ -13,6 +15,9 @@ import {
   floodPeak,
   pulseCycle,
   pulseWarning,
+  tideLevel,
+  tidePhase,
+  waterFactor,
   type Vehicle,
 } from '../../src/game/mechanics';
 import {
@@ -21,7 +26,9 @@ import {
   EV_BLOCK,
   EV_BURN,
   EV_DRAFT,
+  EV_FLAT,
   EV_HIT,
+  EV_SPLASH,
   FLAG_AIR,
   GUARD_TICKS,
   V_MAX,
@@ -31,7 +38,7 @@ import {
   stepKart,
   type KartState,
 } from '../../src/game/sim';
-import { TRACK, newVehiclePose, segDelta, setTrack, trackHeading, vehiclePose, wrapSeg } from '../../src/game/track';
+import { TRACK, newVehiclePose, proj, projectOnTrack, rightX, rightZ, segDelta, setTrack, trackHeading, vehiclePose, wrapSeg } from '../../src/game/track';
 
 afterAll(() => {
   setTrack(0);
@@ -444,5 +451,179 @@ describe('Geysire, Lavabomben und Lavaschwall (Glutkessel)', () => {
     console.log(`Höhle: ${took}-mal genommen, ${avoided}-mal gemieden (über einen ganzen Takt verteilt)`);
     expect(took).toBeGreaterThan(2);
     expect(avoided).toBeGreaterThan(2);
+  });
+});
+
+describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf dem Werkshof)', () => {
+  /** Ein gerades Stück der Startgeraden. */
+  const SEG = 20;
+
+  /** Kart auf Abschnitt seg, seitlich lat, mit Tempo speed. */
+  function at(seg: number, lat: number, speed: number): KartState {
+    const t = TRACK;
+    const s = gridState(0);
+    s.seg = seg;
+    s.x = t.px[seg] + rightX(t, seg) * lat;
+    s.z = t.pz[seg] + rightZ(t, seg) * lat;
+    s.y = t.py[seg] + lat * t.bank[seg];
+    s.heading = trackHeading(t, seg);
+    s.vx = Math.sin(s.heading) * speed;
+    s.vz = Math.cos(s.heading) * speed;
+    s.vy = 0;
+    s.flags = 0;
+    return s;
+  }
+
+  it('ein Förderband nimmt das Kart mit – vorwärts, rückwärts und quer', () => {
+    const t = setTrack(0);
+    const go = (along: number, across: number): { way: number; lat: number } => {
+      t.belts = along === 0 && across === 0 ? [] : [{ first: SEG - 2, count: 60, lat0: -3, lat1: 3, along, across }];
+      try {
+        const s = at(SEG, 0, 20);
+        const x = s.x;
+        const z = s.z;
+        for (let i = 0; i < 30; i++) stepKart(s, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time: i });
+        projectOnTrack(t, s.x, s.z, s.seg);
+        return { way: Math.hypot(s.x - x, s.z - z), lat: proj.lat };
+      } finally {
+        t.belts = [];
+      }
+    };
+    const plain = go(0, 0);
+    const fwd = go(6, 0);
+    const back = go(-5, 0);
+    const side = go(0, 3);
+    // 30 Ticks = eine halbe Sekunde: 3 m mehr, 2,5 m weniger, 1,5 m zur Seite
+    expect(fwd.way - plain.way).toBeGreaterThan(2.8);
+    expect(fwd.way - plain.way).toBeLessThan(3.2);
+    expect(plain.way - back.way).toBeGreaterThan(2.3);
+    expect(side.lat - plain.lat).toBeGreaterThan(1.3);
+    expect(Math.abs(fwd.lat - plain.lat)).toBeLessThan(0.05);
+  });
+
+  it('eine Stampfpresse plättet: kein Dreher, aber eine Weile flach und langsam', () => {
+    const t = setTrack(0);
+    t.pulses = [{ kind: PULSE_PRESS, seg: SEG, lat: 0, x: t.px[SEG], y: t.py[SEG], z: t.pz[SEG], radius: 2, period: 220, phase: 0, on: 34, warn: 60 }];
+    try {
+      const s = at(SEG, 0.5, V_MAX);
+      const ev = stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: 10 });
+      expect(ev & EV_FLAT).not.toBe(0);
+      expect(ev & EV_HIT).toBe(0);
+      expect(s.spin).toBe(0);
+      expect(s.flat).toBeGreaterThan(100);
+      // Platt fährt es nur gut halb so schnell …
+      let top = 0;
+      for (let i = 0; i < 100; i++) {
+        stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: 100 + i });
+        if (i > 40) top = Math.max(top, forwardSpeed(s));
+      }
+      expect(top).toBeLessThan(V_MAX * FLAT_FACTOR * 1.08);
+      // … und danach wieder normal.
+      for (let i = 0; i < 160; i++) stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: 100 });
+      expect(s.flat).toBe(0);
+      expect(forwardSpeed(s)).toBeGreaterThan(V_MAX * 0.9);
+      // Neben der Presse und außerhalb ihres Takts passiert nichts.
+      const beside = at(SEG, 5, V_MAX);
+      expect(stepKart(beside, GAS, { canDrive: true, speedFactor: 1, time: 10 }) & EV_FLAT).toBe(0);
+      const late = at(SEG, 0.5, V_MAX);
+      expect(stepKart(late, GAS, { canDrive: true, speedFactor: 1, time: 80 }) & EV_FLAT).toBe(0);
+    } finally {
+      t.pulses = [];
+    }
+  });
+
+  it('Ebbe und Flut: der Zyklus beginnt mit Ebbe, steigt, steht, fällt', () => {
+    const tide = { low: -0.7, high: 0.6, period: 2400, phase: 0, wave: 0, wavePeriod: 250 };
+    expect(tidePhase(tide, 0)).toBe(0);
+    expect(tidePhase(tide, 700)).toBe(0);
+    expect(tidePhase(tide, 1000)).toBeGreaterThan(0);
+    expect(tidePhase(tide, 1000)).toBeLessThan(1);
+    expect(tidePhase(tide, 1300)).toBe(1);
+    expect(tidePhase(tide, 2390)).toBeLessThan(0.05);
+    expect(tideLevel(tide, 1300)).toBeCloseTo(0.6);
+    expect(tideLevel(tide, 100)).toBeCloseTo(-0.7);
+    expect(waterFactor(0.03)).toBe(1);
+    expect(waterFactor(0.3)).toBeCloseTo(0.73);
+    expect(waterFactor(2)).toBeCloseTo(0.45);
+  });
+
+  it('bei Flut bremst das Wasser, wo die Fahrbahn tiefer liegt – auf der hohen Seite bleibt es trocken', () => {
+    const t = setTrack(0);
+    const bank = t.bank.slice();
+    t.tide = { low: -1, high: 0.4, period: 2400, phase: 0, wave: 0, wavePeriod: 250 };
+    for (let i = SEG - 5; i < SEG + 80; i++) {
+      t.tidal[i] = 1;
+      // rechte Seite höher: 8 cm je Meter
+      t.bank[i] = 0.08;
+    }
+    try {
+      const HIGH = 1300;
+      const LOW = 100;
+      const settle = (lat: number, time: number): { v: number; ev: number } => {
+        const s = at(SEG, lat, 20);
+        let ev = 0;
+        for (let i = 0; i < 45; i++) ev |= stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: time - (time % 10) });
+        return { v: forwardSpeed(s), ev };
+      };
+      const deep = settle(-4, HIGH); // 0,4 + 0,32 = 0,72 m tief
+      const shallow = settle(2, HIGH); // 0,4 − 0,16 = 0,24 m
+      const dry = settle(5.5, HIGH); // 0,4 − 0,44 < 0
+      const ebb = settle(-4, LOW);
+      console.log(`Flut: tief ${deep.v.toFixed(1)} m/s, flach ${shallow.v.toFixed(1)} m/s, trocken ${dry.v.toFixed(1)} m/s; bei Ebbe ${ebb.v.toFixed(1)} m/s`);
+      expect(deep.v).toBeLessThan(dry.v * 0.6);
+      expect(shallow.v).toBeLessThan(dry.v * 0.9);
+      expect(shallow.v).toBeGreaterThan(deep.v + 3);
+      expect(Math.abs(ebb.v - dry.v)).toBeLessThan(0.8);
+      expect(deep.ev & EV_SPLASH).not.toBe(0);
+      expect(dry.ev & EV_SPLASH).toBe(0);
+    } finally {
+      t.tide = null;
+      t.tidal.fill(0);
+      t.bank.set(bank);
+    }
+  });
+
+  it('die KI sucht das Band, das vorwärts läuft, und bei Flut die trockene Seite', () => {
+    const t = setTrack(0);
+    const bank = t.bank.slice();
+    const drive = (ticks: number, time: number): number => {
+      const s = at(SEG, 0, 22);
+      const brain = newBrain(2, AI_MEDIUM);
+      for (let i = 0; i < ticks; i++) {
+        const cmd = botCmd(s, brain, [], true, { tick: i, time, place: 1, smoke: false });
+        stepKart(s, cmd, { canDrive: true, speedFactor: 1, time });
+      }
+      projectOnTrack(t, s.x, s.z, s.seg);
+      return proj.lat;
+    };
+    // Drei Bänder nebeneinander: nur das rechte läuft vorwärts.
+    t.belts = [
+      { first: SEG, count: 90, lat0: -6, lat1: -2, along: -5, across: 0 },
+      { first: SEG, count: 90, lat0: -2, lat1: 2, along: -5, across: 0 },
+      { first: SEG, count: 90, lat0: 2, lat1: 6, along: 6, across: 0 },
+    ];
+    try {
+      const lat = drive(110, 0);
+      expect(lat).toBeGreaterThan(2.3);
+    } finally {
+      t.belts = [];
+    }
+    // Flut, linke Seite tief
+    t.tide = { low: -1, high: 0.3, period: 2400, phase: 0, wave: 0, wavePeriod: 250 };
+    for (let i = SEG - 5; i < SEG + 120; i++) {
+      t.tidal[i] = 1;
+      t.bank[i] = 0.08;
+    }
+    try {
+      const wet = drive(80, 1300);
+      const ebb = drive(80, 100);
+      // Wasserlinie bei 0,3 / 0,08 = 3,75 m rechts der Mitte: die KI fährt rechts davon.
+      expect(wet).toBeGreaterThan(3.2);
+      expect(ebb).toBeLessThan(2.5);
+    } finally {
+      t.tide = null;
+      t.tidal.fill(0);
+      t.bank.set(bank);
+    }
   });
 });
