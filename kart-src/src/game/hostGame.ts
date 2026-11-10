@@ -68,6 +68,7 @@ import {
   type Cmd,
   type KartState,
   type StepEnv,
+  BTN_ITEM,
 } from './sim';
 import {
   EDGE_OPEN_L,
@@ -358,9 +359,15 @@ export class HostGame implements GameView {
 
       // Mitspieler: seine Befehle der Reihe nach ausführen.
       if (k.queue.length > QUEUE_LIMIT) {
+        // Nach einem Hänger (hier oder beim Mitspieler) staut sich mehr, als sich aufholen lässt: das Älteste fällt weg.
+        // Ein Item-Druck dauert oft nur einen Schritt – der darf dabei nicht verloren gehen.
         const drop = k.queue.length - QUEUE_TRIM_TO;
+        let item = false;
+        for (let i = 0; i < drop; i++) if ((k.queue[i].cmd.buttons & BTN_ITEM) !== 0) item = true;
         k.queue.splice(0, drop);
         k.cmdsDropped += drop;
+        const head = k.queue[0];
+        if (item && (head.cmd.buttons & BTN_ITEM) === 0) head.cmd = { steer: head.cmd.steer, buttons: head.cmd.buttons | BTN_ITEM };
       }
       const n = Math.min(k.queue.length, MAX_CMDS_PER_TICK);
       if (n > 0) {

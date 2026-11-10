@@ -23,7 +23,7 @@ import {
   turboStage,
   lavaAt,
 } from '../game/sim';
-import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, PULSE_VENT, pulseCycle, vehicleAt } from '../game/mechanics';
+import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, PULSE_PRESS, PULSE_VENT, WATER_FROM, pulseCycle, tideLevel, vehicleAt } from '../game/mechanics';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
@@ -82,7 +82,11 @@ export interface SceneEvent {
     /** Dicht an einem Fahrzeug vorbeigezogen. */
     | 'pass'
     /** Das eigene Kart fährt durch Lava. */
-    | 'burn';
+    | 'burn'
+    /** Eine Stampfpresse schlägt herunter (slot −1). */
+    | 'press'
+    /** Das eigene Kart fährt durch Wasser (Flut). */
+    | 'splash';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -128,6 +132,9 @@ interface KartView {
   respawn: number;
   tow: number;
   draft: number;
+  flat: number;
+  /** Wie platt das Kart gerade dargestellt wird (0 … 1, geglättet). */
+  flatK: number;
   roulette: number;
   item: number;
   flags: number;
@@ -203,6 +210,8 @@ export class RaceScene {
   private mechTime = 0;
   private honkWait = 0;
   private burnWait = 0;
+  /** Wasserspiegel der Gezeit in diesem Bild (ohne Gezeit: unendlich tief). */
+  private waterLevel = -Infinity;
   /** Je Fahrzeug: lag das eigene Kart zuletzt dahinter (−1) oder davor (1)? */
   private passSide: Int8Array = new Int8Array(0);
   private readonly vpose = newVehiclePose();
@@ -289,7 +298,7 @@ export class RaceScene {
     this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
     this.scene.add(this.world.group, this.things.group);
-    this.mechanics = buildMechanics(TRACK, this.level > 0);
+    this.mechanics = buildMechanics(TRACK, this.level > 0, this.world);
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
     this.scene.fog = this.world.fog;
@@ -308,6 +317,7 @@ export class RaceScene {
       ['BZZZT!', 'violet'],
       ['ZIEL!', 'warm'],
       ['SOG!', 'cool'],
+      ['PLATT!', 'white'],
     ]);
     this.applyLevel();
   }
@@ -453,6 +463,8 @@ export class RaceScene {
       respawn: 0,
       tow: 0,
       draft: 0,
+      flat: 0,
+      flatK: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -495,7 +507,7 @@ export class RaceScene {
    * Was die Streckenmechanik hören und spüren lässt: ausbrechende Geysire,
    * einschlagende Bomben, hupende und vorbeirauschende Fahrzeuge, Lava unter den Rädern.
    */
-  private mechanicEvents(time: number, me: RenderEntity | undefined, dt: number): void {
+  private mechanicEvents(time: number, me: RenderEntity | undefined, dt: number, entities: RenderEntity[]): void {
     const t = this.track;
     const before = this.mechTime;
     this.mechTime = time;
@@ -506,7 +518,8 @@ export class RaceScene {
         // Der Zyklus ist seit dem letzten Bild über null gelaufen: Ausbruch bzw. Einschlag.
         if (pulseCycle(p, time) < pulseCycle(p, before)) {
           const vent = p.kind === PULSE_VENT;
-          this.emitAt(vent ? 'geyser' : 'bomb', p.x, p.y, p.z);
+          this.emitAt(vent ? 'geyser' : p.kind === PULSE_PRESS ? 'press' : 'bomb', p.x, p.y, p.z);
+          if (p.kind === PULSE_PRESS) this.burst(p.x, p.y + 0.2, p.z, 10, 7, 0xbfb8ae, false, 0.7, 0.5, 1);
           if (me && !vent) {
             const d = Math.hypot(me.x - p.x, me.z - p.z);
             if (d < 30) this.shake = Math.max(this.shake, 0.5 * (1 - d / 30));
@@ -516,6 +529,42 @@ export class RaceScene {
     }
     this.honkWait = Math.max(0, this.honkWait - dt);
     this.burnWait = Math.max(0, this.burnWait - dt);
+    // Flut: wer durchs Wasser fährt, spritzt – alle Karts in Sichtweite, zu hören nur das eigene.
+    if (t.tide) {
+      const level = tideLevel(t.tide, time);
+      this.waterLevel = level;
+      for (const e of entities) {
+        if (e.respawn > 0 || (e.flags & FLAG_AIR) !== 0 || !t.tidal[e.seg < t.total ? e.seg : 0]) continue;
+        const depth = level - e.y;
+        const speed = Math.hypot(e.vx, e.vz);
+        if (depth <= WATER_FROM || speed < 3) continue;
+        // Viele kleine Tropfen seitlich der Räder – je schneller und tiefer, desto mehr.
+        const drops = Math.min(4, Math.floor(dt * (10 + speed * 2.2) + Math.random()));
+        const hx = Math.sin(e.heading);
+        const hz = Math.cos(e.heading);
+        for (let d = 0; d < drops; d++) {
+          const side = Math.random() < 0.5 ? -1 : 1;
+          const out = 2 + Math.random() * 3 + speed * 0.08;
+          this.fx.puff(
+            e.x - hz * side * 0.9 + hx * (Math.random() - 0.3),
+            level + 0.05,
+            e.z + hx * side * 0.9 + hz * (Math.random() - 0.3),
+            -hz * side * out + hx * speed * 0.25,
+            2.5 + Math.random() * 3 + depth * 2,
+            hx * side * out + hz * speed * 0.25,
+            0.35 + Math.random() * 0.2,
+            0.16 + Math.random() * 0.2,
+            0xf2fbff,
+            0,
+            14,
+          );
+        }
+        if (me && e.slot === me.slot && this.burnWait === 0) {
+          this.burnWait = 0.28;
+          this.onEvent?.({ kind: 'splash', slot: e.slot, local: true, pan: 0, gain: Math.min(1, 0.4 + depth) });
+        }
+      }
+    }
     if (!me || me.respawn > 0) return;
     if (t.vehicles.length > 0) {
       const lap = t.n * t.step;
@@ -678,6 +727,15 @@ export class RaceScene {
         this.emit('wall', k, local);
         if (local) this.shake = Math.max(this.shake, 0.2);
       }
+      if (e.flat > 0 && k.flat === 0) {
+        this.pop('PLATT!', e, 'white', 4);
+        this.burst(e.x, e.y + 0.4, e.z, 12, 8, 0xe9e6f2, false, 0.8, 0.5, 1);
+        this.emit('hit', k, local);
+        if (local) {
+          this.hitstop = 0.07;
+          this.shake = Math.max(this.shake, 0.7);
+        }
+      }
       if (e.draft >= DRAFT_PULL_FROM && k.draft < DRAFT_PULL_FROM) {
         this.pop('SOG!', e, 'cool', 3.2);
         this.emit('draft', k, local);
@@ -696,6 +754,7 @@ export class RaceScene {
     k.respawn = e.respawn;
     k.tow = e.tow;
     k.draft = e.draft;
+    k.flat = e.flat;
     k.roulette = e.roulette;
     k.item = e.item;
     k.flags = e.flags;
@@ -815,6 +874,9 @@ export class RaceScene {
       const root = k.visual.root;
       root.position.set(e.x, e.y, e.z);
       root.rotation.set(k.pitch, e.heading, k.roll);
+      // Von der Presse geplättet: flach wie eine Flunder, dafür etwas breiter – und am Ende federt es zurück.
+      k.flatK += ((e.flat > 6 ? 1 : 0) - k.flatK) * Math.min(1, dt * (e.flat > 6 ? 26 : 9));
+      root.scale.set(1 + 0.22 * k.flatK, 1 - 0.7 * k.flatK, 1 + 0.12 * k.flatK);
       // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist.
       root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && Math.floor(this.time * 14) % 2 === 0);
       k.visual.update(dt, pose);
@@ -864,7 +926,7 @@ export class RaceScene {
     this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
     for (const m of this.mechanics) m.update(race.time, this.time, dt, this.camera.position, this.fx);
-    this.mechanicEvents(race.time, me ?? undefined, dt);
+    this.mechanicEvents(race.time, me ?? undefined, dt, entities);
     let smoke = 0;
     let threat = 0;
     this.flat.identity();
@@ -914,7 +976,10 @@ export class RaceScene {
     const rl = this.v1.copy(A.wheelRearL).applyMatrix4(root.matrixWorld);
     const rr = this.v2.copy(A.wheelRearR).applyMatrix4(root.matrixWorld);
     const drifting = e.driftDir !== 0 && !air;
-    const dust = DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]];
+    const seg = e.seg < this.track.total ? e.seg : 0;
+    // Im Wasser staubt nichts – dort spritzt es (mechanicEvents).
+    const wet = this.track.tidal[seg] !== 0 && this.waterLevel - e.y > WATER_FROM;
+    const dust = wet ? 0 : DUST[this.track.surf[seg]];
     const lv = LEVELS[this.level];
     const budget = lv.particles / LEVELS[2].particles;
 

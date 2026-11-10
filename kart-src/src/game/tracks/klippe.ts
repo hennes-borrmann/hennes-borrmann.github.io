@@ -13,6 +13,13 @@ export const KLIPPE: TrackDef = {
   name: 'Möwenklippe',
   theme: 'klippe',
   blurb: 'Holzsteg ohne Geländer, Serpentinen oder Grotte, Steilkurve und Sprung über die Bucht.',
+  twist: 'Ebbe und Flut: bei Flut steht die Uferstraße um die Bucht unter Wasser – dann lohnt der Steg.',
+  // Der Wasserspiegel steigt vom Meeresspiegel der Welt (−2,2 m) bis knapp unter
+  // die Promenade. Nur die Uferstraße um die Bucht liegt tief genug, um nass zu
+  // werden; sie neigt sich zum Meer (links), so dass an der Landseite zuerst
+  // noch ein trockener Streifen bleibt.
+  tide: { low: -2.2, high: -0.3, period: 46, phase: 0 },
+  tidal: [[47.3, 52.8]],
   grade: 2,
   surface: 'dirt',
   // Der Leuchtturm steht oben auf der Hochfläche.
@@ -68,13 +75,14 @@ export const KLIPPE: TrackDef = {
     [-150, -35, 0.6],
     // 43–46 Steilkurve an den Strand
     ...arc(-125, -75, 25, 180, 270, 4, 0.2, 0),
-    // 47: Gabelung Bucht – die Uferstraße 48–52 führt sicher um die Bucht herum
+    // 47: Gabelung Bucht – die Uferstraße 48–52 führt um die Bucht herum, dicht
+    // am Wasser: in zwei Senken liegt sie unter dem Flutpegel.
     [-98, -101, 0],
-    [-60, -90, 0],
-    [-38, -62, 0.4],
-    [-6, -48, 0.8],
-    [26, -62, 0.4],
-    [50, -89, 0],
+    [-60, -90, -0.85],
+    [-38, -62, -0.6],
+    [-6, -48, -0.15],
+    [26, -62, -0.6],
+    [50, -89, -0.85],
     // 53: zurück auf der Promenade, Einmündung kurz vor dem Ziel
     [75, -100, 0],
   ],
@@ -97,7 +105,11 @@ export const KLIPPE: TrackDef = {
     { at: 33, length: 15, height: 1.3 },
   ],
   ramps: [{ at: 39.5, length: 9, height: 1.3, gap: 8 }],
-  banks: [[42.5, 46.3, -0.36]],
+  banks: [
+    [42.5, 46.3, -0.36],
+    // Uferstraße: zum Meer hin (links) abfallend
+    [47.7, 52.5, 0.055],
+  ],
   // Steg: schmaler, links und rechts offen; an der Wende steht außen ein Geländer.
   // Untergrund: Sand am Strand und in der Bucht, Holz auf Steg und Brücke,
   // Waldweg durch die Kiefern hinauf, Wiese auf der Hochfläche am Leuchtturm.
@@ -118,10 +130,7 @@ export const KLIPPE: TrackDef = {
     [2.9, 11.3],
     [21, 22.2],
   ],
-  hazards: [
-    { at: 32.6, amp: 3.6, period: 4.6, phase: 1.2 },
-    { at: 50, amp: 4, period: 5, phase: 0 },
-  ],
+  hazards: [{ at: 32.6, amp: 3.6, period: 4.6, phase: 1.2 }],
   branches: [
     // a: Grotte – unter der Serpentinenbrücke hindurch, dann steil und eng
     // durch die Höhle im Fels hinauf; kürzer, aber nur 10 m breit.

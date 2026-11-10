@@ -47,6 +47,9 @@ import {
 import { TRACK } from './track';
 import type { GameView, RaceView, RenderEntity, Standing } from './view';
 
+/** Uhrenabgleich: so viele der jüngsten Stände zählen (45 = anderthalb Sekunden bei 30 Ständen je Sekunde). */
+const OFFSET_WINDOW = 45;
+
 /** Abspielverzögerung fremder Fahrzeuge (Sekunden). */
 export const CLIENT_INTERP_DELAY = 0.085;
 /** Über diese Zeit klingt ein Vorhersagefehler in der Darstellung ab. */
@@ -121,6 +124,15 @@ export class ClientGame implements GameView {
   wrongTrack = -1;
   /** Abbildung eigene Zeit → Host-Tick, bestimmt vom am wenigsten verspäteten Snapshot. */
   private clockOffset = Number.NaN;
+  /**
+   * Uhrenabgleich: Versatz (Host-Tick · DT − Ankunftszeit) der jüngsten Stände.
+   * Der größte davon gehört zum am wenigsten verspäteten Stand – das ist der Bezug.
+   * Ein gleitendes Fenster statt eines ewigen Bestwerts, weil die Rennuhr des Hosts
+   * Zeit verlieren kann (ein Hänger über 250 ms wird dort nicht ganz nachgeholt):
+   * dann müssen die alten, nun zu großen Werte nach kurzer Zeit herausfallen.
+   */
+  private readonly offsets = new Float64Array(OFFSET_WINDOW).fill(Number.NaN);
+  private offsetAt = 0;
   private couldDrive = false;
 
   /**
@@ -138,6 +150,7 @@ export class ClientGame implements GameView {
     this.lastSnapTick = -1;
     this.pending = [];
     this.clockOffset = Number.NaN;
+    this.offsets.fill(Number.NaN);
     // Bis der Host wieder einen Stand geschickt hat, gibt es keinen Zeitbezug:
     // nichts vorhersagen und nichts senden (sonst gingen Eingaben mit falscher Rennzeit hinaus).
     this.ready = false;
@@ -218,7 +231,13 @@ export class ClientGame implements GameView {
     this.stats.snapshots++;
 
     const offset = snap.tick * DT - nowSec;
-    if (Number.isNaN(this.clockOffset) || offset > this.clockOffset || offset < this.clockOffset - 0.5) this.clockOffset = offset;
+    // Sprung der Host-Uhr um mehr als eine halbe Sekunde (langer Hänger): die alten Werte zählen sofort nicht mehr.
+    if (!Number.isNaN(this.clockOffset) && offset < this.clockOffset - 0.5) this.offsets.fill(Number.NaN);
+    this.offsets[this.offsetAt] = offset;
+    this.offsetAt = (this.offsetAt + 1) % OFFSET_WINDOW;
+    let best = offset;
+    for (let i = 0; i < OFFSET_WINDOW; i++) if (this.offsets[i] > best) best = this.offsets[i];
+    this.clockOffset = best;
 
     if (snap.raceId !== this.raceId) {
       // Neues Rennen: alles steht wieder am Start – nichts ausblenden, hart übernehmen.

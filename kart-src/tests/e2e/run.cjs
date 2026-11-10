@@ -908,7 +908,7 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten');
     const h7 = await openScreen('host7', '&laps=2');
     const code7 = await createLobby(h7, 'Anna');
     const c7 = await openScreen('client7', '&laps=2');
@@ -985,10 +985,85 @@ async function main() {
     }
     check('Geysir: Anna wird hochgeworfen und schleudert – auf beiden Bildschirmen', blown[0] > 0 && blown[1] > 0 && air, `${blown[0]} / ${blown[1]} Ticks, in der Luft: ${air}`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Werkshof: Ben (Mitspieler) steht unter einer Stampfpresse, bis sie zuschlägt.
+    const twist0 = await h7.page.locator('.track-card').nth(0).locator('.track-twist').textContent();
+    check('Streckenwahl nennt die Eigenheit des Werkshofs', /Förderbänder/.test(twist0 || '') && /Stampfpressen/.test(twist0 || ''), twist0 || '');
+    await h7.page.locator('.track-card').nth(0).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 0, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 0, null, { timeout: 30000 });
+    const pressRow = (await kart(h7.page, 'pulses()')).filter((p) => p.kind === 2);
+    check('Werkshof hat zwei Reihen Stampfpressen', pressRow.length === 6, `${pressRow.length} Pressen`);
+    const stamp = pressRow[0];
+    await kart(h7.page, `place(1, ${stamp.at}, ${stamp.lat})`);
+    let flat = [0, 0];
+    let spun = 0;
+    const untilP = Date.now() + (stamp.period + 2) * 1000;
+    while (Date.now() < untilP && (flat[0] === 0 || flat[1] === 0)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const b = eh.find((e) => e.slot === 1);
+      flat[0] = Math.max(flat[0], b.flat || 0);
+      flat[1] = Math.max(flat[1], ec.find((e) => e.slot === 1).flat || 0);
+      spun = Math.max(spun, b.spin);
+      await sleep(40);
+    }
+    check('Stampfpresse: Ben ist geplättet – beim Host und auf seinem eigenen Bildschirm, ohne Dreher', flat[0] > 0 && flat[1] > 0 && spun === 0, `${flat[0]} / ${flat[1]} Ticks platt, Dreher ${spun}`);
+    // Platt fährt er nur gut halb so schnell.
+    await c7.page.keyboard.down('ArrowUp');
+    await sleep(900);
+    const slow = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
+    await c7.page.keyboard.up('ArrowUp');
+    check('Geplättet ist Ben langsam', slow.flat > 0 ? Math.hypot(slow.vx, slow.vz) < 19 : true, `${Math.hypot(slow.vx, slow.vz).toFixed(1)} m/s, noch ${slow.flat} Ticks platt`);
+    const sc1 = await kart(h7.page, 'scene()');
+    check('Pressen und Bänder werden gezeichnet', sc1 && sc1.triangles > 5000, sc1 ? `${sc1.calls} Zeichenaufrufe, ${sc1.triangles} Dreiecke` : '');
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Möwenklippe: dieselbe Gezeit auf beiden Bildschirmen; bei Flut bremst das Wasser in der Senke der Uferstraße.
+    const twist1 = await h7.page.locator('.track-card').nth(1).locator('.track-twist').textContent();
+    check('Streckenwahl nennt die Eigenheit der Möwenklippe', /Ebbe und Flut/.test(twist1 || ''), twist1 || '');
+    await h7.page.locator('.track-card').nth(1).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 1, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 1, null, { timeout: 30000 });
+    // Ebbe: Anna fährt durch die Senke, so schnell sie kann (aus dem Stand, 2 s Gas).
+    // Gemessen wird das Tempo nach 20 m Weg, nicht nach einer festen Zeit – ein Hänger der Testmaschine verfälscht das nicht.
+    const dip = async () => {
+      await kart(h7.page, 'place(0, 1290, 0)');
+      await sleep(200);
+      const from = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
+      await h7.page.keyboard.down('ArrowUp');
+      let speed = 0;
+      for (const until = Date.now() + 8000; Date.now() < until; ) {
+        const e = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
+        speed = Math.hypot(e.vx, e.vz);
+        if (Math.hypot(e.x - from.x, e.z - from.z) >= 20) break;
+        await sleep(30);
+      }
+      await h7.page.keyboard.up('ArrowUp');
+      return speed;
+    };
+    const [tideH0, tideC0] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
+    check('Das Rennen beginnt bei Ebbe', tideH0 && tideH0.phase === 0, tideH0 ? `Stand ${tideH0.phase}, Wasser ${tideH0.level.toFixed(2)} m` : 'keine Gezeit');
+    const skewT = tideH0 && tideC0 ? Math.abs(tideH0.time + ((tideC0.wall - tideH0.wall) / 1000) * 60 - tideC0.time) : 999;
+    check('Gezeit des Mitspielers läuft mit der des Hosts (Abweichung < 0,2 s)', skewT < 12, `${(skewT / 60).toFixed(3)} s`);
+    const dry = await dip();
+    await h7.page.waitForFunction(() => window.__kart.tide().phase === 1, null, { timeout: 40000 });
+    const [tideH1, tideC1] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
+    check('Flut steht auf beiden Bildschirmen', tideH1.phase === 1 && tideC1.phase === 1 && Math.abs(tideH1.level - tideC1.level) < 0.08, `Wasser ${tideH1.level.toFixed(2)} m / ${tideC1.level.toFixed(2)} m`);
+    const wet = await dip();
+    check('Bei Flut bremst das Wasser in der Senke', dry > 14 && wet < dry * 0.75, `Ebbe ${dry.toFixed(1)} m/s, Flut ${wet.toFixed(1)} m/s`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die beiden großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
-    await sleep(4000);
+    // Der Browser räumt die vier großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    await sleep(8000);
   }
 
   if (wants('netsim')) {
@@ -1007,10 +1082,25 @@ async function main() {
     await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c3.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
     await sleep(1500);
-    const link = await kart(c3.page, 'hostLink()');
-    check('Gemessene Umlaufzeit passt zur Simulation (≈ 160–260 ms)', link.rtt > 150 && link.rtt < 280, `${link.rtt.toFixed(0)} ms`);
-    const [raceH, raceC] = await Promise.all([raceNow(h3.page), raceNow(c3.page)]);
-    check('Countdown trotz Verzögerung nahezu gleichzeitig (< 0,2 s)', Math.abs(raceH.goAt - raceC.goAt) < 0.2, `${Math.abs(raceH.goAt - raceC.goAt).toFixed(3)} s`);
+    // Die Umlaufzeit ist ein geglätteter Messwert: hing die Testmaschine beim Aufbau der Welt, braucht er ein paar Sekunden, bis er stimmt.
+    let link = await kart(c3.page, 'hostLink()');
+    const rttFirst = link.rtt;
+    for (const rttUntil = Date.now() + 6000; !(link.rtt > 150 && link.rtt < 280) && Date.now() < rttUntil; ) {
+      await sleep(500);
+      link = await kart(c3.page, 'hostLink()');
+    }
+    check('Gemessene Umlaufzeit passt zur Simulation (≈ 160–260 ms)', link.rtt > 150 && link.rtt < 280, `${link.rtt.toFixed(0)} ms${rttFirst > 280 ? ` (zuerst ${rttFirst.toFixed(0)} ms – Testmaschine hing)` : ''}`);
+    // Hängt der Host kurz (hier: die Testmaschine), geht seine Rennuhr nach; der Mitspieler übernimmt sie binnen anderthalb Sekunden.
+    let goDiff = 9;
+    let goFirst = -1;
+    const goUntil = Date.now() + 3000;
+    do {
+      const [raceH, raceC] = await Promise.all([raceNow(h3.page), raceNow(c3.page)]);
+      goDiff = Math.abs(raceH.goAt - raceC.goAt);
+      if (goFirst < 0) goFirst = goDiff;
+      if (goDiff >= 0.2) await sleep(250);
+    } while (goDiff >= 0.2 && Date.now() < goUntil);
+    check('Countdown trotz Verzögerung nahezu gleichzeitig (< 0,2 s)', goDiff < 0.2, `${goDiff.toFixed(3)} s${goFirst >= 0.2 ? ` (zuerst ${goFirst.toFixed(3)} s – Host hing, Uhr nachgeführt)` : ''}`);
     await h3.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 10000 });
     const peaks = [];
     let pendingMax = 0;

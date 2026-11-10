@@ -73,7 +73,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     return out;
   };
 
-  const place = (geo: THREE.BufferGeometry, list: Placement[], material: THREE.Material = toon, outline = false): void => {
+  const place = (geo: THREE.BufferGeometry, list: Placement[], material: THREE.Material = toon, outline = false, into: THREE.Group = group): void => {
     if (list.length === 0) {
       geo.dispose();
       return;
@@ -87,7 +87,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere();
-    group.add(mesh);
+    into.add(mesh);
     disposables.push(geo, mesh);
     if (outline && world.detail === 2) {
       addSmoothNormals(geo);
@@ -95,7 +95,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
       ol.instanceMatrix = mesh.instanceMatrix;
       ol.boundingSphere = mesh.boundingSphere;
       ol.name = 'outline';
-      group.add(ol);
+      into.add(ol);
       disposables.push(ol);
     }
   };
@@ -498,7 +498,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
       if (clearance(x, z) < 14 || world.heightAt(x, z) > th.liquidY! - 1.5) continue;
       boats.push({ x, y: th.liquidY! - 0.1, z, rot: rnd() * 6.3, sx: 1.6, sy: 1.6, sz: 1.6 });
     }
-    place(bb.build(), boats, toon, true);
+    // Schwimmen: steigen und fallen mit dem Pegel (world.floating).
+    place(bb.build(), boats, toon, true, world.floating);
   }
 
   // --- Glutkessel --------------------------------------------------------------

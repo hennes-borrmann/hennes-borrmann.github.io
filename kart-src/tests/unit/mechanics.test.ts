@@ -499,6 +499,7 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
 
   it('ein Förderband nimmt das Kart mit – vorwärts, rückwärts und quer', () => {
     const t = setTrack(0);
+    const real = t.belts;
     const go = (along: number, across: number): { way: number; lat: number } => {
       t.belts = along === 0 && across === 0 ? [] : [{ first: SEG - 2, count: 60, lat0: -3, lat1: 3, along, across }];
       try {
@@ -509,7 +510,7 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
         projectOnTrack(t, s.x, s.z, s.seg);
         return { way: Math.hypot(s.x - x, s.z - z), lat: proj.lat };
       } finally {
-        t.belts = [];
+        t.belts = real;
       }
     };
     const plain = go(0, 0);
@@ -526,6 +527,7 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
 
   it('eine Stampfpresse plättet: kein Dreher, aber eine Weile flach und langsam', () => {
     const t = setTrack(0);
+    const real = t.pulses;
     t.pulses = [{ kind: PULSE_PRESS, seg: SEG, lat: 0, x: t.px[SEG], y: t.py[SEG], z: t.pz[SEG], radius: 2, period: 220, phase: 0, on: 34, warn: 60 }];
     try {
       const s = at(SEG, 0.5, V_MAX);
@@ -551,7 +553,7 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
       const late = at(SEG, 0.5, V_MAX);
       expect(stepKart(late, GAS, { canDrive: true, speedFactor: 1, time: 80 }) & EV_FLAT).toBe(0);
     } finally {
-      t.pulses = [];
+      t.pulses = real;
     }
   });
 
@@ -620,6 +622,7 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
       return proj.lat;
     };
     // Drei Bänder nebeneinander: nur das rechte läuft vorwärts.
+    const real = t.belts;
     t.belts = [
       { first: SEG, count: 90, lat0: -6, lat1: -2, along: -5, across: 0 },
       { first: SEG, count: 90, lat0: -2, lat1: 2, along: -5, across: 0 },
@@ -629,7 +632,7 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
       const lat = drive(110, 0);
       expect(lat).toBeGreaterThan(2.3);
     } finally {
-      t.belts = [];
+      t.belts = real;
     }
     // Flut, linke Seite tief
     t.tide = { low: -1, high: 0.3, period: 2400, phase: 0, wave: 0, wavePeriod: 250 };
@@ -647,6 +650,226 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
       t.tide = null;
       t.tidal.fill(0);
       t.bank.set(bank);
+    }
+  });
+});
+
+describe('Werkshof: Förderbänder und Stampfpressen (Streckendaten)', () => {
+  it('in jeder Pressenreihe ist höchstens ein Stempel unten oder kurz davor – zwei Spuren sind immer frei', () => {
+    const t = setTrack(0);
+    const rows = new Map<number, typeof t.pulses>();
+    for (const p of t.pulses) {
+      expect(p.kind).toBe(PULSE_PRESS);
+      rows.set(p.seg, [...(rows.get(p.seg) ?? []), p]);
+    }
+    expect(rows.size).toBe(2);
+    for (const row of rows.values()) {
+      expect(row.length).toBe(3);
+      // Zusammen decken die drei Stempel die Bahn fast ganz ab – ausweichen heißt: die richtige Spur wählen.
+      const lats = row.map((p) => p.lat).sort((a, b) => a - b);
+      expect(lats[0] - row[0].radius).toBeLessThan(-t.rh[row[0].seg] + 0.5);
+      expect(lats[2] + row[0].radius).toBeGreaterThan(t.rh[row[0].seg] - 0.5);
+      for (let time = 0; time < row[0].period * 3; time++) {
+        let down = 0;
+        for (const p of row) {
+          const c = pulseCycle(p, time);
+          // unten, oder schlägt in der nächsten halben Sekunde zu
+          if (c < p.on || c >= p.period - 30) down++;
+        }
+        expect(down).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('in der Lagerhalle trägt das mittlere Band, die äußeren laufen entgegen', () => {
+    const t = setTrack(0);
+    const hall = t.belts.filter((b) => b.along !== 0);
+    expect(hall.length).toBe(3);
+    const real = t.belts;
+    const way = (b: (typeof hall)[number], on: boolean): number => {
+      t.belts = on ? real : [];
+      try {
+        const seg = b.first + 6;
+        expect(t.branchOf[seg]).toBe(0);
+        const lat = (b.lat0 + b.lat1) / 2;
+        const s = gridState(0);
+        s.seg = seg;
+        s.x = t.px[seg] + rightX(t, seg) * lat;
+        s.z = t.pz[seg] + rightZ(t, seg) * lat;
+        s.y = t.py[seg] + lat * t.bank[seg];
+        s.heading = trackHeading(t, seg);
+        s.vx = Math.sin(s.heading) * 20;
+        s.vz = Math.cos(s.heading) * 20;
+        s.vy = 0;
+        s.flags = 0;
+        const x = s.x;
+        const z = s.z;
+        for (let i = 0; i < 30; i++) stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: i });
+        return Math.hypot(s.x - x, s.z - z);
+      } finally {
+        t.belts = real;
+      }
+    };
+    const gain = hall.map((b) => way(b, true) - way(b, false));
+    const mid = hall.findIndex((b) => b.lat0 < 0 && b.lat1 > 0);
+    expect(mid).toBeGreaterThanOrEqual(0);
+    hall.forEach((b, i) => {
+      if (i === mid) {
+        expect(b.along).toBeGreaterThan(0);
+        // eine halbe Sekunde auf dem Band: gut 3 m gewonnen
+        expect(gain[i]).toBeGreaterThan(3);
+      } else {
+        expect(b.along).toBeLessThan(0);
+        expect(gain[i]).toBeLessThan(-2);
+      }
+    });
+    // Die Bänder liegen in der Halle (im Tunnel) und reichen über die ganze Breite.
+    expect(Math.min(...hall.map((b) => b.lat0))).toBeLessThan(-t.rh[hall[0].first] + 0.3);
+    expect(Math.max(...hall.map((b) => b.lat1))).toBeGreaterThan(t.rh[hall[0].first] - 0.3);
+  });
+
+  it('auf der Verladebrücke schieben die Querbänder abwechselnd – und keines schiebt bis an die Bande', () => {
+    const t = setTrack(0);
+    const cross = t.belts.filter((b) => b.across !== 0).sort((a, b) => a.first - b.first);
+    expect(cross.length).toBe(3);
+    for (let i = 0; i < cross.length; i++) {
+      expect(t.branchOf[cross[i].first]).toBe(-1);
+      if (i > 0) {
+        expect(Math.sign(cross[i].across)).toBe(-Math.sign(cross[i - 1].across));
+        // Dazwischen liegt ein Stück ruhige Fahrbahn zum Gegenlenken.
+        expect(cross[i].first - (cross[i - 1].first + cross[i - 1].count)).toBeGreaterThan(8);
+      }
+      // Mit 22 m/s überquert: seitlicher Versatz deutlich spürbar, aber höchstens die halbe Fahrbahnbreite.
+      const push = (Math.abs(cross[i].across) * cross[i].count * t.step) / 22;
+      expect(push).toBeGreaterThan(1.2);
+      expect(push).toBeLessThan(t.rh[cross[i].first] * 0.5);
+    }
+  });
+});
+
+describe('Möwenklippe: Ebbe und Flut (Streckendaten)', () => {
+  it('bei Ebbe ist alles trocken; bei Flut stehen zwei Senken der Uferstraße unter Wasser, die Kuppe dazwischen und der Start nicht', () => {
+    const t = setTrack(1);
+    const tide = t.tide!;
+    expect(tide).not.toBeNull();
+    // Zeitpunkte ohne Welle rechnen: mitten in Ebbe und mitten in Flut
+    const still = { ...tide, wave: 0 };
+    const LOW = Math.round(tide.period * 0.1) - tide.phase;
+    const HIGH = Math.round(tide.period * 0.65) - tide.phase;
+    expect(tidePhase(tide, LOW)).toBe(0);
+    expect(tidePhase(tide, HIGH)).toBe(1);
+    let first = -1;
+    let last = -1;
+    let wetRuns = 0;
+    let wasWet = false;
+    let deepest = 0;
+    for (let i = 0; i < t.n; i++) {
+      if (!t.tidal[i]) {
+        // Außerhalb der Uferstraße wirkt die Flut nicht – auch nicht auf der Startgeraden.
+        continue;
+      }
+      if (first < 0) first = i;
+      last = i;
+      // Bei Ebbe liegt auch die tiefe (linke) Kante über dem Wasser – selbst mit Welle.
+      const lowEdge = t.py[i] - Math.abs(t.bank[i]) * t.rh[i];
+      expect(lowEdge - (tide.low + tide.wave)).toBeGreaterThan(0.5);
+      const depth = tideLevel(still, HIGH) - t.py[i];
+      deepest = Math.max(deepest, depth);
+      const wet = depth > 0.06;
+      if (wet && !wasWet) wetRuns++;
+      wasWet = wet;
+    }
+    expect(first).toBeGreaterThan(0);
+    // zwei Senken, dazwischen eine trockene Kuppe
+    expect(wetRuns).toBe(2);
+    expect(deepest).toBeGreaterThan(0.4);
+    expect(deepest).toBeLessThan(0.7);
+    console.log(`Möwenklippe: Uferstraße Abschnitt ${first}–${last}, bei Flut bis ${deepest.toFixed(2)} m tief (Tempo × ${waterFactor(deepest).toFixed(2)})`);
+    // Start und Ziel liegen nicht im Gezeitenbereich.
+    for (let slot = 0; slot < 4; slot++) expect(t.tidal[gridState(slot).seg]).toBe(0);
+    expect(t.tidal[0]).toBe(0);
+    // Die Uferstraße ist der Hauptweg hinter der zweiten Gabelung; der Steg (Abzweigung) bleibt trocken.
+    expect(segDelta(t, t.branches[1].from, first)).toBeGreaterThan(0);
+    expect(segDelta(t, last, t.branches[1].to)).toBeGreaterThan(-40);
+    for (let i = t.n; i < t.total; i++) expect(t.tidal[i]).toBe(0);
+  });
+
+  /** Ein KI-Fahrer von 110 m vor der Bucht-Gabelung bis hinter die Einmündung; die Gezeit steht still. */
+  function bay(slot: number, time: number, route: number): { ticks: number; route: number; splash: boolean } {
+    const t = TRACK;
+    const b = t.branches[1];
+    const s = gridState(slot);
+    const seg = wrapSeg(t, b.from - 110);
+    s.seg = seg;
+    s.x = t.px[seg];
+    s.y = t.py[seg];
+    s.z = t.pz[seg];
+    s.heading = trackHeading(t, seg);
+    s.vx = Math.sin(s.heading) * 22;
+    s.vz = Math.cos(s.heading) * 22;
+    s.flags = 0;
+    const brain = newBrain(slot, AI_MEDIUM);
+    if (route >= 0) {
+      brain.route = route;
+      brain.routeLock = true;
+    }
+    const goal = wrapSeg(t, b.to + 30);
+    let ticks = 0;
+    let splash = false;
+    let took = 0;
+    for (; ticks < 3000; ticks++) {
+      const cmd = botCmd(s, brain, [], true, { tick: ticks, time, place: 1, smoke: false });
+      const ev = stepKart(s, cmd, { canDrive: true, speedFactor: 1, time });
+      if (ev & EV_SPLASH) splash = true;
+      if (t.branchOf[s.seg] === 1 && t.twin[s.seg] < 0) took = 2;
+      if (t.branchOf[s.seg] < 0) {
+        const d = segDelta(t, s.seg, goal);
+        if (d <= 0 && d > -60) break;
+      }
+    }
+    return { ticks, route: took, splash };
+  }
+
+  it('bei Flut kostet die Uferstraße Zeit – der Steg ist dann der schnellere Weg', () => {
+    const t = setTrack(1);
+    const tide = t.tide!;
+    // Die Gezeit steht still; die Zeit ist ein Vielfaches von zehn, weil es nur in jedem zehnten Tick spritzt.
+    const LOW = Math.round((tide.period * 0.1 - tide.phase) / 10) * 10;
+    const HIGH = Math.round((tide.period * 0.65 - tide.phase) / 10) * 10;
+    const mean = (time: number, route: number): { s: number; splash: boolean } => {
+      let sum = 0;
+      let splash = false;
+      for (let slot = 0; slot < 4; slot++) {
+        const r = bay(slot, time, route);
+        expect(r.ticks).toBeLessThan(3000);
+        expect(r.route).toBe(route);
+        sum += r.ticks;
+        splash = splash || r.splash;
+      }
+      return { s: sum / 4 / 60, splash };
+    };
+    const shoreLow = mean(LOW, 0);
+    const shoreHigh = mean(HIGH, 0);
+    const pierHigh = mean(HIGH, 2);
+    console.log(`Bucht: Uferstraße bei Ebbe ${shoreLow.s.toFixed(1)} s, bei Flut ${shoreHigh.s.toFixed(1)} s; Steg ${pierHigh.s.toFixed(1)} s`);
+    expect(shoreLow.splash).toBe(false);
+    expect(shoreHigh.splash).toBe(true);
+    expect(pierHigh.splash).toBe(false);
+    // Die Flut kostet auf der Uferstraße mindestens anderthalb Sekunden …
+    expect(shoreHigh.s - shoreLow.s).toBeGreaterThan(1.5);
+    // … und macht den Steg klar zum schnelleren Weg; bei Ebbe ist die Uferstraße nicht langsamer als er.
+    expect(shoreHigh.s - pierHigh.s).toBeGreaterThan(1.2);
+    expect(shoreLow.s - pierHigh.s).toBeLessThan(1);
+  });
+
+  it('die KI nimmt bei Flut den Steg und bei Ebbe die Uferstraße', () => {
+    const t = setTrack(1);
+    const tide = t.tide!;
+    const LOW = Math.round(tide.period * 0.1) - tide.phase;
+    const HIGH = Math.round(tide.period * 0.65) - tide.phase;
+    for (let slot = 0; slot < 4; slot++) {
+      expect(bay(slot, HIGH, -1).route).toBe(2);
+      expect(bay(slot, LOW, -1).route).toBe(0);
     }
   });
 });

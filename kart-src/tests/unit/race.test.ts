@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { botCmd, newBrain } from '../../src/game/ai';
 import { ClientGame } from '../../src/game/clientGame';
 import { HostGame } from '../../src/game/hostGame';
-import { ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
+import { BTN_GAS, BTN_ITEM, ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
 import { TRACK, setTrack } from '../../src/game/track';
 import { withoutMechanics } from './helpers';
 import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot, encodeCmds } from '../../src/net/protocol';
@@ -287,6 +287,65 @@ describe('Rennen über das Netz (simuliert)', () => {
     host.receiveCmds(1, 1, [{ steer: 0, buttons: 1 }], [5], host.raceId);
     host.step(NEUTRAL);
     expect(decodeSnapshot(new DataView(host.snapshot()))!.karts.find((k) => k.slot === 1)!.ack).toBe(1);
+  });
+
+  it('ein Item-Druck geht nicht verloren, wenn sich nach einem Hänger die Eingaben stauen', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    while (host.phase === RACE_COUNTDOWN) host.step(NEUTRAL);
+    for (let i = 0; i < 30; i++) host.step(NEUTRAL);
+    host.giveItem(1, ITEM_BOOST);
+    // 50 Schritte auf einmal (der Bildschirm des Mitspielers hing): nur im fünften ist die Item-Taste gedrückt.
+    const cmds: Cmd[] = [];
+    const times: number[] = [];
+    const now = host.tick - host.goTick;
+    for (let i = 0; i < 50; i++) {
+      cmds.push({ steer: 0, buttons: BTN_GAS | (i === 4 ? BTN_ITEM : 0) });
+      times.push(now + i);
+    }
+    host.receiveCmds(1, 50, cmds, times, host.raceId);
+    for (let i = 0; i < 12; i++) host.step(NEUTRAL);
+    const s = host.authoritative(1)!;
+    expect(s.item).toBe(0);
+    expect(s.boost).toBeGreaterThan(60);
+  });
+
+  it('verliert die Rennuhr des Hosts Zeit (Hänger), folgt ihr die Uhr des Mitspielers nach kurzer Zeit', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    const LAG = 20;
+    const client = new ClientGame(1, () => LAG * 2);
+    const line: Packet[] = [];
+    let now = 0;
+    let acc = 0;
+    const run = (ms: number, hostRuns: boolean): void => {
+      for (const end = now + ms; now < end; now++) {
+        while (line.length > 0 && line[0].at <= now) client.onSnapshot(decodeSnapshot(new DataView(line.shift()!.data))!, now / 1000);
+        if (!hostRuns) continue;
+        acc += 1;
+        while (acc >= 1000 / 60) {
+          acc -= 1000 / 60;
+          host.step(NEUTRAL);
+          if (host.tick % 2 === 0) line.push({ at: now + LAG, data: host.snapshot() });
+        }
+      }
+    };
+    /** Um wie viel weichen die Zeiten bis „Los“ voneinander ab (Sekunden)? */
+    const apart = (): number => Math.abs(client.race(now / 1000).untilGo - (host.goTick - host.tick) / 60);
+    run(1000, true);
+    expect(apart()).toBeLessThan(0.04);
+    // Der Host hängt 0,3 s und holt nichts davon nach: seine Rennuhr geht jetzt 0,3 s nach.
+    run(300, false);
+    run(100, true);
+    expect(apart()).toBeGreaterThan(0.25);
+    // Zwei Sekunden später hat der Mitspieler die neue Uhr übernommen – sonst sähe er „Los“ zu früh.
+    run(1900, true);
+    expect(apart()).toBeLessThan(0.04);
+    // Schwankende Laufzeiten bringen die Uhr dabei nicht aus dem Tritt: einzelne verspätete Stände zählen nicht.
+    for (let i = 0; i < 40; i++) client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, now / 1000 + LAG / 1000 + (i % 3 === 0 ? 0 : 0.06));
+    expect(apart()).toBeLessThan(0.04);
   });
 
   it('nach einem Verbindungsabbruch sendet der Mitspieler nichts, bis der Host wieder einen Stand geschickt hat', () => {
