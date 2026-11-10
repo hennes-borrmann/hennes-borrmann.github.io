@@ -17,6 +17,7 @@ import {
   BTN_ITEM,
   CHARACTERS,
   FLAG_AIR,
+  FLAG_GLIDE,
   ITEM_BOOST,
   ITEM_EMP,
   ITEM_GUARD,
@@ -36,6 +37,7 @@ import { FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } fr
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
+  EDGE_GLIDE,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   TRACK,
@@ -317,6 +319,22 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // Ohne Bande hält die KI Abstand zur Kante; vor einer Lücke fährt sie gerade auf die Mitte zu.
   const maxLat = Math.max(0.5, t.rh[target] - (openAhead ? 3.2 : 2.2));
   let lat = gapAhead ? 0 : (b.line * 0.6 * t.rh[target]) / 6.5 + bend * 110;
+  // Flugstrecke voraus oder schon in der Luft: wer aufpasst, hält auf den nächsten Aufwind oder Ring zu.
+  const flying = (s.flags & FLAG_GLIDE) !== 0;
+  if (b.level > 0 && (flying || (edges & EDGE_GLIDE) !== 0)) {
+    let best = PATH.length;
+    for (const list of [t.thermals, t.rings]) {
+      for (const th of list) {
+        for (let k = 3; k < best; k++) {
+          if (PATH[k] === th.seg) {
+            best = k;
+            lat = th.lat;
+            break;
+          }
+        }
+      }
+    }
+  }
   for (const h of t.hazards) {
     // Nur Hindernisse auf dem eigenen Weg zählen.
     let d = -1;
@@ -463,7 +481,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // --- Lenken und Driften ---
   const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (SURFACES[t.surf[s.seg]] ?? SURFACES[0]).grip) / v);
   let steer: number;
-  if (air) {
+  if (flying) {
+    // Im Gleitflug lenkt es sich weich, aber wirksam.
+    steer = Math.max(-1, Math.min(1, -err * 2.6));
+  } else if (air) {
     // In der Luft nur sanft ausrichten.
     steer = Math.max(-0.5, Math.min(0.5, -err * 2));
   } else if (s.driftDir !== 0) {
