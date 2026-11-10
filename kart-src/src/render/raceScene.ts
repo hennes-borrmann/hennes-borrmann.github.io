@@ -175,7 +175,8 @@ export class RaceScene {
   /** Wie nah ein Brummkreisel ist, der das eigene Kart sucht (0 = keiner, 1 = gleich da). */
   threat = 0;
   onEvent: ((e: SceneEvent) => void) | null = null;
-  readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1 };
+  /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
+  readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -260,7 +261,9 @@ export class RaceScene {
     this.disposeWorld();
     this.track = TRACK;
     const lv = LEVELS[this.level];
+    const started = performance.now();
     this.world = new World(TRACK, lv.world);
+    this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
     this.scene.add(this.world.group, this.things.group);
     this.scene.fog = this.world.fog;
@@ -1013,6 +1016,33 @@ export class RaceScene {
   }
 
   /** Zustand aller sichtbaren Karts für die Dauergeräusche. */
+  /** Nur für Messungen: Aufbauzeiten der Welt in ms (Fahrbahn, Gelände/Himmel, Kulisse, Leben). */
+  buildTimes(): number[] {
+    return this.world?.buildTimes ?? [];
+  }
+
+  /** Nur für Tests und Messungen: Dreiecke je Bauteil der Szene. */
+  debugTree(): { name: string; triangles: number }[] {
+    const count = (o: THREE.Object3D): number => {
+      let n = 0;
+      o.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (!m.isMesh || !m.visible) return;
+        const g = m.geometry;
+        const tris = (g.index ? g.index.count : (g.attributes.position?.count ?? 0)) / 3;
+        n += tris * ((m as unknown as THREE.InstancedMesh).isInstancedMesh ? (m as unknown as THREE.InstancedMesh).count : 1);
+      });
+      return Math.round(n);
+    };
+    const out: { name: string; triangles: number }[] = [];
+    const label = (o: THREE.Object3D, i: number): string => `${i}:${o.name || o.type}${(o as THREE.Mesh).isMesh ? '/' + ((o as THREE.Mesh).material as THREE.Material).type : ''}`;
+    this.world?.group.children.forEach((o, i) => out.push({ name: 'Welt ' + label(o, i), triangles: count(o) }));
+    this.scene.children.forEach((o, i) => {
+      if (o !== this.world?.group) out.push({ name: label(o, i), triangles: count(o) });
+    });
+    return out.filter((x) => x.triangles > 0);
+  }
+
   kartAudio(out: KartAudio[]): KartAudio[] {
     out.length = 0;
     for (const k of this.karts.values()) if (k.seen) out.push(k.audio);

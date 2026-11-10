@@ -1159,6 +1159,8 @@ export class App {
         return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
       },
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
+      tree: () => this.scene?.debugTree() ?? [],
+      buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
       place: (slot: number, meters: number, lat = 0, branch = -1) => this.hostGame?.debugPlace(slot, meters, lat, branch),
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.

@@ -1,6 +1,10 @@
-// 3 · Glutkessel – eine Acht um einen Vulkan: unten durch das Tal, in einer
-// überhöhten Kurve den Krater hinauf, über einen schmalen Grat, Sprung über den
-// Lavastrom und auf einer Felsbrücke über die eigene Strecke zurück.
+// 3 · Glutkessel – eine Acht um einen Vulkan. Gleich nach dem Start im Tal die
+// Wahl: sicher im Bogen oder geradeaus mit Sprung über den Lavastrom. Dann
+// schräg unter der Felsbrücke hindurch zum Fuß des Kraters. Dort teilt sich der
+// Weg erneut: außen hinauf über den schmalen Grat ohne Bande – oder durch die
+// Lavahöhle in der Flanke, die unter dem Grat hindurchführt. Oben am
+// Kraterrand ein Sprung über die Glutrinne, über die Felsbrücke zurück und in
+// der Steilkurve der Abfahrt hinunter ins Tal.
 
 import type { TrackDef } from '../track';
 
@@ -8,41 +12,53 @@ export const GLUT: TrackDef = {
   id: 'glut',
   name: 'Glutkessel',
   theme: 'glut',
-  blurb: 'Schmaler Grat, Sprung über Lava, Brücke über die eigene Spur.',
+  blurb: 'Lavasprung oder Bogen, Grat oder Höhle, Felsbrücke über die eigene Spur.',
   grade: 3,
-  scale: 1.2,
   points: [
-    // 0–3: Start im Tal nach Norden
-    [-92, -24, 0],
-    [-92, 4, 0],
-    [-90, 30, 0],
-    [-80, 50, 0],
-    // 4–8: Rechtskurve und schräg unter der Felsbrücke hindurch
-    [-60, 60, 0.3],
-    [-38, 54, 0.8],
-    [-18, 36, 1.2],
-    [0, 16, 1.2],
-    [18, -4, 1.6],
-    // 9–11: Anstieg um den Krater
-    [40, -20, 3],
-    [66, -28, 5.5],
-    [92, -22, 8.5],
-    // 12–14: der Grat
-    [108, -2, 11.5],
-    [110, 24, 14],
-    [100, 46, 16.5],
-    // 15–16: Kraterrand, Sprung über den Lavastrom
-    [78, 58, 18],
-    [52, 56, 18.8],
-    // 17–19: Felsbrücke über die eigene Strecke
-    [26, 40, 19],
-    [0, 16, 18.5],
-    [-24, -8, 16.5],
-    // 20–23: Abfahrt mit Kehre zurück ins Tal
-    [-44, -32, 13],
-    [-60, -52, 9.5],
-    [-78, -60, 6],
-    [-91, -50, 2.5],
+    // 0–1: Start im Tal nach Norden
+    [-170, -55, 0],
+    [-170, -20, 0],
+    // 2–4: sicherer Bogen um den Lavastrom (Abzweigung b springt geradeaus)
+    [-186, 15, 0],
+    [-208, 52, 0.2],
+    [-186, 89, 0.4],
+    // 5–9: Einmündung, dann weite Rechtskurve im Norden des Tals
+    [-170, 122, 0.6],
+    [-160, 147, 0.8],
+    [-135, 166, 1.0],
+    [-101, 166, 1.3],
+    [-74, 145, 1.5],
+    // 10–14: schräg durchs Tal, unter der Felsbrücke hindurch
+    [-54, 112, 1.6],
+    [-36, 72, 1.7],
+    [-18, 34, 1.8],
+    [0, -2, 2],
+    [28, -40, 2.3],
+    // 15: Fuß des Kraters – Gabelung: außen über den Grat (16–23) …
+    [64, -72, 3],
+    [102, -102, 5],
+    [148, -118, 8],
+    [195, -112, 11.5],
+    [232, -86, 12.8],
+    // 20–22: der Grat, schmal und ohne Bande
+    [254, -42, 14],
+    [258, 8, 15.5],
+    [242, 56, 17],
+    [205, 92, 18],
+    // 24: Einmündung am Kraterrand, Sprung über die Glutrinne
+    [150, 102, 18.5],
+    [100, 96, 19],
+    // 26–28: Felsbrücke über die eigene Strecke
+    [62, 62, 19.2],
+    [30, 30, 19.3],
+    [0, 0, 19.2],
+    // 29–34: Abfahrt mit Steilkurve zurück ins Tal
+    [-32, -32, 17],
+    [-64, -64, 13],
+    [-95, -95, 8.5],
+    [-128, -112, 5],
+    [-158, -100, 2.2],
+    [-170, -78, 0.5],
   ],
   roadHalf: 6.2,
   shoulder: 2.4,
@@ -50,19 +66,82 @@ export const GLUT: TrackDef = {
   laps: 3,
   bank: 3,
   fallDepth: 6,
+  // Felsplatten mit glühenden Rissen; im Tal und in der Kehre rutschige Asche,
+  // nur Start und Ziel asphaltiert.
+  surface: 'rock',
+  surfaces: [
+    [0, 0.9, 'asphalt'],
+    [0.9, 14.5, 'gravel'],
+    [30.2, 34, 'gravel'],
+    [34, 35, 'asphalt'],
+  ],
+  banks: [[30.5, 33.6, 0.36]],
   pads: [
-    { at: 1.2, lat: 0 },
-    { at: 9.4, lat: 0 },
-    { at: 14.75, lat: 0, halfWidth: 0 },
-    { at: 19.5, lat: 0 },
+    { at: 0.4, lat: 0 },
+    { at: 10.5, lat: 0 },
+    { at: 16.3, lat: 0 },
+    { at: 24.6, lat: 0 },
+    { at: 30.2, lat: 0 },
   ],
-  boxRows: [3.5, 10.6, 16.9, 21.2],
-  ramps: [{ at: 15.22, length: 9, height: 1.2, gap: 10 }],
-  widths: [[12.0, 13.9, 5.0, 1.0]],
-  open: [[12.2, 13.7, 0]],
+  boxRows: [6.6, 14.2, 22.6, 26.6, 32.6],
+  ramps: [{ at: 25.3, length: 9, height: 1.2, gap: 8 }],
+  bumps: [
+    { at: 10.9, length: 14, height: 1.0 },
+    { at: 29.6, length: 14, height: 1.1 },
+  ],
+  widths: [[19.0, 22.4, 5.0, 1.0]],
+  open: [[19.2, 22.2, 0]],
   decks: [
-    [12.1, 13.8],
-    [16.7, 19.3],
+    [17.3, 22.6],
+    [25.0, 29.4],
   ],
-  hazards: [{ at: 5.6, amp: 4, period: 4.2, phase: 0.6 }],
+  hazards: [
+    { at: 11.8, amp: 4, period: 4.2, phase: 0.6 },
+    { at: 31.2, amp: 4, period: 4.6, phase: 0 },
+  ],
+  branches: [
+    // a: Lavahöhle – unter dem Grat hindurch und durch die Flanke des Vulkans hinauf
+    {
+      from: 15,
+      to: 24.5,
+      points: [
+        [86, -107, 3],
+        [120, -140, 3.3],
+        [162, -152, 3.8],
+        [198, -135, 4.2],
+        [210, -95, 5],
+        [198, -58, 6.5],
+        [172, -35, 8],
+        [170, 0, 9.5],
+        [190, 30, 12],
+        [188, 58, 15],
+        [162, 86, 17.5],
+      ],
+      roadHalf: 7,
+      // erst Asche am Kraterfuß, ab dem Höhleneingang Fels
+      surfaces: [[0, 5.8, 'gravel']],
+      shoulder: 2.4,
+      tunnels: [[6.2, 9.6]],
+      boxRows: [7.6],
+      pads: [{ at: 10.2, lat: 0 }],
+    },
+    // b: geradeaus über den Lavastrom – schmal, ohne Bande, mit großem Sprung
+    {
+      from: 0.9,
+      to: 5.1,
+      points: [
+        [-169, 12, 1.2],
+        [-169, 48, 3],
+        [-169, 84, 1.5],
+      ],
+      roadHalf: 4.5,
+      // Gitterrost über dem Lavastrom: schnell, aber glatt
+      surface: 'metal',
+      shoulder: 1,
+      ramps: [{ at: 1.55, length: 10, height: 2.0, gap: 9 }],
+      decks: [[1.0, 3.0]],
+      open: [[1.0, 3.0, 0]],
+      boxRows: [0.6],
+    },
+  ],
 };

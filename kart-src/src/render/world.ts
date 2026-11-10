@@ -143,6 +143,7 @@ export class World {
   private nonDeck: number[] = [];
   private idwSegs: number[] = [];
   private life: Life | null = null;
+  buildTimes: number[] = [];
 
   constructor(
     readonly track: Track,
@@ -177,14 +178,20 @@ export class World {
     this.hemi = new THREE.HemisphereLight(th.hemiSky, th.hemiGround, th.hemiIntensity);
     this.group.add(this.sun, this.hemi);
 
+    const t0 = performance.now();
     this.buildRoad();
+    const t1 = performance.now();
     this.buildTerrain(minX, maxX, minZ, maxZ);
     this.buildSky();
     this.buildBoxes();
+    const t2 = performance.now();
     const scenery = buildScenery(this);
     this.group.add(scenery.group);
     this.disposables.push(scenery);
+    const t3 = performance.now();
     this.life = buildLife(this);
+    /** Aufbauzeiten in ms: Fahrbahn, Gelände und Himmel, Kulisse, Leben. */
+    this.buildTimes = [t1 - t0, t2 - t1, t3 - t2, performance.now() - t3].map(Math.round);
     if (this.life) {
       this.group.add(this.life.group);
       this.disposables.push(this.life);
@@ -295,6 +302,10 @@ export class World {
           return { a: cRoad, b: cRoadAlt, c: cInk, band: 4, plain: true, lines: true, kerbs: true, shoulder: null, detail: 'none', barrier: 'block' };
       }
     });
+
+    /** Abschnitte, deren Zaun bzw. Leitplanke schon von einem längeren Stück abgedeckt ist (links, rechts). */
+    const railL = new Uint8Array(t.total);
+    const railR = new Uint8Array(t.total);
 
     for (let i = 0; i < t.total; i++) {
       const j = t.next[i];
@@ -413,32 +424,83 @@ export class World {
             solid.quad(b0, b1, c1, c0, shade(c, 0.8));
           }
         } else {
-          // Zaun, Seil oder Leitplanke: Pfosten in festem Abstand, dazwischen Holme
+          // Zaun, Seil oder Leitplanke: Pfosten in festem Abstand, dazwischen
+          // Holme, die gerade von Pfosten zu Pfosten laufen (das spart zwei
+          // Drittel der Flächen gegenüber einem Stück je Abschnitt).
           const mid = sgn * (wh + WALL_T * 0.5);
-          const rails: [number, number, RGB][] =
-            style === 'fence'
-              ? [
-                  [0.36, 0.52, look.wallA!],
-                  [0.78, 0.94, look.wallA!],
-                ]
-              : style === 'rope'
-                ? [[0.74, 0.86, look.wallB!]]
-                : [[0.4, 0.8, panel ? look.wallB! : shade(look.wallB!, 0.9)]];
-          for (const [y0, y1, c] of rails) {
-            side(i, f0, f1, mid - sgn * 0.06, y0, y1, sgn < 0, c);
-            side(i, f0, f1, mid + sgn * 0.06, y0, y1, sgn > 0, shade(c, 0.8));
-            top(solid, i, f0, f1, Math.min(mid - 0.06, mid + 0.06), Math.max(mid - 0.06, mid + 0.06), y1, shade(c, 1.1));
+          const POST = style === 'rail' ? 4 : 3;
+          const done = sgn < 0 ? railL : railR;
+          if (!done[i]) {
+            // So weit reicht der Zaun ab hier ungestört (höchstens bis zum nächsten Pfosten).
+            let end = i;
+            let count = 0;
+            const reach = whole && i % POST === 0 ? POST : 1;
+            while (count < reach) {
+              const nx = t.next[end];
+              const fine =
+                count === 0 ||
+                ((looks[t.surf[end]] ?? looks[0]).barrier === style &&
+                  t.wh[end] === wh &&
+                  (t.edge[end] & (EDGE_GAP | (sgn < 0 ? EDGE_OPEN_L | EDGE_FREE_L : EDGE_OPEN_R | EDGE_FREE_R))) === 0 &&
+                  (t.edge[nx] & (EDGE_GAP | (sgn < 0 ? EDGE_FREE_L : EDGE_FREE_R))) === 0 &&
+                  nx > end);
+              if (!fine) break;
+              done[end] = 1;
+              end = nx;
+              count++;
+            }
+            const fa = count === 1 ? f0 : 0;
+            const fb = count === 1 ? f1 : 0;
+            const from = i;
+            const to = count === 1 ? i : end;
+            const rails: [number, number, RGB][] =
+              style === 'fence'
+                ? [
+                    [0.36, 0.52, look.wallA!],
+                    [0.78, 0.94, look.wallA!],
+                  ]
+                : style === 'rope'
+                  ? [[0.74, 0.86, look.wallB!]]
+                  : [[0.4, 0.8, panel ? look.wallB! : shade(look.wallB!, 0.9)]];
+            const li = mid - sgn * 0.06;
+            const lo = mid + sgn * 0.06;
+            for (const [y0, y1, c] of rails) {
+              const a0 = this.P(from, fa, li, y0);
+              const a1 = this.P(to, fb, li, y0);
+              const a2 = this.P(to, fb, li, y1);
+              const a3 = this.P(from, fa, li, y1);
+              const b0 = this.P(from, fa, lo, y0);
+              const b1 = this.P(to, fb, lo, y0);
+              const b2 = this.P(to, fb, lo, y1);
+              const b3 = this.P(from, fa, lo, y1);
+              // innen (zur Fahrbahn), außen, oben
+              if (sgn < 0) {
+                solid.quad(a0, a1, a2, a3, c);
+                solid.quad(b1, b0, b3, b2, shade(c, 0.8));
+                solid.quad(b3, a3, a2, b2, shade(c, 1.1));
+              } else {
+                solid.quad(a1, a0, a3, a2, c);
+                solid.quad(b0, b1, b2, b3, shade(c, 0.8));
+                solid.quad(a3, b3, b2, a2, shade(c, 1.1));
+              }
+            }
+            // Leuchtband auf der Leitplanke
+            if (style === 'rail' && look.glow) {
+              const g = Math.floor(i / 8) % 2 === 0 ? look.glow : (look.glowB ?? look.glow);
+              const g0 = this.P(from, fa, Math.min(li, lo) - 0.01, 0.83);
+              const g1 = this.P(from, fa, Math.max(li, lo) + 0.01, 0.83);
+              const g2 = this.P(to, fb, Math.max(li, lo) + 0.01, 0.83);
+              const g3 = this.P(to, fb, Math.min(li, lo) - 0.01, 0.83);
+              paint.quad(g0, g1, g2, g3, g);
+            }
+            if (whole && i % POST === 0) {
+              const p = this.P(i, 0, mid);
+              const ph = style === 'rail' ? 0.86 : 1.12;
+              solid.box(p[0], p[1] + ph / 2 - 0.05, p[2], 0.26, ph + 0.1, 0.26, look.wallA!, Math.atan2(t.tx[i], t.tz[i]));
+            }
           }
-          if (whole && i % (style === 'rail' ? 4 : 3) === 0) {
-            const p = this.P(i, 0, mid);
-            const ph = style === 'rail' ? 0.86 : 1.12;
-            solid.box(p[0], p[1] + ph / 2 - 0.05, p[2], 0.26, ph + 0.1, 0.26, look.wallA!, Math.atan2(t.tx[i], t.tz[i]));
-          }
-          // Leuchtband auf der Leitplanke
-          if (style === 'rail' && look.glow) top(paint, i, f0, f1, Math.min(mid - 0.07, mid + 0.07), Math.max(mid - 0.07, mid + 0.07), 0.83, Math.floor(i / 6) % 2 === 0 ? look.glow : (look.glowB ?? look.glow));
           // Wo die Fahrbahn frei steht oder angehoben ist, braucht sie darunter eine Kante.
-          if (deck || t.py[q] - t.base[q] > 0.05) side(i, f0, f1, outer, skirt, 0, sgn > 0, deck ? cDeckDark : shade(sh, 0.75));
-          else side(i, f0, f1, outer, skirt, 0, sgn > 0, shade(sh, 0.75));
+          side(i, f0, f1, outer, skirt, 0, sgn > 0, deck ? cDeckDark : shade(sh, 0.75));
         }
       }
       if (deck) {

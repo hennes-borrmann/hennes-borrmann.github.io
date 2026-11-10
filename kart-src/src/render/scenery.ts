@@ -3,6 +3,7 @@
 // Verteilt wird mit festem Zufall entlang der Strecke – nie auf der Fahrbahn.
 
 import * as THREE from 'three';
+import { SURFACE_INDEX } from '../game/surface';
 import { EDGE_DECK, EDGE_TUNNEL, rightX, rightZ } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, textTexture, type RGB } from './build';
 import { addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
@@ -169,6 +170,39 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     place(board(), right, mR);
     place(board(), left, mL);
     disposables.push(texR, texL, mR, mL);
+  }
+
+  // --- Gemeinsam: Wald entlang der Waldwege --------------------------------------------
+  {
+    const dirt = SURFACE_INDEX.dirt;
+    const spots: Placement[] = [];
+    const cap = Math.round(170 * dense);
+    for (let i = 0; i < t.total && spots.length < cap; i++) {
+      if (t.surf[i] !== dirt || t.edge[i] & (EDGE_DECK | EDGE_TUNNEL)) continue;
+      // Dicht an den Weg heran, dahinter lichter – auf jeder Seite etwa ein Baum alle drei Meter.
+      for (const sgn of [-1, 1]) {
+        if (rnd() > 0.34) continue;
+        const lat = sgn * (t.wh[i] + 1.6 + rnd() * rnd() * 16);
+        const x = t.px[i] + rightX(t, i) * lat + (rnd() - 0.5) * 2;
+        const z = t.pz[i] + rightZ(t, i) * lat + (rnd() - 0.5) * 2;
+        if (world.clearance(x, z) < 1.2) continue;
+        const y = world.heightAt(x, z);
+        if (th.liquidY !== null && y < th.liquidY + 0.6) continue;
+        const k = 0.8 + rnd() * 0.7;
+        spots.push({ x, y: y - 0.2, z, rot: rnd() * Math.PI * 2, sx: k, sy: k * (0.9 + rnd() * 0.4), sz: k });
+      }
+    }
+    if (spots.length > 0) {
+      // Kiefer: Stamm und drei gestufte Kronen
+      const fb = new MeshBuilder();
+      const needle = th.stars ? rgb(0x1f4a44) : rgb(0x2f7d4f);
+      const needleD = th.stars ? rgb(0x183a36) : rgb(0x256642);
+      put(fb, cyl(0.22, 0.34, 2.6, 5), th.stars ? rgb(0x3a2c33) : rgb(0x7a5230), mat(0, 1.3, 0));
+      put(fb, new THREE.ConeGeometry(2.1, 3.2, 6), needleD, mat(0, 3.6, 0));
+      put(fb, new THREE.ConeGeometry(1.6, 2.8, 6), needle, mat(0, 5.4, 0, 0, 0.5, 0));
+      put(fb, new THREE.ConeGeometry(1.05, 2.4, 6), needleD, mat(0, 7.1, 0, 0, 1, 0));
+      place(fb.build(), spots, toon);
+    }
   }
 
   // --- Gemeinsam: Tafel im Keil jeder Gabelung – hier teilt sich die Strecke ----------
