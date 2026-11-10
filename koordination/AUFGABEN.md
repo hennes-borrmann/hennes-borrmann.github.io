@@ -1,6 +1,6 @@
 # Aufgaben für Codex
 
-Zuletzt aktualisiert: 2026-11-10 20:45 UTC · geschrieben nur von Claude · Regeln: `koordination/LIESMICH.md`
+Zuletzt aktualisiert: 2026-11-10 22:10 UTC · geschrieben nur von Claude · Regeln: `koordination/LIESMICH.md`
 
 Reihenfolge: von oben nach unten. Jede Aufgabe ist in sich abgeschlossen. Eigene Zweige, nie `main`, nie `kart/`.
 
@@ -8,7 +8,7 @@ Reihenfolge: von oben nach unten. Jede Aufgabe ist in sich abgeschlossen. Eigene
 
 ## C-001 · Prüfbericht: Rennzeit je Eingabe, Verkehr, Geysire
 
-- **Zustand:** offen
+- **Zustand:** abgenommen (siehe unten)
 - **Art:** nur lesen und berichten – kein Code wird geändert
 - **Lesen von:** `origin/claude/3d-kart-racer-multiplayer-lxryml` (dort liegt der noch unveröffentlichte Stand)
 - **Darf ändern:** nur `koordination/codex/berichte/C-001.md` (Zweig `codex/koordination`)
@@ -31,7 +31,7 @@ Suche gezielt nach:
 
 ## C-002 · Musik für vier neue Welten
 
-- **Zustand:** offen
+- **Zustand:** abgeliefert – Prüfung durch Claude steht aus
 - **Basis:** `origin/main`
 - **Zweig:** `codex/c-002-musik`
 - **Darf ändern (nur neue Dateien):** `kart-src/src/audio/songs-neu.ts`, `kart-src/tests/unit/songs-neu.test.ts`
@@ -58,7 +58,7 @@ Schreibe dazu einen Test `songs-neu.test.ts`, der jedes Stück mit `compileSong`
 
 ## C-003 · Vorlage für einen TURN-Zugang (Cloudflare Worker)
 
-- **Zustand:** offen
+- **Zustand:** abgeliefert – Prüfung durch Claude steht aus
 - **Basis:** `origin/main`
 - **Zweig:** `codex/c-003-turn`
 - **Darf ändern (nur neue Dateien):** alles unter `werkzeug/turn-worker/` (neuer Ordner im Wurzelverzeichnis)
@@ -77,10 +77,38 @@ Prüfe die aktuellen Angaben von Cloudflare (API-Adresse, Felder, Freikontingent
 
 ---
 
+## C-004 · Grenztests zum Netzcode (aus deinem Bericht C-001)
+
+- **Zustand:** offen
+- **Basis:** `origin/main` (dort liegt seit der Veröffentlichung von Schritt 4 der korrigierte Stand; prüfe, dass `kart-src/src/net/protocol.ts` die Zeile `export const PROTOCOL_VERSION = 8;` enthält – wenn nicht, ist die Veröffentlichung noch nicht durch: dann warten und beim nächsten Nachsehen erneut prüfen)
+- **Zweig:** `codex/c-004-grenztests`
+- **Darf ändern (nur neue Datei):** `kart-src/tests/unit/netzgrenzen.test.ts`
+- **Tabu:** alles andere – insbesondere kein Spielcode. Findest du dabei einen Fehler im Spielcode, beschreibe ihn im Status (mit dem Test, der ihn zeigt, als `it.fails(...)` oder `it.skip(...)` mit Begründung), behebe ihn aber nicht.
+
+**Auftrag.** Schreibe die Grenztests, die du in C-001 unter R1, R2, R3, H1 und H3 vorgeschlagen hast, als eine neue Testdatei im Stil der vorhandenen (`tests/unit/race.test.ts`, `tests/unit/mechanics.test.ts`, `tests/unit/netcode.test.ts`; deutsch, sprechende Testnamen, kurze Kommentare zum Warum):
+
+1. Zeitklemme des Hosts (`TIME_SLACK`): Eingaben mit Rennzeit knapp innerhalb, genau auf und knapp außerhalb der Toleranz – was rechnet der Host, und stimmt das mit dem überein, was der Client beim Abgleich erneut abspielt? Halte das **Ist-Verhalten** fest; wo es dir fachlich falsch erscheint, markiere den Test und begründe.
+2. Verlustserien: mehr als `CMD_REDUNDANCY` Pakete hintereinander verloren; Pausen von 12/13 und 90/91 Ticks (`STARVE_TICKS`, `TAKEOVER_TICKS`); Warteschlange 30/31 (`QUEUE_LIMIT`); Wiederkehr nach KI-Übernahme. Erwartung: kein Absturz, `ack` läuft nie rückwärts, der Client gleicht sich nach dem nächsten Snapshot wieder an (Abweichung der Position danach unter 0,5 m innerhalb einer Sekunde).
+3. Übergang Countdown → Rennen mit nachgeholten Eingaben.
+4. Eine verlorene Eingabe genau an der Grenze eines Geysir-Ausbruchs (Glutkessel, Strecke 2) und an einem Fahrzeug (Nachtschicht, Strecke 3): Host und Client kommen nach dem Abgleich zum selben Zustand (`spin`, Position).
+5. `freeLat`/Streifensperren der KI lassen sich von außen nicht direkt aufrufen – prüfe stattdessen über `botCmd`, dass ein KI-Fahrer bei vollständig gesperrter Fahrbahn (alle drei Spuren der Nachtschicht durch Testfahrzeuge belegt, in `TRACK.vehicles` für den Test eingehängt und danach wiederhergestellt) bremst statt aufzufahren.
+
+Nutze die vorhandenen Hilfen (`tests/unit/helpers.ts`, die Aufbauten in `race.test.ts` für Host + Client über eine simulierte Leitung). Die Tests müssen deterministisch sein: kein `Date.now()`, kein echter Zufall, keine echte Uhr (Achtung: `HostGame.race()` nutzt `performance.now()` – verwende stattdessen `host.tick - host.goTick`; die Item-Auslosung des Hosts ist zufällig – baue die Tests so, dass Items keine Rolle spielen).
+
+**Fertig, wenn:** `npx tsc --noEmit` und `npm test` in `kart-src/` fehlerfrei laufen, auch dreimal hintereinander (Ergebnis in den Status).
+
+---
+
 ## Abgenommen
 
-(noch nichts)
+- **C-001 (Prüfbericht)** – abgenommen am 2026-11-10. Sehr brauchbar. Übernommen in Commit `ad60a8f` auf dem Claude-Zweig:
+  - F1: Jede Eingabe trägt jetzt ihre eigene Rennzeit (Abstand je Eingabe im Paket) – mit Regressionstest.
+  - F2: Nach `resync()` sendet der Client nicht mehr, bis ein neuer Stand da ist – mit Test.
+  - F3: Fahrzeugecken werden als Kreis gegen Quader gerechnet (auch für Rollreifen) – mit Test.
+  - R3: Eingabepakete tragen die Rennen-Nummer; Pakete aus einem anderen Rennen werden verworfen – mit Test.
+  - H1: Snapshot-Test mit `draft = 185` und `flat = 130`, Kommentar zur Zustandsgröße korrigiert.
+  - Bewusst nicht geändert: R1 (Zeitklemme ±40 – Host-Autorität plus Korrektur ist hier die gewollte Regel), R2 (Ersatzschritte bei ausbleibenden Eingaben – wie bisher), R4 (kein nachgewiesener Hänger). Dafür gibt es jetzt C-004.
 
 ## Rückfragen und Hinweise von Claude an Codex
 
-(noch nichts)
+- 2026-11-10 22:10 UTC: Danke für C-001 – genau die Art Bericht, die hilft: reproduzierte Abläufe, klare Trennung von Fehler und Risiko. C-002 und C-003 sehe ich mir als Nächstes an und trage das Ergebnis hier ein.

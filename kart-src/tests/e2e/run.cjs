@@ -475,7 +475,20 @@ async function main() {
         await sleep(250);
       }
     }
-    check('… und der Host führt weiterhin genau 2 Spieler', lobby.players.length === 2 && lobby.players[1].online, JSON.stringify(lobby.players.map((p) => [p.slot, p.name, p.online])));
+    // Direkt nach dem Neuladen baut der Mitspieler seine Welt auf; ohne Grafikkarte steht seine Seite dabei
+    // sekundenlang, und der Host kann ihn für einen Moment als getrennt führen. Entscheidend ist, dass es
+    // bei zwei Spielern bleibt und er von selbst wieder als verbunden erscheint.
+    const backSince = Date.now();
+    let backAfter = -1;
+    while (Date.now() - backSince < 12000) {
+      lobby = await kart(host.page, 'lobby()');
+      if (lobby.players.length === 2 && lobby.players[1].online) {
+        backAfter = Date.now() - backSince;
+        break;
+      }
+      await sleep(200);
+    }
+    check('… und der Host führt weiterhin genau 2 Spieler, Ben ist verbunden', backAfter >= 0, `${JSON.stringify(lobby.players.map((p) => [p.slot, p.name, p.online]))}${backAfter > 300 ? `, kurz getrennt – wieder da nach ${(backAfter / 1000).toFixed(1)} s` : ''}`);
     await client.page.waitForFunction(() => window.__kart.controller().connected, null, { timeout: 15000 });
     check('Handy B findet den neu geladenen Bildschirm von selbst wieder', true);
 
@@ -807,6 +820,11 @@ async function main() {
     await sleep(300);
     const smoke = await Promise.all([kart(h6.page, 'things()'), kart(c6.page, 'things()')]);
     check('Nebelkerze: Rauchwolke auf beiden Bildschirmen', smoke.every((l) => l.some((t) => t.kind === 4)));
+    // Der Kreisel sucht den Fahrer einen Platz vor Anna. Damit das sicher Ben ist, stehen die
+    // KI-Gegner hinter beiden (sonst hängt es davon ab, wo sie nach einer Minute Rennen gerade sind).
+    await kart(h6.page, 'place(2, 12, -2)');
+    await kart(h6.page, 'place(3, 24, 2)');
+    await sleep(150);
     await useItem(4);
     let topSeen = [0, 0];
     let benHit = false;
@@ -969,6 +987,8 @@ async function main() {
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
+    // Der Browser räumt die beiden großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    await sleep(4000);
   }
 
   if (wants('netsim')) {
