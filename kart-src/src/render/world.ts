@@ -304,6 +304,39 @@ export class World {
       }
     });
 
+    // Gabelung und Einmündung: dort liegen zwei Fahrbahnen im Grundriss
+    // ineinander. Gezeichnet wird jede Stelle nur einmal – die Hauptstrecke
+    // hat Vorrang, die Abzweigung beginnt an deren Fahrbahnrand, und der
+    // Seitenstreifen dazwischen wächst als Keil, sobald beide auseinanderlaufen.
+    // Werte in Metern von der Mittellinie zur freien Seite hin.
+    const cutRoad = new Float64Array(t.total).fill(Infinity);
+    const cutSh = new Float64Array(t.total).fill(Infinity);
+    for (let i = 0; i < t.total; i++) {
+      const k = t.twin[i];
+      if (k < 0) continue;
+      const sep = Math.abs((t.px[i] - t.px[k]) * rightX(t, k) + (t.pz[i] - t.pz[k]) * rightZ(t, k));
+      const cos = Math.max(0.6, t.tx[i] * t.tx[k] + t.tz[i] * t.tz[k]);
+      if (t.branchOf[i] < 0) cutSh[i] = (sep - t.rh[k]) / cos;
+      else {
+        cutRoad[i] = (sep - t.rh[k]) / cos + 0.3;
+        cutSh[i] = (sep - t.wh[k]) / cos + 0.1;
+      }
+    }
+    /**
+     * Wie top, aber zur freien Seite fs hin beschnitten: am Anfang des
+     * Abschnitts bei cutI, am Ende bei cutJ.
+     */
+    const topCut = (b: MeshBuilder, i: number, l0: number, l1: number, dy: number, c: RGB, fs: number, cutI: number, cutJ: number): void => {
+      const u0 = Math.min(fs * l0, fs * l1);
+      const u1 = Math.max(fs * l0, fs * l1);
+      if (cutI <= u0 && cutJ <= u0) return;
+      const ui = Math.max(u0, Math.min(u1, cutI));
+      const uj = Math.max(u0, Math.min(u1, cutJ));
+      const j = t.next[i];
+      if (fs > 0) b.quad(this.P(i, 0, u0, dy), this.P(i, 0, ui, dy), this.P(j, 0, uj, dy), this.P(j, 0, u0, dy), c);
+      else b.quad(this.P(i, 0, -ui, dy), this.P(i, 0, -u0, dy), this.P(j, 0, -u0, dy), this.P(j, 0, -uj, dy), c);
+    };
+
     /** Abschnitte, deren Zaun bzw. Leitplanke schon von einem längeren Stück abgedeckt ist (links, rechts). */
     const railL = new Uint8Array(t.total);
     const railR = new Uint8Array(t.total);
@@ -337,15 +370,32 @@ export class World {
       const tone = Math.floor(i / look.band) % 2 === 0;
       const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : tone ? look.a : look.b;
       const surface = deck && !ramp && look.plain ? mixRgb(road, cDeck, 0.35) : road;
+      // Zur freien Seite hin beschnitten (siehe cutRoad, cutSh)
+      const fs = freeL ? -1 : freeR ? 1 : 0;
+      const cut = fs !== 0 && !gapI && !gapJ;
+      const roadI = cut ? (cutRoad[i] === Infinity ? cutRoad[j] : cutRoad[i]) : Infinity;
+      const roadJ = cut ? (cutRoad[j] === Infinity ? cutRoad[i] : cutRoad[j]) : Infinity;
+      const clipped = roadI !== Infinity || roadJ !== Infinity;
+      const lane = (l0: number, l1: number, c: RGB): void => {
+        if (clipped) topCut(solid, i, l0, l1, lower, c, fs, roadI, roadJ);
+        else top(solid, i, f0, f1, l0, l1, lower, c);
+      };
       if (look.detail === 'cobble' && !ramp) {
         // Pflaster: vier Bahnen im Schachbrett
-        for (let c = 0; c < 4; c++) {
-          top(solid, i, f0, f1, -rh + (c * rh) / 2, -rh + ((c + 1) * rh) / 2, lower, (i + c) % 2 === 0 ? look.a : look.b);
-        }
-      } else top(solid, i, f0, f1, -rh, rh, lower, surface);
+        for (let c = 0; c < 4; c++) lane(-rh + (c * rh) / 2, -rh + ((c + 1) * rh) / 2, (i + c) % 2 === 0 ? look.a : look.b);
+      } else lane(-rh, rh, surface);
       const sh = look.shoulder ?? (deck ? cDeckDark : cShoulder);
-      top(solid, i, f0, f1, -wh, -rh, freeL ? -0.025 : 0, sh);
-      top(solid, i, f0, f1, rh, wh, freeR ? -0.025 : 0, sh);
+      for (const sgn of [-1, 1]) {
+        const l0 = sgn < 0 ? -wh : rh;
+        const l1 = sgn < 0 ? -rh : wh;
+        if (sgn !== fs) top(solid, i, f0, f1, l0, l1, 0, sh);
+        else if (!cut) top(solid, i, f0, f1, l0, l1, -0.025, sh);
+        else {
+          const a = cutSh[i] === Infinity ? cutSh[j] : cutSh[i];
+          const b = cutSh[j] === Infinity ? cutSh[i] : cutSh[j];
+          topCut(solid, i, l0, l1, -0.025, sh, fs, a, b);
+        }
+      }
 
       // Was den Untergrund ausmacht: Fugen, Fahrrinnen, Nähte, Risse
       if (!ramp && lower === 0 && f0 === 0 && f1 === 1) {
@@ -368,8 +418,17 @@ export class World {
       // Markierungen
       if (!ramp && look.lines) {
         const cl = look.line ?? cLine;
-        if (!freeL) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cl);
-        if (!freeR) top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cl);
+        for (const sgn of [-1, 1]) {
+          // An der freien Seite: durchgezogen, wo schon ein Keil zwischen den
+          // Fahrbahnen liegt; davor zieht die Hauptstrecke ihre Randlinie
+          // gestrichelt über die Öffnung – so liest man die Abzweigung.
+          if (sgn === fs) {
+            const wedge = Math.min(cutSh[i], cutSh[j]) > rh + 0.3;
+            if (!wedge && (t.branchOf[i] >= 0 || i % 4 >= 2)) continue;
+          }
+          if (sgn < 0) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cl);
+          else top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cl);
+        }
         if (i % 8 < 3 && lower === 0 && look.plain) top(paint, i, f0, f1, -0.14, 0.14, 0.03, look.center ?? cl);
       }
       if (!ramp && look.kerbs && Math.abs(t.curv[q]) > 1 / 46) {

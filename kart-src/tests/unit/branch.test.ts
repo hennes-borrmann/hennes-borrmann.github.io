@@ -4,9 +4,11 @@ import { BTN_GAS, BTN_ITEM, EV_FALL, EV_WALL, ITEM_TOP, V_MAX, gridState, stepKa
 import {
   EDGE_FREE_L,
   EDGE_FREE_R,
+  EDGE_GAP,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   TRACK,
+  TRACK_COUNT,
   pathAhead,
   proj,
   projectOnTrack,
@@ -168,4 +170,71 @@ describe('Abzweigungen (Werkshof)', () => {
     expect(onBranch).toBeGreaterThan(10);
     expect(target.spin).toBeGreaterThan(0);
   });
+});
+
+describe('Gabelung und Einmündung auf allen Strecken', () => {
+  for (let ti = 0; ti < TRACK_COUNT; ti++) {
+    it(`Strecke ${ti}: keine Begrenzung steht in der Nachbarfahrbahn`, () => {
+      setTrack(ti);
+      const t = TRACK;
+      const bad: string[] = [];
+      for (let i = 0; i < t.total; i++) {
+        const e = t.edge[i];
+        if (e & EDGE_GAP) continue;
+        for (const sgn of [-1, 1]) {
+          if (e & (sgn < 0 ? EDGE_FREE_L | EDGE_OPEN_L : EDGE_FREE_R | EDGE_OPEN_R)) continue;
+          // Mitte der Bande
+          const lat = sgn * (t.wh[i] + 0.25);
+          const wx = t.px[i] + rightX(t, i) * lat;
+          const wz = t.pz[i] + rightZ(t, i) * lat;
+          const wy = t.py[i] + lat * t.bank[i];
+          for (let k = 0; k < t.total; k++) {
+            if (t.edge[k] & EDGE_GAP) continue;
+            if (t.branchOf[k] === t.branchOf[i] && Math.abs(k - i) < 30) continue;
+            const dx = wx - t.px[k];
+            const dz = wz - t.pz[k];
+            const along = dx * t.tx[k] + dz * t.tz[k];
+            if (along < -0.2 || along > t.step + 0.2) continue;
+            const l = dx * rightX(t, k) + dz * rightZ(t, k);
+            // gleiche Ebene (darüber oder darunter kreuzende Fahrbahnen zählen nicht)
+            if (Math.abs(l) < t.wh[k] - 0.6 && Math.abs(t.py[k] + l * t.bank[k] - wy) < 2.6) {
+              bad.push(`${i}/${sgn} in ${k}`);
+              break;
+            }
+          }
+        }
+      }
+      expect(bad).toEqual([]);
+    });
+
+    it(`Strecke ${ti}: wo zwei Fahrbahnen ineinander liegen, liegen sie in einer Ebene`, () => {
+      setTrack(ti);
+      const t = TRACK;
+      let worst = 0;
+      for (const b of t.branches) {
+        for (let g = b.first; g < b.first + b.count; g++) {
+          if (!(t.edge[g] & (EDGE_FREE_L | EDGE_FREE_R))) continue;
+          for (let lat = -t.wh[g]; lat <= t.wh[g]; lat += 0.5) {
+            const wx = t.px[g] + rightX(t, g) * lat;
+            const wz = t.pz[g] + rightZ(t, g) * lat;
+            const hg = t.py[g] + lat * t.bank[g];
+            for (let m = 0; m < t.n; m++) {
+              const dx = wx - t.px[m];
+              const dz = wz - t.pz[m];
+              if (Math.abs(dx) > 30 || Math.abs(dz) > 30 || t.edge[m] & EDGE_GAP) continue;
+              const along = dx * t.tx[m] + dz * t.tz[m];
+              if (along < 0 || along > t.step) continue;
+              const l = dx * rightX(t, m) + dz * rightZ(t, m);
+              if (Math.abs(l) > t.wh[m]) continue;
+              const n = t.next[m];
+              const hm = t.py[m] + l * t.bank[m] + (along * (t.py[n] - t.py[m])) / t.step;
+              // nur dieselbe Ebene: eine Brücke darüber ist kein Fehler
+              if (Math.abs(hg - hm) < 4) worst = Math.max(worst, Math.abs(hg - hm));
+            }
+          }
+        }
+      }
+      expect(worst).toBeLessThan(0.15);
+    });
+  }
 });

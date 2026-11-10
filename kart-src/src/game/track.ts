@@ -576,6 +576,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       if (own.length === 0) continue;
       const side = own[own.length - 1].lat >= 0 ? 1 : -1;
       if (atFork) b.side = side;
+      let offH = 0;
+      let offB = 0;
       for (const o of own) {
         const sep = Math.abs(o.lat);
         edge[o.g] |= side > 0 ? EDGE_FREE_L : EDGE_FREE_R;
@@ -587,24 +589,55 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         // Platz zur Nachbarin hin: bis zu deren äußerer Bande – und gegen Ende
         // der Zone als Keil auf die eigene Bande zulaufend.
         free[o.g] = Math.min(sep + wh[o.m], wh[o.g] + (o.limit - sep) / 2);
+        // Solange beide Fahrbahnen im Grundriss übereinander liegen, liegt die
+        // Abzweigung genau in der Ebene der Hauptstrecke (Höhe und Neigung):
+        // sonst stünde dort eine Stufe mitten in der Fahrbahn.
+        const slope = (py[next[o.m]] - py[o.m]) / step;
         const plane = py[o.m] + o.lat * bank[o.m];
-        py[o.g] = plane + (py[o.g] - plane) * w;
-        bank[o.g] = bank[o.m] + (bank[o.g] - bank[o.m]) * w;
+        const rr = tz[o.g] * tz[o.m] + tx[o.g] * tx[o.m];
+        const rt = -tz[o.g] * tx[o.m] + tx[o.g] * tz[o.m];
+        const planeBank = bank[o.m] * rr + slope * rt;
+        offH = plane - py[o.g];
+        offB = planeBank - bank[o.g];
+        py[o.g] = plane;
+        bank[o.g] = planeBank;
         cross.push([o.g, o.m]);
         twin[o.g] = o.m;
       }
+      // Erst hinter der Zone findet sie zu ihrer eigenen Höhe – je größer der
+      // Unterschied, desto länger die Rampe.
+      const ease = Math.round(Math.max(16, Math.min(56, 14 + 14 * Math.abs(offH))));
+      const lastOwn = own[own.length - 1].g;
+      for (let k = 1; k <= ease; k++) {
+        const g = atFork ? lastOwn + k : lastOwn - k;
+        if (g < b.first + (b.count >> 1) === !atFork || g < b.first || g >= b.first + b.count) break;
+        const f = 1 - smoothStep(k / (ease + 1));
+        py[g] += offH * f;
+        bank[g] += offB * f;
+      }
       const ownZone = own.map((o) => o.g);
       for (const m of mainList) {
-        const r = nearest(m, ownZone);
-        const sep = Math.abs(r.lat);
-        const limit = wh[m] + wh[r.seg] + 0.6;
-        // Am Rand der Zone vergleicht man sonst mit einem Abschnitt, der längs weit weg liegt.
-        const along = Math.abs((px[r.seg] - px[m]) * tx[m] + (pz[r.seg] - pz[m]) * tz[m]);
-        if (sep >= limit || along > 3) continue;
+        // Abstand zur Abzweigung, senkrecht zu ihr gemessen (also zum nächsten
+        // ihrer Abschnitte). Seitlich aus Sicht der Hauptstrecke zu messen
+        // führt in die Irre, sobald die Abzweigung schräg wegläuft: der nächste
+        // Abschnitt liegt dann längs versetzt, und die Bande der Hauptstrecke
+        // stünde quer vor der Abzweigung.
+        let twinSeg = ownZone[0];
+        let bestD = Infinity;
+        for (const g of ownZone) {
+          const d = (px[m] - px[g]) ** 2 + (pz[m] - pz[g]) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            twinSeg = g;
+          }
+        }
+        const sep = Math.sqrt(bestD);
+        const limit = wh[m] + wh[twinSeg] + 0.6;
+        if (sep >= limit) continue;
         edge[m] |= side > 0 ? EDGE_FREE_R : EDGE_FREE_L;
-        free[m] = Math.min(sep + wh[r.seg], wh[m] + (limit - sep) / 2);
-        cross.push([m, r.seg]);
-        twin[m] = r.seg;
+        free[m] = Math.min(sep + wh[twinSeg], wh[m] + (limit - sep) / 2);
+        cross.push([m, twinSeg]);
+        twin[m] = twinSeg;
       }
     }
   });
