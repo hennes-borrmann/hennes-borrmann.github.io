@@ -559,10 +559,38 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
       const pu = v.half + KART_RADIUS - Math.abs(du);
       const pw = v.halfWidth + KART_RADIUS - Math.abs(dw);
       if (pu <= 0 || pw <= 0) continue;
-      ev |= TRAFFIC_MOVED;
       // Geschwindigkeit des Karts aus Sicht des Fahrzeugs
       let ku = s.vx * hx + s.vz * hz;
       let kw = -s.vx * hz + s.vz * hx;
+      // An den vier Ecken ist das Kart ein Kreis gegen eine Ecke – nicht gegen ein vergrößertes Rechteck.
+      const cu = Math.abs(du) - v.half;
+      const cw = Math.abs(dw) - v.halfWidth;
+      if (cu > 0 && cw > 0) {
+        const d2 = cu * cu + cw * cw;
+        if (d2 >= KART_RADIUS * KART_RADIUS) continue;
+        ev |= TRAFFIC_MOVED;
+        // Von der Ecke weg hinausschieben; was auf die Ecke zuläuft, prallt ab. Kein Dreher.
+        const dist = Math.sqrt(d2) || 1e-6;
+        const nu = ((du > 0 ? 1 : -1) * cu) / dist;
+        const nw = ((dw > 0 ? 1 : -1) * cw) / dist;
+        const push = KART_RADIUS - dist;
+        s.x += (hx * nu - hz * nw) * push;
+        s.z += (hz * nu + hx * nw) * push;
+        const vn = (ku - v.speed) * nu + kw * nw;
+        if (vn < 0) {
+          ku -= nu * vn * 1.3;
+          kw -= nw * vn * 1.3;
+          if (vn < -5) {
+            ev |= EV_WALL;
+            s.driftDir = 0;
+            s.driftCharge = 0;
+          }
+        }
+        s.vx = hx * ku - hz * kw;
+        s.vz = hz * ku + hx * kw;
+        continue;
+      }
+      ev |= TRAFFIC_MOVED;
       if (pw < pu || Math.abs(dw) > v.halfWidth + CRASH_INSET) {
         // Seitlich – oder nur die Ecke erwischt: hinausschieben und
         // entlangstreifen wie an einer Bande. Das kostet Tempo, aber keinen Dreher.
@@ -627,7 +655,11 @@ export function trafficBlocks(t: Track, x: number, y: number, z: number, radius:
       const hz = Math.cos(p.heading);
       const du = (x - p.x) * hx + (z - p.z) * hz;
       const dw = -(x - p.x) * hz + (z - p.z) * hx;
-      if (Math.abs(du) < v.half + radius && Math.abs(dw) < v.halfWidth + radius && y - p.y < v.height + radius && y - p.y > -1.5) return true;
+      if (y - p.y >= v.height + radius || y - p.y <= -1.5) continue;
+      // Kreis gegen Quader: Abstand zum nächsten Punkt des Rechtecks
+      const cu = Math.max(0, Math.abs(du) - v.half);
+      const cw = Math.max(0, Math.abs(dw) - v.halfWidth);
+      if (cu * cu + cw * cw < radius * radius) return true;
     }
   }
   return false;

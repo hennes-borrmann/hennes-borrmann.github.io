@@ -280,17 +280,21 @@ export class HostGame implements GameView {
   }
 
   /**
-   * @param time Rennzeit (Ticks seit "Los"), mit der der Mitspieler die neueste
-   *             dieser Eingaben gerechnet hat; die älteren liegen je einen Tick davor.
+   * @param times  Rennzeit (Ticks seit "Los") je Eingabe, so wie der Mitspieler sie gerechnet hat;
+   *               ohne Angabe gilt die Rennzeit des Hosts
+   * @param raceId Nummer des Rennens, für das die Eingaben gedacht sind – Pakete aus
+   *               einem anderen Rennen (verspätet nach einem Neustart) werden verworfen
    */
-  receiveCmds(slot: number, newestSeq: number, cmds: Cmd[], time = this.tick - this.goTick): void {
+  receiveCmds(slot: number, newestSeq: number, cmds: Cmd[], times?: number[], raceId?: number): void {
     const k = this.karts.get(slot);
     if (!k || k.local || k.bot) return;
+    if (raceId !== undefined && raceId !== this.raceId) return;
     const first = newestSeq - cmds.length + 1;
+    const now = this.tick - this.goTick;
     for (let i = 0; i < cmds.length; i++) {
       const seq = first + i;
       if (seq > k.lastSeq) {
-        k.queue.push({ seq, cmd: cmds[i], time: time - (newestSeq - seq) });
+        k.queue.push({ seq, cmd: cmds[i], time: times?.[i] ?? now });
         k.lastSeq = seq;
         k.cmdsIn++;
       }

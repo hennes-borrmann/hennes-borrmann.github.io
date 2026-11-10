@@ -138,6 +138,10 @@ export class ClientGame implements GameView {
     this.lastSnapTick = -1;
     this.pending = [];
     this.clockOffset = Number.NaN;
+    // Bis der Host wieder einen Stand geschickt hat, gibt es keinen Zeitbezug:
+    // nichts vorhersagen und nichts senden (sonst gingen Eingaben mit falscher Rennzeit hinaus).
+    this.ready = false;
+    this.envTime = Number.NaN;
   }
 
   /** Geschätzter Host-Tick zum Zeitpunkt, an dem der Snapshot von "jetzt" beim Host losging. */
@@ -192,8 +196,13 @@ export class ClientGame implements GameView {
     if (ev & EV_FALL) this.onFx?.('fall');
 
     this.stats.pending = this.pending.length;
-    const recent = this.pending.slice(-CMD_REDUNDANCY).map((p) => p.cmd);
-    return encodeCmds(this.seq, recent, this.envTime);
+    const recent = this.pending.slice(-CMD_REDUNDANCY);
+    return encodeCmds(
+      this.seq,
+      recent.map((p) => p.cmd),
+      recent.map((p) => p.time),
+      this.raceId,
+    );
   }
 
   onSnapshot(snap: Snapshot, nowSec: number): void {

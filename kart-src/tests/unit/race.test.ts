@@ -5,7 +5,7 @@ import { HostGame } from '../../src/game/hostGame';
 import { ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
 import { TRACK, setTrack } from '../../src/game/track';
 import { withoutMechanics } from './helpers';
-import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot } from '../../src/net/protocol';
+import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot, encodeCmds } from '../../src/net/protocol';
 
 const CTX = { tick: 0, time: 0, place: 1, smoke: false };
 const count = (host: HostGame, kind: number): number => host.things().filter((t) => t.kind === kind).length;
@@ -170,7 +170,7 @@ function simulate(opts: { lag: number; jitter: number; loss: number; laps: numbe
   for (; now < opts.maxSeconds * 1000 && host.phase !== RACE_RESULTS; now++) {
     deliver(up, now, (d) => {
       const c = decodeCmds(new DataView(d))!;
-      host.receiveCmds(1, c.newestSeq, c.cmds, c.time);
+      host.receiveCmds(1, c.newestSeq, c.cmds, c.times, c.raceId);
     });
     deliver(down, now, (d) => {
       const wasRunning = host.phase === RACE_RUNNING;
@@ -268,6 +268,49 @@ describe('Rennen über das Netz (simuliert)', () => {
     } finally {
       setTrack(0);
     }
+  });
+
+  it('ein verspätetes Eingabepaket aus dem vorigen Rennen wird nicht im neuen ausgeführt', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    const old = host.raceId;
+    const packet = decodeCmds(new DataView(encodeCmds(1, [{ steer: 0, buttons: 1 }], [5], old)))!;
+    host.newRace();
+    host.receiveCmds(1, packet.newestSeq, packet.cmds, packet.times, packet.raceId);
+    host.step(NEUTRAL);
+    expect(JSON.parse(JSON.stringify(host.snapshot().byteLength))).toBeGreaterThan(0);
+    const snap = decodeSnapshot(new DataView(host.snapshot()))!;
+    // nichts bestätigt: die Eingabe wurde verworfen
+    expect(snap.karts.find((k) => k.slot === 1)!.ack).toBe(0);
+    // Ein Paket für das laufende Rennen kommt an.
+    host.receiveCmds(1, 1, [{ steer: 0, buttons: 1 }], [5], host.raceId);
+    host.step(NEUTRAL);
+    expect(decodeSnapshot(new DataView(host.snapshot()))!.karts.find((k) => k.slot === 1)!.ack).toBe(1);
+  });
+
+  it('nach einem Verbindungsabbruch sendet der Mitspieler nichts, bis der Host wieder einen Stand geschickt hat', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    for (let i = 0; i < 400; i++) host.step(NEUTRAL);
+    const client = new ClientGame(1, () => 0);
+    client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, host.tick / 60);
+    expect(client.ready).toBe(true);
+    const first = client.tick({ steer: 0, buttons: 1 }, (host.tick + 1) / 60);
+    expect(first).not.toBeNull();
+    // Die Rennzeit im Paket ist die des Hosts (hier ohne Laufzeit) – nicht null und nicht irgendetwas.
+    const sent = decodeCmds(new DataView(first!))!;
+    expect(Math.abs(sent.times[sent.times.length - 1] - (host.tick + 1 - host.goTick))).toBeLessThanOrEqual(1);
+    expect(sent.raceId).toBe(host.raceId);
+    client.resync();
+    expect(client.ready).toBe(false);
+    expect(client.tick({ steer: 0, buttons: 1 }, (host.tick + 2) / 60)).toBeNull();
+    for (let i = 0; i < 3; i++) host.step(NEUTRAL);
+    client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, host.tick / 60);
+    expect(client.ready).toBe(true);
+    const again = decodeCmds(new DataView(client.tick({ steer: 0, buttons: 1 }, (host.tick + 1) / 60)!))!;
+    expect(Math.abs(again.times[again.times.length - 1] - (host.tick + 1 - host.goTick))).toBeLessThanOrEqual(1);
   });
 
   it('Strecke hat Kisten und Boost-Felder an sinnvollen Stellen', () => {

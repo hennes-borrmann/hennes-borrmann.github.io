@@ -143,39 +143,62 @@ export function seq16Newer(a: number, b: number): boolean {
 }
 
 // --- Binär: Eingaben Client → Host ------------------------------------------
-// [u8 typ][u32 seq der neuesten Eingabe][u8 anzahl][i32 rennzeit der neuesten Eingabe]
-// [anzahl × (i8 lenkung, u8 tasten)]
+// [u8 typ][u32 seq der neuesten Eingabe][u8 anzahl][i32 rennzeit der neuesten Eingabe][u8 rennen-nr]
+// [anzahl × (i8 lenkung, u8 tasten, u8 abstand)]
 // Die Eingaben stehen alt → neu. Jedes Paket wiederholt die letzten paar,
-// damit ein einzelnes verlorenes Paket keine Lücke reißt. Die Rennzeit (Ticks
-// seit "Los") ist der Takt, mit dem der Client diesen Schritt gerechnet hat;
-// ältere Eingaben im selben Paket liegen je einen Tick davor.
+// damit ein einzelnes verlorenes Paket keine Lücke reißt.
+//
+// Die Rennzeit (Ticks seit "Los") ist der Takt, mit dem der Client diesen
+// Schritt gerechnet hat – der Host rechnet ihn mit derselben Zeit nach. Meist
+// liegt jede Eingabe einen Tick nach der vorigen, aber nicht immer (die Uhr
+// des Clients wird nachgeführt): deshalb trägt jede Eingabe ihren "abstand" –
+// so viele Ticks liegt die nächste (neuere) nach ihr; bei der neuesten 0.
+// Die Rennen-Nr. verhindert, dass ein verspätetes Paket aus dem vorigen Rennen
+// im neuen ausgeführt wird.
 
 export const CMD_REDUNDANCY = 4;
-const CMD_HEADER = 10;
+const CMD_HEADER = 11;
+const CMD_SIZE = 3;
 
-export function encodeCmds(newestSeq: number, cmds: Cmd[], time = 0): ArrayBuffer {
-  const buf = new ArrayBuffer(CMD_HEADER + cmds.length * 2);
+/**
+ * @param times  Rennzeit je Eingabe (gleiche Reihenfolge wie cmds); ohne Angabe überall 0
+ * @param raceId Nummer des Rennens, für das die Eingaben gelten
+ */
+export function encodeCmds(newestSeq: number, cmds: Cmd[], times: number[] = [], raceId = 0): ArrayBuffer {
+  const buf = new ArrayBuffer(CMD_HEADER + cmds.length * CMD_SIZE);
   const v = new DataView(buf);
+  const n = cmds.length;
   v.setUint8(0, PKT_CMD);
   v.setUint32(1, newestSeq);
-  v.setUint8(5, cmds.length);
-  v.setInt32(6, time);
-  for (let i = 0; i < cmds.length; i++) {
-    v.setInt8(CMD_HEADER + i * 2, cmds[i].steer);
-    v.setUint8(CMD_HEADER + 1 + i * 2, cmds[i].buttons);
+  v.setUint8(5, n);
+  v.setInt32(6, n > 0 ? (times[n - 1] ?? 0) : 0);
+  v.setUint8(10, raceId & 0xff);
+  for (let i = 0; i < n; i++) {
+    const o = CMD_HEADER + i * CMD_SIZE;
+    v.setInt8(o, cmds[i].steer);
+    v.setUint8(o + 1, cmds[i].buttons);
+    v.setUint8(o + 2, i < n - 1 ? Math.max(0, Math.min(255, (times[i + 1] ?? 0) - (times[i] ?? 0))) : 0);
   }
   return buf;
 }
 
-export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; time: number } | null {
+export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; times: number[]; raceId: number } | null {
   if (view.byteLength < CMD_HEADER) return null;
   const count = view.getUint8(5);
-  if (view.byteLength < CMD_HEADER + count * 2) return null;
+  if (view.byteLength < CMD_HEADER + count * CMD_SIZE) return null;
   const cmds: Cmd[] = [];
+  const times: number[] = new Array<number>(count);
   for (let i = 0; i < count; i++) {
-    cmds.push({ steer: view.getInt8(CMD_HEADER + i * 2), buttons: view.getUint8(CMD_HEADER + 1 + i * 2) });
+    const o = CMD_HEADER + i * CMD_SIZE;
+    cmds.push({ steer: view.getInt8(o), buttons: view.getUint8(o + 1) });
   }
-  return { newestSeq: view.getUint32(1), cmds, time: view.getInt32(6) };
+  // Zeiten von der neuesten rückwärts aufbauen
+  let time = view.getInt32(6);
+  for (let i = count - 1; i >= 0; i--) {
+    if (i < count - 1) time -= view.getUint8(CMD_HEADER + i * CMD_SIZE + 2);
+    times[i] = time;
+  }
+  return { newestSeq: view.getUint32(1), cmds, times, raceId: view.getUint8(10) };
 }
 
 // --- Binär: Snapshot Host → Client ------------------------------------------
@@ -184,7 +207,7 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; ti
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
 //        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 44 Byte]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 46 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)

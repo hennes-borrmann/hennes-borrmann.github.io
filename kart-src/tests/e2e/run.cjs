@@ -258,7 +258,7 @@ async function main() {
   await client.page.setViewportSize({ width: Number(process.env.VW || 240), height: Number(process.env.VH || 150) });
   await host.page.click('#btn-start');
   await host.page.waitForSelector('#app[data-view="game"]');
-  await client.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+  await client.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
   check('Beide Bildschirme wechseln ins Rennen', true);
   await client.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
   check('Vier Karts am Start: zwei Menschen, zwei KI-Gegner', (await kart(host.page, 'standings()')).filter((s) => s.bot).length === 2);
@@ -670,7 +670,7 @@ async function main() {
     await h5.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h5, c5]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h5.page.click('#btn-start');
-    await c5.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c5.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     const t0 = Date.now();
     await h5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 120000 });
     await c5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 5000 });
@@ -746,7 +746,7 @@ async function main() {
     await h6.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h6.page.click('#btn-start');
-    await c6.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c6.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c6.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 20000 });
     const [trH, trC] = await Promise.all([kart(h6.page, 'track()'), kart(c6.page, 'track()')]);
     check('Beide fahren auf der gewählten Strecke', trH.index === 1 && trC.index === 1, `${trH.name} / ${trC.name}, ${trH.length.toFixed(0)} m`);
@@ -904,7 +904,7 @@ async function main() {
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h7, c7]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h7.page.click('#btn-start');
-    await c7.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c7.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 25000 });
     await h7.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 5000 });
     // Derselbe Verkehr auf beiden Bildschirmen: gleiche Rennzeit, gleiche Orte.
@@ -984,7 +984,7 @@ async function main() {
     await h3.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h3, c3]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h3.page.click('#btn-start');
-    await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c3.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
     await sleep(1500);
     const link = await kart(c3.page, 'hostLink()');

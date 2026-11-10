@@ -29,6 +29,7 @@ import {
   EV_FLAT,
   EV_HIT,
   EV_SPLASH,
+  EV_WALL,
   FLAG_AIR,
   GUARD_TICKS,
   V_MAX,
@@ -209,6 +210,28 @@ describe('Verkehr (Nachtschicht)', () => {
     const ev2 = run(clip, T0, 120);
     expect(ev2 & EV_HIT).toBe(0);
     expect(clip.spin).toBe(0);
+  });
+
+  it('an den Ecken zählt der Kreis des Karts, nicht ein vergrößertes Rechteck', () => {
+    setTrack(3);
+    const { v: bus, time: T0 } = scene(VEH_BUS, 5);
+    // Schräg hinter der Ecke, 1,13 m von ihr entfernt (0,8 m längs und quer): kein Kontakt.
+    const far = behind(bus, T0, bus.half + 0.8, bus.halfWidth + 0.8, bus.speed);
+    const x = far.x;
+    const z = far.z;
+    const ev = stepKart(far, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time: T0 });
+    expect(ev & (EV_HIT | EV_WALL)).toBe(0);
+    // Es rollt einfach weiter (ein Schritt bei Bustempo), ohne zur Seite geschoben zu werden.
+    expect(Math.hypot(far.x - x, far.z - z)).toBeLessThan(bus.speed / 60 + 0.02);
+    // 0,85 m von der Ecke (0,6 m längs und quer): Kontakt – hinausgeschoben, aber kein Dreher.
+    const near = behind(bus, T0, bus.half + 0.6, bus.halfWidth + 0.6, bus.speed);
+    const ev2 = stepKart(near, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time: T0 });
+    expect(ev2 & EV_HIT).toBe(0);
+    expect(near.spin).toBe(0);
+    const p = vehiclePose(TRACK, bus, 0, T0, POSE);
+    const du = Math.abs((near.x - p.x) * Math.sin(p.heading) + (near.z - p.z) * Math.cos(p.heading)) - bus.half;
+    const dw = Math.abs(-(near.x - p.x) * Math.cos(p.heading) + (near.z - p.z) * Math.sin(p.heading)) - bus.halfWidth;
+    expect(Math.hypot(Math.max(0, du), Math.max(0, dw))).toBeGreaterThan(0.93);
   });
 
   it('der Stoßfänger fängt einen Auffahrunfall ab', () => {

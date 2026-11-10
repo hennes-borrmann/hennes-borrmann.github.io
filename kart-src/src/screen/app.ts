@@ -458,7 +458,7 @@ export class App {
     lobby.onFast = (slot, view) => {
       if (!this.hostGame || view.getUint8(0) !== PKT_CMD) return;
       const d = decodeCmds(view);
-      if (d) this.hostGame.receiveCmds(slot, d.newestSeq, d.cmds, d.time);
+      if (d) this.hostGame.receiveCmds(slot, d.newestSeq, d.cmds, d.times, d.raceId);
     };
 
     this.setRoomInUrl(code);
