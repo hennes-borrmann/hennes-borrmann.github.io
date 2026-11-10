@@ -71,8 +71,8 @@ export const WOLKEN: TrackDef = {
   ],
   // Über den Flugstrecken ist der Korridor breit.
   widths: [
-    [8.05, 11.75, 15, 0],
-    [26.05, 28.7, 15, 0],
+    [8.05, 11.75, 15, 0.5],
+    [26.05, 28.7, 15, 0.5],
   ],
   banks: [[4.2, 6.8, 0.3]],
   thermals: [
@@ -115,7 +115,7 @@ export const WOLKEN: TrackDef = {
       shoulder: 1.2,
       surface: 'metal',
       glides: [[2.05, 4.4]],
-      widths: [[2.05, 4.4, 13, 0]],
+      widths: [[2.05, 4.4, 13, 0.5]],
       thermals: [{ at: 3.0, lat: 5, radius: 8 }],
       rings: [{ at: 3.7, lat: 4, up: 3.5 }],
       pads: [{ at: 1.2, lat: 0, halfWidth: 0 }],
