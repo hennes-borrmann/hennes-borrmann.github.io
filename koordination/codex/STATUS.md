@@ -1,12 +1,13 @@
-Zuletzt aktualisiert: 2026-11-10 21:48 UTC
+Zuletzt aktualisiert: 2026-11-10 22:16 UTC
 
-Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 21:45 UTC
+Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 22:15 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
-| C-001 | fertig | codex/koordination | 94453f98616dccbb669647d5755e13e557109d17 | tsc OK / 123 Tests OK; 9 Wegwerfproben OK | Prüfung des Claude-Stands `326bd88167b7e1e1974d3f3992cfe744c9827714`; nur Bericht. |
+| C-001 | fertig | codex/koordination | 94453f98616dccbb669647d5755e13e557109d17 | tsc OK / 123 Tests OK; 9 Wegwerfproben OK | Prüfung des Claude-Stands `326bd88167b7e1e1974d3f3992cfe744c9827714`; nur Bericht. Von Claude abgenommen; Nachprüfung als C-004 beauftragt. |
 | C-002 | fertig | codex/c-002-musik | 0c23f20b78160a0647de63d60452ab38a5dde814 | npm ci OK; tsc OK / 112 Tests OK (10 neu) | Vier Stücke, je 16 Takte und zwei Abschnitte; Tonumfang/Pegel geprüft. Nicht angehört, nicht eingebunden. |
 | C-003 | fertig | codex/c-003-turn | 4a2e344e0c469bec49c121dff7c7c88f88bde674 | npm ci OK; tsc OK / 102 Tests OK; node --check OK; 24 lokale Worker-Prüfungen OK | Drei Vorlagendateien. CORS, 30-Minuten-TTL, IP-Drosselung, Fehlerbehandlung und deutsche Anleitung; nicht ausgerollt. |
+| C-004 | angenommen | codex/c-004-grenztests | noch keiner | noch ungeprüft | Nur neue Testdatei; Basis origin/main ce3e36e, Protokoll 8 bestätigt. |
 
 
 ## C-002 · Stückbeschreibungen
@@ -33,9 +34,9 @@ Am **2026-11-10** in den offiziellen Cloudflare-Unterlagen geprüft:
 
 ## Weiterer Aufgabenabruf
 
-Alle drei Aufgaben sind aus Codex-Sicht fertig und gepusht; Claudes Abnahme steht noch aus. Auftrag, Regeln, Aufgaben und Claude-Status beim Abruf am 2026-11-10 21:45 UTC vollständig erneut gelesen: keine neuen Aufgaben, keine Nacharbeit, kein STOPP. Claude steht jetzt auf `ad60a8f9f6cbcfe95d6e2ff29e1daaaa3fec93a4`. Der neue Commit betrifft unter anderem Client, Host, Simulation, Protokoll und Tests; seine Commit-Nachricht nennt Korrekturen zu C-001. Diese neue Implementierung und ihre Tests sind durch Codex **ungeprüft**; eine Nachprüfung wurde nicht beauftragt. Der abgeschlossene Bericht und seine Prüfresultate beziehen sich ausschließlich auf `326bd88167b7e1e1974d3f3992cfe744c9827714`.
+C-001 ist von Claude abgenommen. C-002 und C-003 sind abgeliefert; Claudes Prüfung steht aus. Beim Aufgabenabruf am 2026-11-10 22:15 UTC wurden Auftrag, Regeln, Aufgaben und Claude-Status vollständig gelesen. Neu: C-004 (Grenztests); kein STOPP. Claude-Stand `9b4a73059cc0e98cf6f28ffe2d65ba3a07943913`, main-Basis für C-004 `ce3e36e43aba6286632676cae72a50aaefd9a454` mit bestätigter Protokollversion 8. C-004 prüft Zeitklemme, Verlustserien, Countdown, Mechanikgrenzen und vollständig gesperrte KI-Fahrspuren; nur die neue Datei `kart-src/tests/unit/netzgrenzen.test.ts` wird geändert.
 
-Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Automatische Abrufe wurden am 2026-11-10 um 21:15 und 21:45 UTC erfolgreich ausgeführt. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
+Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-10 22:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
 
 Abschlusskontrolle: alle drei Remote-Zweige und ihr erlaubter Dateiumfang verifiziert; Arbeitsbaum sauber, keine Änderungen unter "kart/". Es wurde kein Spiel-Build ausgeführt und nichts zusammengeführt.
