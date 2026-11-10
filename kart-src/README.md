@@ -108,7 +108,7 @@ Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS.
 1. iPad/Rechner: Seite öffnen, Namen eintragen, **Lobby erstellen**.
 2. Handy: QR-Code unter „Dein Controller“ scannen → **Tippen zum Starten** → Sensor erlauben → Handy quer halten → **Kalibrieren**.
 3. Zweiter Bildschirm: Einladungslink öffnen oder Raumcode eintippen, eigenes Handy koppeln, **Ich bin bereit**.
-4. Host: Strecke und KI-Stärke wählen, **Rennen starten**.
+4. Host: Strecke, KI-Stärke und Rundenzahl (2–5, Vorgabe 3) wählen, **Rennen starten**. Die Mitspieler sehen die Auswahl, ändern kann sie nur der Host.
 5. Auf dem iPad in den Einstellungen **Bildrate anzeigen** einschalten und im Rennen ablesen.
 6. Nach dem Ziel: Ergebnisliste, dann **Nochmal** oder **Zur Lobby** (wählt der Host).
 7. Diagnose (im Menü oder Taste F2) bei Bedarf: Latenz, Raten, „direkt“ oder „über TURN“.
@@ -151,7 +151,7 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | `?turn=force` / `?turn=off` | nur TURN bzw. TURN ignorieren |
 | `?lag=80&jitter=20&loss=5` | künstliche Verzögerung (ms pro Richtung), Schwankung, Paketverlust in % |
 | `?debug=0` / `?debug=1` | Diagnose ausgeblendet bzw. auch im Rennen von Anfang an sichtbar |
-| `?laps=1` | Rundenzahl überschreiben (zählt beim Host) |
+| `?laps=1` | Rundenzahl überschreiben, geht der Auswahl in der Lobby vor (zählt beim Host) |
 | `?track=2` / `?ai=0` | Strecke (0–3) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
 | `?q=low` | Grafik: `low`, `medium`, `high`, `auto` |
 | `?mute=1` | ohne Ton starten |

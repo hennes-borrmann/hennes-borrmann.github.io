@@ -2,6 +2,9 @@
 // dieselben Eingaben (Lenkung, vier Tasten) – sie haben also keine Sonderrechte
 // außer einem milden Tempo-Ausgleich ("Gummiband"), den der Host berechnet.
 //
+// An Gabelungen entscheidet jeder Fahrer rechtzeitig vorher per Zufall, welchen
+// Weg er nimmt; alles Vorausschauen folgt dann diesem Weg.
+//
 // Fahrweise: ein Zielpunkt ein Stück voraus auf der Strecke, in Kurven zur
 // Innenseite versetzt. Vor engen Kurven wird gebremst, in engen Kurven
 // gedriftet und danach der Mini-Turbo mitgenommen. Vor Sprüngen, auf Stegen
@@ -24,6 +27,7 @@ import {
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
+  bankGrip,
   forwardSpeed,
   type Cmd,
   type KartState,
@@ -34,12 +38,12 @@ import {
   EDGE_OPEN_R,
   TRACK,
   hazardLat,
+  pathAhead,
   proj,
   projectOnTrack,
   rightX,
   rightZ,
   segDelta,
-  wrapSeg,
 } from './track';
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
@@ -61,6 +65,8 @@ export interface BotBrain {
   driftFrom: number;
   /** Bevorzugte Spur: seitlicher Versatz zur Mittellinie in Metern. */
   line: number;
+  /** Gewählter Weg: Bit k gesetzt = Abzweigung k nehmen. */
+  route: number;
   /** Ticks, die das Kart praktisch steht. */
   stuck: number;
   /** Verbleibende Ticks Rückwärtsfahrt zum Freikommen. */
@@ -101,6 +107,7 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     skill: SKILL[slot % 4] + SKILL_SHIFT[l],
     driftFrom: DRIFT_FROM[l][slot % 4],
     line: [-1.6, 1.4, 0.2, -0.6][slot % 4],
+    route: 0,
     stuck: 0,
     reverse: 0,
     holding: 0,
@@ -128,32 +135,45 @@ const BASE_A_LAT = 31;
 const DRIFT_WIDE = 0.55;
 const DRIFT_TIGHT = 1.55;
 
+/** Die nächsten Abschnitte auf dem gewählten Weg (ab dem eigenen); botCmd füllt sie zu Beginn. */
+const PATH = new Int32Array(84);
+/** So weit vor einer Gabelung fällt die Entscheidung (Abschnitte). */
+const DECIDE_AT = 64;
+
+/** Abschnitt d Meter voraus auf dem gewählten Weg. */
+function aheadSeg(d: number): number {
+  return PATH[Math.min(PATH.length - 1, Math.round(d / TRACK.step))];
+}
+
 /** Mittlere Krümmung über die nächsten Meter (positiv = Rechtskurve). */
-function curvatureAhead(seg: number, fromM: number, toM: number): number {
+function curvatureAhead(fromM: number, toM: number): number {
   const t = TRACK;
   let sum = 0;
   let count = 0;
   for (let d = fromM; d <= toM; d += 2) {
-    sum += t.curv[wrapSeg(t, seg + Math.round(d / t.step))];
+    sum += t.curv[aheadSeg(d)];
     count++;
   }
   return sum / count;
 }
 
-function maxCurvatureAhead(seg: number, toM: number): number {
+/** Engste Stelle voraus. Steilkurven zählen so viel weiter, wie ihre Neigung an Halt bringt. */
+function maxCurvatureAhead(toM: number): number {
   const t = TRACK;
   let max = 0;
   for (let d = 0; d <= toM; d += 2) {
-    max = Math.max(max, Math.abs(t.curv[wrapSeg(t, seg + Math.round(d / t.step))]));
+    const i = aheadSeg(d);
+    const c = t.curv[i];
+    max = Math.max(max, Math.abs(c) / bankGrip(t, i, c > 0 ? 1 : -1));
   }
   return max;
 }
 
 /** Bits aller Kanten-Eigenschaften der nächsten Meter (Lücke, fehlende Bande). */
-function edgesAhead(seg: number, toM: number): number {
+function edgesAhead(toM: number): number {
   const t = TRACK;
   let bits = 0;
-  for (let d = 0; d <= toM; d += 3) bits |= t.edge[wrapSeg(t, seg + Math.round(d / t.step))];
+  for (let d = 0; d <= toM; d += 3) bits |= t.edge[aheadSeg(d)];
   return bits;
 }
 
@@ -180,25 +200,43 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const vf = forwardSpeed(s);
   const v = Math.abs(vf);
   const air = (s.flags & FLAG_AIR) !== 0;
+
+  // --- Welcher Weg? Rechtzeitig vor jeder Gabelung wird gewürfelt. ---
+  const on = t.branchOf[s.seg];
+  for (let k = 0; k < t.branches.length; k++) {
+    if (on === k) b.route |= 1 << k;
+    else if (on < 0) {
+      const d = segDelta(t, s.seg, t.branches[k].from);
+      if (d > DECIDE_AT && d <= DECIDE_AT + 2) b.route = random(b) < 0.5 ? b.route | (1 << k) : b.route & ~(1 << k);
+    }
+  }
+  pathAhead(t, s.seg, b.route, PATH);
   // Jede Figur hält in Kurven etwas anders – die KI plant mit den Werten ihrer eigenen.
   const A_LAT = BASE_A_LAT * (CHARACTERS[s.char] ?? CHARACTERS[0]).grip;
 
   // --- Was liegt voraus? ---
-  const near = curvatureAhead(s.seg, 0, 14);
-  const edges = edgesAhead(s.seg, 46);
+  const near = curvatureAhead(0, 14);
+  const edges = edgesAhead(46);
   const gapAhead = (edges & EDGE_GAP) !== 0;
-  const openAhead = (edgesAhead(s.seg, 24) & (EDGE_OPEN_L | EDGE_OPEN_R)) !== 0;
+  const openAhead = (edgesAhead(24) & (EDGE_OPEN_L | EDGE_OPEN_R)) !== 0;
 
   // --- Zielpunkt voraus, in Kurven zur Innenseite versetzt ---
   const look = Math.max(8, Math.min(24, 6 + v * 0.6));
-  const target = wrapSeg(t, s.seg + Math.round(look / t.step));
-  const bend = curvatureAhead(s.seg, 0, 34);
+  const target = aheadSeg(look);
+  const bend = curvatureAhead(0, 34);
   // Ohne Bande hält die KI Abstand zur Kante; vor einer Lücke fährt sie gerade auf die Mitte zu.
   const maxLat = Math.max(0.5, t.rh[target] - (openAhead ? 3.2 : 2.2));
   let lat = gapAhead ? 0 : (b.line * 0.6 * t.rh[target]) / 6.5 + bend * 110;
   for (const h of t.hazards) {
-    const d = segDelta(t, s.seg, h.seg) * t.step;
-    if (d < 2 || d > 42) continue;
+    // Nur Hindernisse auf dem eigenen Weg zählen.
+    let d = -1;
+    for (let k = 2; k < 44; k++) {
+      if (PATH[k] === h.seg) {
+        d = k * t.step;
+        break;
+      }
+    }
+    if (d < 0) continue;
     // Wo ist das Hindernis, wenn ich dort ankomme? Auf der anderen Seite vorbei.
     const hl = hazardLat(h, ctx.tick + (d / Math.max(v, 8)) * 60);
     lat = hl > 0 ? Math.min(lat, hl - 4.6) : Math.max(lat, hl + 4.6);
@@ -224,7 +262,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
 
   // --- Tempo: so schnell, wie die engste Stelle voraus es zulässt ---
   const brakeDist = (v * v) / 70 + 8;
-  const tight = maxCurvatureAhead(s.seg, brakeDist);
+  const tight = maxCurvatureAhead(brakeDist);
   const mayDrift = !openAhead && !gapAhead;
   // Wer driftet, kommt enger herum als mit normaler Lenkung und darf schneller hinein.
   const cornering = tight > b.driftFrom && mayDrift ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * (openAhead ? 0.8 : 0.92);
@@ -252,7 +290,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     b.drifting = 0;
     steer = yawMax > 0 ? Math.max(-1, Math.min(1, wantYaw / yawMax)) : 0;
     const dir = near > 0 ? 1 : -1;
-    const turnAhead = Math.abs(curvatureAhead(s.seg, 0, 30)) * 30;
+    const turnAhead = Math.abs(curvatureAhead(0, 30)) * 30;
     if (
       mayDrift &&
       Math.abs(near) > b.driftFrom &&
@@ -275,7 +313,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   } else {
     if (b.holding++ === 0) b.patience = Math.round((150 + Math.floor(random(b) * 330)) * PATIENCE_FACTOR[b.level]);
     const aligned = Math.abs(err) < 0.2;
-    const straight = maxCurvatureAhead(s.seg, 45) < 1 / 70;
+    const straight = maxCurvatureAhead(45) < 1 / 70;
     const late = b.holding > b.patience;
     projectOnTrack(t, s.x, s.z, s.seg);
     const myLat = proj.lat;
@@ -318,7 +356,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         break;
       case ITEM_SPRING:
         // Nur wo nichts passieren kann: gerade, mit Bande, kein Sprung voraus.
-        press = late && straight && !air && (edgesAhead(s.seg, 70) & (EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R)) === 0;
+        press = late && straight && !air && (edgesAhead(70) & (EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R)) === 0;
         break;
     }
   }

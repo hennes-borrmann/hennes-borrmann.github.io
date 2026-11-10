@@ -5,10 +5,13 @@
 import * as THREE from 'three';
 import {
   EDGE_DECK,
+  EDGE_FREE_L,
+  EDGE_FREE_R,
   EDGE_GAP,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   EDGE_RAMP,
+  EDGE_TUNNEL,
   rightX,
   rightZ,
   segDelta,
@@ -24,6 +27,9 @@ import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './too
 const WALL_H = 0.95;
 const WALL_T = 0.5;
 const DECK_D = 1.1;
+/** Tunnel und Höhlen: lichte Höhe über der Fahrbahn und Dicke des Felsmantels. */
+const TUNNEL_H = 7.4;
+const TUNNEL_ROCK = 5;
 
 const FOG_VERT = /* glsl */ `
 #include <common>
@@ -125,7 +131,7 @@ export class World {
     let maxX = -Infinity;
     let minZ = Infinity;
     let maxZ = -Infinity;
-    for (let i = 0; i < t.n; i++) {
+    for (let i = 0; i < t.total; i++) {
       minX = Math.min(minX, t.px[i]);
       maxX = Math.max(maxX, t.px[i]);
       minZ = Math.min(minZ, t.pz[i]);
@@ -165,8 +171,9 @@ export class World {
   clearance(x: number, z: number): number {
     const t = this.track;
     let best = Infinity;
-    for (let k = 0; k < t.n; k += 2) {
-      const d = Math.hypot(x - t.px[k], z - t.pz[k]) - t.wh[k];
+    for (let k = 0; k < t.total; k += 2) {
+      // Um einen Tunnel liegt Fels: dort beginnt der freie Platz erst weiter draußen.
+      const d = Math.hypot(x - t.px[k], z - t.pz[k]) - t.wh[k] - (t.edge[k] & EDGE_TUNNEL ? TUNNEL_ROCK + 2 : 0);
       if (d < best) best = d;
     }
     return best;
@@ -177,12 +184,12 @@ export class World {
   /** Punkt auf der Fahrbahn: Abschnitt i, Anteil f zum nächsten, seitlich lat, um dy angehoben. */
   private P(i: number, f: number, lat: number, dy = 0): V3 {
     const t = this.track;
-    const a = ((i % t.n) + t.n) % t.n;
+    const a = i;
     const x = t.px[a] + rightX(t, a) * lat;
     const y = t.py[a] + lat * t.bank[a] + dy;
     const z = t.pz[a] + rightZ(t, a) * lat;
     if (f === 0) return [x, y, z];
-    const b = (a + 1) % t.n;
+    const b = t.next[a];
     const x2 = t.px[b] + rightX(t, b) * lat;
     const y2 = t.py[b] + lat * t.bank[b] + dy;
     const z2 = t.pz[b] + rightZ(t, b) * lat;
@@ -232,8 +239,8 @@ export class World {
       else solid.quad(a, b, cc, d, c);
     };
 
-    for (let i = 0; i < t.n; i++) {
-      const j = (i + 1) % t.n;
+    for (let i = 0; i < t.total; i++) {
+      const j = t.next[i];
       const gapI = (t.edge[i] & EDGE_GAP) !== 0;
       const gapJ = (t.edge[j] & EDGE_GAP) !== 0;
       if (gapI && gapJ) continue;
@@ -248,29 +255,36 @@ export class World {
       const openR = (e & EDGE_OPEN_R) !== 0;
       const deck = (e & EDGE_DECK) !== 0;
       const ramp = (e & EDGE_RAMP) !== 0;
+      // An Gabelung und Einmündung liegen zwei Fahrbahnen ineinander: zur
+      // Nachbarin hin gibt es weder Bande noch Randlinie, und die Flächen
+      // liegen hauchdünn gestaffelt, damit sie nicht flimmern.
+      const freeL = ((e | t.edge[j]) & EDGE_FREE_L) !== 0;
+      const freeR = ((e | t.edge[j]) & EDGE_FREE_R) !== 0;
+      const lower = (freeL || freeR) && t.branchOf[i] >= 0 ? -0.012 : 0;
 
       // Asphalt in zwei leicht verschiedenen Tönen – das Wechselmuster macht Tempo sichtbar.
       const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : Math.floor(i / 4) % 2 === 0 ? cRoad : cRoadAlt;
-      top(solid, i, f0, f1, -rh, rh, 0, deck && !ramp ? mixRgb(road, cDeck, 0.35) : road);
+      top(solid, i, f0, f1, -rh, rh, lower, deck && !ramp ? mixRgb(road, cDeck, 0.35) : road);
       const sh = deck ? cDeckDark : cShoulder;
-      top(solid, i, f0, f1, -wh, -rh, 0, sh);
-      top(solid, i, f0, f1, rh, wh, 0, sh);
+      top(solid, i, f0, f1, -wh, -rh, freeL ? -0.025 : 0, sh);
+      top(solid, i, f0, f1, rh, wh, freeR ? -0.025 : 0, sh);
 
       // Markierungen
       if (!ramp) {
-        top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cLine);
-        top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cLine);
-        if (i % 8 < 3) top(paint, i, f0, f1, -0.14, 0.14, 0.03, cLine);
+        if (!freeL) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cLine);
+        if (!freeR) top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cLine);
+        if (i % 8 < 3 && lower === 0) top(paint, i, f0, f1, -0.14, 0.14, 0.03, cLine);
         if (Math.abs(t.curv[q]) > 1 / 46) {
           const kerb = Math.floor(i / 2) % 2 === 0 ? cKerbA : cKerbB;
-          top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
-          top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
+          if (!freeL) top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
+          if (!freeR) top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
         }
       }
 
       // Bande bzw. offene Kante
       const panel = Math.floor(i / 3) % 2 === 0 ? cWallA : cWallB;
       for (const sgn of [-1, 1]) {
+        if (sgn < 0 ? freeL : freeR) continue;
         const open = sgn < 0 ? openL : openR;
         const inner = sgn * wh;
         const outer = sgn * (wh + WALL_T);
@@ -305,8 +319,8 @@ export class World {
         for (const sgn of [-1, 1]) {
           const p = this.P(i, 0, sgn * lat);
           posts.push(p);
-          for (let k = 0; k < t.n; k += 2) {
-            if (Math.abs(segDelta(t, i, k)) < 24) continue;
+          for (let k = 0; k < t.total; k += 2) {
+            if (Math.abs(segDelta(t, i, k)) < 24 && t.branchOf[i] === t.branchOf[k]) continue;
             if (t.py[k] < p[1] - 2 && Math.hypot(t.px[k] - p[0], t.pz[k] - p[2]) < t.wh[k] + 1) free = false;
           }
         }
@@ -322,6 +336,8 @@ export class World {
         }
       }
     }
+
+    this.buildTunnels(solid, paint);
 
     // Start- und Ziellinie: Schachbrett
     const cols = 10;
@@ -344,14 +360,110 @@ export class World {
     this.buildGantry();
   }
 
+  /**
+   * Tunnel und Höhlen: ein Felsmantel um die Fahrbahn – außen zerklüftet, innen
+   * dunkel, mit leuchtenden Kristallen an den Wänden. Der Fels steht als eigener
+   * Rücken auf dem Gelände; eine zweite Fahrbahn kann darüber hinwegführen.
+   */
+  private buildTunnels(solid: MeshBuilder, glow: MeshBuilder): void {
+    const t = this.track;
+    const th = this.theme;
+    const cOut = rgb(th.ground[2]);
+    const cOutHi = rgb(th.ground[3]);
+    const cIn = shade(cOut, 0.42);
+    const cInDark = shade(cOut, 0.3);
+    const cFace = shade(cOut, 0.72);
+    const cGlow = rgb({ werkshof: 0xffd23f, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1 }[t.def.theme] ?? 0x7ef0ff);
+    const H = TUNNEL_H;
+    const R = TUNNEL_ROCK;
+    // Querschnitt von links unten über den Scheitel nach rechts unten:
+    // innen [Anteil der halben Breite, Höhe], außen zusätzlich [Anteil des Felsmantels].
+    const IN: [number, number][] = [
+      [-1, 0],
+      [-1, 0.45 * H],
+      [-0.74, 0.78 * H],
+      [-0.38, 0.95 * H],
+      [0, H],
+      [0.38, 0.95 * H],
+      [0.74, 0.78 * H],
+      [1, 0.45 * H],
+      [1, 0],
+    ];
+    const OUT: [number, number, number][] = [
+      [-1, 1, -1.4],
+      [-1, 0.86, 0.5 * H],
+      [-0.74, 0.74, 0.86 * H + 0.4 * R],
+      [-0.38, 0.4, H + 0.6 * R],
+      [0, 0, H + 0.72 * R],
+      [0.38, 0.4, H + 0.6 * R],
+      [0.74, 0.74, 0.86 * H + 0.4 * R],
+      [1, 0.86, 0.5 * H],
+      [1, 1, -1.4],
+    ];
+    const K = IN.length;
+    const rings = new Map<number, { inner: V3[]; outer: V3[] }>();
+    const ring = (i: number): { inner: V3[]; outer: V3[] } => {
+      let r = rings.get(i);
+      if (r) return r;
+      const W = t.wh[i] + WALL_T + 0.25;
+      const inner: V3[] = [];
+      const outer: V3[] = [];
+      for (let k = 0; k < K; k++) {
+        inner.push(this.P(i, 0, IN[k][0] * W, IN[k][1]));
+        // Zerklüftet: jeder Punkt des Mantels sitzt etwas anders – entlang der Röhre zusammenhängend.
+        const n = noise(t.px[i] * 0.16 + k * 7.3, t.pz[i] * 0.16 - k * 3.1);
+        const bulge = 1 + 0.5 * (n - 0.5);
+        const side = OUT[k][0] < 0 ? -1 : OUT[k][0] > 0 ? 1 : 0;
+        outer.push(this.P(i, 0, OUT[k][0] * W + side * OUT[k][1] * R * bulge, k === 0 || k === K - 1 ? OUT[k][2] : OUT[k][2] * (0.9 + 0.2 * n)));
+      }
+      r = { inner, outer };
+      rings.set(i, r);
+      return r;
+    };
+    let lamp = 0;
+    for (let i = 0; i < t.total; i++) {
+      if ((t.edge[i] & EDGE_TUNNEL) === 0) continue;
+      const a = ring(i);
+      const j = t.next[i];
+      const first = (t.edge[t.prev[i]] & EDGE_TUNNEL) === 0;
+      const last = (t.edge[j] & EDGE_TUNNEL) === 0;
+      // Stirnflächen am Ein- und Ausgang
+      for (let k = 0; k < K - 1; k++) {
+        if (first) solid.quad(a.inner[k], a.inner[k + 1], a.outer[k + 1], a.outer[k], cFace);
+        if (last) solid.quad(a.inner[k + 1], a.inner[k], a.outer[k], a.outer[k + 1], cFace);
+      }
+      if (last) continue;
+      const b = ring(j);
+      for (let k = 0; k < K - 1; k++) {
+        const high = k >= 2 && k <= 5;
+        solid.quad(a.outer[k], a.outer[k + 1], b.outer[k + 1], b.outer[k], (i + k) % 3 === 0 ? shade(high ? cOutHi : cOut, 0.9) : high ? cOutHi : cOut);
+        solid.quad(a.inner[k + 1], a.inner[k], b.inner[k], b.inner[k + 1], (i + k) % 2 === 0 ? cIn : cInDark);
+      }
+      // Kristalle: abwechselnd links und rechts an der Wand
+      if (i % 7 === 3) {
+        const sgn = lamp++ % 2 === 0 ? -1 : 1;
+        const W = t.wh[i] + WALL_T;
+        for (let c = 0; c < 3; c++) {
+          const p = this.P(i, 0.2 * c, sgn * (W - 0.25 * c), 1.3 + 0.9 * c + (lamp % 3) * 0.5);
+          const geo = new THREE.OctahedronGeometry(0.34 + 0.16 * ((lamp + c) % 3), 0);
+          this.euler.set(0.5 * c, lamp, 0.4 * sgn);
+          this.q.setFromEuler(this.euler);
+          this.m4.compose(this.v.set(p[0], p[1], p[2]), this.q, this.s.set(0.7, 1.6, 0.7));
+          glow.add(geo, c === 1 ? shade(cGlow, 1.25) : cGlow, this.m4);
+          geo.dispose();
+        }
+      }
+    }
+  }
+
   private buildPads(): void {
     const t = this.track;
     if (t.pads.length === 0) return;
     const b = new MeshBuilder();
     const white: RGB = [1, 1, 1];
     for (const pad of t.pads) {
-      for (let k = 0; k < pad.length; k++) {
-        const i = pad.seg + k;
+      let i = pad.seg;
+      for (let k = 0; k < pad.length; k++, i = t.next[i]) {
         b.quadUv(
           this.P(i, 0, pad.lat - pad.halfWidth, 0.05),
           this.P(i, 0, pad.lat + pad.halfWidth, 0.05),

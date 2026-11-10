@@ -77,6 +77,8 @@ import {
   rightX,
   rightZ,
   segDelta,
+  sideLimit,
+  walk,
   wrapSeg,
 } from './track';
 import type { GameView, RaceView, RenderEntity, Standing } from './view';
@@ -472,12 +474,16 @@ export class HostGame implements GameView {
     if (k) this.applyHit(k);
   }
 
-  /** Nur für Tests: ein Kart an eine Stelle der Strecke setzen (Meter hinter der Startlinie). */
-  debugPlace(slot: number, meters: number, lat = 0): void {
+  /**
+   * Nur für Tests: ein Kart an eine Stelle der Strecke setzen – Meter hinter
+   * der Startlinie bzw., mit branch ≥ 0, Meter hinter der Gabelung dieser Abzweigung.
+   */
+  debugPlace(slot: number, meters: number, lat = 0, branch = -1): void {
     const k = this.karts.get(slot);
     if (!k) return;
     const t = TRACK;
-    const seg = wrapSeg(t, Math.round(meters / t.step));
+    const br = t.branches[branch];
+    const seg = br ? br.first + Math.max(0, Math.min(br.count - 1, Math.round(meters / t.step) - 1)) : wrapSeg(t, Math.round(meters / t.step));
     const before = k.state.seg;
     k.state.seg = seg;
     k.state.x = t.px[seg] + rightX(t, seg) * lat;
@@ -658,7 +664,9 @@ export class HostGame implements GameView {
     const t = TRACK;
     projectOnTrack(t, k.state.x, k.state.z, k.state.seg);
     const top = this.addThing(THING_TOP, k, k.state.x, k.state.y + 0.6, k.state.z, TOP_LIFE_TICKS);
-    top.pos = wrapSeg(t, proj.seg) * t.step + 3;
+    // pos zählt die Meter seit dem Punkt des Abschnitts seg.
+    top.seg = walk(t, proj.seg, 3);
+    top.pos = 0;
     top.lat = proj.lat;
     top.safe = 30;
     for (const o of this.karts.values()) if (o.place === k.place - 1 && !o.finished) top.target = o.slot;
@@ -751,9 +759,9 @@ export class HostGame implements GameView {
         th.z += th.vz * dt;
         projectOnTrack(t, th.x, th.z, th.seg);
         th.seg = proj.seg;
-        const limit = t.wh[th.seg] - TIRE_RADIUS;
+        const side = proj.lat > 0 ? 1 : -1;
+        const limit = sideLimit(t, th.seg, side) - TIRE_RADIUS;
         if (Math.abs(proj.lat) > limit) {
-          const side = proj.lat > 0 ? 1 : -1;
           if ((t.edge[th.seg] & (side > 0 ? EDGE_OPEN_R : EDGE_OPEN_L)) === 0) {
             const nx = rightX(t, th.seg) * side;
             const nz = rightZ(t, th.seg) * side;
@@ -785,11 +793,16 @@ export class HostGame implements GameView {
         reach = 0.6;
       } else if (th.kind === THING_TOP) {
         // Brummkreisel: der Strecke folgen, seitlich auf das Ziel zuhalten
-        th.pos = (th.pos + TOP_SPEED * dt) % t.length;
-        th.seg = Math.floor(th.pos / t.step) % t.n;
+        const target = th.target >= 0 ? this.karts.get(th.target) : undefined;
+        // An einer Gabelung nimmt er den Weg, auf dem sein Ziel fährt.
+        const onBranch = target ? t.branchOf[target.state.seg] : -1;
+        th.pos += TOP_SPEED * dt;
+        while (th.pos >= t.step) {
+          th.pos -= t.step;
+          th.seg = walk(t, th.seg, 1, onBranch >= 0 ? 1 << onBranch : 0);
+        }
         let wantLat = 0;
         let rate = 4;
-        const target = th.target >= 0 ? this.karts.get(th.target) : undefined;
         if (target && !target.finished) {
           const d = segDelta(t, th.seg, target.state.seg) * t.step;
           if (d < -8) {
@@ -805,7 +818,7 @@ export class HostGame implements GameView {
         const maxLat = t.wh[th.seg] - 1;
         const dl = Math.max(-rate * dt, Math.min(rate * dt, wantLat - th.lat));
         th.lat = Math.max(-maxLat, Math.min(maxLat, th.lat + dl));
-        const along = th.pos - th.seg * t.step;
+        const along = th.pos;
         th.x = t.px[th.seg] + t.tx[th.seg] * along + rightX(t, th.seg) * th.lat;
         th.z = t.pz[th.seg] + t.tz[th.seg] * along + rightZ(t, th.seg) * th.lat;
         th.y = centerHeight(t, th.seg, along) + th.lat * t.bank[th.seg] + 0.6;

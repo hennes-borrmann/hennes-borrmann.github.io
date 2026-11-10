@@ -3,7 +3,7 @@
 // Verteilt wird mit festem Zufall entlang der Strecke – nie auf der Fahrbahn.
 
 import * as THREE from 'three';
-import { EDGE_DECK, rightX, rightZ } from '../game/track';
+import { EDGE_DECK, EDGE_TUNNEL, rightX, rightZ } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, textTexture, type RGB } from './build';
 import { addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
 import type { World } from './world';
@@ -58,6 +58,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     for (let tries = 0; out.length < want && tries < want * 12; tries++) {
       const i = Math.floor(rnd() * t.n);
       if (t.edge[i] & EDGE_DECK && th.liquidY !== null) continue;
+      if (t.edge[i] & EDGE_TUNNEL) continue;
       const lat = (rnd() < 0.5 ? -1 : 1) * (t.wh[i] + 0.5 + minOut + rnd() * (maxOut - minOut));
       const x = t.px[i] + rightX(t, i) * lat;
       const z = t.pz[i] + rightZ(t, i) * lat;

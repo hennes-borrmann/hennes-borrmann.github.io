@@ -15,7 +15,7 @@ export function mapTransform(t: Track, w: number, h: number, pad: number): (x: n
   let maxX = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
-  for (let i = 0; i < t.n; i++) {
+  for (let i = 0; i < t.total; i++) {
     minX = Math.min(minX, t.px[i]);
     maxX = Math.max(maxX, t.px[i]);
     minZ = Math.min(minZ, t.pz[i]);
@@ -36,7 +36,19 @@ export function trackPath(t: Track, w: number, h: number, pad: number): string {
     const [x, y] = f(t.px[i], t.pz[i]);
     d += `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
   }
-  return `${d}Z`;
+  d += 'Z';
+  // Abzweigungen: von der Gabelung über die eigenen Abschnitte zur Einmündung
+  for (const b of t.branches) {
+    const [x0, y0] = f(t.px[b.from], t.pz[b.from]);
+    d += `M${x0.toFixed(1)} ${y0.toFixed(1)}`;
+    for (let k = 1; k < b.count; k += 3) {
+      const [x, y] = f(t.px[b.first + k], t.pz[b.first + k]);
+      d += `L${x.toFixed(1)} ${y.toFixed(1)}`;
+    }
+    const [x1, y1] = f(t.px[b.to], t.pz[b.to]);
+    d += `L${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  }
+  return d;
 }
 
 export class Minimap {
@@ -66,16 +78,23 @@ export class Minimap {
       g.strokeStyle = color;
       g.beginPath();
       let pen = false;
-      for (let i = 0; i <= t.n; i += 2) {
-        const k = i % t.n;
+      const to = (k: number): void => {
         if (t.edge[k] & EDGE_GAP) {
           pen = false;
-          continue;
+          return;
         }
         const [x, y] = this.f(t.px[k], t.pz[k]);
         if (pen) g.lineTo(x, y);
         else g.moveTo(x, y);
         pen = true;
+      };
+      for (let i = 0; i <= t.n; i += 2) to(i % t.n);
+      // Abzweigungen: von der Gabelung über die eigenen Abschnitte zur Einmündung
+      for (const b of t.branches) {
+        pen = false;
+        to(b.from);
+        for (let k = 1; k < b.count; k += 2) to(b.first + k);
+        to(b.to);
       }
       g.stroke();
     };

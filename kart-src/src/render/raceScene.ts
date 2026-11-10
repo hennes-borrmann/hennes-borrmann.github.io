@@ -22,7 +22,7 @@ import {
   V_MAX,
   turboStage,
 } from '../game/sim';
-import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, type Track } from '../game/track';
+import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -622,9 +622,7 @@ export class RaceScene {
       projectOnTrack(t, e.x, e.z, e.seg);
       const seg = proj.seg;
       const ground = groundAt(t, seg, proj.along, proj.lat);
-      const a = (seg - 1 + t.n) % t.n;
-      const b = (seg + 1) % t.n;
-      const slope = (t.py[b] - t.py[a]) / (2 * t.step);
+      const slope = (t.py[t.next[seg]] - t.py[t.prev[seg]]) / (2 * t.step);
       const gx = slope * t.tx[seg] + t.bank[seg] * rightX(t, seg);
       const gz = slope * t.tz[seg] + t.bank[seg] * rightZ(t, seg);
       const groundPitch = -Math.atan(gx * fx + gz * fz);
@@ -914,8 +912,8 @@ export class RaceScene {
     const dx = Math.sin(yaw);
     const dz = Math.cos(yaw);
     // Hang voraus: am Berg schaut die Kamera hinauf, im Gefälle hinunter.
-    const seg = me.seg % t.n;
-    const ahead = (seg + 6) % t.n;
+    const seg = me.seg < t.total ? me.seg : 0;
+    const ahead = walk(t, seg, 6);
     const rise = Math.max(-2.5, Math.min(2.5, t.py[ahead] - t.py[seg]));
     const air = (me.flags & FLAG_AIR) !== 0;
 

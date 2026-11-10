@@ -29,6 +29,8 @@ export interface LobbyModel {
   aiLevel: number;
   /** Gewählte Strecke. */
   track: number;
+  /** Rundenzahl des Rennens. */
+  laps: number;
   /** Eigene Figur. */
   character: number;
   quality: 'auto' | 'low' | 'medium' | 'high';
@@ -109,6 +111,7 @@ export interface UiHandlers {
   again(): void;
   setBots(bots: boolean): void;
   setAiLevel(level: number): void;
+  setLaps(laps: number): void;
   setTrack(track: number): void;
   setCharacter(character: number): void;
   setQuality(q: 'auto' | 'low' | 'medium' | 'high'): void;
@@ -243,6 +246,12 @@ export class ScreenUi {
         on.setAiLevel(Number(btn.dataset.level));
       });
     }
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#lap-count button')) {
+      btn.addEventListener('click', () => {
+        on.click('click');
+        on.setLaps(Number(btn.dataset.laps));
+      });
+    }
   }
 
   show(view: ViewName): void {
@@ -323,13 +332,13 @@ export class ScreenUi {
     const chkBots = $<HTMLInputElement>('chk-bots');
     chkBots.checked = m.bots;
     chkBots.disabled = !m.isHost;
-    $('bots-note').textContent = m.isHost ? '' : 'Strecke und Gegner legt der Host fest.';
+    $('bots-note').textContent = m.isHost ? '' : 'Strecke, Runden und Gegner legt der Host fest.';
     const charJson = JSON.stringify([m.character, m.localSlot]);
     if (charJson !== this.lastCharJson) {
       this.lastCharJson = charJson;
       this.renderCharacters(m);
     }
-    const setupJson = JSON.stringify([m.track, m.aiLevel, m.bots, m.isHost]);
+    const setupJson = JSON.stringify([m.track, m.aiLevel, m.laps, m.bots, m.isHost]);
     if (setupJson !== this.lastSetupJson) {
       this.lastSetupJson = setupJson;
       this.renderSetup(m);
@@ -747,6 +756,10 @@ export class ScreenUi {
     for (const btn of seg.querySelectorAll<HTMLButtonElement>('button')) {
       btn.setAttribute('aria-pressed', String(Number(btn.dataset.level) === m.aiLevel));
       btn.disabled = !m.isHost || !m.bots;
+    }
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#lap-count button')) {
+      btn.setAttribute('aria-pressed', String(Number(btn.dataset.laps) === m.laps));
+      btn.disabled = !m.isHost;
     }
   }
 

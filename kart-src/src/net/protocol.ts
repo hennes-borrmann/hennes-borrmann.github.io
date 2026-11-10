@@ -87,6 +87,8 @@ export interface LobbyState {
   aiLevel: number;
   /** Gewählte Strecke (Index in TRACK_DEFS). */
   track: number;
+  /** Rundenzahl des Rennens (MIN_LAPS..MAX_LAPS). */
+  laps: number;
 }
 
 export type RejectReason = 'full' | 'running' | 'version';

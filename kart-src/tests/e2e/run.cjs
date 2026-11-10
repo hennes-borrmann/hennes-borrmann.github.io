@@ -704,10 +704,11 @@ async function main() {
 
   if (wants('phase3')) {
     // === Phase 3 =============================================================
-    section('Phase 3: Streckenwahl, KI-Stärke, Sprung, Absturz und neue Items über zwei Bildschirme');
-    const h6 = await openScreen('host6', '&laps=2');
+    section('Phase 3: Streckenwahl, KI-Stärke, Rundenzahl, Sprung, Absturz und neue Items über zwei Bildschirme');
+    // Ohne ?laps=: die Rundenzahl kommt hier aus der Lobby-Auswahl.
+    const h6 = await openScreen('host6');
     const code6 = await createLobby(h6, 'Anna');
-    const c6 = await openScreen('client6', '&laps=2');
+    const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     check('Vier Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 4);
@@ -716,6 +717,15 @@ async function main() {
     await h6.page.locator('#ai-level button[data-level="2"]').click();
     await c6.page.waitForFunction(() => window.__kart.lobby().track === 1 && window.__kart.lobby().aiLevel === 2, null, { timeout: 5000 });
     check('Wahl des Hosts kommt beim Mitspieler an', (await c6.page.locator('.track-card[data-on="true"] .track-name').textContent()) === 'Möwenklippe' && (await c6.page.locator('#ai-level button[aria-pressed="true"]').textContent()) === 'Schwer');
+    // Rundenzahl: Vorgabe 3, nur der Host stellt um
+    check('Rundenzahl steht anfangs auf 3', (await kart(c6.page, 'lobby()')).laps === 3 && (await c6.page.locator('#lap-count button[aria-pressed="true"]').textContent()) === '3');
+    check('Mitspieler kann die Rundenzahl nicht ändern', (await c6.page.locator('#lap-count button').count()) === 4 && (await c6.page.locator('#lap-count button[data-laps="5"]').isDisabled()));
+    await h6.page.locator('#lap-count button[data-laps="4"]').click();
+    const lapsSynced = await c6.page.waitForFunction(() => window.__kart.lobby().laps === 4, null, { timeout: 5000 }).then(() => true, () => false);
+    check('Host stellt 4 Runden ein – der Mitspieler sieht 4', lapsSynced && (await c6.page.locator('#lap-count button[aria-pressed="true"]').textContent()) === '4');
+    await c6.page.locator('#lap-count button[data-laps="2"]').click({ force: true });
+    await sleep(300);
+    check('Klick des Mitspielers ändert nichts', (await kart(h6.page, 'lobby()')).laps === 4 && (await kart(c6.page, 'lobby()')).laps === 4);
     // Figurenwahl: jeder wählt selbst, dieselbe Figur darf doppelt vorkommen
     // Die Bilder der Figuren entstehen nacheinander im Hintergrund.
     const drawn = await h6.page.waitForFunction(() => [...document.querySelectorAll('.char-card img.char-face')].filter((i) => i.src.startsWith('data:image/png')).length === 4, null, { timeout: 15000 }).then(() => true, () => false);
@@ -731,6 +741,7 @@ async function main() {
     await h6.page.waitForFunction(() => window.__kart.lobby().players.find((p) => !p.isHost).character === 1, null, { timeout: 5000 });
     check('Ben wechselt zur Füchsin – der Host sieht es', true);
     await shot(h6.page, 'lobby-phase3.png');
+    await shot(c6.page, 'lobby-phase3-client.png');
     await c6.page.click('#btn-ready');
     await h6.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 240, height: 150 });
@@ -740,6 +751,9 @@ async function main() {
     const [trH, trC] = await Promise.all([kart(h6.page, 'track()'), kart(c6.page, 'track()')]);
     check('Beide fahren auf der gewählten Strecke', trH.index === 1 && trC.index === 1, `${trH.name} / ${trC.name}, ${trH.length.toFixed(0)} m`);
     const [charsH, charsC] = await Promise.all([h6, c6].map(async (s) => (await kart(s.page, 'entities()')).sort((a, b) => a.slot - b.slot).map((e) => e.char)));
+    const lapShown = await Promise.all([h6, c6].map((s) => s.page.waitForFunction(() => document.getElementById('rh-lap').textContent === '1/4', null, { timeout: 5000 }).then(() => true, () => false)));
+    const [lapsH, lapsC] = await Promise.all([kart(h6.page, 'race().laps'), kart(c6.page, 'race().laps')]);
+    check('Im Rennen gilt die gewählte Rundenzahl: Anzeige „1/4“ auf beiden', lapShown[0] && lapShown[1] && lapsH === 4 && lapsC === 4, `Host ${lapsH}, Ben ${lapsC}`);
     check('Im Rennen fahren alle ihre gewählte Figur, die KI die ihres Platzes', JSON.stringify(charsH) === '[3,1,2,3]' && JSON.stringify(charsC) === '[3,1,2,3]', `Host ${charsH.join('')} / Ben ${charsC.join('')}`);
 
     // Sprung: Anna (Host, Tastatur) nimmt Anlauf auf die Schanze
