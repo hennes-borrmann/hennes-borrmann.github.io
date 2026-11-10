@@ -390,6 +390,9 @@ function renderHud(): void {
   box.dataset.state = hud?.rolling ? 'rolling' : info ? 'ready' : 'none';
   $('pad-item-icon').innerHTML = hud?.rolling ? itemSvg(ROLLING_ICON) : info ? itemSvg(info.icon) : '';
   $('pad-item-name').textContent = hud?.rolling ? '…' : info ? info.name : 'Item';
+  $('pad-item-hint').textContent = info ? info.hint : '';
+  // Lange Namen ("Brummkreisel") brauchen eine kleinere Schrift, um in die Taste zu passen.
+  box.dataset.long = String(!!info && info.name.length > 9);
   if (hud) {
     $('mid-place').textContent = hud.place > 0 ? `${hud.place}.` : '–';
     $('mid-lap').textContent = hud.laps > 0 ? `Runde ${hud.lap}/${hud.laps}` : '';
@@ -406,6 +409,12 @@ const VIBRATION: Record<FxKind, number | number[]> = {
   item: [0, 25, 40, 25],
   go: 70,
   finish: [0, 70, 60, 70, 60, 150],
+  block: [0, 40, 30, 40],
+  stall: [0, 30, 40, 30, 40, 30, 40, 30],
+  land: 40,
+  fall: [0, 160],
+  lap: 30,
+  finallap: [0, 40, 50, 40, 50, 90],
 };
 
 const FLASH_TONE: Record<FxKind, string> = {
@@ -417,6 +426,12 @@ const FLASH_TONE: Record<FxKind, string> = {
   item: 'item',
   go: 'go',
   finish: 'go',
+  block: 'item',
+  stall: 'bad',
+  land: 'plain',
+  fall: 'bad',
+  lap: 'go',
+  finallap: 'go',
 };
 
 function feedback(kind: FxKind): void {

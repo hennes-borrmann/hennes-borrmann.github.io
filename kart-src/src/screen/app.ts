@@ -1,16 +1,19 @@
 // Ablaufsteuerung eines Bildschirms (iPad/Desktop).
 //
-// Zustände: Startseite → Lobby (als Host oder Mitspieler) → Testszene → Lobby.
+// Zustände: Startseite → Lobby (als Host oder Mitspieler) → Rennen → Lobby.
 // Diese Datei verbindet die Bausteine: Signaling-Endpunkte, Lobby,
 // Controller-Kopplung, Simulation, Darstellung und Diagnose.
 
+import { GameAudio } from '../audio';
 import { BUILD_ID } from '../build';
 import { BOT_NAMES, botCmd, newBrain, type BotBrain } from '../game/ai';
 import { ClientGame, CLIENT_INTERP_DELAY } from '../game/clientGame';
 import { HostGame } from '../game/hostGame';
 import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
+import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
+import { TRACK, TRACK_COUNT, setTrack } from '../game/track';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
 import { HostLobby } from '../lobby/hostLobby';
@@ -34,10 +37,11 @@ import {
   type Phase,
 } from '../net/protocol';
 import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../render/debugOverlay';
-import { RaceScene } from '../render/raceScene';
+import { RaceScene, type KartAudio, type Quality } from '../render/raceScene';
 import { $, ms } from '../util/dom';
 import { keepAwake, wakeLockMode } from '../util/wakeLock';
 import { ControllerPairing } from './pairing';
+import { Sound, type AudioEngine, type MusicName } from './sound';
 import {
   clearSession,
   loadName,
@@ -53,7 +57,59 @@ import { ScreenUi, type LobbyModel, type ResultRow } from './ui';
 /** Der Host schickt jeden zweiten Simulationsschritt einen Snapshot (30 pro Sekunde). */
 const SNAPSHOT_EVERY = 2;
 
+/** Ereignisse, die nur der Host kennt und deshalb an den Bildschirm des Betroffenen schickt. */
+const EMPTY_HUD = {
+  visible: false,
+  place: 0,
+  of: 0,
+  lap: 0,
+  laps: 0,
+  timeSec: 0,
+  frozenTime: false,
+  item: ITEM_NONE,
+  rolling: false,
+  speedKmh: 0,
+  finished: false,
+  order: [],
+  banner: null,
+  bannerTone: 'info' as const,
+  fps: null,
+  smoke: 0,
+};
+
+const HOST_ONLY_FX = new Set<FxKind>(['hit', 'bump', 'pickup', 'finish', 'block', 'stall', 'lap', 'finallap']);
+
 type Role = 'none' | 'host' | 'client';
+
+function loadFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Das Ton-Modul; fehlt es (oder kann der Browser keinen Ton), bleibt das Spiel stumm. */
+function createAudio(): AudioEngine | null {
+  try {
+    return new GameAudio();
+  } catch (err) {
+    console.warn('[audio] Ton nicht verfügbar:', err);
+    return null;
+  }
+}
+
+function loadQuality(): Quality {
+  const fromUrl = readDebugParams().quality;
+  if (fromUrl) return fromUrl;
+  try {
+    const v = localStorage.getItem('kart.quality');
+    if (v === 'low' || v === 'medium' || v === 'high') return v;
+  } catch {
+    /* kein Speicher: Vorgabe */
+  }
+  return 'auto';
+}
 
 function signalText(status: EndpointStatus): { value: string; tone: Tone } {
   switch (status) {
@@ -112,6 +168,15 @@ export class App {
   private lastHudAt = 0;
   private joinStartedAt = 0;
   private lastSaveJson = '';
+  private quality: Quality = loadQuality();
+  private showFps = loadFlag('kart.fps');
+  private readonly sound: Sound;
+  private readonly kartAudio: KartAudio[] = [];
+  /** Bis wann "Letzte Runde!" eingeblendet bleibt (ms). */
+  private finalLapUntil = 0;
+  /** Seit wann das eigene Kart falsch herum fährt (ms), 0 = gar nicht. */
+  private wrongWaySince = 0;
+  private mapTick = 0;
 
   private readonly ents: RenderEntity[] = [];
   private lastCmd: Cmd = { steer: 0, buttons: 0 };
@@ -135,6 +200,7 @@ export class App {
       idleTimeoutMs: 8000,
       netSim: { lag: this.debug.lag, jitter: this.debug.jitter, loss: this.debug.loss },
     };
+    this.sound = new Sound(createAudio(), this.debug.mute);
     this.pairing = new ControllerPairing(() => this.pairedInfo());
     this.pairing.onChange = () => {
       this.reportController();
@@ -157,13 +223,33 @@ export class App {
         this.hostGame.newRace();
       },
       setBots: (bots) => this.hostLobby?.setBots(bots),
+      setAiLevel: (level) => this.hostLobby?.setAiLevel(level),
+      setTrack: (track) => this.hostLobby?.setTrack(Math.max(0, Math.min(TRACK_COUNT - 1, track))),
+      setQuality: (q) => this.setQuality(q),
       leave: () => this.leave(),
       backToLobby: () => {
         if (this.hostLobby) this.hostLobby.setPhase('lobby');
         else this.leave();
       },
       toggleCamera: () => {
-        if (this.scene) this.scene.cameraMode = this.scene.cameraMode === 'chase' ? 'top' : 'chase';
+        if (!this.scene) return;
+        this.scene.cameraMode = this.scene.cameraMode === 'chase' ? 'top' : 'chase';
+        this.ui.setCameraLabel(this.scene.cameraMode === 'top');
+      },
+      setVolumes: (music, sfx) => this.sound.setVolumes(music, sfx),
+      setMuted: (muted) => this.sound.setMuted(muted),
+      setShowFps: (show) => {
+        this.showFps = show;
+        try {
+          localStorage.setItem('kart.fps', show ? '1' : '0');
+        } catch {
+          /* gilt dann nur für diese Sitzung */
+        }
+      },
+      settings: () => ({ quality: this.quality, ...this.sound.volumes(), muted: this.sound.muted, showFps: this.showFps }),
+      click: (kind) => {
+        this.sound.unlock();
+        this.sound.ui(kind);
       },
       toggleDebug: () => (this.overlay.visible = !this.overlay.visible),
       showPairing: () => this.ui.showPairingModal(this.pairUrl(), this.pairing.connected),
@@ -172,12 +258,20 @@ export class App {
         this.hostLobby?.setLocalName(name);
         this.clientLobby?.setName(name);
       },
-      gesture: () => void keepAwake(),
+      gesture: () => {
+        this.sound.unlock();
+        void keepAwake();
+      },
     });
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'F2') this.overlay.visible = !this.overlay.visible;
     });
+    this.sound.music('menu');
+    // Ton darf erst nach einer Nutzeraktion starten – jede Berührung oder Taste genügt.
+    const unlock = (): void => this.sound.unlock();
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock);
 
     // Beim Verlassen/Neuladen der Seite die Verbindungen aktiv schließen, damit
     // die Gegenseiten nicht erst auf ein Zeitlimit warten müssen.
@@ -305,6 +399,11 @@ export class App {
     this.playerToken = playerToken;
     this.roomPeerToken = roomPeerToken;
     const lobby = new HostLobby(code, playerToken, name, saved);
+    if (!saved) {
+      if (this.debug.track >= 0) lobby.track = Math.min(TRACK_COUNT - 1, this.debug.track);
+      if (this.debug.ai >= 0) lobby.aiLevel = this.debug.ai;
+    }
+    lobby.track = Math.min(TRACK_COUNT - 1, lobby.track);
     this.hostLobby = lobby;
 
     ep.onIncoming = (link) => {
@@ -520,6 +619,9 @@ export class App {
       isHost: this.role === 'host',
       canStart: this.hostLobby?.canStart() ?? false,
       bots: state.bots,
+      aiLevel: state.aiLevel,
+      track: state.track,
+      quality: this.quality,
       waitingFor: state.players.filter((p) => !p.isHost && p.online && !p.ready).map((p) => p.name),
       localReady: me?.ready ?? false,
       controllerConnected: this.pairing.connected,
@@ -557,7 +659,7 @@ export class App {
     this.ui.setBanner(null);
   }
 
-  // --- Testszene ------------------------------------------------------------
+  // --- Rennen ---------------------------------------------------------------
 
   private syncPhase(phase: Phase): void {
     if (phase === 'game' && !this.inGame) this.enterGame();
@@ -582,9 +684,10 @@ export class App {
     const state = this.lobbyState();
     if (!state) return;
     this.ui.show('game');
+    setTrack(state.track);
     if (!this.scene) {
       try {
-        this.scene = new RaceScene($<HTMLCanvasElement>('stage'));
+        this.scene = new RaceScene($<HTMLCanvasElement>('stage'), this.quality);
       } catch (err) {
         console.error(err);
         this.ui.showModal('3D-Darstellung nicht möglich', ['Dieser Browser stellt kein WebGL bereit.'], [
@@ -593,22 +696,29 @@ export class App {
         return;
       }
     }
+    this.scene.setTrack();
+    this.scene.reset();
+    this.ui.setCameraLabel(false);
+    this.scene.onEvent = (e) => this.sound.sceneEvent(e);
     this.scene.setRoster(this.drivers(state));
+    this.sound.music(TRACK.def.theme as MusicName);
+    this.finalLapUntil = 0;
+    this.wrongWaySince = 0;
     this.autoBrain = this.debug.autopilot ? newBrain(this.localSlot()) : null;
     this.shownRaceId = -1;
     this.resultsShown = false;
     this.lastHudJson = '';
     if (this.hostLobby) {
       const lobby = this.hostLobby;
-      const game = new HostGame(lobby.localSlot, { laps: this.debug.laps || undefined });
+      const game = new HostGame(lobby.localSlot, { laps: this.debug.laps || undefined, aiLevel: lobby.aiLevel });
       this.hostGame = game;
       game.setRoster(lobby.slots(), lobby.bots);
       for (const p of lobby.state().players) if (!p.isHost) game.setOnline(p.slot, p.online);
       game.onFx = (slot, kind) => {
         if (slot === lobby.localSlot) this.localFx(kind);
-        // Was ein Mitspieler selbst vorhersagt (Schub, Bande, Item bereit, Start),
-        // meldet sein eigener Bildschirm ohne Umweg; hier nur, was allein der Host weiß.
-        else if (kind === 'hit' || kind === 'bump' || kind === 'pickup' || kind === 'finish') lobby.sendFx(slot, kind);
+        // Was ein Mitspieler selbst vorhersagt (Schub, Bande, Item bereit, Start, Landung,
+        // Absturz), meldet sein eigener Bildschirm ohne Umweg; hier nur, was allein der Host weiß.
+        else if (HOST_ONLY_FX.has(kind)) lobby.sendFx(slot, kind);
       };
       game.newRace();
     } else if (this.clientLobby) {
@@ -633,14 +743,30 @@ export class App {
     this.lastCmd = { steer: 0, buttons: 0 };
     this.ui.hideResults();
     this.ui.setCountdown(null);
-    this.ui.renderRaceHud({ visible: false, place: 0, of: 0, lap: 0, laps: 0, timeSec: 0, frozenTime: false, item: ITEM_NONE, rolling: false, speedKmh: 0, finished: false });
+    this.ui.renderRaceHud({ ...EMPTY_HUD });
+    this.ui.setRaceTitle(null);
+    this.sound.update(0, null);
+    this.sound.music('menu');
     this.overlay.visible = this.debug.debugOverlay;
     this.sendHud(true);
+  }
+
+  private setQuality(q: Quality): void {
+    this.quality = q;
+    try {
+      localStorage.setItem('kart.quality', q);
+    } catch {
+      /* ohne Speicher gilt die Wahl nur für diese Sitzung */
+    }
+    this.scene?.setQuality(q);
+    this.refresh();
   }
 
   /** Ein spürbares Ereignis für diesen Spieler: ans Handy weiterreichen. */
   private localFx(kind: FxKind): void {
     this.pairing.sendFx(kind);
+    this.sound.fx(kind);
+    if (kind === 'finallap') this.finalLapUntil = performance.now() + 2600;
   }
 
   private localState(): KartState | null {
@@ -658,7 +784,7 @@ export class App {
     if (this.autoBrain) {
       const state = this.localState();
       const canDrive = this.hostGame ? this.hostGame.localCanDrive() : (this.clientGame?.localCanDrive(now) ?? false);
-      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive);
+      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive, { tick: this.ticks, place: 1, smoke: false });
     }
     this.lastCmd = cmd;
     if (this.hostGame && this.hostLobby) {
@@ -684,8 +810,10 @@ export class App {
         const t = now / 1000;
         view.entities(alpha, t, dt, this.ents);
         const race = view.race(t);
-        this.scene.frame(this.ents, view.localSlot, dt, race, view.tires(t), view.oils());
+        this.scene.frame(this.ents, view.localSlot, dt, race, view.things(t));
         this.updateRaceUi(race, now);
+        this.sound.update(dt, race.phase === RACE_RESULTS ? null : this.scene.kartAudio(this.kartAudio));
+        if (++this.mapTick % 3 === 0) this.ui.drawMinimap(TRACK, this.ents, view.localSlot);
       }
     }
 
@@ -712,6 +840,8 @@ export class App {
       this.shownRaceId = race.raceId;
       this.resultsShown = false;
       this.ui.hideResults();
+      this.sound.music(TRACK.def.theme as MusicName);
+      this.finalLapUntil = 0;
     }
 
     // Countdown: 3 – 2 – 1 – Los
@@ -719,7 +849,25 @@ export class App {
     if (race.phase === RACE_COUNTDOWN && race.untilGo <= 3 && race.untilGo > 0) countdown = String(Math.ceil(race.untilGo));
     else if (race.phase !== RACE_RESULTS && race.untilGo <= 0 && race.untilGo > -1.1) countdown = 'Los!';
     this.ui.setCountdown(countdown);
+    this.sound.countdown(countdown);
     this.ui.setHudNoteVisible(race.phase === RACE_COUNTDOWN);
+    // Während der Kamerafahrt vor der Ampel: Name der Strecke
+    const intro = race.phase === RACE_COUNTDOWN && race.untilGo > 3.15 && race.untilGo < COUNTDOWN_TICKS / TICK_RATE;
+    this.ui.setRaceTitle(intro ? TRACK.def.name : null, `Strecke ${TRACK.index + 1} · ${race.laps} ${race.laps === 1 ? 'Runde' : 'Runden'}`);
+    this.sound.roulette((me?.roulette ?? 0) > 0, nowMs);
+
+    // Falsch herum? Erst nach einem Moment melden, damit ein Dreher nicht gleich Alarm schlägt.
+    let wrongWay = false;
+    if (me && race.phase === RACE_RUNNING && !me.finished && me.respawn === 0 && me.spin === 0) {
+      const seg = me.seg % TRACK.n;
+      const along = me.vx * TRACK.tx[seg] + me.vz * TRACK.tz[seg];
+      const facing = Math.sin(me.heading) * TRACK.tx[seg] + Math.cos(me.heading) * TRACK.tz[seg];
+      if (along < -3 && facing < -0.3) {
+        if (this.wrongWaySince === 0) this.wrongWaySince = nowMs;
+        wrongWay = nowMs - this.wrongWaySince > 900;
+      } else this.wrongWaySince = 0;
+    } else this.wrongWaySince = 0;
+    const names = new Map(this.drivers(state).map((d) => [d.slot, d.name]));
 
     const count = this.ents.length;
     this.ui.renderRaceHud({
@@ -733,7 +881,17 @@ export class App {
       item: me?.item ?? ITEM_NONE,
       rolling: (me?.roulette ?? 0) > 0,
       speedKmh: me ? Math.round(Math.hypot(me.vx, me.vz) * 3.6) : 0,
-      finished: me?.finished ?? false,
+      finished: (me?.finished ?? false) && race.phase !== RACE_RESULTS,
+      order: view.standings().map((st) => ({
+        slot: st.slot,
+        name: names.get(st.slot) ?? `Fahrer ${st.slot + 1}`,
+        me: st.slot === view.localSlot,
+        done: st.finished,
+      })),
+      banner: wrongWay ? 'Falsch herum!' : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
+      bannerTone: wrongWay ? 'bad' : 'info',
+      fps: this.showFps && this.scene ? this.scene.stats.fps : null,
+      smoke: this.scene?.smoke ?? 0,
     });
 
     if (race.phase === RACE_RESULTS && !this.resultsShown) {
@@ -747,7 +905,9 @@ export class App {
         me: st.slot === view.localSlot,
         timeSec: st.finished ? st.finishTicks / TICK_RATE : -1,
       }));
-      this.ui.showResults(rows, this.role === 'host');
+      this.ui.showResults(rows, this.role === 'host', TRACK.def.name);
+      this.sound.music('results');
+      this.sound.results(me?.place ?? rows.find((r) => r.me)?.place ?? 0, rows.length);
     }
 
     if (nowMs - this.lastHudAt > 120) {
@@ -955,8 +1115,20 @@ export class App {
       predicted: () => (this.clientGame?.ready ? { ...this.clientGame.predictedState() } : null),
       race: () => (this.hostGame ?? this.clientGame)?.race(performance.now() / 1000) ?? null,
       standings: () => (this.hostGame ?? this.clientGame)?.standings() ?? [],
-      tires: () => (this.hostGame ?? this.clientGame)?.tires(performance.now() / 1000) ?? [],
-      oils: () => (this.hostGame ?? this.clientGame)?.oils() ?? [],
+      things: () => ((this.hostGame ?? this.clientGame)?.things(performance.now() / 1000) ?? []).map((t) => ({ ...t })),
+      track: () => {
+        // gapAt/openAt: Meter hinter der Startlinie, an denen die erste Lücke bzw. das erste Stück ohne Bande liegt.
+        let gap = -1;
+        let open = -1;
+        for (let i = 0; i < TRACK.n; i++) {
+          if (gap < 0 && TRACK.edge[i] & 4) gap = i;
+          if (open < 0 && (TRACK.edge[i] & 7) === 3) open = i;
+        }
+        return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
+      },
+      scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
+      audio: () => this.sound.debug(),
+      place: (slot: number, meters: number, lat = 0) => this.hostGame?.debugPlace(slot, meters, lat),
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
       debugHit: (slot: number) => this.hostGame?.debugHit(slot),

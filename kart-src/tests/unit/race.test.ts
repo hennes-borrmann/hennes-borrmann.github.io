@@ -4,7 +4,10 @@ import { ClientGame } from '../../src/game/clientGame';
 import { HostGame } from '../../src/game/hostGame';
 import { ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
 import { TRACK } from '../../src/game/track';
-import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, decodeCmds, decodeSnapshot } from '../../src/net/protocol';
+import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot } from '../../src/net/protocol';
+
+const CTX = { tick: 0, place: 1, smoke: false };
+const count = (host: HostGame, kind: number): number => host.things().filter((t) => t.kind === kind).length;
 
 function rng(seed: number): () => number {
   let s = seed;
@@ -31,8 +34,8 @@ describe('Rennen auf dem Host', () => {
       if (host.phase === RACE_COUNTDOWN) {
         for (let s = 0; s < 4; s++) if (Math.abs(forwardSpeed(host.authoritative(s)!)) > 0.01) moved = true;
       }
-      const t = host.tires().length;
-      const o = host.oils().length;
+      const t = count(host, THING_TIRE);
+      const o = count(host, THING_OIL);
       if (t > lastTireCount) tires += t - lastTireCount;
       if (o > lastOilCount) oils += o - lastOilCount;
       lastTireCount = t;
@@ -71,10 +74,10 @@ describe('Rennen auf dem Host', () => {
 
     host.giveItem(0, ITEM_TIRE);
     host.step(press);
-    expect(host.tires().length).toBe(1);
+    expect(count(host, THING_TIRE)).toBe(1);
     for (let i = 0; i < 40 && b.spin === 0; i++) host.step(NEUTRAL);
     expect(b.spin).toBeGreaterThan(0);
-    expect(host.tires().length).toBe(0);
+    expect(count(host, THING_TIRE)).toBe(0);
     expect(fx).toContain('1:hit');
 
     // Schub
@@ -88,8 +91,8 @@ describe('Rennen auf dem Host', () => {
     host.giveItem(0, ITEM_OIL);
     host.step(NEUTRAL);
     host.step(press);
-    expect(host.oils().length).toBe(1);
-    const oil = host.oils()[0];
+    expect(count(host, THING_OIL)).toBe(1);
+    const oil = host.things().find((t) => t.kind === THING_OIL)!;
     for (let i = 0; i < 400; i++) host.step(gas);
     const c = host.authoritative(1)!;
     c.spin = 0;
@@ -98,7 +101,7 @@ describe('Rennen auf dem Host', () => {
     c.z = oil.z;
     host.step(gas);
     expect(c.spin).toBeGreaterThan(0);
-    expect(host.oils().length).toBe(0);
+    expect(count(host, THING_OIL)).toBe(0);
   });
 
   it('Rempler schieben Karts auseinander', () => {
@@ -167,7 +170,7 @@ function simulate(opts: { lag: number; jitter: number; loss: number; laps: numbe
     while (hostAcc >= stepMs) {
       hostAcc -= stepMs;
       const before = host.phase;
-      host.step(botCmd(host.authoritative(0)!, brainHost, [], host.localCanDrive()));
+      host.step(botCmd(host.authoritative(0)!, brainHost, [], host.localCanDrive(), CTX));
       if (before === RACE_COUNTDOWN && host.phase === RACE_RUNNING) goSeenAt = now;
       if (host.phase === RACE_COUNTDOWN && Math.abs(forwardSpeed(host.authoritative(1)!)) > 0.01) movedEarly = true;
       if (host.tick % 2 === 0) send(down, now, host.snapshot());
@@ -176,7 +179,7 @@ function simulate(opts: { lag: number; jitter: number; loss: number; laps: numbe
     while (clientAcc >= stepMs) {
       clientAcc -= stepMs;
       const t = now / 1000;
-      const cmd = client.ready ? botCmd(client.predictedState(), brainClient, [], client.localCanDrive(t)) : NEUTRAL;
+      const cmd = client.ready ? botCmd(client.predictedState(), brainClient, [], client.localCanDrive(t), CTX) : NEUTRAL;
       const pkt = client.tick(cmd, t);
       if (pkt) send(up, now, pkt);
     }

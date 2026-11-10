@@ -10,7 +10,7 @@
 //   npm run build && npm run preview -- --port 4173
 //   node tests/e2e/run.cjs                 braucht ein installiertes Playwright
 //
-// Umgebungsvariablen: BASE, SIGNAL, SHOT_DIR (Ordner für Screenshots), ONLY (Teilmenge, z. B. "sync,reconnect")
+// Umgebungsvariablen: BASE, SIGNAL, SHOT_DIR (Ordner für Screenshots), ONLY (Teilmenge, z. B. "sync,reconnect,phase3")
 
 const { chromium, devices } = require('playwright');
 
@@ -52,11 +52,27 @@ async function openScreen(name, query = '') {
       if (/\[link\]|\[endpoint\]/.test(m.text())) console.log(`        ${new Date().toISOString().slice(17, 23)} [${name}] ${m.text()}`);
     });
   }
-  await page.goto(`${BASE}?signal=${SIGNAL}${query}`);
+  // Ohne Ton und mit einfacher Grafik: ohne Grafikkarte rendert Chromium sonst zu langsam.
+  await page.goto(`${BASE}?signal=${SIGNAL}&mute=1&q=low${query}`);
   return { ctx, page, name };
 }
 
 const kart = (page, expr) => page.evaluate(`window.__kart.${expr}`);
+/**
+ * Rennstand samt Uhrzeit der Abfrage. "goAt" ist der Zeitpunkt (Sekunden, gemeinsame Uhr des
+ * Rechners), zu dem diese Seite "Los" erwartet – vergleichbar auch dann, wenn eine Seite die
+ * Frage später beantwortet als die andere.
+ */
+const raceNow = (page) => page.evaluate(() => {
+  const r = window.__kart.race();
+  return { ...r, goAt: (performance.timeOrigin + performance.now()) / 1000 + r.untilGo };
+});
+/** „Zur Lobby“ steckt im Menü; bei winzigem Testfenster direkt auslösen statt mit der Maus zu zielen. */
+const toLobby = async (page) => {
+  await page.evaluate(() => document.getElementById('btn-menu').click());
+  await page.waitForSelector('#menu:not([hidden])', { timeout: 3000 });
+  await page.evaluate(() => document.getElementById('btn-back').click());
+};
 const ctl = (page, expr) => page.evaluate(`window.__ctl.${expr}`);
 
 /**
@@ -253,9 +269,9 @@ async function main() {
     await press(phoneA, 'gas');
     await press(phoneB, 'gas');
     await sleep(700);
-    const [raceH, raceC] = await Promise.all([kart(host.page, 'race()'), kart(client.page, 'race()')]);
+    const [raceH, raceC] = await Promise.all([raceNow(host.page), raceNow(client.page)]);
     check('Beide zeigen den Countdown', raceH.phase === 0 && raceC.phase === 0, `Host ${raceH.untilGo.toFixed(2)} s, Ben ${raceC.untilGo.toFixed(2)} s`);
-    check('Countdown läuft auf beiden gleich (Abweichung < 0,15 s)', Math.abs(raceH.untilGo - raceC.untilGo) < 0.15, `${Math.abs(raceH.untilGo - raceC.untilGo).toFixed(3)} s`);
+    check('Countdown läuft auf beiden gleich (Abweichung < 0,15 s)', Math.abs(raceH.goAt - raceC.goAt) < 0.15, `${Math.abs(raceH.goAt - raceC.goAt).toFixed(3)} s`);
     const before = await kart(host.page, 'authoritative(1)');
     check('Trotz Gas steht Bens Kart bis zum Start', Math.hypot(before.vx, before.vz) === 0);
 
@@ -327,8 +343,8 @@ async function main() {
     let tiresClient = 0;
     for (let i = 0; i < 8; i++) {
       await sleep(60);
-      tiresHost = Math.max(tiresHost, (await kart(host.page, 'tires()')).length);
-      tiresClient = Math.max(tiresClient, (await kart(client.page, 'tires()')).length);
+      tiresHost = Math.max(tiresHost, (await kart(host.page, 'things()')).filter((t) => t.kind === 1).length);
+      tiresClient = Math.max(tiresClient, (await kart(client.page, 'things()')).filter((t) => t.kind === 1).length);
     }
     check('Annas Rollreifen rollt auf beiden Bildschirmen', tiresHost >= 1 && tiresClient >= 1, `${tiresHost} / ${tiresClient}`);
 
@@ -389,10 +405,15 @@ async function main() {
     await release(phoneA, 'gas');
     await release(phoneB, 'gas');
     await kart(host.page, 'debugHit(1)');
-    await sleep(300);
-    const spinHost = (await kart(host.page, 'entities()')).find((e) => e.slot === 1);
-    const spinClient = (await kart(client.page, 'entities()')).find((e) => e.slot === 1);
-    check('Treffer: Ben schleudert beim Host und auf seinem eigenen Bildschirm', spinHost.spin > 0 && spinClient.spin > 0, `${spinHost.spin} / ${spinClient.spin} Ticks`);
+    // Die Anzeige folgt mit dem nächsten gezeichneten Bild; mehrmals nachsehen.
+    const spinSeen = [0, 0];
+    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0); i++) {
+      await sleep(100);
+      const [eh, ec] = await Promise.all([kart(host.page, 'entities()'), kart(client.page, 'entities()')]);
+      spinSeen[0] = Math.max(spinSeen[0], eh.find((e) => e.slot === 1).spin);
+      spinSeen[1] = Math.max(spinSeen[1], ec.find((e) => e.slot === 1).spin);
+    }
+    check('Treffer: Ben schleudert beim Host und auf seinem eigenen Bildschirm', spinSeen[0] > 0 && spinSeen[1] > 0, `${spinSeen[0]} / ${spinSeen[1]} Ticks`);
     check('… und sein Handy meldet den Treffer', (await ctl(phoneB.page, 'lastFlash()')) === 'bad');
 
     // Anhalten: danach müssen beide Bildschirme exakt dasselbe zeigen.
@@ -572,7 +593,7 @@ async function main() {
     await late.page.waitForSelector('#modal:not([hidden])', { timeout: 20000 });
     check('Beitritt während des Rennens: klare Absage', (await late.page.textContent('#modal-title')).includes('läuft'));
     await late.ctx.close();
-    await host.page.click('#btn-back');
+    await toLobby(host.page);
     await client.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
     check('Host holt alle zurück in die Lobby', true);
   }
@@ -581,7 +602,7 @@ async function main() {
     // === Host verlässt die Lobby ============================================
     section('Host verlässt die Lobby');
     if ((await kart(host.page, 'view()')) === 'game') {
-      await host.page.click('#btn-back');
+      await toLobby(host.page);
       await host.page.waitForSelector('#app[data-view="lobby"]');
     }
     await host.page.click('#btn-leave');
@@ -651,7 +672,9 @@ async function main() {
     await h5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 120000 });
     await c5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 5000 });
     const [stH, stC] = await Promise.all([kart(h5.page, 'standings()'), kart(c5.page, 'standings()')]);
-    check('Rennen endet auf beiden Bildschirmen mit der Ergebnisliste', (await h5.page.isVisible('#results')) && (await c5.page.isVisible('#results')), `nach ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+    // Die Liste erscheint mit dem nächsten gezeichneten Bild.
+    const listed = await Promise.all([h5, c5].map((s) => s.page.waitForSelector('#results', { state: 'visible', timeout: 5000 }).then(() => true, () => false)));
+    check('Rennen endet auf beiden Bildschirmen mit der Ergebnisliste', listed[0] && listed[1], `nach ${((Date.now() - t0) / 1000).toFixed(0)} s`);
     check('Beide Menschen sind im Ziel', stH.filter((s) => !s.bot).every((s) => s.finished));
     check('Gleiche Ergebnisliste bei Host und Mitspieler', JSON.stringify(stH) === JSON.stringify(stC), stH.map((s) => `${s.place}. ${s.bot ? 'KI' : 'Mensch'} ${s.slot + 1} ${(s.finishTicks / 60).toFixed(1)} s`).join(', '));
     check('Nur der Host kann „Nochmal“ wählen', (await h5.page.isVisible('#btn-again')) && !(await c5.page.isVisible('#btn-again')));
@@ -669,11 +692,138 @@ async function main() {
     check('„Nochmal“: neues Rennen mit Countdown auf beiden, Ergebnisliste weg', gone[0] && gone[1]);
     const grid = await kart(c5.page, 'entities()');
     check('Alle stehen wieder in der Startaufstellung', grid.length === 4 && grid.every((e) => Math.hypot(e.vx, e.vz) < 0.01));
-    await h5.page.click('#btn-back');
+    await toLobby(h5.page);
     await c5.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
     check('„Zur Lobby“ holt alle zurück', true);
     await h5.ctx.close();
     await c5.ctx.close();
+  }
+
+  if (wants('phase3')) {
+    // === Phase 3 =============================================================
+    section('Phase 3: Streckenwahl, KI-Stärke, Sprung, Absturz und neue Items über zwei Bildschirme');
+    const h6 = await openScreen('host6', '&laps=2');
+    const code6 = await createLobby(h6, 'Anna');
+    const c6 = await openScreen('client6', '&laps=2');
+    await joinLobby(c6, 'Ben', code6);
+    await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
+    check('Vier Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 4);
+    check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
+    await h6.page.locator('.track-card').nth(1).click();
+    await h6.page.locator('#ai-level button[data-level="2"]').click();
+    await c6.page.waitForFunction(() => window.__kart.lobby().track === 1 && window.__kart.lobby().aiLevel === 2, null, { timeout: 5000 });
+    check('Wahl des Hosts kommt beim Mitspieler an', (await c6.page.locator('.track-card[data-on="true"] .track-name').textContent()) === 'Möwenklippe' && (await c6.page.locator('#ai-level button[aria-pressed="true"]').textContent()) === 'Schwer');
+    await shot(h6.page, 'lobby-phase3.png');
+    await c6.page.click('#btn-ready');
+    await h6.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    for (const s of [h6, c6]) await s.page.setViewportSize({ width: 240, height: 150 });
+    await h6.page.click('#btn-start');
+    await c6.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c6.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 20000 });
+    const [trH, trC] = await Promise.all([kart(h6.page, 'track()'), kart(c6.page, 'track()')]);
+    check('Beide fahren auf der gewählten Strecke', trH.index === 1 && trC.index === 1, `${trH.name} / ${trC.name}, ${trH.length.toFixed(0)} m`);
+
+    // Sprung: Anna (Host, Tastatur) nimmt Anlauf auf die Schanze
+    await kart(h6.page, `place(0, ${trH.gapAt - 45}, 0)`);
+    await h6.page.keyboard.down('ArrowUp');
+    let airHost = 0;
+    let airClient = 0;
+    let fell = false;
+    let highest = 0;
+    for (let i = 0; i < 40; i++) {
+      await sleep(70);
+      const [a, list] = await Promise.all([kart(h6.page, 'authoritative(0)'), kart(c6.page, 'entities()')]);
+      const shown = list.find((e) => e.slot === 0);
+      if (a.flags & 8) airHost++;
+      if (shown && shown.flags & 8) {
+        airClient++;
+        highest = Math.max(highest, shown.y);
+      }
+      if (a.respawn > 0) fell = true;
+    }
+    await h6.page.keyboard.up('ArrowUp');
+    const landed = await kart(h6.page, 'authoritative(0)');
+    check('Sprung über die Lücke: Anna fliegt und landet dahinter', airHost >= 2 && !fell && landed.seg * 1 > trH.gapAt + 5, `${airHost} Messungen in der Luft, danach bei ${landed.seg} m`);
+    check('Ben sieht den Sprung (Kart in der Luft)', airClient >= 1, `${airClient} Messungen, höchster Punkt ${highest.toFixed(1)} m`);
+
+    // Absturz: Bens Kart wird mitten in die Lücke gesetzt – seine Vorhersage muss Sturz und Zurücksetzen mitmachen
+    await kart(h6.page, `place(1, ${trH.gapAt + 3}, 0)`);
+    let sawFall = false;
+    for (let i = 0; i < 30 && !sawFall; i++) {
+      await sleep(60);
+      const p = await kart(c6.page, 'predicted()');
+      sawFall = p.respawn > 0;
+    }
+    check('Absturz: Bens eigener Bildschirm zeigt das Zurücksetzen', sawFall);
+    await sleep(1600);
+    const [authB, predB] = await Promise.all([kart(h6.page, 'authoritative(1)'), kart(c6.page, 'predicted()')]);
+    check('Danach steht Ben vor der Lücke – bei Host und Mitspieler an derselben Stelle', authB.respawn === 0 && authB.seg < trH.gapAt - 15 && Math.hypot(authB.x - predB.x, authB.z - predB.z) < 0.5, `Abschnitt ${authB.seg}, Abweichung ${Math.hypot(authB.x - predB.x, authB.z - predB.z).toFixed(2)} m`);
+
+    // Neue Items vom Host aus: Nebelkerze und Brummkreisel erscheinen auf beiden Bildschirmen
+    const useItem = async (item) => {
+      await kart(h6.page, `giveItem(0, ${item})`);
+      await sleep(120);
+      await h6.page.keyboard.down('Space');
+      await sleep(150);
+      await h6.page.keyboard.up('Space');
+    };
+    await kart(h6.page, 'place(0, 60, 0)');
+    await kart(h6.page, 'place(1, 110, 2)');
+    await sleep(200);
+    await useItem(7);
+    await sleep(300);
+    const smoke = await Promise.all([kart(h6.page, 'things()'), kart(c6.page, 'things()')]);
+    check('Nebelkerze: Rauchwolke auf beiden Bildschirmen', smoke.every((l) => l.some((t) => t.kind === 4)));
+    await useItem(4);
+    let topSeen = [0, 0];
+    let benHit = false;
+    for (let i = 0; i < 40 && !benHit; i++) {
+      await sleep(60);
+      const [lh, lc, b] = await Promise.all([kart(h6.page, 'things()'), kart(c6.page, 'things()'), kart(h6.page, 'authoritative(1)')]);
+      if (lh.some((t) => t.kind === 3)) topSeen[0]++;
+      if (lc.some((t) => t.kind === 3)) topSeen[1]++;
+      benHit = b.spin > 0;
+    }
+    check('Brummkreisel: auf beiden Bildschirmen zu sehen und trifft Ben vor Anna', topSeen[0] > 0 && topSeen[1] > 0 && benHit, `${topSeen.join(' / ')} Messungen`);
+
+    // Kurzschluss: trifft nur, wer vorn liegt; Bens Vorhersage übernimmt die Drosselung
+    await sleep(2500);
+    await useItem(6);
+    await sleep(250);
+    const [stallAuth, stallPred, self] = await Promise.all([kart(h6.page, 'authoritative(1)'), kart(c6.page, 'predicted()'), kart(h6.page, 'authoritative(0)')]);
+    check('Kurzschluss drosselt Ben (vorn), nicht Anna – auch in Bens Vorhersage', stallAuth.stall > 0 && stallPred.stall > 0 && self.stall === 0, `Host ${stallAuth.stall}, Vorhersage ${stallPred.stall} Ticks`);
+
+    // Stoßfänger fängt den nächsten Treffer ab
+    await useItem(5);
+    await sleep(200);
+    const guarded = await kart(h6.page, 'authoritative(0)');
+    await kart(h6.page, 'debugHit(0)');
+    await sleep(100);
+    const after = await kart(h6.page, 'authoritative(0)');
+    check('Stoßfänger: aktiv nach dem Einsatz, fängt einen Treffer ab', guarded.guard > 0 && after.guard === 0 && after.spin === 0, `${guarded.guard} Ticks Schutz`);
+
+    // Sprungfeder
+    await kart(h6.page, 'place(0, 20, 0)');
+    await sleep(200);
+    await useItem(8);
+    let hop = 0;
+    for (let i = 0; i < 12; i++) {
+      await sleep(50);
+      const a = await kart(h6.page, 'authoritative(0)');
+      if (a.flags & 8) hop++;
+    }
+    check('Sprungfeder: das Kart hüpft', hop >= 2, `${hop} Messungen in der Luft`);
+
+    for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
+    await sleep(800);
+    await shot(h6.page, 'race-phase3-host.png');
+    await shot(c6.page, 'race-phase3-client.png');
+    const scene = await kart(h6.page, 'scene()');
+    check('Szene läuft ohne Fehler', scene && scene.calls > 10 && scene.triangles > 5000, scene ? `${scene.calls} Zeichenaufrufe, ${scene.triangles} Dreiecke` : '');
+    await toLobby(h6.page);
+    await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+    await h6.ctx.close();
+    await c6.ctx.close();
   }
 
   if (wants('netsim')) {
@@ -694,8 +844,8 @@ async function main() {
     await sleep(1500);
     const link = await kart(c3.page, 'hostLink()');
     check('Gemessene Umlaufzeit passt zur Simulation (≈ 160–260 ms)', link.rtt > 150 && link.rtt < 280, `${link.rtt.toFixed(0)} ms`);
-    const [raceH, raceC] = await Promise.all([kart(h3.page, 'race()'), kart(c3.page, 'race()')]);
-    check('Countdown trotz Verzögerung nahezu gleichzeitig (< 0,2 s)', Math.abs(raceH.untilGo - raceC.untilGo) < 0.2, `${Math.abs(raceH.untilGo - raceC.untilGo).toFixed(3)} s`);
+    const [raceH, raceC] = await Promise.all([raceNow(h3.page), raceNow(c3.page)]);
+    check('Countdown trotz Verzögerung nahezu gleichzeitig (< 0,2 s)', Math.abs(raceH.goAt - raceC.goAt) < 0.2, `${Math.abs(raceH.goAt - raceC.goAt).toFixed(3)} s`);
     await h3.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 10000 });
     const peaks = [];
     let pendingMax = 0;
