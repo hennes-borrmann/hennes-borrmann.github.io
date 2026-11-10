@@ -49,7 +49,7 @@ import { RACE_RUNNING, THING_SMOKE, THING_TIRE, THING_TOP, decodeSnapshot } from
 
 const GAS: Cmd = { steer: 0, buttons: 1 };
 const PRESS: Cmd = { steer: 0, buttons: 1 | 8 };
-const ENV = { canDrive: true, speedFactor: 1 };
+const ENV = { canDrive: true, speedFactor: 1, time: 0 };
 
 afterAll(() => {
   setTrack(0);
@@ -419,7 +419,7 @@ describe('Neue Items', () => {
     let towed = 0;
     let ev = 0;
     for (let tick = 1; tick <= 420; tick++) {
-      ev |= stepKart(s, botCmd(s, brain, [], true, { tick, place: 4, smoke: false }), ENV);
+      ev |= stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 4, smoke: false }), ENV);
       if (s.tow > 0) towed++;
     }
     expect(ev & EV_USE_KITE).toBeTruthy();

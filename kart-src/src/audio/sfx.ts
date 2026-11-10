@@ -62,6 +62,12 @@ const LEVEL: Record<SfxName, number> = {
   finish: 1.35,
   win: 1.5,
   lose: 1.3,
+  draft: 1.8,
+  geyser: 2.8,
+  bomb: 3.4,
+  honk: 2.4,
+  pass: 2.3,
+  burn: 1.1,
 };
 
 interface ToneOpts {
@@ -210,6 +216,8 @@ export class SfxPlayer {
   private readonly last = new Map<SfxName, number>();
   private readonly busyUntil: number[] = [];
   private tick = 0;
+  private passTick = 0;
+  private burnTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -358,6 +366,72 @@ export class SfxPlayer {
           .tone('triangle', 2260, 2230, 0.24, 0.1, { at: 0.01 })
           .noise(3000, 1500, 0.04, 0.2, { q: 1 });
         break;
+      // --- Streckenmechanik ---
+      case 'draft':
+        // Weicher Sog: breites Rauschen, das langsam einschwingt und nach oben zieht,
+        // darüber ein Hauch Luft und ein leiser, steigender Grundton – kein Sägezahn wie beim Schub.
+        v.noise(600, 2400, 0.4, 0.22, { q: 0.9, attack: 0.09 })
+          .noise(3000, 6500, 0.3, 0.06, { type: 'highpass', attack: 0.1, at: 0.05 })
+          .tone('triangle', 200, 380, 0.36, 0.06, { attack: 0.1 });
+        break;
+      case 'geyser':
+        // Scharfes Zischen am Anfang, dann ein breites Fauchen, das nach unten sinkt;
+        // darunter Grollen aus braunem Rauschen und ein tiefer Sinus.
+        v.noise(6500, 4200, 0.3, 0.26, { type: 'highpass', attack: 0.005 })
+          .noise(3000, 650, 1.35, 0.34, { q: 0.6, attack: 0.12, at: 0.06 })
+          .noise(240, 90, 1.4, 0.4, { type: 'lowpass', brown: true, attack: 0.1 })
+          .tone('sine', 64, 40, 0.9, 0.28, { attack: 0.06 });
+        break;
+      case 'bomb':
+        // Satter Schlag (tiefer Sinus, braunes Rauschen, kurzer Aufprall-Knack),
+        // danach Zischen mit einzelnen Knistern.
+        v.tone('sine', 125, 36, 0.38, 0.55)
+          .noise(520, 110, 0.32, 0.5, { type: 'lowpass', brown: true })
+          .noise(1400, 450, 0.06, 0.22, { q: 1 })
+          .tone('triangle', 240, 80, 0.07, 0.18)
+          .noise(5200, 3200, 0.5, 0.11, { type: 'highpass', attack: 0.05, at: 0.12 })
+          .noise(3600, 3000, 0.025, 0.12, { q: 4, at: 0.2 })
+          .noise(4400, 3800, 0.02, 0.1, { q: 4, at: 0.31 })
+          .noise(3200, 2700, 0.025, 0.09, { q: 4, at: 0.43 });
+        break;
+      case 'honk':
+        // „Möp-möp": zwei kurze Stöße aus großer Terz (F + A), leicht absackend,
+        // mit einer weichen Dreieckstimme darunter, damit es rund statt schrill klingt.
+        v.tone('pulse25', 349, 338, 0.11, 0.17, { attack: 0.008 })
+          .tone('pulse25', 440, 426, 0.11, 0.13, { attack: 0.008 })
+          .tone('triangle', 175, 170, 0.11, 0.2, { attack: 0.008 })
+          .tone('pulse25', 349, 330, 0.2, 0.17, { attack: 0.008, at: 0.15, vibHz: 7, vibDepth: 0.01 })
+          .tone('pulse25', 440, 416, 0.2, 0.13, { attack: 0.008, at: 0.15, vibHz: 7, vibDepth: 0.01 })
+          .tone('triangle', 175, 166, 0.2, 0.2, { attack: 0.008, at: 0.15 });
+        break;
+      case 'pass': {
+        // Fahrtwind-„Wusch": Rauschen schwillt an und fällt wieder (zwei überlappende Fahrten).
+        // Die Mitte wechselt leicht, damit es nicht bei jedem Vorbeiziehen gleich klingt.
+        const f = [1700, 1950, 1550][this.passTick++ % 3];
+        v.noise(650, f, 0.14, 0.2, { q: 1.1, attack: 0.07 }).noise(f, 550, 0.14, 0.18, { q: 1.1, attack: 0.03, at: 0.1 });
+        break;
+      }
+      case 'burn': {
+        // Dauerbrutzeln: Zischen mit langem Ein- und Ausschwingen, damit die etwa alle
+        // 0,33 s folgenden Aufrufe ineinanderlaufen, dazu wechselnde Knister-Muster
+        // (drei Fassungen), damit kein gleichmäßiges Rattern entsteht.
+        const k = this.burnTick++ % 3;
+        const crackle = [
+          [0.05, 3400, 0.17, 4600, 0.29, 2900],
+          [0.1, 4200, 0.22, 3100, 0.36, 3800],
+          [0.03, 2800, 0.14, 3900, 0.26, 4800],
+        ][k];
+        // Zwei Zischschichten um eine halbe Aufrufspanne versetzt: so liegt alle ~0,17 s
+        // ein neuer Gipfel an, und die Hüllkurve schwankt nur noch wenig.
+        v.noise(5200, 3800, 0.7, 0.16, { type: 'highpass', attack: 0.2 })
+          .noise(4600, 3600, 0.7, 0.14, { type: 'highpass', attack: 0.2, at: 0.17 })
+          .noise(2600, 2000, 0.7, 0.05, { q: 2, attack: 0.25 });
+        for (let i = 0; i < crackle.length; i += 2) {
+          const fc = crackle[i + 1];
+          v.noise(fc, fc * 0.85, 0.02, 0.07, { q: 5, at: crackle[i] });
+        }
+        break;
+      }
       case 'stall':
         v.tone('sawtooth', 120, 100, 0.07, 0.24)
           .tone('sawtooth', 105, 88, 0.07, 0.22, { at: 0.11 })

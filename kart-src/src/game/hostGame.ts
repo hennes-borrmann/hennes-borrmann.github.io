@@ -24,7 +24,11 @@ import {
 import { AI_MEDIUM, botCmd, newBrain, rubberBand, type BotBrain, type BotContext } from './ai';
 import { EntityInterp, lerpState } from './interp';
 import {
+  EV_BLOCK,
+  EV_DRAFT,
   EV_FALL,
+  EV_FLAT,
+  EV_HIT,
   EV_ITEM_READY,
   EV_LAND,
   EV_PAD,
@@ -60,6 +64,7 @@ import {
   newState,
   stallKart,
   stepKart,
+  trafficBlocks,
   type Cmd,
   type KartState,
   type StepEnv,
@@ -93,6 +98,8 @@ const TAKEOVER_TICKS = 90;
 const MAX_CMDS_PER_TICK = 3;
 const QUEUE_LIMIT = 30;
 const QUEUE_TRIM_TO = 8;
+/** So weit darf die Rennzeit, die ein Mitspieler zu seiner Eingabe meldet, von der des Hosts abweichen (Ticks). */
+const TIME_SLACK = 40;
 
 /** Vom Rennstart bis "Los": Kamerafahrt über die Startaufstellung, dann 3 – 2 – 1. */
 export const COUNTDOWN_TICKS = 345;
@@ -134,7 +141,7 @@ interface HostKart {
   ptick: number;
   ack: number;
   lastSeq: number;
-  queue: { seq: number; cmd: Cmd }[];
+  queue: { seq: number; cmd: Cmd; time: number }[];
   starved: number;
   interp: EntityInterp;
   cmdsIn: number;
@@ -182,12 +189,12 @@ export class HostGame implements GameView {
 
   private readonly karts = new Map<number, HostKart>();
   private readonly scratch = newState();
-  private readonly env: StepEnv = { canDrive: false, speedFactor: 1 };
+  private readonly env: StepEnv = { canDrive: false, speedFactor: 1, time: 0 };
   private readonly boxTimers: Uint16Array;
   private thingList: Thing[] = [];
   /** Gewählte Figur je Platz; fehlt ein Eintrag (KI), gilt die Standardfigur des Platzes. */
   private chars: number[] = [];
-  private readonly botCtx: BotContext = { tick: 0, place: 1, smoke: false };
+  private readonly botCtx: BotContext = { tick: 0, time: 0, place: 1, smoke: false };
   private nextId = 1;
   private firstFinishTick = -1;
   private resultsAtTick = -1;
@@ -272,14 +279,22 @@ export class HostGame implements GameView {
     if (k && !k.local && !k.bot) k.online = online;
   }
 
-  receiveCmds(slot: number, newestSeq: number, cmds: Cmd[]): void {
+  /**
+   * @param times  Rennzeit (Ticks seit "Los") je Eingabe, so wie der Mitspieler sie gerechnet hat;
+   *               ohne Angabe gilt die Rennzeit des Hosts
+   * @param raceId Nummer des Rennens, für das die Eingaben gedacht sind – Pakete aus
+   *               einem anderen Rennen (verspätet nach einem Neustart) werden verworfen
+   */
+  receiveCmds(slot: number, newestSeq: number, cmds: Cmd[], times?: number[], raceId?: number): void {
     const k = this.karts.get(slot);
     if (!k || k.local || k.bot) return;
+    if (raceId !== undefined && raceId !== this.raceId) return;
     const first = newestSeq - cmds.length + 1;
+    const now = this.tick - this.goTick;
     for (let i = 0; i < cmds.length; i++) {
       const seq = first + i;
       if (seq > k.lastSeq) {
-        k.queue.push({ seq, cmd: cmds[i] });
+        k.queue.push({ seq, cmd: cmds[i], time: times?.[i] ?? now });
         k.lastSeq = seq;
         k.cmdsIn++;
       }
@@ -297,6 +312,7 @@ export class HostGame implements GameView {
       for (const k of this.karts.values()) this.fx(k, 'go');
     }
     const running = this.phase === RACE_RUNNING;
+    const raceTime = this.tick - this.goTick;
 
     // Bezugspunkt für den Tempo-Ausgleich der KI: der beste Mensch, der noch fährt.
     let humanBest = Number.NEGATIVE_INFINITY;
@@ -308,6 +324,7 @@ export class HostGame implements GameView {
       const canDrive = running && !k.finished;
       this.env.canDrive = canDrive;
       this.env.speedFactor = 1;
+      this.env.time = raceTime;
 
       if (k.local) {
         copyState(k.prev, k.state);
@@ -323,6 +340,7 @@ export class HostGame implements GameView {
         const band =
           k.bot && humanBest > Number.NEGATIVE_INFINITY ? rubberBand((k.progress - humanBest) * TRACK.step, this.aiLevel) : 1;
         this.botCtx.tick = this.tick;
+        this.botCtx.time = raceTime;
         this.botCtx.place = k.place;
         this.botCtx.smoke = this.inSmoke(k.state);
         this.env.speedFactor = k.brain.skill * band * (this.botCtx.smoke ? 0.85 : 1);
@@ -349,12 +367,15 @@ export class HostGame implements GameView {
         for (let i = 0; i < n; i++) {
           const entry = k.queue.shift()!;
           this.env.canDrive = canDrive && !k.finished;
+          // Der Mitspieler hat diesen Schritt mit seiner Rennzeit vorhergesagt – der Host rechnet ihn mit derselben nach.
+          this.env.time = Math.max(raceTime - TIME_SLACK, Math.min(raceTime + TIME_SLACK, entry.time));
           this.advance(k, entry.cmd);
           k.ack = entry.seq;
         }
         k.starved = 0;
       } else {
         k.starved++;
+        this.env.time = raceTime;
         if (k.starved > STARVE_TICKS) this.advance(k, NEUTRAL);
       }
       k.interp.push(k.ptick, k.state, now);
@@ -419,6 +440,7 @@ export class HostGame implements GameView {
       untilGo: (this.goTick - this.tick - frac) / 60,
       boxes: this.boxMask(),
       hostTick: this.tick + frac,
+      time: this.tick - this.goTick + frac,
     };
   }
 
@@ -547,7 +569,11 @@ export class HostGame implements GameView {
     if (ev & EV_USE_TOP) this.spawnTop(k);
     if (ev & EV_USE_EMP) this.shortCircuit(k);
     if (ev & EV_USE_KITE) this.fx(k, 'boost');
-    if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD)) this.fx(k, 'boost');
+    if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.fx(k, 'boost');
+    // Treffer durch die Strecke selbst (Verkehr, Geysir, Lavabombe) sagt der Bildschirm eines
+    // Mitspielers selbst vorher und meldet sie dort – von hier aus nur für das eigene Kart.
+    if (k.local && ev & (EV_HIT | EV_FLAT)) this.fx(k, 'hit');
+    if (k.local && ev & EV_BLOCK) this.fx(k, 'block');
     if (ev & EV_ITEM_READY) this.fx(k, 'item');
     if (ev & EV_WALL) this.fx(k, 'wall');
     if (ev & EV_LAND) this.fx(k, 'land');
@@ -787,6 +813,8 @@ export class HostGame implements GameView {
           th.y = g + TIRE_RADIUS;
         }
         if (th.bounces > TIRE_BOUNCES) gone = true;
+        // Am Verkehr zerschellt er.
+        if (t.vehicles.length > 0 && trafficBlocks(t, th.x, th.y, th.z, TIRE_RADIUS, th.seg, this.tick - this.goTick)) gone = true;
         radius = KART_RADIUS + TIRE_RADIUS;
       } else if (th.kind === THING_OIL) {
         radius = OIL_RADIUS;

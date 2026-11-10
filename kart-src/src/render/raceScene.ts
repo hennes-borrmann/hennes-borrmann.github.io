@@ -21,9 +21,12 @@ import {
   SPIN_TICKS,
   V_MAX,
   turboStage,
+  lavaAt,
 } from '../game/sim';
+import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, PULSE_VENT, pulseCycle, vehicleAt } from '../game/mechanics';
+import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, walk, type Track } from '../game/track';
+import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -68,7 +71,18 @@ export interface SceneEvent {
     | 'use-smoke'
     | 'use-spring'
     | 'use-kite'
-    | 'finish';
+    | 'finish'
+    /** Aus dem Windschatten ausgeschert: es zieht. */
+    | 'draft'
+    /** Ein Geysir bricht aus bzw. eine Lavabombe schlägt ein (slot −1: gehört zu keinem Kart). */
+    | 'geyser'
+    | 'bomb'
+    /** Ein Fahrzeug hupt, weil das eigene Kart es berührt. */
+    | 'honk'
+    /** Dicht an einem Fahrzeug vorbeigezogen. */
+    | 'pass'
+    /** Das eigene Kart fährt durch Lava. */
+    | 'burn';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -113,6 +127,7 @@ interface KartView {
   guard: number;
   respawn: number;
   tow: number;
+  draft: number;
   roulette: number;
   item: number;
   flags: number;
@@ -183,6 +198,14 @@ export class RaceScene {
   private readonly camera = new THREE.PerspectiveCamera(62, 1.6, 0.3, 4200);
   private world: World | null = null;
   private things: ThingVisuals | null = null;
+  /** Verkehr, Geysire, Lava – was die Strecke an Mechanik hat (mechanics.ts). */
+  private mechanics: MechanicView[] = [];
+  private mechTime = 0;
+  private honkWait = 0;
+  private burnWait = 0;
+  /** Je Fahrzeug: lag das eigene Kart zuletzt dahinter (−1) oder davor (1)? */
+  private passSide: Int8Array = new Int8Array(0);
+  private readonly vpose = newVehiclePose();
   private track: Track = TRACK;
   private readonly karts = new Map<number, KartView>();
   private drivers: SceneDriver[] = [];
@@ -266,6 +289,9 @@ export class RaceScene {
     this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
     this.scene.add(this.world.group, this.things.group);
+    this.mechanics = buildMechanics(TRACK, this.level > 0);
+    this.passSide = new Int8Array(TRACK.vehicles.length);
+    for (const m of this.mechanics) this.scene.add(m.group);
     this.scene.fog = this.world.fog;
     this.scene.background = new THREE.Color(this.world.theme.sky[2]);
     this.camReady = false;
@@ -281,6 +307,7 @@ export class RaceScene {
       ['KLONK!', 'white'],
       ['BZZZT!', 'violet'],
       ['ZIEL!', 'warm'],
+      ['SOG!', 'cool'],
     ]);
     this.applyLevel();
   }
@@ -296,6 +323,11 @@ export class RaceScene {
       this.things.dispose();
       this.things = null;
     }
+    for (const m of this.mechanics) {
+      this.scene.remove(m.group);
+      m.dispose();
+    }
+    this.mechanics = [];
     this.skids.clear();
     this.puffs.clear();
     this.sparks.clear();
@@ -353,6 +385,8 @@ export class RaceScene {
     for (const k of this.karts.values()) k.visual.setDetail(lv.kart);
     this.needsCompile = true;
     if (this.things) setOutlinesVisible(this.things.group, this.level > 0);
+    // Fällt die Qualität mitten im Rennen, verlieren auch Verkehr und Lava ihre Konturen.
+    for (const m of this.mechanics) setOutlinesVisible(m.group, this.level > 0);
     this.skids.mesh.visible = lv.skid;
     this.resize();
   }
@@ -418,6 +452,7 @@ export class RaceScene {
       guard: 0,
       respawn: 0,
       tow: 0,
+      draft: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -442,6 +477,88 @@ export class RaceScene {
     const gain = local ? 1 : Math.max(0, 1 - k.audio.distance / 70);
     if (gain <= 0.02) return;
     this.onEvent({ kind, slot: k.slot, local, pan: local ? 0 : k.audio.pan, gain });
+  }
+
+  /** Ereignis an einem Ort der Welt (kein Kart): Lautstärke und Richtung aus Sicht der Kamera. */
+  private emitAt(kind: SceneEvent['kind'], x: number, y: number, z: number, reach = 90): void {
+    if (!this.onEvent) return;
+    this.v1.set(x, y, z).sub(this.camera.position);
+    const dist = this.v1.length();
+    const gain = Math.max(0, 1 - dist / reach);
+    if (gain <= 0.02) return;
+    this.v2.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const pan = dist > 0.5 ? Math.max(-1, Math.min(1, this.v1.dot(this.v2) / dist)) : 0;
+    this.onEvent({ kind, slot: -1, local: false, pan, gain });
+  }
+
+  /**
+   * Was die Streckenmechanik hören und spüren lässt: ausbrechende Geysire,
+   * einschlagende Bomben, hupende und vorbeirauschende Fahrzeuge, Lava unter den Rädern.
+   */
+  private mechanicEvents(time: number, me: RenderEntity | undefined, dt: number): void {
+    const t = this.track;
+    const before = this.mechTime;
+    this.mechTime = time;
+    // Nur bei stetig laufender Zeit – nicht über einen Neustart oder Sprung hinweg.
+    const steady = time > before && time - before < 30;
+    if (steady) {
+      for (const p of t.pulses) {
+        // Der Zyklus ist seit dem letzten Bild über null gelaufen: Ausbruch bzw. Einschlag.
+        if (pulseCycle(p, time) < pulseCycle(p, before)) {
+          const vent = p.kind === PULSE_VENT;
+          this.emitAt(vent ? 'geyser' : 'bomb', p.x, p.y, p.z);
+          if (me && !vent) {
+            const d = Math.hypot(me.x - p.x, me.z - p.z);
+            if (d < 30) this.shake = Math.max(this.shake, 0.5 * (1 - d / 30));
+          }
+        }
+      }
+    }
+    this.honkWait = Math.max(0, this.honkWait - dt);
+    this.burnWait = Math.max(0, this.burnWait - dt);
+    if (!me || me.respawn > 0) return;
+    if (t.vehicles.length > 0) {
+      const lap = t.n * t.step;
+      const mine = t.prog[me.seg < t.total ? me.seg : 0] * t.step;
+      for (const v of t.vehicles) {
+        let d = mine - vehicleAt(v, time, lap);
+        if (d > lap / 2) d -= lap;
+        else if (d < -lap / 2) d += lap;
+        const key = v.id;
+        if (d > 30 || d < -40) {
+          this.passSide[key] = 0;
+          continue;
+        }
+        // Lage des Karts aus Sicht des Fahrzeugs (mittlerer Wagen genügt für Hupe und Fahrtwind).
+        const p = vehiclePose(t, v, v.cars >> 1, time, this.vpose);
+        const hx = Math.sin(p.heading);
+        const hz = Math.cos(p.heading);
+        const du = (me.x - p.x) * hx + (me.z - p.z) * hz;
+        const dw = -(me.x - p.x) * hz + (me.z - p.z) * hx;
+        const dy = Math.abs(me.y - p.y);
+        const reach = v.half + ((v.cars - 1) * v.pitch) / 2;
+        if (dy < 2.5 && Math.abs(du) < reach + 1.4 && Math.abs(dw) < v.halfWidth + 1.35 && this.honkWait === 0) {
+          this.honkWait = 2.2;
+          this.emitAt('honk', p.x, p.y + 1.5, p.z);
+        }
+        // Vorbeigezogen: eben noch dahinter, jetzt davor – und dicht daneben.
+        const side = du > reach ? 1 : du < -reach ? -1 : 0;
+        if (side === 1 && this.passSide[key] === -1 && Math.abs(dw) < 4.2 && dy < 2.5) this.emitAt('pass', p.x, p.y + 1, p.z);
+        if (side !== 0) this.passSide[key] = side;
+      }
+    }
+    if (t.floods.length > 0 && (me.flags & FLAG_AIR) === 0 && lavaAt(t, me.seg, time) > FLOOD_FROM) {
+      if (this.burnWait === 0) {
+        this.burnWait = 0.3;
+        this.onEvent?.({ kind: 'burn', slot: me.slot, local: true, pan: 0, gain: 1 });
+      }
+      // Glut und Qualm unter den Rädern
+      for (let i = 0; i < 2; i++) {
+        const a = Math.random() * 6.28;
+        this.fx.spark(me.x + Math.cos(a) * 0.9, me.y + 0.2, me.z + Math.sin(a) * 0.9, Math.cos(a) * 3, 4 + Math.random() * 3, Math.sin(a) * 3, 0.5, 0.35, 0xffa628);
+      }
+      if (Math.random() < 0.3) this.fx.puff(me.x, me.y + 0.5, me.z, 0, 2.5, 0, 0.7, 1.1, 0x4a3b45, 1.2, -2);
+    }
   }
 
   private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
@@ -561,6 +678,10 @@ export class RaceScene {
         this.emit('wall', k, local);
         if (local) this.shake = Math.max(this.shake, 0.2);
       }
+      if (e.draft >= DRAFT_PULL_FROM && k.draft < DRAFT_PULL_FROM) {
+        this.pop('SOG!', e, 'cool', 3.2);
+        this.emit('draft', k, local);
+      }
       if (e.finished && !k.finished) {
         this.pop('ZIEL!', e, 'warm', 4.6);
         for (const c of PLAYER_COLORS) this.burst(e.x, e.y + 2, e.z, 9, 8, parseInt(c.slice(1), 16), false, 0.4, 1.4, 9);
@@ -574,6 +695,7 @@ export class RaceScene {
     k.guard = e.guard;
     k.respawn = e.respawn;
     k.tow = e.tow;
+    k.draft = e.draft;
     k.roulette = e.roulette;
     k.item = e.item;
     k.flags = e.flags;
@@ -741,6 +863,8 @@ export class RaceScene {
     // Dinge und Hindernisse
     this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
+    for (const m of this.mechanics) m.update(race.time, this.time, dt, this.camera.position, this.fx);
+    this.mechanicEvents(race.time, me ?? undefined, dt);
     let smoke = 0;
     let threat = 0;
     this.flat.identity();
@@ -766,7 +890,9 @@ export class RaceScene {
     this.pops.update(dt);
 
     this.updateCamera(me, meView, race, dt);
-    const fast = me ? (me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
+    // Tempostriche: voll bei Schub, sonst bei hohem Tempo – und im Windschatten wachsen sie mit der Ladung.
+    const wake = me ? (me.draft >= DRAFT_PULL_FROM ? 0.8 : (me.draft / DRAFT_FULL) * 0.5) : 0;
+    const fast = me ? Math.max(wake, me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
     this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx);
     if (this.needsCompile) {

@@ -1,3 +1,4 @@
+import { withoutMechanics } from './helpers';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { CHARACTERS, EV_FALL, forwardSpeed, gridState, stepKart, turboStage } from '../../src/game/sim';
@@ -13,6 +14,11 @@ afterAll(() => {
  * @param drifter true = driftet in jeder Kurve, false = fährt alles ohne Drift
  */
 function bestLap(char: number, drifter: boolean): number {
+  // Ohne Verkehr und Lava: hier wird das Fahrwerk verglichen, nicht das Glück im Verkehr.
+  return withoutMechanics(() => quietLap(char, drifter));
+}
+
+function quietLap(char: number, drifter: boolean): number {
   const s = gridState(0, char);
   const brain = drifter ? newBrain(0, AI_HARD) : newBrain(3, AI_MEDIUM);
   brain.skill = 1;
@@ -22,7 +28,7 @@ function bestLap(char: number, drifter: boolean): number {
   let best = Infinity;
   for (let tick = 1; tick < 4 * 90 * 60 && laps < 4; tick++) {
     const before = s.seg;
-    const ev = stepKart(s, botCmd(s, brain, [], true, { tick, place: 1, smoke: false }), { canDrive: true, speedFactor: 1 });
+    const ev = stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false }), { canDrive: true, speedFactor: 1, time: tick });
     expect(ev & EV_FALL).toBe(0);
     progress += segDelta(TRACK, before, s.seg);
     if (progress >= (laps + 1) * TRACK.n) {
@@ -49,7 +55,7 @@ describe('Figuren', () => {
   it('jede Stärke ist messbar: Antritt, Tempo, Grünstreifen, Drift', () => {
     setTrack(0);
     const gas = { steer: 0, buttons: 1 };
-    const env = { canDrive: true, speedFactor: 1 };
+    const env = { canDrive: true, speedFactor: 1, time: 0 };
     const sprint: number[] = [];
     const top: number[] = [];
     const green: number[] = [];

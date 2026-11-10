@@ -6,14 +6,30 @@
 // steigt an der Westseite wieder herauf. Zum Schluss schraubt sich die
 // Parkhaus-Spirale mit Steilkurve einmal über sich selbst hinweg.
 
+import { VEH_BUS, VEH_TAXI, VEH_TRAM, VEH_VAN } from '../mechanics';
 import type { TrackDef } from '../track';
-import { arc } from './shape';
+import { arc, convoy } from './shape';
 
 export const NACHT: TrackDef = {
   id: 'nacht',
   name: 'Nachtschicht',
   theme: 'nacht',
   blurb: 'Hochstraße bei Nacht: Dachsprung oder Bogen, Unterführung durch die Röhre, Parkhaus-Spirale.',
+  twist: 'Stadtverkehr fährt mit: nicht auffahren – dicht dahinter lädt der Windschatten.',
+  // Verkehr auf der ganzen Hochstraße, drei Spuren. Links das Gleis der
+  // Straßenbahn (mit Taxis dazwischen) und die Mitte fahren gleich schnell und
+  // sind gegeneinander versetzt besetzt; rechts rollen langsamer die Busse und
+  // Lieferwagen. Nebeneinander fahren also höchstens zwei Fahrzeuge – eine
+  // ganze Spur bleibt immer frei. Abzweigungen (Dächer, Röhre) sind
+  // verkehrsfrei. Die Lücke im Muster liegt während des Countdowns über der
+  // Startaufstellung.
+  traffic: {
+    lanes: [
+      { lat: -4.2, speed: 15, cars: convoy(150, 1300, 104, [VEH_TRAM, VEH_TAXI, VEH_TAXI]) },
+      { lat: 0, speed: 15, cars: convoy(202, 1340, 104, [VEH_TAXI, VEH_VAN, VEH_TAXI]) },
+      { lat: 4.2, speed: 11, cars: convoy(120, 1340, 76, [VEH_BUS, VEH_VAN, VEH_BUS, VEH_TAXI]) },
+    ],
+  },
   grade: 2,
   // Neon-Asphalt auf der Hochstraße, Stahl in der Parkhaus-Spirale und auf den
   // Dächern, Kopfsteinpflaster unten in der Unterführung
@@ -75,16 +91,13 @@ export const NACHT: TrackDef = {
     { at: 32.5, lat: 0 },
   ],
   boxRows: [2.5, 12.6, 22.7, 30.6, 44],
-  ramps: [{ at: 8.6, length: 8, height: 1.0 }],
+  // Keine Schanze und keine Pendel auf der Hochstraße: dort fährt der Verkehr.
   bumps: [
     { at: 3.5, length: 14, height: 0.9 },
+    { at: 8.7, length: 14, height: 0.8 },
     { at: 32, length: 16, height: 1.0 },
   ],
   decks: [[0, 51.99]],
-  hazards: [
-    { at: 21.5, amp: 3.8, period: 5, phase: 2 },
-    { at: 31.4, amp: 4.2, period: 6, phase: 0 },
-  ],
   branches: [
     // a: Unterführung – über die Rampe hinab, unter der Hochstraße hindurch,
     // durch die Betonröhre und an der Westseite wieder hinauf

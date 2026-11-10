@@ -15,7 +15,7 @@ import {
 } from '../../src/net/protocol';
 import { CODE_ALPHABET, isValidCode, normalizeCode, randomCode } from '../../src/net/codes';
 
-const ENV: StepEnv = { canDrive: true, speedFactor: 1 };
+const ENV: StepEnv = { canDrive: true, speedFactor: 1, time: 0 };
 
 function rng(seed: number): () => number {
   let s = seed;
@@ -30,7 +30,7 @@ function drive(i: number): Cmd {
   return { steer: Math.round(Math.sin(i / 37) * 40), buttons: BTN_GAS };
 }
 
-const CTX = { tick: 0, place: 1, smoke: false };
+const CTX = { tick: 0, time: 0, place: 1, smoke: false };
 
 describe('Protokoll', () => {
   it('Eingabepakete überstehen Kodieren/Dekodieren', () => {
@@ -42,6 +42,23 @@ describe('Protokoll', () => {
     const d = decodeCmds(new DataView(encodeCmds(4711, cmds)))!;
     expect(d.newestSeq).toBe(4711);
     expect(d.cmds).toEqual(cmds);
+  });
+
+  it('jede Eingabe behält ihre eigene Rennzeit – auch wenn die Uhr nachgeführt wurde und ein Paket fehlt', () => {
+    // Der Client hat Eingabe 1 mit Rennzeit 101 gerechnet, Eingabe 2 (nach einem Nachführschritt) mit 103,
+    // Eingabe 3 mit 103 (die Uhr blieb einen Schritt stehen), Eingabe 4 mit 104. Das erste Paket ging verloren.
+    const cmds: Cmd[] = [
+      { steer: 1, buttons: 1 },
+      { steer: 2, buttons: 1 },
+      { steer: 3, buttons: 1 },
+      { steer: 4, buttons: 1 },
+    ];
+    const d = decodeCmds(new DataView(encodeCmds(4, cmds, [101, 103, 103, 104], 7)))!;
+    expect(d.times).toEqual([101, 103, 103, 104]);
+    expect(d.raceId).toBe(7);
+    expect(d.cmds).toEqual(cmds);
+    // Auch im Countdown (negative Zeiten)
+    expect(decodeCmds(new DataView(encodeCmds(2, cmds.slice(0, 2), [-3, -2])))!.times).toEqual([-3, -2]);
   });
 
   it('Snapshots überstehen Kodieren/Dekodieren (float32-genau)', () => {
@@ -60,6 +77,9 @@ describe('Protokoll', () => {
     s.respawn = 12;
     s.char = 3;
     s.tow = 201;
+    // die größten Werte, die im Spiel vorkommen (Windschatten 100 + 85, geplättet 130)
+    s.draft = 185;
+    s.flat = 130;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -92,6 +112,7 @@ describe('Protokoll', () => {
     expect(snap.track).toBe(2);
     expect(k.state.char).toBe(3);
     expect(k.state.tow).toBe(201);
+    expect([k.state.draft, k.state.flat]).toEqual([185, 130]);
     expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([Math.fround(s.y), 4.5, 700, 99, 12]);
     expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 });
     expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 });

@@ -19,6 +19,19 @@
 // wenn eine Kurve nachträglich etwas anders gelegt wird. In einer Abzweigung
 // ist 0 die Gabelung, 1 ihr erster eigener Stützpunkt, und so weiter.
 
+import {
+  PULSE_BOMB,
+  PULSE_PRESS,
+  PULSE_VENT,
+  VEHICLE_SPECS,
+  vehicleAt,
+  type Belt,
+  type Flood,
+  type Pulse,
+  type Tide,
+  type TrafficDef,
+  type Vehicle,
+} from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
@@ -60,6 +73,24 @@ export interface PathFeatures {
   surfaces?: [number, number, SurfaceId][];
   /** Grund-Untergrund dieses Wegs; ohne Angabe Asphalt (bei Abzweigungen: wie die Hauptstrecke). */
   surface?: SurfaceId;
+  /**
+   * Geysire: brechen im Takt aus und schleudern hoch, was über ihnen steht.
+   * period und phase in Sekunden; lat = seitliche Lage in Metern.
+   */
+  vents?: { at: number; lat: number; period: number; phase: number }[];
+  /** Lavabomben: schlagen im Takt an dieser Stelle ein und lassen kurz eine Glutpfütze zurück. */
+  bombs?: { at: number; lat: number; period: number; phase: number }[];
+  /** Steigende Lava: [von, bis] wird im Takt überflutet (period, phase in Sekunden). */
+  floods?: { from: number; to: number; period: number; phase: number }[];
+  /** Stampfpressen: schlagen im Takt herunter und plätten, was darunter steht. */
+  presses?: { at: number; lat: number; period: number; phase: number }[];
+  /**
+   * Förderbänder: von … bis, seitlich lat0 … lat1 (Meter), Tempo längs und quer
+   * in m/s (vorwärts bzw. nach rechts positiv).
+   */
+  belts?: { from: number; to: number; lat0: number; lat1: number; along?: number; across?: number }[];
+  /** Stücke, auf denen Ebbe und Flut gelten: [von, bis] (siehe TrackDef.tide). */
+  tidal?: [number, number][];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -103,6 +134,12 @@ export interface TrackDef extends PathFeatures {
   branches?: BranchDef[];
   /** Wo das Wahrzeichen der Welt steht (z. B. der Leuchtturm) – Stützpunkt-Einheiten der Hauptstrecke. */
   landmarkAt?: number;
+  /** Verkehr auf der Hauptstrecke (siehe mechanics.ts). */
+  traffic?: TrafficDef;
+  /** Ein Satz dazu, was diese Strecke von den anderen unterscheidet – für die Streckenwahl. */
+  twist?: string;
+  /** Ebbe und Flut: Wasserhöhe bei Ebbe und Flut (Meter), Periode und Versatz in Sekunden. */
+  tide?: { low: number; high: number; period: number; phase: number };
 }
 
 export interface BoostPad {
@@ -218,6 +255,14 @@ export interface Track {
   pads: BoostPad[];
   boxes: { x: number; y: number; z: number; seg: number }[];
   hazards: Hazard[];
+  /** Streckenmechanik (mechanics.ts): Verkehr, Geysire und Lavabomben, steigende Lava. */
+  vehicles: Vehicle[];
+  pulses: Pulse[];
+  floods: Flood[];
+  belts: Belt[];
+  /** Ebbe und Flut (null = keine) und je Abschnitt, ob sie dort gilt. */
+  tide: Tide | null;
+  tidal: Uint8Array;
   laps: number;
 }
 
@@ -777,6 +822,21 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     pads: [],
     boxes: [],
     hazards: [],
+    vehicles: [],
+    pulses: [],
+    floods: [],
+    belts: [],
+    tide: def.tide
+      ? {
+          low: def.tide.low,
+          high: def.tide.high,
+          period: Math.round(def.tide.period * 60),
+          phase: Math.round(def.tide.phase * 60),
+          wave: TIDE_WAVE,
+          wavePeriod: TIDE_WAVE_PERIOD,
+        }
+      : null,
+    tidal: new Uint8Array(total),
     laps: def.laps,
   };
   for (const p of paths) {
@@ -800,8 +860,132 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const h of p.f.hazards ?? []) {
       track.hazards.push({ seg: segAt(p, h.at), amp: h.amp, period: Math.round(h.period * 60), phase: h.phase });
     }
+    const pulse = (kind: number, d: { at: number; lat: number; period: number; phase: number }): void => {
+      const seg = segAt(p, d.at);
+      const k = PULSE_KINDS[kind];
+      track.pulses.push({
+        kind,
+        seg,
+        lat: d.lat,
+        x: px[seg] + rightX(track, seg) * d.lat,
+        y: py[seg] + d.lat * bank[seg],
+        z: pz[seg] + rightZ(track, seg) * d.lat,
+        radius: k.radius,
+        period: Math.round(d.period * 60),
+        phase: Math.round(d.phase * 60),
+        on: k.on,
+        warn: k.warn,
+      });
+    };
+    for (const v of p.f.vents ?? []) pulse(PULSE_VENT, v);
+    for (const b of p.f.bombs ?? []) pulse(PULSE_BOMB, b);
+    for (const b of p.f.presses ?? []) pulse(PULSE_PRESS, b);
+    for (const b of p.f.belts ?? []) {
+      const first = segAt(p, b.from);
+      const last = segAt(p, b.to);
+      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0 });
+    }
+    for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
+    for (const f of p.f.floods ?? []) {
+      const first = segAt(p, f.from);
+      const last = segAt(p, f.to);
+      const branch = branchOf[first];
+      // Fahrzeit von der Gabelung (bzw. vom Punkt 64 m davor, an dem die KI entscheidet) bis zur Flut
+      const run = branch >= 0 ? first - branches[branch].first : 0;
+      track.floods.push({
+        first,
+        count: Math.max(1, last - first + 1),
+        branch,
+        period: Math.round(f.period * 60),
+        phase: Math.round(f.phase * 60),
+        rise: FLOOD_RISE,
+        hold: Math.round(f.period * 60 * FLOOD_HOLD),
+        fall: FLOOD_FALL,
+        lead: Math.round(((run * step) / 25) * 60),
+      });
+    }
+  }
+  // Verkehr: nur auf der Hauptstrecke
+  let vid = 0;
+  for (const lane of def.traffic?.lanes ?? []) {
+    for (const [kind, at] of lane.cars) {
+      track.vehicles.push({ ...VEHICLE_SPECS[kind], id: vid++, kind, lat: lane.lat, speed: lane.speed, offset: at });
+    }
   }
   return track;
+}
+
+/**
+ * Je Art (PULSE_*): Radius, Dauer der Gefahr und der Vorwarnung in Ticks.
+ * Geysir: Ausbruch. Lavabombe: Einschlag samt Glutpfütze, davor wächst ihr
+ * Schatten. Stampfpresse: der Stempel ist unten, davor blinkt die Warnleuchte.
+ */
+const PULSE_KINDS = [
+  { radius: 2.1, on: 66, warn: 78 },
+  { radius: 2.6, on: 150, warn: 110 },
+  { radius: 2.0, on: 34, warn: 60 },
+];
+/** Welle auf dem Wasser bei Ebbe und Flut: Ausschlag (Meter) und Periode (Ticks). */
+const TIDE_WAVE = 0.1;
+const TIDE_WAVE_PERIOD = 250;
+/** Steigende Lava: Steigen und Fallen in Ticks, Stehen als Anteil der Periode. */
+const FLOOD_RISE = 150;
+const FLOOD_FALL = 150;
+const FLOOD_HOLD = 0.3;
+
+/** Wo ein Wagen eines Fahrzeugs gerade steht. */
+export interface VehiclePose {
+  x: number;
+  y: number;
+  z: number;
+  /** Fahrtrichtung (Radiant, wie KartState.heading). */
+  heading: number;
+  /** Steigung der Fahrbahn (Höhe pro Meter voraus) und Querneigung (Höhe pro Meter nach rechts). */
+  slope: number;
+  bank: number;
+  seg: number;
+  /** Seitliche Lage der Wagenmitte (Meter, rechts positiv). */
+  lat: number;
+}
+
+export function newVehiclePose(): VehiclePose {
+  return { x: 0, y: 0, z: 0, heading: 0, slope: 0, bank: 0, seg: 0, lat: 0 };
+}
+
+/**
+ * Lage des Wagens car (0 = vorderster) von Fahrzeug v zur Rennzeit time
+ * (Ticks seit "Los", auch gebrochen oder negativ).
+ */
+export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
+  const lap = t.n * t.step;
+  let s = vehicleAt(v, time, lap);
+  if (car > 0) {
+    // Hintere Wagen folgen im Abstand der Kupplung – gemessen auf der eigenen Spur, nicht auf der
+    // Mittellinie: außen in der Kurve ist der Weg länger, innen kürzer (curv > 0 = Rechtskurve).
+    const lead = Math.min(t.n - 1, Math.floor(s / t.step));
+    const scale = Math.max(0.6, Math.min(1.6, 1 - ((v.lat * t.rh[lead]) / t.def.roadHalf) * t.curv[lead]));
+    s -= (car * v.pitch) / scale;
+    if (s < 0) s += lap;
+  }
+  const i = Math.min(t.n - 1, Math.floor(s / t.step));
+  const along = s - i * t.step;
+  const f = along / t.step;
+  const j = (i + 1) % t.n;
+  // Richtung zwischen den Abschnitten überblenden – sonst ruckt ein langer Bus in der Kurve.
+  const hx = t.tx[i] + (t.tx[j] - t.tx[i]) * f;
+  const hz = t.tz[i] + (t.tz[j] - t.tz[i]) * f;
+  const lat = (v.lat * (t.rh[i] + (t.rh[j] - t.rh[i]) * f)) / t.def.roadHalf;
+  const bank = t.bank[i] + (t.bank[j] - t.bank[i]) * f;
+  const k = 1 / Math.hypot(hx, hz);
+  out.x = t.px[i] + t.tx[i] * along - hz * k * lat;
+  out.z = t.pz[i] + t.tz[i] * along + hx * k * lat;
+  out.y = t.py[i] + (t.py[j] - t.py[i]) * f + lat * bank;
+  out.heading = Math.atan2(hx, hz);
+  out.slope = (t.py[j] - t.py[i]) / t.step;
+  out.bank = bank;
+  out.seg = i;
+  out.lat = lat;
+  return out;
 }
 
 /** Vektor nach rechts (quer zur Fahrtrichtung) im Abschnitt seg. */

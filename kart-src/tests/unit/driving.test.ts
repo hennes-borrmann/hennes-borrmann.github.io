@@ -18,7 +18,7 @@ import {
 } from '../../src/game/sim';
 import { TRACK, segDelta } from '../../src/game/track';
 
-const ENV: StepEnv = { canDrive: true, speedFactor: 1 };
+const ENV: StepEnv = { canDrive: true, speedFactor: 1, time: 0 };
 
 describe('Fahrphysik', () => {
   it('beschleunigt zügig: 0 auf 20 m/s in etwa einer Sekunde', () => {
@@ -87,7 +87,7 @@ describe('Fahrphysik', () => {
   it('bleibt im Countdown stehen', () => {
     const s = gridState(1);
     const x = s.x;
-    for (let i = 0; i < 60; i++) stepKart(s, { steer: 50, buttons: BTN_GAS }, { canDrive: false, speedFactor: 1 });
+    for (let i = 0; i < 60; i++) stepKart(s, { steer: 50, buttons: BTN_GAS }, { canDrive: false, speedFactor: 1, time: 0 });
     expect(s.x).toBe(x);
     expect(Math.hypot(s.vx, s.vz)).toBe(0);
   });
@@ -109,10 +109,10 @@ function soloRun(slot: number, laps: number, cmdFilter?: (c: Cmd) => Cmd) {
   const limit = laps * 80 * 60;
   while (lapTimes.length < laps && tick < limit) {
     tick++;
-    let cmd = botCmd(s, brain, [], true, { tick, place: 1, smoke: false });
+    let cmd = botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false });
     if (cmdFilter) cmd = cmdFilter(cmd);
     const before = s.seg;
-    const ev = stepKart(s, cmd, { canDrive: true, speedFactor: brain.skill });
+    const ev = stepKart(s, cmd, { canDrive: true, speedFactor: brain.skill, time: tick });
     progress += segDelta(TRACK, before, s.seg);
     if (ev & EV_WALL) wallHits++;
     if (ev & EV_TURBO) turbos++;

@@ -15,6 +15,25 @@
 // Sekunde): das rechnet auf jedem Gerät identisch.
 
 import {
+  CRASH_SPEED,
+  DRAFT_FULL,
+  DRAFT_PULL_FROM,
+  DRAFT_PULL_TICKS,
+  FLAT_FACTOR,
+  FLAT_TICKS,
+  FLOOD_FROM,
+  PULSE_PRESS,
+  PULSE_VENT,
+  WATER_FROM,
+  WAKE_HALF,
+  WAKE_LENGTH,
+  floodLevel,
+  pulseCycle,
+  tideLevel,
+  vehicleAt,
+  waterFactor,
+} from './mechanics';
+import {
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   NO_GROUND,
@@ -22,6 +41,7 @@ import {
   centerHeight,
   gridPosition,
   groundAt,
+  newVehiclePose,
   proj,
   projectOnTrack,
   rightX,
@@ -30,6 +50,7 @@ import {
   segDelta,
   sideLimit,
   trackHeading,
+  vehiclePose,
   walk,
   type Track,
 } from './track';
@@ -79,6 +100,13 @@ export interface StepEnv {
   canDrive: boolean;
   /** Faktor auf die Höchstgeschwindigkeit (nur für KI-Gegner ungleich 1). */
   speedFactor: number;
+  /**
+   * Rennzeit dieses Schritts in Ticks seit "Los" (im Countdown negativ) – der
+   * Takt für Verkehr, Geysire und alles andere aus mechanics.ts. Sie gehört zur
+   * Eingabe: der Bildschirm eines Mitspielers schickt sie mit, und der Host
+   * rechnet dessen Schritt mit genau dieser Zeit nach.
+   */
+  time: number;
 }
 
 export const FLAG_ITEM_HELD = 1;
@@ -118,6 +146,10 @@ export interface KartState {
   respawn: number;
   /** Verbleibende Ticks am Abschleppdrachen. */
   tow: number;
+  /** Windschatten: Ladung 0..255; ab DRAFT_FULL gibt das Ausscheren Schub. */
+  draft: number;
+  /** Verbleibende Ticks geplättet (Stampfpresse): das Kart ist flach und langsam. */
+  flat: number;
   item: number;
   /** Das Item, das nach der Auslosung erscheint. */
   nextItem: number;
@@ -154,6 +186,18 @@ export const EV_TAKEOFF = 1 << 16;
 export const EV_USE_KITE = 1 << 17;
 /** Der Abschleppdrache hat losgelassen. */
 export const EV_TOW_END = 1 << 18;
+/** Aus dem Windschatten ausgeschert: Schub. */
+export const EV_DRAFT = 1 << 19;
+/** Von der Strecke selbst getroffen (Verkehr, Geysir, Lavabombe): das Kart schleudert. */
+export const EV_HIT = 1 << 20;
+/** … aber der Stoßfänger hat es abgefangen. */
+export const EV_BLOCK = 1 << 21;
+/** Fährt durch Lava. */
+export const EV_BURN = 1 << 22;
+/** Von einer Stampfpresse geplättet. */
+export const EV_FLAT = 1 << 23;
+/** Fährt durch Wasser (Flut). */
+export const EV_SPLASH = 1 << 24;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -258,7 +302,7 @@ export const CHARACTERS: Character[] = [
     name: 'Kolben-Kalle',
     trait: 'Schnell auf der Geraden, braucht etwas länger auf Touren.',
     bars: [5, 2, 3],
-    vmax: 1.006,
+    vmax: 1.003,
     accel: 0.88,
     grip: 0.985,
     offroad: OFFROAD_FACTOR,
@@ -291,7 +335,7 @@ export const CHARACTERS: Character[] = [
     name: 'Zünd-Zoe',
     trait: 'Klebt in Kurven, und der Drift lädt schneller.',
     bars: [2, 3, 5],
-    vmax: 0.993,
+    vmax: 0.996,
     accel: 1,
     grip: 1.05,
     offroad: OFFROAD_FACTOR,
@@ -319,6 +363,8 @@ export function newState(): KartState {
     stall: 0,
     respawn: 0,
     tow: 0,
+    draft: 0,
+    flat: 0,
     item: ITEM_NONE,
     nextItem: ITEM_NONE,
     roulette: 0,
@@ -345,6 +391,8 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.stall = src.stall;
   dst.respawn = src.respawn;
   dst.tow = src.tow;
+  dst.draft = src.draft;
+  dst.flat = src.flat;
   dst.item = src.item;
   dst.nextItem = src.nextItem;
   dst.roulette = src.roulette;
@@ -406,6 +454,24 @@ export function hitKart(s: KartState): number {
   return HIT_SPIN;
 }
 
+/** Stampfpresse: das Kart wird geplättet und fährt eine Weile flach und langsam. Rückgabe wie hitKart. */
+export function flattenKart(s: KartState): number {
+  if (s.shield > 0 || s.flat > 0 || s.respawn > 0 || s.tow > 0) return HIT_NONE;
+  if (s.guard > 0) {
+    s.guard = 0;
+    s.shield = 50;
+    return HIT_BLOCKED;
+  }
+  s.flat = FLAT_TICKS;
+  s.shield = FLAT_TICKS + 40;
+  s.driftDir = 0;
+  s.driftCharge = 0;
+  s.boost = 0;
+  s.vx *= 0.4;
+  s.vz *= 0.4;
+  return HIT_SPIN;
+}
+
 /** Kurzschluss: der Motor läuft kurz nur gedrosselt. Rückgabe wie hitKart. */
 export function stallKart(s: KartState): number {
   if (s.respawn > 0 || s.stall > 0 || s.tow > 0) return HIT_NONE;
@@ -427,6 +493,178 @@ function wrapAngle(a: number): number {
   return a;
 }
 
+/** Anteil, um den volle Lava die Höchstgeschwindigkeit drückt. */
+const LAVA_DRAG = 0.5;
+/** Tempozuschlag nach dem Ausscheren aus dem Windschatten. */
+const DRAFT_PULL = 1.2;
+/** Nur wer das Heck mit der Kartmitte innerhalb der Fahrzeugbreite (plus so viel) trifft, fährt wirklich auf. */
+const CRASH_INSET = 0.3;
+const VENT_LAUNCH = 10.5;
+/** Internes Bit aus stepTraffic: das Kart wurde verschoben. */
+const TRAFFIC_MOVED = 1 << 30;
+
+/** Lavapegel (0..1) auf dem Abschnitt seg zur Rennzeit time. */
+export function lavaAt(t: Track, seg: number, time: number): number {
+  let level = 0;
+  for (const f of t.floods) {
+    if (seg < f.first || seg >= f.first + f.count) continue;
+    // An den Enden des Stücks läuft die Lava flach aus.
+    const edge = Math.min(seg - f.first, f.first + f.count - 1 - seg);
+    level = Math.max(level, floodLevel(f, time) * Math.min(1, (edge + 1) / 6));
+  }
+  return level;
+}
+
+const VPOSE = newVehiclePose();
+
+/**
+ * Verkehr: Zusammenstöße und Windschatten. Fahrzeuge sind fahrende Wände –
+ * seitlich streift man an ihnen entlang wie an einer Bande; wer mit viel
+ * Überschuss auffährt (oder überrollt wird), schleudert.
+ */
+function stepTraffic(t: Track, s: KartState, time: number): number {
+  let ev = 0;
+  const lap = t.n * t.step;
+  const mine = t.prog[s.seg] * t.step;
+  let inWake = false;
+  for (const v of t.vehicles) {
+    // Grob: nur Fahrzeuge in der Nähe (gemessen am Fortschritt auf der Hauptstrecke).
+    let d = mine - vehicleAt(v, time, lap);
+    if (d > lap / 2) d -= lap;
+    else if (d < -lap / 2) d += lap;
+    const train = (v.cars - 1) * v.pitch;
+    if (d > v.half + 8 || d < -(train + v.half + WAKE_LENGTH + 8)) continue;
+    for (let car = 0; car < v.cars; car++) {
+      const p = vehiclePose(t, v, car, time, VPOSE);
+      const hx = Math.sin(p.heading);
+      const hz = Math.cos(p.heading);
+      const dx = s.x - p.x;
+      const dz = s.z - p.z;
+      const du = dx * hx + dz * hz;
+      const dw = -dx * hz + dz * hx;
+      const dy = s.y - p.y;
+      // Windschatten hinter dem letzten Wagen
+      if (
+        car === v.cars - 1 &&
+        du < -v.half - 0.8 &&
+        du > -v.half - WAKE_LENGTH &&
+        Math.abs(dw) < WAKE_HALF &&
+        dy > -1.2 &&
+        dy < 1.2
+      ) {
+        inWake = true;
+      }
+      // Darüber hinweg (Sprungfeder, Schanze) oder auf einer anderen Ebene: kein Kontakt.
+      if (dy > v.height || dy < -1.5) continue;
+      const pu = v.half + KART_RADIUS - Math.abs(du);
+      const pw = v.halfWidth + KART_RADIUS - Math.abs(dw);
+      if (pu <= 0 || pw <= 0) continue;
+      // Geschwindigkeit des Karts aus Sicht des Fahrzeugs
+      let ku = s.vx * hx + s.vz * hz;
+      let kw = -s.vx * hz + s.vz * hx;
+      // An den vier Ecken ist das Kart ein Kreis gegen eine Ecke – nicht gegen ein vergrößertes Rechteck.
+      const cu = Math.abs(du) - v.half;
+      const cw = Math.abs(dw) - v.halfWidth;
+      if (cu > 0 && cw > 0) {
+        const d2 = cu * cu + cw * cw;
+        if (d2 >= KART_RADIUS * KART_RADIUS) continue;
+        ev |= TRAFFIC_MOVED;
+        // Von der Ecke weg hinausschieben; was auf die Ecke zuläuft, prallt ab. Kein Dreher.
+        const dist = Math.sqrt(d2) || 1e-6;
+        const nu = ((du > 0 ? 1 : -1) * cu) / dist;
+        const nw = ((dw > 0 ? 1 : -1) * cw) / dist;
+        const push = KART_RADIUS - dist;
+        s.x += (hx * nu - hz * nw) * push;
+        s.z += (hz * nu + hx * nw) * push;
+        const vn = (ku - v.speed) * nu + kw * nw;
+        if (vn < 0) {
+          ku -= nu * vn * 1.3;
+          kw -= nw * vn * 1.3;
+          if (vn < -5) {
+            ev |= EV_WALL;
+            s.driftDir = 0;
+            s.driftCharge = 0;
+          }
+        }
+        s.vx = hx * ku - hz * kw;
+        s.vz = hz * ku + hx * kw;
+        continue;
+      }
+      ev |= TRAFFIC_MOVED;
+      if (pw < pu || Math.abs(dw) > v.halfWidth + CRASH_INSET) {
+        // Seitlich – oder nur die Ecke erwischt: hinausschieben und
+        // entlangstreifen wie an einer Bande. Das kostet Tempo, aber keinen Dreher.
+        const side = dw > 0 ? 1 : -1;
+        s.x += -hz * side * pw;
+        s.z += hx * side * pw;
+        const vn = -kw * side;
+        if (vn > 0) kw += side * vn * 1.3;
+        // Wer die Ecke von hinten erwischt, verliert einen Teil seines Überschusses.
+        const corner = pw >= pu ? 0.35 : 0;
+        const loss = Math.max(corner, vn > 0 ? Math.min(0.3, 0.008 + vn * 0.02) : 0);
+        if (loss > 0 && ku > v.speed) ku -= (ku - v.speed) * loss;
+        if (vn > 5 || (corner > 0 && Math.abs(ku - v.speed) > 4)) {
+          ev |= EV_WALL;
+          s.driftDir = 0;
+          s.driftCharge = 0;
+        }
+      } else {
+        // Von hinten aufgefahren – oder das Fahrzeug schiebt das Kart vor sich her.
+        const end = du > 0 ? 1 : -1;
+        s.x += hx * end * pu;
+        s.z += hz * end * pu;
+        const closing = -(ku - v.speed) * end;
+        if (closing > 0) {
+          if (closing > CRASH_SPEED) {
+            const r = hitKart(s);
+            if (r === HIT_BLOCKED) ev |= EV_BLOCK;
+            else if (r === HIT_SPIN) ev |= EV_HIT;
+            kw = (-s.vx * hz + s.vz * hx) * 0.5;
+          }
+          ku = v.speed + end * 2;
+        }
+      }
+      s.vx = hx * ku - hz * kw;
+      s.vz = hz * ku + hx * kw;
+    }
+  }
+  // Windschatten lädt, solange man dicht hinter einem Fahrzeug bleibt; wer danach ausschert, bekommt Zug.
+  if (s.draft >= DRAFT_PULL_FROM) {
+    s.draft = s.spin > 0 || s.draft - 1 < DRAFT_PULL_FROM ? 0 : s.draft - 1;
+  } else if (inWake && s.spin === 0 && (s.flags & FLAG_AIR) === 0 && s.vx * s.vx + s.vz * s.vz > 10 * 10) {
+    s.draft = Math.min(DRAFT_FULL, s.draft + 2);
+  } else if (s.draft >= DRAFT_FULL && s.spin === 0) {
+    s.draft = DRAFT_PULL_FROM + DRAFT_PULL_TICKS;
+    ev |= EV_DRAFT;
+  } else if (s.draft > 0) s.draft = Math.max(0, s.draft - 4);
+  return ev;
+}
+
+/** Steht an dieser Stelle gerade ein Fahrzeug? (für Rollreifen und Co.) */
+export function trafficBlocks(t: Track, x: number, y: number, z: number, radius: number, seg: number, time: number): boolean {
+  const lap = t.n * t.step;
+  const mine = t.prog[seg] * t.step;
+  for (const v of t.vehicles) {
+    let d = mine - vehicleAt(v, time, lap);
+    if (d > lap / 2) d -= lap;
+    else if (d < -lap / 2) d += lap;
+    if (d > v.half + 8 || d < -((v.cars - 1) * v.pitch + v.half + 8)) continue;
+    for (let car = 0; car < v.cars; car++) {
+      const p = vehiclePose(t, v, car, time, VPOSE);
+      const hx = Math.sin(p.heading);
+      const hz = Math.cos(p.heading);
+      const du = (x - p.x) * hx + (z - p.z) * hz;
+      const dw = -(x - p.x) * hz + (z - p.z) * hx;
+      if (y - p.y >= v.height + radius || y - p.y <= -1.5) continue;
+      // Kreis gegen Quader: Abstand zum nächsten Punkt des Rechtecks
+      const cu = Math.max(0, Math.abs(du) - v.half);
+      const cw = Math.max(0, Math.abs(dw) - v.halfWidth);
+      if (cu * cu + cw * cw < radius * radius) return true;
+    }
+  }
+  return false;
+}
+
 export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const t = TRACK;
   let ev = 0;
@@ -436,6 +674,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.shield > 0) s.shield--;
   if (s.guard > 0) s.guard--;
   if (s.stall > 0) s.stall--;
+  if (s.flat > 0) s.flat--;
   const spinning = s.spin > 0;
   if (spinning) s.spin--;
   if (s.roulette > 0) {
@@ -565,7 +804,12 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // zwischen weitem und engem Bogen. Eng hineinlenken lädt schneller.
     const into = steer * s.driftDir;
     yaw = s.driftDir * yawMax * (DRIFT_WIDE + ((DRIFT_TIGHT - DRIFT_WIDE) * (into + 1)) / 2);
-    if (!wasAir) s.driftCharge = Math.min(255, s.driftCharge + (into > 0.35 ? 2 : 1));
+    if (!wasAir) {
+      // Auf losem Grund lädt der Mini-Turbo schneller: in einem Teil der Ticks zählt er doppelt.
+      // (Welche Ticks, hängt nur vom Stand der Ladung ab – so rechnet jedes Gerät gleich.)
+      const extra = ground.charge > 0 && (s.driftCharge * 7) % 20 < ground.charge * 20 ? 1 : 0;
+      s.driftCharge = Math.min(255, s.driftCharge + (into > 0.35 ? 2 : 1) + extra);
+    }
   } else {
     yaw = steer * yawMax * (vf < 0 ? -1 : 1);
   }
@@ -594,6 +838,27 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (boosting) vmax = V_BOOST * env.speedFactor;
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
+    if (s.flat > 0) vmax *= FLAT_FACTOR;
+    // Flut: wo die Fahrbahn unter Wasser steht, bremst es – je tiefer, desto mehr.
+    if (t.tide && t.tidal[seg0]) {
+      const depth = tideLevel(t.tide, env.time) - y0;
+      if (depth > WATER_FROM) {
+        vmax *= waterFactor(depth);
+        if (vf > vmax + 2) vf -= 24 * DT;
+        if (((env.time % 10) + 10) % 10 === 0 && v > 4) ev |= EV_SPLASH;
+      }
+    }
+    // Aus dem Windschatten ausgeschert: kurz mehr Tempo – aber nur auf dem Gas, die Bremse bleibt die Bremse.
+    if (s.draft >= DRAFT_PULL_FROM && !boosting) vmax *= DRAFT_PULL;
+    // Lava auf der Fahrbahn: zäh wie Teer.
+    if (t.floods.length > 0) {
+      const lava = lavaAt(t, seg0, env.time);
+      if (lava > FLOOD_FROM) {
+        vmax *= 1 - LAVA_DRAG * lava;
+        if (vf > vmax + 2) vf -= 30 * DT;
+        if (((env.time % 24) + 24) % 24 === 0) ev |= EV_BURN;
+      }
+    }
     // Steigung in Fahrtrichtung: s.vy ist am Boden die Geschwindigkeit, mit der das Kart dem Hang folgt.
     const slope = Math.max(-0.3, Math.min(0.3, s.vy / Math.max(6, v)));
     vmax *= 1 - slope * SLOPE_EFFECT * (vf < 0 ? -1 : 1);
@@ -606,15 +871,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     } else if (spinning) {
       const d = 16 * DT;
       vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
-    } else if (boosting) {
-      // Schub wirkt auch ohne Gas.
+    } else if (boosting && !brake) {
+      // Schub wirkt auch ohne Gas – aber die Bremse geht vor (sonst schiebt ein Mini-Turbo ins Heck des Busses).
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
       if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
-      if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
+      if (vf > 0.4) vf = Math.max(0, vf - BRAKE * ground.brake * DT);
       else vf = Math.max(-V_REVERSE, vf - 16 * DT);
     } else {
       const d = (wasOffroad ? COAST + 12 : COAST) * DT;
@@ -626,6 +891,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.vz = fz * vf + rz * vl;
   s.x += s.vx * DT;
   s.z += s.vz * DT;
+  // Förderband: der Boden nimmt das Kart mit.
+  if (!wasAir && t.belts.length > 0) {
+    for (const b of t.belts) {
+      if (seg0 < b.first || seg0 >= b.first + b.count || lat0 < b.lat0 || lat0 > b.lat1) continue;
+      s.x += (t.tx[seg0] * b.along + rightX(t, seg0) * b.across) * DT;
+      s.z += (t.tz[seg0] * b.along + rightZ(t, seg0) * b.across) * DT;
+      break;
+    }
+  }
 
   // --- Strecke: Abschnitt, Bande ---
   projectOnTrack(t, s.x, s.z, s.seg);
@@ -668,6 +942,22 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       }
     }
   }
+
+  // --- Verkehr: fahrende Wände, in die man besser nicht hineinrauscht ---
+  // (Wer im Ziel ausgerollt ist oder noch an der Ampel steht, wird in Ruhe gelassen.)
+  if (t.vehicles.length > 0 && env.canDrive) {
+    const tev = stepTraffic(t, s, env.time);
+    if (tev !== 0) {
+      ev |= tev & ~TRAFFIC_MOVED;
+      if (tev & TRAFFIC_MOVED) {
+        // Das Kart wurde verschoben: Lage auf der Strecke neu bestimmen.
+        projectOnTrack(t, s.x, s.z, s.seg);
+        s.seg = proj.seg;
+        lat = proj.lat;
+        along = proj.along;
+      }
+    }
+  } else s.draft = 0;
 
   // --- Boden: Stufen, Schwerkraft, Abheben und Landen ---
   let g = sunk ? NO_GROUND : groundAt(t, s.seg, along, lat);
@@ -728,6 +1018,34 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
 
   if (!air && Math.abs(lat) > t.rh[s.seg] + 0.3) flags |= FLAG_OFFROAD;
+
+  // --- Geysire, Lavabomben, Stampfpressen ---
+  for (const p of t.pulses) {
+    if (!env.canDrive) break;
+    const dy = s.y - p.y;
+    if (dy < -1.5 || dy > 2.5) continue;
+    const dx = s.x - p.x;
+    const dz = s.z - p.z;
+    const reach = p.radius + KART_RADIUS * 0.6;
+    if (dx * dx + dz * dz > reach * reach) continue;
+    if (pulseCycle(p, env.time) >= p.on) continue;
+    if (p.kind === PULSE_PRESS) {
+      // Die Presse plättet: kein Dreher, aber das Kart ist eine Weile flach und langsam.
+      const r = flattenKart(s);
+      if (r === HIT_BLOCKED) ev |= EV_BLOCK;
+      else if (r === HIT_SPIN) ev |= EV_FLAT;
+      continue;
+    }
+    const r = hitKart(s);
+    if (r === HIT_BLOCKED) ev |= EV_BLOCK;
+    else if (r === HIT_SPIN) {
+      ev |= EV_HIT;
+      // Der Geysir wirft das Kart hoch, die Bombe nur ein Stück.
+      s.vy = p.kind === PULSE_VENT ? VENT_LAUNCH : 4.5;
+      s.y += AIR_EPS + 0.05;
+      flags |= FLAG_AIR;
+    }
+  }
 
   // --- Boost-Felder ---
   if (!air && vf > 6 && s.boost < PAD_TICKS - 8) {

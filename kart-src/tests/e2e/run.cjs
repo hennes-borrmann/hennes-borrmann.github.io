@@ -10,7 +10,7 @@
 //   npm run build && npm run preview -- --port 4173
 //   node tests/e2e/run.cjs                 braucht ein installiertes Playwright
 //
-// Umgebungsvariablen: BASE, SIGNAL, SHOT_DIR (Ordner für Screenshots), ONLY (Teilmenge, z. B. "sync,reconnect,phase3")
+// Umgebungsvariablen: BASE, SIGNAL, SHOT_DIR (Ordner für Screenshots), ONLY (Teilmenge, z. B. "sync,reconnect,phase3,mechanics")
 
 const { chromium, devices } = require('playwright');
 
@@ -258,7 +258,7 @@ async function main() {
   await client.page.setViewportSize({ width: Number(process.env.VW || 240), height: Number(process.env.VH || 150) });
   await host.page.click('#btn-start');
   await host.page.waitForSelector('#app[data-view="game"]');
-  await client.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+  await client.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
   check('Beide Bildschirme wechseln ins Rennen', true);
   await client.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
   check('Vier Karts am Start: zwei Menschen, zwei KI-Gegner', (await kart(host.page, 'standings()')).filter((s) => s.bot).length === 2);
@@ -475,7 +475,20 @@ async function main() {
         await sleep(250);
       }
     }
-    check('… und der Host führt weiterhin genau 2 Spieler', lobby.players.length === 2 && lobby.players[1].online, JSON.stringify(lobby.players.map((p) => [p.slot, p.name, p.online])));
+    // Direkt nach dem Neuladen baut der Mitspieler seine Welt auf; ohne Grafikkarte steht seine Seite dabei
+    // sekundenlang, und der Host kann ihn für einen Moment als getrennt führen. Entscheidend ist, dass es
+    // bei zwei Spielern bleibt und er von selbst wieder als verbunden erscheint.
+    const backSince = Date.now();
+    let backAfter = -1;
+    while (Date.now() - backSince < 12000) {
+      lobby = await kart(host.page, 'lobby()');
+      if (lobby.players.length === 2 && lobby.players[1].online) {
+        backAfter = Date.now() - backSince;
+        break;
+      }
+      await sleep(200);
+    }
+    check('… und der Host führt weiterhin genau 2 Spieler, Ben ist verbunden', backAfter >= 0, `${JSON.stringify(lobby.players.map((p) => [p.slot, p.name, p.online]))}${backAfter > 300 ? `, kurz getrennt – wieder da nach ${(backAfter / 1000).toFixed(1)} s` : ''}`);
     await client.page.waitForFunction(() => window.__kart.controller().connected, null, { timeout: 15000 });
     check('Handy B findet den neu geladenen Bildschirm von selbst wieder', true);
 
@@ -670,7 +683,7 @@ async function main() {
     await h5.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h5, c5]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h5.page.click('#btn-start');
-    await c5.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c5.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     const t0 = Date.now();
     await h5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 120000 });
     await c5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 5000 });
@@ -746,7 +759,7 @@ async function main() {
     await h6.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h6.page.click('#btn-start');
-    await c6.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c6.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c6.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 20000 });
     const [trH, trC] = await Promise.all([kart(h6.page, 'track()'), kart(c6.page, 'track()')]);
     check('Beide fahren auf der gewählten Strecke', trH.index === 1 && trC.index === 1, `${trH.name} / ${trC.name}, ${trH.length.toFixed(0)} m`);
@@ -807,6 +820,11 @@ async function main() {
     await sleep(300);
     const smoke = await Promise.all([kart(h6.page, 'things()'), kart(c6.page, 'things()')]);
     check('Nebelkerze: Rauchwolke auf beiden Bildschirmen', smoke.every((l) => l.some((t) => t.kind === 4)));
+    // Der Kreisel sucht den Fahrer einen Platz vor Anna. Damit das sicher Ben ist, stehen die
+    // KI-Gegner hinter beiden (sonst hängt es davon ab, wo sie nach einer Minute Rennen gerade sind).
+    await kart(h6.page, 'place(2, 12, -2)');
+    await kart(h6.page, 'place(3, 24, 2)');
+    await sleep(150);
     await useItem(4);
     let topSeen = [0, 0];
     let benHit = false;
@@ -888,6 +906,91 @@ async function main() {
     await c6.ctx.close();
   }
 
+  if (wants('mechanics')) {
+    // === Streckenmechanik ====================================================
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir');
+    const h7 = await openScreen('host7', '&laps=2');
+    const code7 = await createLobby(h7, 'Anna');
+    const c7 = await openScreen('client7', '&laps=2');
+    await joinLobby(c7, 'Ben', code7);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
+    const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
+    check('Streckenwahl nennt die Eigenheit der Nachtschicht', /Stadtverkehr/.test(twist || ''), twist || '');
+    await h7.page.locator('.track-card').nth(3).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 3, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    for (const s of [h7, c7]) await s.page.setViewportSize({ width: 240, height: 150 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 25000 });
+    await h7.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 5000 });
+    // Derselbe Verkehr auf beiden Bildschirmen: gleiche Rennzeit, gleiche Orte.
+    // "at" rechnet die Abfragezeit heraus: wo stünde das Fahrzeug zur Rennzeit 0?
+    const sample = (s) => s.page.evaluate(() => window.__kart.traffic().map((v) => ({ ...v, at0: v.at - (v.speed * v.time) / 60, wall: performance.timeOrigin + performance.now() })));
+    const [tH, tC] = await Promise.all([sample(h7), sample(c7)]);
+    check('Beide Bildschirme haben denselben Verkehr', tH.length > 30 && tH.length === tC.length, `${tH.length} / ${tC.length} Fahrzeuge`);
+    // Rennzeit beider Bildschirme auf denselben Augenblick umgerechnet (der Mitspieler eilt um die Laufzeit seiner Eingaben voraus)
+    const skew = Math.abs(tH[0].time + ((tC[0].wall - tH[0].wall) / 1000) * 60 - tC[0].time);
+    check('Rennzeit des Mitspielers läuft mit der des Hosts (Abweichung < 0,2 s)', skew < 12, `${(skew / 60).toFixed(3)} s`);
+    const lapLen = (await kart(h7.page, 'track()')).length;
+    const drift = Math.max(...tH.map((v, i) => { const d = Math.abs(v.at0 - tC[i].at0) % lapLen; return Math.min(d, lapLen - d); }));
+    check('Jedes Fahrzeug hat auf beiden Bildschirmen denselben Fahrplan', drift < 0.01, `größte Abweichung ${drift.toFixed(4)} m`);
+
+    // Auffahrunfall: Ben (Mitspieler, Tastatur) wird hinter einen Bus gesetzt und gibt Gas.
+    const sc0 = await kart(h7.page, 'scene()');
+    let crash = [0, 0];
+    let peak = 0;
+    for (let attempt = 0; attempt < 3 && (crash[0] === 0 || crash[1] === 0); attempt++) {
+      const buses = (await kart(h7.page, 'traffic()')).filter((v) => v.kind === 2);
+      // Ein Bus auf der Startgeraden oder einem anderen geraden Stück ist nicht nötig – 18 m dahinter reicht in jeder Lage.
+      const bus = buses[attempt % buses.length];
+      await kart(h7.page, `place(1, ${bus.at - bus.half - 18}, ${bus.lat})`);
+      await sleep(250);
+      await c7.page.keyboard.down('ArrowUp');
+      const until = Date.now() + 5000;
+      while (Date.now() < until && (crash[0] === 0 || crash[1] === 0)) {
+        const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+        crash[0] = Math.max(crash[0], eh.find((e) => e.slot === 1).spin);
+        crash[1] = Math.max(crash[1], ec.find((e) => e.slot === 1).spin);
+        await sleep(40);
+      }
+      await c7.page.keyboard.up('ArrowUp');
+      peak = Math.max(peak, (await kart(c7.page, 'clientStats()')).peak);
+    }
+    check('Auffahrunfall: Ben schleudert beim Host und auf seinem eigenen Bildschirm', crash[0] > 0 && crash[1] > 0, `${crash[0]} / ${crash[1]} Ticks`);
+    check('Verkehr wird gezeichnet', sc0 && sc0.triangles > 5000, sc0 ? `${sc0.calls} Zeichenaufrufe, ${sc0.triangles} Dreiecke` : '');
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Glutkessel: Anna steht auf einem Geysir, bis er ausbricht.
+    await h7.page.locator('.track-card').nth(2).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 2, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 2, null, { timeout: 30000 });
+    const vent = (await kart(h7.page, 'pulses()')).find((p) => p.kind === 0);
+    await kart(h7.page, `place(0, ${vent.at}, ${vent.lat})`);
+    let blown = [0, 0];
+    let air = false;
+    const untilV = Date.now() + (vent.period + 2) * 1000;
+    while (Date.now() < untilV && (blown[0] === 0 || blown[1] === 0)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const a = eh.find((e) => e.slot === 0);
+      blown[0] = Math.max(blown[0], a.spin);
+      blown[1] = Math.max(blown[1], ec.find((e) => e.slot === 0).spin);
+      if (a.flags & 8) air = true;
+      await sleep(40);
+    }
+    check('Geysir: Anna wird hochgeworfen und schleudert – auf beiden Bildschirmen', blown[0] > 0 && blown[1] > 0 && air, `${blown[0]} / ${blown[1]} Ticks, in der Luft: ${air}`);
+    await toLobby(h7.page);
+    await h7.ctx.close();
+    await c7.ctx.close();
+    // Der Browser räumt die beiden großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    await sleep(4000);
+  }
+
   if (wants('netsim')) {
     // === Schlechte Leitung ===================================================
     section('Simulierte schlechte Leitung: 80 ms + 25 ms Jitter + 5 % Verlust je Richtung');
@@ -901,7 +1004,7 @@ async function main() {
     await h3.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h3, c3]) await s.page.setViewportSize({ width: 240, height: 150 });
     await h3.page.click('#btn-start');
-    await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 8000 });
+    await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c3.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
     await sleep(1500);
     const link = await kart(c3.page, 'hostLink()');

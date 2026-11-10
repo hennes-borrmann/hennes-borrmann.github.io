@@ -25,7 +25,11 @@ import {
 import { EntityInterp, lerpState } from './interp';
 import {
   DT,
+  EV_BLOCK,
+  EV_DRAFT,
   EV_FALL,
+  EV_FLAT,
+  EV_HIT,
   EV_ITEM_READY,
   EV_LAND,
   EV_PAD,
@@ -56,6 +60,8 @@ interface Pending {
   cmd: Cmd;
   /** Durfte das Kart bei dieser Eingabe fahren? Muss beim erneuten Abspielen gleich bleiben. */
   canDrive: boolean;
+  /** Rennzeit dieses Schritts (Ticks seit "Los") – der Host rechnet ihn mit derselben nach. */
+  time: number;
 }
 
 interface Remote {
@@ -90,7 +96,14 @@ export class ClientGame implements GameView {
   private readonly prev = newState();
   private readonly replay = newState();
   private readonly scratch = newState();
-  private readonly env: StepEnv = { canDrive: false, speedFactor: 1 };
+  private readonly env: StepEnv = { canDrive: false, speedFactor: 1, time: 0 };
+  /**
+   * Rennzeit des letzten eigenen Schritts. Sie zählt mit jedem Schritt um eins
+   * weiter und wird nur sanft nachgeführt, wenn die Uhr des Hosts davonläuft –
+   * so springt der Verkehr nicht.
+   */
+  private envTime = Number.NaN;
+  private lastTickAt = 0;
   private readonly err = { x: 0, y: 0, z: 0, h: 0 };
   private readonly remotes = new Map<number, Remote>();
   private own: SnapshotKart | null = null;
@@ -125,6 +138,10 @@ export class ClientGame implements GameView {
     this.lastSnapTick = -1;
     this.pending = [];
     this.clockOffset = Number.NaN;
+    // Bis der Host wieder einen Stand geschickt hat, gibt es keinen Zeitbezug:
+    // nichts vorhersagen und nichts senden (sonst gingen Eingaben mit falscher Rennzeit hinaus).
+    this.ready = false;
+    this.envTime = Number.NaN;
   }
 
   /** Geschätzter Host-Tick zum Zeitpunkt, an dem der Snapshot von "jetzt" beim Host losging. */
@@ -156,21 +173,36 @@ export class ClientGame implements GameView {
     if (canDrive && !this.couldDrive && this.phase === RACE_COUNTDOWN) this.onFx?.('go');
     this.couldDrive = canDrive;
 
+    // Rennzeit, zu der diese Eingabe beim Host ankommt: sein bekannter Stand plus eine Umlaufzeit.
+    const target = Math.round(this.hostTick(nowSec) + this.rttTicks()) - this.goTick;
+    const next = this.envTime + 1;
+    const off = target - next;
+    this.envTime = Number.isNaN(next) || Math.abs(off) > 6 ? target : off >= 2 ? next + 1 : off <= -2 ? next - 1 : next;
+    this.lastTickAt = nowSec;
+
     this.seq++;
-    this.pending.push({ seq: this.seq, cmd: { steer: cmd.steer, buttons: cmd.buttons }, canDrive });
+    this.pending.push({ seq: this.seq, cmd: { steer: cmd.steer, buttons: cmd.buttons }, canDrive, time: this.envTime });
     if (this.pending.length > MAX_PENDING) this.pending.shift();
     copyState(this.prev, this.predicted);
     this.env.canDrive = canDrive;
+    this.env.time = this.envTime;
     const ev = stepKart(this.predicted, cmd, this.env);
-    if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD)) this.onFx?.('boost');
+    if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.onFx?.('boost');
+    if (ev & (EV_HIT | EV_FLAT)) this.onFx?.('hit');
+    if (ev & EV_BLOCK) this.onFx?.('block');
     if (ev & EV_WALL) this.onFx?.('wall');
     if (ev & EV_ITEM_READY) this.onFx?.('item');
     if (ev & EV_LAND) this.onFx?.('land');
     if (ev & EV_FALL) this.onFx?.('fall');
 
     this.stats.pending = this.pending.length;
-    const recent = this.pending.slice(-CMD_REDUNDANCY).map((p) => p.cmd);
-    return encodeCmds(this.seq, recent);
+    const recent = this.pending.slice(-CMD_REDUNDANCY);
+    return encodeCmds(
+      this.seq,
+      recent.map((p) => p.cmd),
+      recent.map((p) => p.time),
+      this.raceId,
+    );
   }
 
   onSnapshot(snap: Snapshot, nowSec: number): void {
@@ -193,6 +225,7 @@ export class ClientGame implements GameView {
       this.raceId = snap.raceId;
       this.hardSync = true;
       this.couldDrive = false;
+      this.envTime = Number.NaN;
       for (const r of this.remotes.values()) r.interp.reset();
     }
     this.phase = snap.phase;
@@ -261,6 +294,8 @@ export class ClientGame implements GameView {
       untilGo: Number.isNaN(this.clockOffset) ? 99 : (this.goTick - tick) / TICK_RATE,
       boxes: this.boxes,
       hostTick: tick,
+      // Der Verkehr wird im Takt des eigenen (vorhergesagten) Karts gezeichnet.
+      time: Number.isNaN(this.envTime) ? tick - this.goTick : this.envTime + Math.min(1, Math.max(0, (nowSec - this.lastTickAt) * TICK_RATE)),
     };
   }
 
@@ -300,6 +335,7 @@ export class ClientGame implements GameView {
     const r = copyState(this.replay, auth);
     for (const p of this.pending) {
       this.env.canDrive = p.canDrive;
+      this.env.time = p.time;
       stepKart(r, p.cmd, this.env);
     }
 

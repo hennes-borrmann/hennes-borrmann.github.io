@@ -32,6 +32,7 @@ import {
   type Cmd,
   type KartState,
 } from './sim';
+import { FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -45,6 +46,7 @@ import {
   rightX,
   rightZ,
   segDelta,
+  walk,
 } from './track';
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
@@ -88,6 +90,8 @@ export interface BotBrain {
 export interface BotContext {
   /** Host-Tick (für pendelnde Hindernisse). */
   tick: number;
+  /** Rennzeit in Ticks seit "Los" (für Verkehr, Geysire, Lava – siehe mechanics.ts). */
+  time: number;
   /** Aktueller Platz dieses Fahrers. */
   place: number;
   /** Fährt gerade durch eine Rauchwolke. */
@@ -134,6 +138,7 @@ function wrapAngle(a: number): number {
 }
 
 // Dieselben Grenzwerte wie in sim.ts (dort nicht exportiert, weil nur die KI sie zum Planen braucht).
+const KART_HALF = 1.0;
 const R_MIN = 4.5;
 const BASE_A_LAT = 31;
 const DRIFT_WIDE = 0.55;
@@ -174,6 +179,62 @@ function maxCurvatureAhead(toM: number): number {
   return max;
 }
 
+// --- Ausweichen: gesperrte Streifen quer zur Fahrbahn ---------------------------
+// Verkehr, Geysire und Lavabomben sperren je einen Streifen [von, bis] (seitliche
+// Lage in Metern). Die KI sucht den freien Streifen, der ihrer Wunschlinie und
+// ihrer jetzigen Lage am nächsten liegt.
+
+const BLOCK_LO = new Float64Array(24);
+const BLOCK_HI = new Float64Array(24);
+/** 1 = gleich da (unbedingt meiden), kleiner = noch ein Stück weg (nur ungern). */
+const BLOCK_W = new Float64Array(24);
+let blocks = 0;
+
+function block(lo: number, hi: number, weight: number): void {
+  if (blocks >= BLOCK_LO.length) return;
+  BLOCK_LO[blocks] = lo;
+  BLOCK_HI[blocks] = hi;
+  BLOCK_W[blocks] = weight;
+  blocks++;
+}
+
+/**
+ * Beste Lage innerhalb ±max: nie in einem Streifen, der gleich da ist; möglichst
+ * nicht in einem, der noch kommt; sonst nah an der Wunschlinie want und an der
+ * jetzigen Lage here. NaN = alles dicht.
+ */
+function freeLat(want: number, here: number, max: number): number {
+  let best = Number.NaN;
+  let bestCost = Infinity;
+  // Kandidaten: die Wunschlage, die jetzige Lage und die Ränder aller Streifen.
+  for (let c = -2; c < blocks * 2; c++) {
+    let cand = c === -2 ? want : c === -1 ? here : c % 2 === 0 ? BLOCK_LO[c >> 1] - 0.05 : BLOCK_HI[c >> 1] + 0.05;
+    cand = Math.max(-max, Math.min(max, cand));
+    let cost = Math.abs(cand - want) * 0.5 + Math.abs(cand - here);
+    for (let k = 0; k < blocks; k++) {
+      if (cand > BLOCK_LO[k] && cand < BLOCK_HI[k]) cost += BLOCK_W[k] >= 1 ? Infinity : 9 * BLOCK_W[k];
+    }
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = cand;
+    }
+  }
+  return best;
+}
+
+/**
+ * Seitliche Lage der Hauptstrecke aus Sicht des Abschnitts seg: 0 auf der
+ * Hauptstrecke selbst; an Gabelung und Einmündung der Versatz zur Nachbarin;
+ * NaN, wo die Abzweigung ihre eigenen Wege geht.
+ */
+function mainOffset(seg: number): number {
+  const t = TRACK;
+  if (t.branchOf[seg] < 0) return 0;
+  const m = t.twin[seg];
+  if (m < 0) return Number.NaN;
+  return (t.px[m] - t.px[seg]) * rightX(t, seg) + (t.pz[m] - t.pz[seg]) * rightZ(t, seg);
+}
+
 /** Bits aller Kanten-Eigenschaften der nächsten Meter (Lücke, fehlende Bande). */
 function edgesAhead(toM: number): number {
   const t = TRACK;
@@ -187,6 +248,9 @@ function edgesAhead(toM: number): number {
  * @param others Zustände der anderen Karts (für den Einsatz von Items)
  * @param racing false während Countdown und nach dem Ziel
  */
+/** Nur zur Fehlersuche in Tests: was die KI im letzten Schritt über den Verkehr dachte. */
+export const AI_TRACE = { here: 0, lat: 0, want: 0, jam: false, blocks: '' };
+
 export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: boolean, ctx: BotContext): Cmd {
   const t = TRACK;
   if (!racing || s.respawn > 0) {
@@ -214,7 +278,26 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     if (on === k && t.twin[s.seg] < 0) b.route |= 1 << k;
     else if (on < 0) {
       const d = segDelta(t, s.seg, t.branches[k].from);
-      if (d > DECIDE_AT && d <= DECIDE_AT + 2) b.route = random(b) < 0.5 ? b.route | (1 << k) : b.route & ~(1 << k);
+      if (d > DECIDE_AT && d <= DECIDE_AT + 2) {
+        let take = random(b) < 0.5;
+        // Liegt auf der Abzweigung ein Stück, durch das im Takt Lava läuft? Wer aufpasst,
+        // nimmt sie genau dann, wenn sie bei der Durchfahrt frei ist (die Ampel zeigt es an).
+        if (b.level > 0) {
+          for (const f of t.floods) {
+            if (f.branch !== k) continue;
+            const arrive = ctx.time + f.lead + (DECIDE_AT * t.step * 60) / 25;
+            take = floodPeak(f, arrive - 30, arrive + (f.count * t.step * 60) / 22) <= FLOOD_FROM;
+          }
+          // Steht die Hauptstrecke hinter der Gabelung bei Flut unter Wasser, lohnt die Abzweigung – bei Ebbe nicht.
+          if (t.tide && t.tidal[walk(t, t.branches[k].from, 40)]) {
+            const arrive = ctx.time + ((DECIDE_AT + 70) * t.step * 60) / 25;
+            const wet = tidePhase(t.tide, arrive);
+            if (wet > 0.6) take = true;
+            else if (wet < 0.15) take = false;
+          }
+        }
+        b.route = take ? b.route | (1 << k) : b.route & ~(1 << k);
+      }
     }
   }
   pathAhead(t, s.seg, b.route, PATH);
@@ -249,6 +332,102 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     lat = hl > 0 ? Math.min(lat, hl - 4.6) : Math.max(lat, hl + 4.6);
   }
   lat = Math.max(-maxLat, Math.min(maxLat, lat));
+
+  // --- Verkehr, Geysire, Lavabomben: gesperrte Streifen voraus ---
+  let jam = false;
+  /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
+  let close = false;
+  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide) && !air) {
+    blocks = 0;
+    projectOnTrack(t, s.x, s.z, s.seg);
+    const here = proj.lat;
+    // Der Verkehr fährt auf der Hauptstrecke. Wo meine Abzweigung noch (oder schon wieder) in ihr
+    // liegt, rechne ich seine Spuren in meine Sicht um: so weit liegt die Hauptstrecke seitlich neben mir.
+    const offHere = mainOffset(s.seg);
+    const offTarget = mainOffset(target);
+    const range = Math.min((PATH.length - 2) * t.step, 16 + v * 1.7);
+    /** Bei Flut: die höhere, flachere Seite der Fahrbahn (−1 links, 1 rechts, 0 = keine Flut hier). */
+    let shallow = 0;
+    // Im Verkehr nutzt die KI die Fahrbahn bis an den Rand.
+    const room = t.vehicles.length > 0 && !openAhead ? Math.max(maxLat, t.rh[target] - 0.9) : maxLat;
+    if (t.vehicles.length > 0) {
+      const lap = t.n * t.step;
+      const mine = t.prog[s.seg] * t.step + proj.along;
+      for (const veh of t.vehicles) {
+        // Abstand zur Fahrzeugmitte des vordersten Wagens, entlang der Hauptstrecke
+        let d = vehicleAt(veh, ctx.time, lap) - mine;
+        if (d > lap / 2) d -= lap;
+        else if (d < -lap / 2) d += lap;
+        const rear = d - (veh.cars - 1) * veh.pitch - veh.half;
+        const front = d + veh.half;
+        if (front < -1.5 || rear > range) continue;
+        // Nur, wenn mein Weg dort auf der Hauptstrecke liegt (nicht auf den Dächern oder in der Röhre).
+        const there = aheadSeg(Math.max(0, rear));
+        if (t.branchOf[there] >= 0 && t.twin[there] < 0) continue;
+        if (Number.isNaN(offTarget) || Number.isNaN(offHere)) continue;
+        // Wer langsamer ist als das Fahrzeug und dahinter, holt es nicht ein.
+        if (rear > 6 && vf < veh.speed + 1) continue;
+        const vl = (veh.lat * t.rh[target]) / t.def.roadHalf;
+        // Wie bald bin ich dort? Was in zwei Sekunden neben mir ist, zählt voll.
+        const eta = rear <= 0 ? 0 : rear / Math.max(2, vf - veh.speed);
+        // In der Kurve schwenkt das Heck eines langen Fahrzeugs aus; im Drift fährt man selbst ungenauer.
+        const margin = KART_HALF + 0.6 + veh.half * veh.half * Math.abs(t.curv[there]) * 0.5 + (s.driftDir !== 0 ? 0.4 : 0);
+        if (eta < 1.2) close = true;
+        block(vl - offTarget - veh.halfWidth - margin, vl - offTarget + veh.halfWidth + margin, eta < 2 ? 1 : Math.max(0.15, 1 - (eta - 2) / 3));
+        // Direkt davor und zu schnell: vom Gas.
+        if (rear > 0 && rear < 5 + (vf - veh.speed) * 0.7 && Math.abs(here - (vl - offHere)) < veh.halfWidth + margin - 0.3) jam = true;
+      }
+    }
+    for (const p of t.pulses) {
+      let d = -1;
+      for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
+        if (PATH[k] === p.seg) {
+          d = k * t.step;
+          break;
+        }
+      }
+      if (d < 0) continue;
+      // Ist die Stelle gefährlich, wenn ich dort ankomme (mit etwas Spielraum davor und danach)?
+      const eta = (d / Math.max(v, 8)) * 60;
+      const c0 = pulseCycle(p, ctx.time + eta - 14);
+      const c1 = pulseCycle(p, ctx.time + eta + 14);
+      if (c0 < p.on || c1 < p.on || c1 < c0) block(p.lat - p.radius - KART_HALF - 0.5, p.lat + p.radius + KART_HALF + 0.5, 1);
+    }
+    AI_TRACE.here = here;
+    AI_TRACE.want = lat;
+    AI_TRACE.blocks = '';
+    for (let k = 0; k < blocks; k++) AI_TRACE.blocks += `[${BLOCK_LO[k].toFixed(1)},${BLOCK_HI[k].toFixed(1)} w${BLOCK_W[k].toFixed(1)}]`;
+    // Förderbänder: auf das schnellste Band zuhalten, rückwärts laufende meiden.
+    for (const belt of t.belts) {
+      if (target < belt.first || target >= belt.first + belt.count) continue;
+      if (belt.along > 1) lat = Math.max(belt.lat0 + 0.9, Math.min(belt.lat1 - 0.9, lat));
+      else if (belt.along < -1) block(belt.lat0 - 0.4, belt.lat1 + 0.4, 0.5);
+    }
+    // Flut: wo das Wasser bei meiner Ankunft tiefer als eine Handbreit steht, lieber nicht fahren.
+    if (t.tide && t.tidal[target]) {
+      const level = tideLevel(t.tide, ctx.time + (look / Math.max(v, 8)) * 60) + 0.05;
+      const tilt = t.bank[target];
+      const dry = t.py[target] + 0.12;
+      if (Math.abs(tilt) > 0.012) {
+        // Die Wasserlinie quer zur Fahrbahn: auf der tiefen Seite steht es, auf der hohen ist es trocken.
+        // Steht es auf der Wunschlinie mehr als knöcheltief, wird ausgewichen – sonst nur, wenn es wenig kostet.
+        const line = (level - dry) / tilt;
+        const weight = level - (t.py[target] + lat * tilt) > 0.15 ? 1 : 0.5;
+        if (tilt > 0) block(-99, line + 0.9, weight);
+        else block(line - 0.9, 99, weight);
+        shallow = tilt > 0 ? 1 : -1;
+      }
+    }
+    if (blocks > 0) {
+      const free = freeLat(lat, here, room);
+      // Alles dicht? Im Verkehr heißt das bremsen; steht nur überall Wasser, dann dort durch, wo es am flachsten ist.
+      if (!Number.isNaN(free)) lat = free;
+      else if (t.vehicles.length > 0) jam = true;
+      else if (shallow !== 0) lat = shallow * room;
+    }
+  }
+  AI_TRACE.lat = lat;
+  AI_TRACE.jam = jam;
   const txp = t.px[target] + rightX(t, target) * lat;
   const tzp = t.pz[target] + rightZ(t, target) * lat;
   const err = wrapAngle(Math.atan2(txp - s.x, tzp - s.z) - s.heading);
@@ -270,7 +449,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // --- Tempo: so schnell, wie die engste Stelle voraus es zulässt ---
   const brakeDist = (v * v) / 70 + 8;
   const tight = maxCurvatureAhead(brakeDist);
-  const mayDrift = !openAhead && !gapAhead;
+  const mayDrift = !openAhead && !gapAhead && !close;
   // Wer driftet, kommt enger herum als mit normaler Lenkung und darf schneller hinein.
   const cornering = tight > b.driftFrom && mayDrift ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * (openAhead ? 0.8 : 0.92);
   const limit = tight > 1e-4 ? Math.sqrt(cornering / tight) : 99;
@@ -278,6 +457,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // Vor einem Sprung zählt nur Anlauf.
   if (gapAhead || v < limit + 0.5) buttons |= BTN_GAS;
   else if (v > limit + 5) buttons |= BTN_BRAKE;
+  // Kein Durchkommen im Verkehr: bremsen, bis sich eine Lücke auftut.
+  if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > 13 ? BTN_BRAKE : 0);
 
   // --- Lenken und Driften ---
   const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (SURFACES[t.surf[s.seg]] ?? SURFACES[0]).grip) / v);
@@ -290,6 +471,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const stillTurning = near * s.driftDir > 1 / 55;
     // Mindestens bis Stufe 1 halten, sofern die Kurve nicht schon vorbei ist.
     if (mayDrift && (stillTurning || (b.drifting < 40 && near * s.driftDir > 1 / 120))) buttons |= BTN_DRIFT;
+    // Hinter einem Fahrzeug eingeklemmt: Drift halten – loslassen würde den Mini-Turbo zünden.
+    if (jam) buttons |= BTN_DRIFT;
     const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
     const into = ((k - DRIFT_WIDE) / (DRIFT_TIGHT - DRIFT_WIDE)) * 2 - 1;
     steer = Math.max(-1, Math.min(1, into)) * s.driftDir;

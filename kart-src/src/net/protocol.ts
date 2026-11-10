@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -143,34 +143,62 @@ export function seq16Newer(a: number, b: number): boolean {
 }
 
 // --- Binär: Eingaben Client → Host ------------------------------------------
-// [u8 typ][u32 seq der neuesten Eingabe][u8 anzahl][anzahl × (i8 lenkung, u8 tasten)]
+// [u8 typ][u32 seq der neuesten Eingabe][u8 anzahl][i32 rennzeit der neuesten Eingabe][u8 rennen-nr]
+// [anzahl × (i8 lenkung, u8 tasten, u8 abstand)]
 // Die Eingaben stehen alt → neu. Jedes Paket wiederholt die letzten paar,
 // damit ein einzelnes verlorenes Paket keine Lücke reißt.
+//
+// Die Rennzeit (Ticks seit "Los") ist der Takt, mit dem der Client diesen
+// Schritt gerechnet hat – der Host rechnet ihn mit derselben Zeit nach. Meist
+// liegt jede Eingabe einen Tick nach der vorigen, aber nicht immer (die Uhr
+// des Clients wird nachgeführt): deshalb trägt jede Eingabe ihren "abstand" –
+// so viele Ticks liegt die nächste (neuere) nach ihr; bei der neuesten 0.
+// Die Rennen-Nr. verhindert, dass ein verspätetes Paket aus dem vorigen Rennen
+// im neuen ausgeführt wird.
 
 export const CMD_REDUNDANCY = 4;
+const CMD_HEADER = 11;
+const CMD_SIZE = 3;
 
-export function encodeCmds(newestSeq: number, cmds: Cmd[]): ArrayBuffer {
-  const buf = new ArrayBuffer(6 + cmds.length * 2);
+/**
+ * @param times  Rennzeit je Eingabe (gleiche Reihenfolge wie cmds); ohne Angabe überall 0
+ * @param raceId Nummer des Rennens, für das die Eingaben gelten
+ */
+export function encodeCmds(newestSeq: number, cmds: Cmd[], times: number[] = [], raceId = 0): ArrayBuffer {
+  const buf = new ArrayBuffer(CMD_HEADER + cmds.length * CMD_SIZE);
   const v = new DataView(buf);
+  const n = cmds.length;
   v.setUint8(0, PKT_CMD);
   v.setUint32(1, newestSeq);
-  v.setUint8(5, cmds.length);
-  for (let i = 0; i < cmds.length; i++) {
-    v.setInt8(6 + i * 2, cmds[i].steer);
-    v.setUint8(7 + i * 2, cmds[i].buttons);
+  v.setUint8(5, n);
+  v.setInt32(6, n > 0 ? (times[n - 1] ?? 0) : 0);
+  v.setUint8(10, raceId & 0xff);
+  for (let i = 0; i < n; i++) {
+    const o = CMD_HEADER + i * CMD_SIZE;
+    v.setInt8(o, cmds[i].steer);
+    v.setUint8(o + 1, cmds[i].buttons);
+    v.setUint8(o + 2, i < n - 1 ? Math.max(0, Math.min(255, (times[i + 1] ?? 0) - (times[i] ?? 0))) : 0);
   }
   return buf;
 }
 
-export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[] } | null {
-  if (view.byteLength < 6) return null;
+export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; times: number[]; raceId: number } | null {
+  if (view.byteLength < CMD_HEADER) return null;
   const count = view.getUint8(5);
-  if (view.byteLength < 6 + count * 2) return null;
+  if (view.byteLength < CMD_HEADER + count * CMD_SIZE) return null;
   const cmds: Cmd[] = [];
+  const times: number[] = new Array<number>(count);
   for (let i = 0; i < count; i++) {
-    cmds.push({ steer: view.getInt8(6 + i * 2), buttons: view.getUint8(7 + i * 2) });
+    const o = CMD_HEADER + i * CMD_SIZE;
+    cmds.push({ steer: view.getInt8(o), buttons: view.getUint8(o + 1) });
   }
-  return { newestSeq: view.getUint32(1), cmds };
+  // Zeiten von der neuesten rückwärts aufbauen
+  let time = view.getInt32(6);
+  for (let i = count - 1; i >= 0; i--) {
+    if (i < count - 1) time -= view.getUint8(CMD_HEADER + i * CMD_SIZE + 2);
+    times[i] = time;
+  }
+  return { newestSeq: view.getUint32(1), cmds, times, raceId: view.getUint8(10) };
 }
 
 // --- Binär: Snapshot Host → Client ------------------------------------------
@@ -179,7 +207,7 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[] } |
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
 //        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 44 Byte]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 46 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)
@@ -197,7 +225,7 @@ export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 
-const STATE_SIZE = 44;
+const STATE_SIZE = 46;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
 const SNAP_THING_SIZE = 24;
@@ -268,6 +296,8 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 41, s.flags);
   v.setUint8(o + 42, s.char);
   v.setUint8(o + 43, s.tow);
+  v.setUint8(o + 44, s.draft);
+  v.setUint8(o + 45, s.flat);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -295,6 +325,8 @@ function readState(v: DataView, o: number): KartState {
     flags: v.getUint8(o + 41),
     char: v.getUint8(o + 42),
     tow: v.getUint8(o + 43),
+    draft: v.getUint8(o + 44),
+    flat: v.getUint8(o + 45),
   };
 }
 

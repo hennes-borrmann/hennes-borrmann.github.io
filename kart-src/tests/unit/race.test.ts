@@ -3,10 +3,11 @@ import { botCmd, newBrain } from '../../src/game/ai';
 import { ClientGame } from '../../src/game/clientGame';
 import { HostGame } from '../../src/game/hostGame';
 import { ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
-import { TRACK } from '../../src/game/track';
-import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot } from '../../src/net/protocol';
+import { TRACK, setTrack } from '../../src/game/track';
+import { withoutMechanics } from './helpers';
+import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot, encodeCmds } from '../../src/net/protocol';
 
-const CTX = { tick: 0, place: 1, smoke: false };
+const CTX = { tick: 0, time: 0, place: 1, smoke: false };
 const count = (host: HostGame, kind: number): number => host.things().filter((t) => t.kind === kind).length;
 
 function rng(seed: number): () => number {
@@ -134,7 +135,7 @@ interface Packet {
 }
 
 /** Host und ein Client (dessen Kart per KI gelenkt wird) über eine simulierte Leitung. */
-function simulate(opts: { lag: number; jitter: number; loss: number; laps: number; maxSeconds: number }) {
+function simulate(opts: { lag: number; jitter: number; loss: number; laps: number; maxSeconds: number; blind?: boolean }) {
   const rand = rng(99);
   const host = new HostGame(0, { laps: opts.laps });
   host.setRoster([0, 1], true);
@@ -163,11 +164,13 @@ function simulate(opts: { lag: number; jitter: number; loss: number; laps: numbe
   let startCorrection = 0;
   let movedEarly = false;
   let goSeenAt = -1;
+  let hits = 0;
+  let lastSpin = 0;
   let now = 0;
   for (; now < opts.maxSeconds * 1000 && host.phase !== RACE_RESULTS; now++) {
     deliver(up, now, (d) => {
       const c = decodeCmds(new DataView(d))!;
-      host.receiveCmds(1, c.newestSeq, c.cmds);
+      host.receiveCmds(1, c.newestSeq, c.cmds, c.times, c.raceId);
     });
     deliver(down, now, (d) => {
       const wasRunning = host.phase === RACE_RUNNING;
@@ -180,7 +183,13 @@ function simulate(opts: { lag: number; jitter: number; loss: number; laps: numbe
     while (hostAcc >= stepMs) {
       hostAcc -= stepMs;
       const before = host.phase;
-      host.step(botCmd(host.authoritative(0)!, brainHost, [], host.localCanDrive(), CTX));
+      // (nicht host.race().time: das rechnet mit der echten Uhr und wäre von Lauf zu Lauf verschieden)
+      const hostTime = host.tick - host.goTick;
+      host.step(botCmd(host.authoritative(0)!, brainHost, [], host.localCanDrive(), { ...CTX, tick: host.tick, time: hostTime }));
+      // Treffer des Mitspielers zählen (Beginn eines Drehers)
+      const spin = host.authoritative(1)!.spin;
+      if (spin > lastSpin) hits++;
+      lastSpin = spin;
       if (before === RACE_COUNTDOWN && host.phase === RACE_RUNNING) goSeenAt = now;
       if (host.phase === RACE_COUNTDOWN && Math.abs(forwardSpeed(host.authoritative(1)!)) > 0.01) movedEarly = true;
       if (host.tick % 2 === 0) send(down, now, host.snapshot());
@@ -189,17 +198,23 @@ function simulate(opts: { lag: number; jitter: number; loss: number; laps: numbe
     while (clientAcc >= stepMs) {
       clientAcc -= stepMs;
       const t = now / 1000;
-      const cmd = client.ready ? botCmd(client.predictedState(), brainClient, [], client.localCanDrive(t), CTX) : NEUTRAL;
+      const time = Math.floor(client.race(t).time);
+      const steer = (): Cmd => botCmd(client.predictedState(), brainClient, [], client.localCanDrive(t), { ...CTX, tick: time, time });
+      // blind = der Mitspieler lenkt, als gäbe es keinen Verkehr – er fährt also ständig auf und streift.
+      const cmd = client.ready ? (opts.blind ? withoutMechanics(steer) : steer()) : NEUTRAL;
       const pkt = client.tick(cmd, t);
       if (pkt) send(up, now, pkt);
     }
   }
+  // Der Host sendet auch nach dem Zieleinlauf weiter: der Endstand kommt beim Mitspieler an.
+  client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, now / 1000 + 0.05);
   corrections.sort((a, b) => a - b);
   const pct = (p: number): number => corrections[Math.min(corrections.length - 1, Math.floor(corrections.length * p))] ?? 0;
   return {
     host,
     client,
     seconds: now / 1000,
+    hits,
     startCorrection,
     movedEarly,
     median: pct(0.5),
@@ -234,6 +249,68 @@ describe('Rennen über das Netz (simuliert)', () => {
     expect(r.host.standings().find((s) => s.slot === 1)!.finished).toBe(true);
     expect(r.median).toBeLessThan(0.02);
     expect(r.bigShare).toBeLessThan(0.05);
+  });
+
+  it('Nachtschicht: Zusammenstöße mit dem Verkehr sagt der Bildschirm des Mitspielers selbst richtig vorher', () => {
+    setTrack(3);
+    try {
+      // Der Mitspieler fährt blind durch den Verkehr: viele Auffahrunfälle und Streifer.
+      const r = simulate({ lag: 40, jitter: 12, loss: 1, laps: 1, maxSeconds: 200, blind: true });
+      console.log(
+        `Nachtschicht, 40 ms: Rennen ${r.seconds.toFixed(0)} s, ${r.hits} Treffer; Korrektur Median ${(r.median * 100).toFixed(2)} cm, 99 % unter ${(r.p99 * 100).toFixed(1)} cm, größte ${(r.max * 100).toFixed(0)} cm, Anteil über 50 cm: ${(r.bigShare * 100).toFixed(2)} %`,
+      );
+      expect(r.host.standings().find((s) => s.slot === 1)!.finished).toBe(true);
+      // Es hat wirklich gekracht (wie oft, hängt von den ausgelosten Items ab) …
+      expect(r.hits).toBeGreaterThanOrEqual(1);
+      // … und trotzdem musste der Host kaum etwas zurechtrücken: die Rennzeit reist mit jeder Eingabe mit.
+      expect(r.median).toBeLessThan(0.02);
+      expect(r.bigShare).toBeLessThan(0.05);
+    } finally {
+      setTrack(0);
+    }
+  });
+
+  it('ein verspätetes Eingabepaket aus dem vorigen Rennen wird nicht im neuen ausgeführt', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    const old = host.raceId;
+    const packet = decodeCmds(new DataView(encodeCmds(1, [{ steer: 0, buttons: 1 }], [5], old)))!;
+    host.newRace();
+    host.receiveCmds(1, packet.newestSeq, packet.cmds, packet.times, packet.raceId);
+    host.step(NEUTRAL);
+    expect(JSON.parse(JSON.stringify(host.snapshot().byteLength))).toBeGreaterThan(0);
+    const snap = decodeSnapshot(new DataView(host.snapshot()))!;
+    // nichts bestätigt: die Eingabe wurde verworfen
+    expect(snap.karts.find((k) => k.slot === 1)!.ack).toBe(0);
+    // Ein Paket für das laufende Rennen kommt an.
+    host.receiveCmds(1, 1, [{ steer: 0, buttons: 1 }], [5], host.raceId);
+    host.step(NEUTRAL);
+    expect(decodeSnapshot(new DataView(host.snapshot()))!.karts.find((k) => k.slot === 1)!.ack).toBe(1);
+  });
+
+  it('nach einem Verbindungsabbruch sendet der Mitspieler nichts, bis der Host wieder einen Stand geschickt hat', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    for (let i = 0; i < 400; i++) host.step(NEUTRAL);
+    const client = new ClientGame(1, () => 0);
+    client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, host.tick / 60);
+    expect(client.ready).toBe(true);
+    const first = client.tick({ steer: 0, buttons: 1 }, (host.tick + 1) / 60);
+    expect(first).not.toBeNull();
+    // Die Rennzeit im Paket ist die des Hosts (hier ohne Laufzeit) – nicht null und nicht irgendetwas.
+    const sent = decodeCmds(new DataView(first!))!;
+    expect(Math.abs(sent.times[sent.times.length - 1] - (host.tick + 1 - host.goTick))).toBeLessThanOrEqual(1);
+    expect(sent.raceId).toBe(host.raceId);
+    client.resync();
+    expect(client.ready).toBe(false);
+    expect(client.tick({ steer: 0, buttons: 1 }, (host.tick + 2) / 60)).toBeNull();
+    for (let i = 0; i < 3; i++) host.step(NEUTRAL);
+    client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, host.tick / 60);
+    expect(client.ready).toBe(true);
+    const again = decodeCmds(new DataView(client.tick({ steer: 0, buttons: 1 }, (host.tick + 1) / 60)!))!;
+    expect(Math.abs(again.times[again.times.length - 1] - (host.tick + 1 - host.goTick))).toBeLessThanOrEqual(1);
   });
 
   it('Strecke hat Kisten und Boost-Felder an sinnvollen Stellen', () => {

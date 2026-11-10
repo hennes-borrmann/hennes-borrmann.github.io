@@ -13,7 +13,8 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { TRACK, TRACK_COUNT, setTrack } from '../game/track';
+import { vehicleAt } from '../game/mechanics';
+import { TRACK, TRACK_COUNT, newVehiclePose, setTrack, vehiclePose } from '../game/track';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
 import { HostLobby } from '../lobby/hostLobby';
@@ -457,7 +458,7 @@ export class App {
     lobby.onFast = (slot, view) => {
       if (!this.hostGame || view.getUint8(0) !== PKT_CMD) return;
       const d = decodeCmds(view);
-      if (d) this.hostGame.receiveCmds(slot, d.newestSeq, d.cmds);
+      if (d) this.hostGame.receiveCmds(slot, d.newestSeq, d.cmds, d.times, d.raceId);
     };
 
     this.setRoomInUrl(code);
@@ -813,7 +814,8 @@ export class App {
     if (this.autoBrain) {
       const state = this.localState();
       const canDrive = this.hostGame ? this.hostGame.localCanDrive() : (this.clientGame?.localCanDrive(now) ?? false);
-      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive, { tick: this.ticks, place: 1, smoke: false });
+      const time = Math.floor((this.hostGame ?? this.clientGame)?.race(now).time ?? 0);
+      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive, { tick: this.ticks, time, place: 1, smoke: false });
     }
     this.lastCmd = cmd;
     if (this.hostGame && this.hostLobby) {
@@ -882,7 +884,7 @@ export class App {
     this.ui.setHudNoteVisible(race.phase === RACE_COUNTDOWN);
     // Während der Kamerafahrt vor der Ampel: Name der Strecke
     const intro = race.phase === RACE_COUNTDOWN && race.untilGo > 3.15 && race.untilGo < COUNTDOWN_TICKS / TICK_RATE;
-    this.ui.setRaceTitle(intro ? TRACK.def.name : null, `Strecke ${TRACK.index + 1} · ${race.laps} ${race.laps === 1 ? 'Runde' : 'Runden'}`);
+    this.ui.setRaceTitle(intro ? TRACK.def.name : null, `Strecke ${TRACK.index + 1} · ${race.laps} ${race.laps === 1 ? 'Runde' : 'Runden'}`, TRACK.def.twist ?? '');
     this.sound.roulette((me?.roulette ?? 0) > 0, nowMs);
     const threat = race.phase === RACE_RUNNING ? (this.scene?.threat ?? 0) : 0;
     this.sound.warn(threat, nowMs);
@@ -1158,6 +1160,19 @@ export class App {
         }
         return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
       },
+      // Streckenmechanik, wie dieser Bildschirm sie gerade sieht: Verkehr (Meter hinter der
+      // Startlinie, Spur, Ort) und die Stellen der Geysire und Lavabomben.
+      traffic: () => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = view ? view.race(performance.now() / 1000).time : 0;
+        const pose = newVehiclePose();
+        const lap = TRACK.n * TRACK.step;
+        return TRACK.vehicles.map((v) => {
+          const p = vehiclePose(TRACK, v, 0, time, pose);
+          return { id: v.id, kind: v.kind, lat: p.lat, half: v.half, speed: v.speed, at: vehicleAt(v, time, lap), x: p.x, y: p.y, z: p.z, time };
+        });
+      },
+      pulses: () => TRACK.pulses.map((p) => ({ kind: p.kind, lat: p.lat, at: TRACK.prog[p.seg] * TRACK.step, period: p.period / 60 })),
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
       tree: () => this.scene?.debugTree() ?? [],
       buildTimes: () => this.scene?.buildTimes() ?? [],

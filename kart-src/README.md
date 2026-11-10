@@ -2,7 +2,7 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 3 mit Ausbau Schritt 3.** Vier Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+**Stand: Phase 3 mit Ausbau Schritt 4.** Vier Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen – zwei davon mit eigener Streckenmechanik (Stadtverkehr auf der Nachtschicht; Geysire, Lavabomben und Lavaschwall im Glutkessel) –, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
 
 Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
@@ -36,7 +36,14 @@ Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scanne
 
 **Abzweigungen:** Jede Strecke teilt sich zweimal. Beide Wege zählen für Runden und Platzierung gleich und dauern ähnlich lange; der eine ist meist sicherer, der andere riskanter (Sprung, keine Bande) oder enger. Eine gelbe Tafel im Keil zeigt die Gabelung an. Solange beide Fahrbahnen ineinander liegen, steht zwischen ihnen keine Begrenzung, sie liegen in einer Ebene, und jede Stelle wird nur einmal gezeichnet: die Hauptstrecke hat Vorrang und zieht ihre Randlinie gestrichelt über die Öffnung, die Abzweigung beginnt an ihrem Fahrbahnrand. Erst hinter dem Keil findet die Abzweigung zu ihrer eigenen Höhe. Zwei Tests prüfen das auf allen Strecken.
 
-**Untergründe** fahren sich verschieden: Sand und Schotter sind rutschig und etwas langsamer, der Waldweg leicht rutschig, die Wiese weich, Fels und Neon-Asphalt griffig, Stahl schnell, aber glatt, Pflaster holprig. Auf losem Grund zieht das Kart eine Staubfahne. Jede Sorte hat ihre eigene Begrenzung – Holzzaun, Seil, Felswall, Mauer, Leitplanke.
+**Streckenmechanik:** Jede Strecke soll sich nicht nur anders ansehen, sondern anders fahren. Den Anfang machen zwei:
+
+- **Nachtschicht – Stadtverkehr.** Auf der Hochstraße fahren rund 40 Fahrzeuge in drei Spuren mit: links die Straßenbahn auf ihrem Gleis und Taxis, in der Mitte Taxis und Lieferwagen, rechts langsamer die Busse. Die Spuren sind so besetzt, dass nebeneinander höchstens zwei Fahrzeuge fahren – eine ganze Spur ist immer frei. Wer mit Tempo ins Heck fährt, schleudert; seitlich streift man nur entlang, und eine gestreifte Ecke kostet Tempo, aber keinen Dreher. Dicht hinter einem Fahrzeug lädt der **Windschatten** (die Tempostriche wachsen); wer geladen ausschert, wird gut eine Sekunde lang schneller („SOG!“). Die Dächer und die Röhre sind verkehrsfrei.
+- **Glutkessel – der Vulkan spielt mit.** Geysire sitzen in Reihen quer über der Bahn und brechen reihum aus – eine Spur bleibt immer frei; wer über einem steht, wird hochgeworfen. Lavabomben kündigen sich mit einem wachsenden Schatten an und lassen kurz eine Glutpfütze zurück. Durch die Höhle schießt im Takt ein Lavaschwall, der das Kart auf halbes Tempo bremst: bei freier Bahn ist die Höhle der schnellere Weg, bei Lava der langsamere. Die Ampel vor der Gabelung zeigt, wie es bei der Durchfahrt sein wird.
+
+All das läuft nach einem festen Fahrplan (Rennzeit seit „Los“), ist also auf jedem Bildschirm gleich und in jedem Rennen gleich – man kann es lernen. Werkshof und Möwenklippe bekommen ihre Eigenheit im nächsten Schritt.
+
+**Untergründe** fahren sich deutlich verschieden: Sand und Schotter rutschen stark und kosten Tempo, laden dafür den Drift schneller; der Waldweg lässt das Heck arbeiten, die Wiese bremst; Fels und Neon-Asphalt kleben; Stahl ist am schnellsten, aber glatt – auch beim Bremsen; Pflaster ist holprig. Auf losem Grund zieht das Kart eine Staubfahne. Jede Sorte hat ihre eigene Begrenzung – Holzzaun, Seil, Felswall, Mauer, Leitplanke.
 
 **Steilkurven** sind nach innen geneigt und geben Halt: man kommt deutlich schneller herum als in einer flachen Kurve.
 
@@ -176,15 +183,19 @@ src/net/         Verbindungsschicht: Signaling-Endpunkt, Link (zuverlässiger + 
 src/lobby/       Lobby auf dem Host und auf den Mitspieler-Bildschirmen, Platzvergabe, Wiedereinstieg
 src/controller/  Handy-Seite: Neigung → Lenkwert, Kalibrierung, Touch-Tasten, Verbindung zum Bildschirm
 src/game/        sim.ts Fahrphysik (Ebene + Höhe, Sprünge, Abstürze) · track.ts Streckenbau · tracks.ts die vier Strecken
+                 · mechanics.ts Streckenmechanik (Verkehr, Geysire, Lavabomben, Lavaschwall) als Funktion der Rennzeit
                  · ai.ts KI-Fahrer · hostGame.ts Rennen auf dem Host (Ablauf, Items, Rempler, Hindernisse)
                  · clientGame.ts Vorhersage/Abgleich · interp.ts Interpolation
 src/render/      three.js-Szene: world.ts Fahrbahn, Gelände, Himmel · scenery.ts Kulissen · kartModel.ts Figuren
-                 · things.ts Items und Hindernisse · effects.ts Teilchen, Spuren, Comic-Wörter · toon.ts Farbstufen und Kontur
+                 · things.ts Items und Hindernisse · mechanics.ts (+ mechanics/) Verkehr und Lava
+                 · effects.ts Teilchen, Spuren, Comic-Wörter · toon.ts Farbstufen und Kontur
 src/audio/       Ton: Mischpult, Motoren, Geräusche, Musik – alles zur Laufzeit erzeugt
 src/screen/      Ablauf und Oberfläche des Bildschirms (Lobby, Renn-Anzeige, Minikarte, Einstellungen)
 ```
 
 Netzwerkmodell: Der Lobby-Ersteller rechnet das Rennen. Die anderen schicken ihre Eingaben (60/s) und bekommen den kompletten Spielstand zurück (30/s). Das eigene Kart wird vorhergesagt – samt Drift, Schub, Bande, Sprüngen, Abstürzen und Boost-Feldern – und beim Eintreffen des Host-Stands abgeglichen. Fremde Karts werden 85 ms verzögert interpoliert. Rempler, Treffer, Kisten und Hindernisse entscheidet allein der Host.
+
+**Streckenmechanik und Netz:** Verkehr, Geysire und Lava stehen nicht im Spielstand und reisen nicht über das Netz. Ihre Stellung ist eine reine Funktion der Rennzeit (Ticks seit „Los“), die jeder Bildschirm selbst ausrechnet. Damit die Vorhersage auch dann stimmt, wenn ein Mitspieler einen Bus streift, gehört die Rennzeit zu jeder Eingabe: sein Bildschirm rechnet den Schritt mit seiner Rennzeit, schickt sie mit, und der Host rechnet denselben Schritt mit genau dieser Zeit nach. Im simulierten Netz (40 ms, Schwankung, Paketverlust, blind durch den Verkehr gelenkt) bleiben 99 % der Korrekturen unter 5 cm.
 
 Eine neue Strecke ist nur eine weitere Beschreibung in `src/game/tracks.ts` (Stützpunkte mit Höhe, dazu Schanzen, Lücken, offene Kanten, Boost-Felder, Kisten); Gelände, Kulissen und Minikarte entstehen daraus von selbst.
 
@@ -205,7 +216,7 @@ Es gibt keine Tondateien. Motoren, Geräusche und Musik werden im Browser mit de
 npm test             # Unit-Tests: Physik, Strecken, KI auf allen Strecken, Items, Netzcode
 npm run signal       # lokaler Signaling-Server (Port 9000) für den Browser-Test
 npm run build && npm run preview -- --port 4173
-node tests/e2e/run.cjs   # Browser-Test in Chromium: Lobby, Kopplung, Rennen, Wiederverbindung, Phase 3
+node tests/e2e/run.cjs   # Browser-Test in Chromium: Lobby, Kopplung, Rennen, Wiederverbindung, Phase 3, Streckenmechanik
 ```
 
 Der Browser-Test läuft auf einem Rechner über die lokale Schleife. Er sagt nichts über echte Netze, Safari, iOS-Berechtigungen, echte Neigungssensoren oder die Bildrate eines iPads.
@@ -214,8 +225,11 @@ Der Browser-Test läuft auf einem Rechner über die lokale Schleife. Er sagt nic
 
 - **Nicht auf echten Geräten geprüft** (von mir aus): iPhone/iPad, Safari, echte Sensoren, echte Netze, Bildrate auf dem iPad, Höreindruck des Tons.
 - **Größere Welten:** Seit den langen Strecken zeichnet das Spiel rund doppelt so viele Dreiecke wie vorher (je nach Strecke etwa 110 000–150 000 in hoher Qualität). Ob das auf jedem iPad flüssig bleibt, ist nicht gemessen; notfalls in den Einstellungen die Qualität senken.
-- **KI an Gabelungen:** Die KI-Gegner würfeln ihren Weg, sie wählen ihn nicht nach Lage des Rennens.
+- **KI an Gabelungen:** Die KI-Gegner würfeln ihren Weg, sie wählen ihn nicht nach Lage des Rennens. Ausnahme: die Lavahöhle im Glutkessel nehmen mittlere und starke Gegner nur bei freier Bahn.
+- **KI im Verkehr:** Die Gegner weichen aus und bremsen, fahren im Verkehr aber vorsichtiger als ein guter Mensch und brauchen pro Runde einige Sekunden länger als auf freier Strecke. Den Windschatten nutzen sie nicht gezielt.
+- **Verkehr und Items:** Ein Rollreifen zerschellt an Fahrzeugen; Brummkreisel, Öl und Rauch gehen durch sie hindurch.
+- **Fremde Karts im Verkehr:** Jedes Kart erlebt den Verkehr zu seiner eigenen Rennzeit. Auf dem eigenen Bildschirm stimmt das eigene Kart genau; ein fremdes kann beim Überholen eines Busses um Zentimeter bis wenige Dezimeter „im Blech“ erscheinen.
 - **Ohne TURN** keine Verbindung über Mobilfunk und viele Schul-/Firmennetze (siehe oben).
 - **Der Host hat keinen Latenz-Nachteil** und muss im Vordergrund bleiben. Verlässt er die Lobby, ist das Rennen für alle vorbei (Host-Wechsel ist nicht eingebaut).
-- **Rempler, Treffer und Hindernisse** kennt nur der Host; beim Mitspieler zieht das eigene Kart danach einen Moment nach.
+- **Rempler, Treffer durch Items und die Pendel-Hindernisse** kennt nur der Host; beim Mitspieler zieht das eigene Kart danach einen Moment nach. (Verkehr, Geysire, Bomben und Lava sagt jeder Bildschirm selbst vorher.)
 - **Rauchwolke:** nimmt Menschen die Sicht und lässt die KI nur „eiern“ – wer den Streckenverlauf auswendig kennt, verliert wenig.
