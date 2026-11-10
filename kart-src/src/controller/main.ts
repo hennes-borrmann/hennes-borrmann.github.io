@@ -12,8 +12,9 @@ import { SCREEN_ID_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { readDebugParams } from '../net/debugParams';
 import type { LinkOptions } from '../net/link';
 import { loadNetSetup } from '../net/netConfig';
-import { CTRL_INPUT_SIZE, writeCtrlInput } from '../net/protocol';
+import { CTRL_INPUT_SIZE, writeCtrlInput, type FxKind } from '../net/protocol';
 import { $, ms } from '../util/dom';
+import { ITEMS, ROLLING_ICON, itemSvg } from '../util/items';
 import { playerColor } from '../util/players';
 import { keepAwake } from '../util/wakeLock';
 import { ScreenConnection } from './connection';
@@ -374,6 +375,64 @@ function renderConnection(): void {
   }
 }
 
+// --- Rennen: Anzeige und spürbare Rückmeldung --------------------------------
+
+let lastHudKey = '';
+function renderHud(): void {
+  const hud = conn?.hud ?? null;
+  const racing = !!hud && hud.racing;
+  $('mid-race').hidden = !racing;
+  const key = hud ? `${hud.racing}|${hud.item}|${hud.rolling}|${hud.place}|${hud.lap}|${hud.laps}` : '';
+  if (key === lastHudKey) return;
+  lastHudKey = key;
+  const box = $('pad-item');
+  const info = hud && !hud.rolling ? ITEMS[hud.item] : undefined;
+  box.dataset.state = hud?.rolling ? 'rolling' : info ? 'ready' : 'none';
+  $('pad-item-icon').innerHTML = hud?.rolling ? itemSvg(ROLLING_ICON) : info ? itemSvg(info.icon) : '';
+  $('pad-item-name').textContent = hud?.rolling ? '…' : info ? info.name : 'Item';
+  if (hud) {
+    $('mid-place').textContent = hud.place > 0 ? `${hud.place}.` : '–';
+    $('mid-lap').textContent = hud.laps > 0 ? `Runde ${hud.lap}/${hud.laps}` : '';
+  }
+}
+
+/** Vibrationsmuster in Millisekunden (Pause/Dauer abwechselnd bei Listen). */
+const VIBRATION: Record<FxKind, number | number[]> = {
+  hit: [0, 90, 50, 150],
+  bump: 35,
+  wall: 30,
+  boost: 45,
+  pickup: 20,
+  item: [0, 25, 40, 25],
+  go: 70,
+  finish: [0, 70, 60, 70, 60, 150],
+};
+
+const FLASH_TONE: Record<FxKind, string> = {
+  hit: 'bad',
+  bump: 'plain',
+  wall: 'plain',
+  boost: 'boost',
+  pickup: 'item',
+  item: 'item',
+  go: 'go',
+  finish: 'go',
+};
+
+function feedback(kind: FxKind): void {
+  // Android vibriert; iPhone-Safari kann das nicht, dort blitzt der Rand auf.
+  try {
+    navigator.vibrate?.(VIBRATION[kind]);
+  } catch {
+    /* egal */
+  }
+  const flash = $('flash');
+  flash.dataset.tone = FLASH_TONE[kind];
+  flash.classList.remove('on');
+  void flash.offsetWidth;
+  flash.classList.add('on');
+}
+
 let lastText = 0;
 function frame(): void {
   requestAnimationFrame(frame);
@@ -395,7 +454,9 @@ function frame(): void {
     const src = useTilt() ? `Neigung ${sensorHz} Hz` : 'Touch-Lenkung';
     $('mid-rates').textContent = conn?.buildMismatch
       ? 'Andere Version als der Bildschirm – bitte beide Seiten neu laden'
-      : `${src} · sendet ${sendHz}/s · ${BUILD_ID}`;
+      : conn?.hud?.racing
+        ? `${src} · sendet ${sendHz}/s`
+        : `${src} · sendet ${sendHz}/s · ${BUILD_ID}`;
   }
 }
 
@@ -442,6 +503,8 @@ async function boot(): Promise<void> {
   };
   conn = new ScreenConnection(setup, screenId, linkOptions);
   conn.onChange = renderConnection;
+  conn.onHud = renderHud;
+  conn.onFx = feedback;
   renderConnection();
 
   (window as unknown as Record<string, unknown>).__ctl = {
@@ -452,6 +515,8 @@ async function boot(): Promise<void> {
     tilt: () => ({ active: tilt.active, angle: tilt.angle, value: tilt.value, side: tilt.side }),
     rates: () => ({ sendHz, sensorHz }),
     drops: () => conn?.drops ?? 0,
+    hud: () => conn?.hud ?? null,
+    lastFlash: () => $('flash').dataset.tone ?? null,
     unreliable: () => conn?.link?.fastIsUnreliable ?? false,
     rtt: () => conn?.link?.rtt ?? -1,
     screen: () => current(),

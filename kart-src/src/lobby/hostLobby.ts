@@ -9,6 +9,7 @@ import { BUILD_ID } from '../build';
 import type { Link } from '../net/link';
 import {
   PROTOCOL_VERSION,
+  type FxKind,
   type HostToScreen,
   type LobbyPlayer,
   type LobbyState,
@@ -38,6 +39,7 @@ interface Seat {
 export interface HostLobbySave {
   code: string;
   seats: { slot: number; token: string; name: string; isHost: boolean }[];
+  bots?: boolean;
 }
 
 export function cleanName(raw: unknown, fallback: string): string {
@@ -50,6 +52,8 @@ export function cleanName(raw: unknown, fallback: string): string {
 
 export class HostLobby {
   phase: Phase = 'lobby';
+  /** Freie Plätze im Rennen mit KI-Gegnern auffüllen. */
+  bots = true;
   readonly localSlot: number;
 
   /** Irgendetwas an der Lobby hat sich geändert (für die Anzeige). */
@@ -58,6 +62,8 @@ export class HostLobby {
   onSeatsChanged: (() => void) | null = null;
   /** Ein Spieler hat sich (neu) verbunden. */
   onPlayerLink: ((slot: number) => void) | null = null;
+  /** Die Verbindung eines Spielers ist weg (sein Platz bleibt reserviert). */
+  onPlayerDown: ((slot: number) => void) | null = null;
   onFast: ((slot: number, view: DataView) => void) | null = null;
 
   private readonly seats: (Seat | null)[] = new Array(MAX_PLAYERS).fill(null);
@@ -71,6 +77,7 @@ export class HostLobby {
     saved?: HostLobbySave,
   ) {
     if (saved && saved.code === code) {
+      if (typeof saved.bots === 'boolean') this.bots = saved.bots;
       // Nach einem Neuladen des Host-Bildschirms: Plätze wiederherstellen,
       // damit die anderen beim automatischen Wiederverbinden ihren Platz finden.
       for (const s of saved.seats) {
@@ -129,7 +136,19 @@ export class HostLobby {
         ping: s.isHost ? 0 : s.link ? Math.round(s.link.rtt) : -1,
       });
     }
-    return { code: this.code, phase: this.phase, players };
+    return { code: this.code, phase: this.phase, players, bots: this.bots };
+  }
+
+  setBots(bots: boolean): void {
+    if (this.bots === bots) return;
+    this.bots = bots;
+    this.changed();
+  }
+
+  /** Spürbares Ereignis an das Handy eines Mitspielers weiterreichen. */
+  sendFx(slot: number, kind: FxKind): void {
+    const link = this.seats[slot]?.link;
+    if (link) this.sendTo(link, { t: 'fx', k: kind });
   }
 
   slots(): number[] {
@@ -205,6 +224,7 @@ export class HostLobby {
       seats: this.seats
         .filter((s): s is Seat => s !== null)
         .map((s) => ({ slot: s.slot, token: s.token, name: s.name, isHost: s.isHost })),
+      bots: this.bots,
     };
   }
 
@@ -284,6 +304,7 @@ export class HostLobby {
       s.offlineSince = Date.now();
       s.controller = false;
       s.ctrlRtt = -1;
+      this.onPlayerDown?.(s.slot);
       this.changed();
     };
 

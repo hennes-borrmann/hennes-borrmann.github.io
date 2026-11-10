@@ -27,13 +27,13 @@ export function lerpAngle(a: number, b: number, k: number): number {
 }
 
 export function lerpState(out: KartState, a: KartState, b: KartState, k: number): KartState {
+  // Alles, was keine Position oder Geschwindigkeit ist, kommt vom näheren Stand.
+  copyState(out, k < 0.5 ? a : b);
   out.x = a.x + (b.x - a.x) * k;
   out.z = a.z + (b.z - a.z) * k;
-  out.y = a.y + (b.y - a.y) * k;
-  out.vy = a.vy + (b.vy - a.vy) * k;
   out.heading = lerpAngle(a.heading, b.heading, k);
-  out.speed = a.speed + (b.speed - a.speed) * k;
-  out.flags = k < 0.5 ? a.flags : b.flags;
+  out.vx = a.vx + (b.vx - a.vx) * k;
+  out.vz = a.vz + (b.vz - a.vz) * k;
   return out;
 }
 
@@ -92,8 +92,8 @@ export class EntityInterp {
       // Kurz weiterrechnen, danach stehen bleiben.
       const ext = Math.min(this.clock - newest.t, MAX_EXTRAPOLATE);
       copyState(out, newest.s);
-      out.x += Math.sin(out.heading) * out.speed * ext;
-      out.z += Math.cos(out.heading) * out.speed * ext;
+      out.x += out.vx * ext;
+      out.z += out.vz * ext;
       if (this.clock - newest.t > DT) this.underruns++;
       return true;
     }

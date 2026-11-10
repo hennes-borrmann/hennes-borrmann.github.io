@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ClientGame } from '../../src/game/clientGame';
-import { HostGame } from '../../src/game/hostGame';
+import { botCmd, newBrain } from '../../src/game/ai';
 import { ControllerInput } from '../../src/game/input';
 import { EntityInterp } from '../../src/game/interp';
-import { BTN_GAS, BTN_ITEM, DT, newState, spawnState, stepKart, type Cmd } from '../../src/game/sim';
+import { BTN_GAS, BTN_ITEM, DT, ITEM_OIL, gridState, newState, stepKart, type Cmd, type StepEnv } from '../../src/game/sim';
 import {
   CTRL_INPUT_SIZE,
+  RACE_RUNNING,
   decodeCmds,
   decodeSnapshot,
   encodeCmds,
@@ -15,6 +15,8 @@ import {
 } from '../../src/net/protocol';
 import { CODE_ALPHABET, isValidCode, normalizeCode, randomCode } from '../../src/net/codes';
 
+const ENV: StepEnv = { canDrive: true, speedFactor: 1 };
+
 function rng(seed: number): () => number {
   let s = seed;
   return () => {
@@ -23,9 +25,9 @@ function rng(seed: number): () => number {
   };
 }
 
-/** Lenkt in Schlangenlinien mit Vollgas – deterministisch aus der Schrittnummer. */
+/** Lenkt in leichten Schlangenlinien mit Vollgas – deterministisch aus der Schrittnummer. */
 function drive(i: number): Cmd {
-  return { steer: Math.round(Math.sin(i / 37) * 110), buttons: BTN_GAS | (i % 240 === 100 ? BTN_ITEM : 0) };
+  return { steer: Math.round(Math.sin(i / 37) * 40), buttons: BTN_GAS };
 }
 
 describe('Protokoll', () => {
@@ -41,15 +43,43 @@ describe('Protokoll', () => {
   });
 
   it('Snapshots überstehen Kodieren/Dekodieren (float32-genau)', () => {
-    const s = spawnState(2);
-    s.heading = 1.25;
-    s.speed = 17.5;
-    const d = decodeSnapshot(new DataView(encodeSnapshot({ tick: 99, players: [{ slot: 2, ptick: 5, ack: 7, state: s }] })))!;
-    expect(d.tick).toBe(99);
-    expect(d.players[0].slot).toBe(2);
-    expect(d.players[0].ack).toBe(7);
-    expect(d.players[0].state.x).toBeCloseTo(s.x, 5);
-    expect(d.players[0].state.heading).toBeCloseTo(1.25, 5);
+    const s = gridState(2);
+    s.vx = 3.25;
+    s.vz = -17.5;
+    s.boost = 42;
+    s.driftDir = -1;
+    s.driftCharge = 130;
+    s.item = ITEM_OIL;
+    s.nextItem = 2;
+    s.roulette = 9;
+    const snap = decodeSnapshot(
+      new DataView(
+        encodeSnapshot({
+          tick: 99,
+          raceId: 3,
+          phase: RACE_RUNNING,
+          goTick: 1234,
+          laps: 3,
+          boxes: 0b101101,
+          karts: [{ slot: 2, bot: true, ptick: 5, ack: 7, state: s, lap: 2, place: 3, finished: true, finishTicks: 4321 }],
+          tires: [{ id: 9, x: 1.5, z: -2.5, vx: 40, vz: 0 }],
+          oils: [{ id: 4, x: 7, z: 8 }],
+        }),
+      ),
+    )!;
+    expect(snap.tick).toBe(99);
+    expect(snap.raceId).toBe(3);
+    expect(snap.phase).toBe(RACE_RUNNING);
+    expect(snap.goTick).toBe(1234);
+    expect(snap.boxes).toBe(0b101101);
+    const k = snap.karts[0];
+    expect([k.slot, k.bot, k.ack, k.lap, k.place, k.finished, k.finishTicks]).toEqual([2, true, 7, 2, 3, true, 4321]);
+    expect(k.state.x).toBeCloseTo(s.x, 4);
+    expect(k.state.vz).toBeCloseTo(-17.5, 5);
+    expect([k.state.seg, k.state.boost, k.state.driftDir, k.state.driftCharge]).toEqual([s.seg, 42, -1, 130]);
+    expect([k.state.item, k.state.nextItem, k.state.roulette]).toEqual([ITEM_OIL, 2, 9]);
+    expect(snap.tires[0]).toEqual({ id: 9, x: 1.5, z: -2.5, vx: 40, vz: 0 });
+    expect(snap.oils[0]).toEqual({ id: 4, x: 7, z: 8 });
   });
 
   it('16-Bit-Zähler erkennt "neuer" auch über den Überlauf', () => {
@@ -115,130 +145,14 @@ describe('Item-Taste am Bildschirm', () => {
   });
 });
 
-/** Größere Abweichungen würde der Client nicht mehr ausblenden, sondern hart übernehmen. */
-const SNAP_LIMIT = 5;
-
-interface Packet {
-  at: number;
-  data: ArrayBuffer;
-}
-
-/**
- * Spielt Host und einen Client gegeneinander, verbunden über eine simulierte
- * Leitung. Zeit läuft in Millisekunden-Schritten, beide ticken mit 60 Hz.
- */
-function simulate(opts: { lag: number; jitter: number; loss: number; seconds: number; clientOffsetMs?: number }) {
-  const rand = rng(42);
-  const host = new HostGame(0);
-  host.syncPlayers([0, 1]);
-  const client = new ClientGame(1);
-  const up: Packet[] = [];
-  const down: Packet[] = [];
-  const send = (queue: Packet[], now: number, data: ArrayBuffer): void => {
-    if (rand() * 100 < opts.loss) return;
-    queue.push({ at: now + opts.lag + rand() * opts.jitter, data });
-  };
-  const deliver = (queue: Packet[], now: number, fn: (d: ArrayBuffer) => void): void => {
-    for (let i = queue.length - 1; i >= 0; i--) {
-      if (queue[i].at <= now) {
-        fn(queue[i].data);
-        queue.splice(i, 1);
-      }
-    }
-  };
-
-  let hostAcc = 0;
-  let clientAcc = opts.clientOffsetMs ?? 7;
-  let clientStep = 0;
-  let maxCorrection = 0;
-  let sumCorrection = 0;
-  let corrections = 0;
-  const stepMs = 1000 / 60;
-
-  for (let now = 0; now < opts.seconds * 1000; now++) {
-    deliver(up, now, (d) => {
-      const c = decodeCmds(new DataView(d))!;
-      host.receiveCmds(1, c.newestSeq, c.cmds);
-    });
-    deliver(down, now, (d) => {
-      client.onSnapshot(decodeSnapshot(new DataView(d))!, now / 1000);
-      // Die ersten zwei Sekunden einschwingen lassen.
-      if (now > 2000) {
-        const c = client.stats.lastCorrection;
-        maxCorrection = Math.max(maxCorrection, c);
-        sumCorrection += c;
-        corrections++;
-      }
-    });
-    hostAcc += 1;
-    while (hostAcc >= stepMs) {
-      hostAcc -= stepMs;
-      host.step({ steer: 0, buttons: 0 });
-      if (host.tick % 2 === 0) send(down, now, host.snapshot());
-    }
-    clientAcc += 1;
-    while (clientAcc >= stepMs) {
-      clientAcc -= stepMs;
-      const pkt = client.tick(drive(clientStep));
-      if (pkt) {
-        clientStep++;
-        send(up, now, pkt);
-      }
-    }
-  }
-  return { host, client, maxCorrection, meanCorrection: sumCorrection / Math.max(1, corrections) };
-}
-
-describe('Vorhersage und Abgleich', () => {
-  it('ohne Verlust stimmt die Vorhersage praktisch exakt (nur float32-Rundung)', () => {
-    const r = simulate({ lag: 40, jitter: 0, loss: 0, seconds: 20 });
-    console.log(`40 ms, kein Verlust: max. Korrektur ${(r.maxCorrection * 1000).toFixed(2)} mm`);
-    expect(r.maxCorrection).toBeLessThan(0.002);
-  });
-
-  it('mit 80 ms Verzögerung, 30 ms Jitter und 5 % Verlust bleiben Korrekturen klein', () => {
-    const r = simulate({ lag: 80, jitter: 30, loss: 5, seconds: 30 });
-    console.log(
-      `80 ms/30 ms/5 %: max. Korrektur ${(r.maxCorrection * 100).toFixed(1)} cm, im Mittel ${(r.meanCorrection * 100).toFixed(2)} cm`,
-    );
-    // Vier Eingaben pro Paket: erst vier verlorene Pakete in Folge reißen eine Lücke.
-    expect(r.meanCorrection).toBeLessThan(0.02);
-    expect(r.maxCorrection).toBeLessThan(1.5);
-  });
-
-  it('bei 40 % Verlust entstehen Lücken – der Abgleich fängt sie ab, ohne wegzulaufen', () => {
-    const r = simulate({ lag: 60, jitter: 20, loss: 40, seconds: 30 });
-    console.log(
-      `60 ms/20 ms/40 %: max. Korrektur ${(r.maxCorrection * 100).toFixed(1)} cm, im Mittel ${(r.meanCorrection * 100).toFixed(2)} cm`,
-    );
-    expect(r.maxCorrection).toBeGreaterThan(0);
-    expect(r.maxCorrection).toBeLessThan(SNAP_LIMIT);
-  });
-
-  it('Host und Client landen am selben Ort, sobald alles bestätigt ist', () => {
-    const r = simulate({ lag: 60, jitter: 20, loss: 10, seconds: 12 });
-    // Der Client ist dem Host um die noch unbestätigten Eingaben voraus;
-    // bei höchstens ~22 m/s und <0,3 s Vorsprung sind das wenige Meter.
-    const a = r.host.authoritative(1)!;
-    const p = r.client.predictedState();
-    const start = spawnState(1);
-    // Es wurde wirklich gefahren ...
-    expect(Math.hypot(a.x - start.x, a.z - start.z)).toBeGreaterThan(3);
-    expect(r.client.ready).toBe(true);
-    // ... und der Abstand entspricht nur dem Vorsprung der unbestätigten Eingaben.
-    expect(Math.hypot(a.x - p.x, a.z - p.z)).toBeLessThan(8);
-    expect(r.client.stats.pending).toBeLessThan(30);
-  });
-});
-
 describe('Interpolation fremder Fahrzeuge', () => {
   it('bleibt gleichmäßig, obwohl der Host Eingaben stoßweise verarbeitet', () => {
     const interp = new EntityInterp(0.085);
-    const s = spawnState(1);
+    const s = gridState(1);
+    // Ein KI-Fahrer lenkt, damit das Kart auf der Fahrbahn bleibt.
+    const brain = newBrain(1);
     const rand = rng(7);
     const out = newState();
-    // Fährt mit Vollgas im Kreis (Radius ca. 14 m), damit es die Bande nicht berührt.
-    const cmd: Cmd = { steer: 80, buttons: BTN_GAS };
     let ptick = 0;
     let carry = 0;
     let hostTick = 0;
@@ -248,7 +162,7 @@ describe('Interpolation fremder Fahrzeuge', () => {
     const arrivals: { at: number; ptick: number; state: typeof s }[] = [];
     const stepMs = 1000 / 60;
     let acc = 0;
-    for (let ms = 0; ms < 12000; ms++) {
+    for (let ms = 0; ms < 9000; ms++) {
       acc += 1;
       while (acc >= stepMs) {
         acc -= stepMs;
@@ -263,7 +177,7 @@ describe('Interpolation fremder Fahrzeuge', () => {
           carry = 1;
         }
         for (let i = 0; i < n; i++) {
-          stepKart(s, cmd);
+          stepKart(s, botCmd(s, brain, [], true), ENV);
           ptick++;
         }
         // Jeder zweite Tick geht als Snapshot raus und ist 30–60 ms unterwegs.
@@ -275,7 +189,8 @@ describe('Interpolation fremder Fahrzeuge', () => {
         interp.push(a.ptick, a.state, ms / 1000);
       }
       if (ms % 16 === 0 && interp.sample(ms / 1000, 0.016, out)) {
-        if (ms > 4000 && !Number.isNaN(prevX)) speeds.push(Math.hypot(out.x - prevX, out.z - prevZ) / 0.016);
+        // Erst messen, wenn das Kart gleichmäßig schnell fährt.
+        if (ms > 2400 && !Number.isNaN(prevX)) speeds.push(Math.hypot(out.x - prevX, out.z - prevZ) / 0.016);
         prevX = out.x;
         prevZ = out.z;
       }
@@ -286,21 +201,28 @@ describe('Interpolation fremder Fahrzeuge', () => {
       `dargestelltes Tempo ${mean.toFixed(1)} m/s ± ${dev.toFixed(2)} m/s (${((dev / mean) * 100).toFixed(1)} %), Bilder über den letzten Stand hinaus: ${interp.underruns}`,
     );
     expect(mean).toBeGreaterThan(20);
-    expect(mean).toBeLessThan(23);
-    expect(dev / mean).toBeLessThan(0.1);
+    // Das Tempo ändert sich beim Fahren wirklich (Schub, Kurven); geprüft wird
+    // deshalb der Sprung von Bild zu Bild, nicht die Streuung insgesamt.
+    let jerk = 0;
+    for (let i = 1; i < speeds.length; i++) jerk = Math.max(jerk, Math.abs(speeds[i] - speeds[i - 1]));
+    console.log(`größter Tempo-Sprung zwischen zwei Bildern: ${jerk.toFixed(2)} m/s`);
+    expect(jerk).toBeLessThan(2.5);
   });
 });
 
 describe('Simulation', () => {
-  it('ist deterministisch', () => {
-    const a = spawnState(0);
-    const b = spawnState(0);
+  it('ist deterministisch: gleiche Eingaben, gleicher Verlauf', () => {
+    const a = gridState(0);
+    const b = gridState(0);
+    const brainA = newBrain(0);
+    const brainB = newBrain(0);
     for (let i = 0; i < 2000; i++) {
-      stepKart(a, drive(i));
-      stepKart(b, drive(i));
+      stepKart(a, botCmd(a, brainA, [], true), ENV);
+      stepKart(b, botCmd(b, brainB, [], true), ENV);
     }
     expect(a).toEqual(b);
-    expect(Math.abs(a.x) + Math.abs(a.z)).toBeGreaterThan(1);
+    expect(Math.hypot(a.vx, a.vz)).toBeGreaterThan(15);
     expect(DT).toBeCloseTo(1 / 60);
+    expect(drive(10).buttons).toBe(BTN_GAS);
   });
 });

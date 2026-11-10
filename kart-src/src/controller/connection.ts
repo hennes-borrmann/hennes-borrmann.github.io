@@ -11,7 +11,13 @@ import { randomCode, randomToken } from '../net/codes';
 import { PeerEndpoint } from '../net/endpoint';
 import type { Link, LinkOptions } from '../net/link';
 import type { NetSetup } from '../net/netConfig';
-import { PROTOCOL_VERSION, screenPeerId, type ControllerToScreen, type ScreenToController } from '../net/protocol';
+import {
+  PROTOCOL_VERSION,
+  screenPeerId,
+  type ControllerToScreen,
+  type FxKind,
+  type ScreenToController,
+} from '../net/protocol';
 
 export type ConnStatus =
   | 'connecting'
@@ -25,6 +31,17 @@ export interface PairedInfo {
   slot: number;
   room: string | null;
   phase: string;
+}
+
+/** Was das Handy während des Rennens anzeigt. */
+export interface HudInfo {
+  racing: boolean;
+  item: number;
+  rolling: boolean;
+  place: number;
+  of: number;
+  lap: number;
+  laps: number;
 }
 
 const RETRY_MS = 1200;
@@ -57,7 +74,10 @@ export class ScreenConnection {
   drops = 0;
   /** Der Bildschirm läuft mit einer anderen Fassung der Seite. */
   buildMismatch = false;
+  hud: HudInfo | null = null;
   onChange: (() => void) | null = null;
+  onHud: (() => void) | null = null;
+  onFx: ((kind: FxKind) => void) | null = null;
 
   private readonly endpoint: PeerEndpoint;
   private readonly id = identity();
@@ -134,6 +154,11 @@ export class ScreenConnection {
         this.everConnected = true;
         this.status = 'connected';
         this.onChange?.();
+      } else if (msg.t === 'hud') {
+        this.hud = { racing: msg.racing, item: msg.item, rolling: msg.rolling, place: msg.place, of: msg.of, lap: msg.lap, laps: msg.laps };
+        this.onHud?.();
+      } else if (msg.t === 'fx') {
+        this.onFx?.(msg.k);
       } else if (msg.t === 'replaced' || msg.t === 'reject') {
         this.status = msg.t === 'replaced' ? 'replaced' : 'version';
         this.link = null;
@@ -147,6 +172,8 @@ export class ScreenConnection {
       this.link = null;
       if (this.stopped) return;
       if (this.status === 'connected') this.drops++;
+      this.hud = null;
+      this.onHud?.();
       this.status = reason === 'unavailable' || this.everConnected ? 'searching' : 'connecting';
       this.onChange?.();
       this.attemptSoon(RETRY_MS);

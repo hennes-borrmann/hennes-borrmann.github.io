@@ -5,10 +5,11 @@
 // Controller-Kopplung, Simulation, Darstellung und Diagnose.
 
 import { BUILD_ID } from '../build';
+import { BOT_NAMES, botCmd, newBrain, type BotBrain } from '../game/ai';
 import { ClientGame, CLIENT_INTERP_DELAY } from '../game/clientGame';
 import { HostGame } from '../game/hostGame';
 import { KeyboardInput, mergeInput } from '../game/input';
-import { TICK_RATE, type Cmd } from '../game/sim';
+import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { FixedTicker } from '../game/ticker';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -21,15 +22,19 @@ import { loadNetSetup, type NetSetup } from '../net/netConfig';
 import {
   PKT_CMD,
   PKT_SNAPSHOT,
+  RACE_COUNTDOWN,
+  RACE_RESULTS,
+  RACE_RUNNING,
   decodeCmds,
   decodeSnapshot,
   roomPeerId,
   screenPeerId,
+  type FxKind,
   type LobbyState,
   type Phase,
 } from '../net/protocol';
 import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../render/debugOverlay';
-import { TestScene } from '../render/testScene';
+import { RaceScene } from '../render/raceScene';
 import { $, ms } from '../util/dom';
 import { keepAwake, wakeLockMode } from '../util/wakeLock';
 import { ControllerPairing } from './pairing';
@@ -43,7 +48,7 @@ import {
   saveSession,
   type Session,
 } from './session';
-import { ScreenUi, type LobbyModel } from './ui';
+import { ScreenUi, type LobbyModel, type ResultRow } from './ui';
 
 /** Der Host schickt jeden zweiten Simulationsschritt einen Snapshot (30 pro Sekunde). */
 const SNAPSHOT_EVERY = 2;
@@ -88,7 +93,7 @@ export class App {
   private readonly ui: ScreenUi;
   private readonly overlay: DebugOverlay;
   private readonly ticker: FixedTicker;
-  private scene: TestScene | null = null;
+  private scene: RaceScene | null = null;
 
   private role: Role = 'none';
   private roomEp: PeerEndpoint | null = null;
@@ -99,6 +104,12 @@ export class App {
   private playerToken = '';
   private roomPeerToken = '';
   private inGame = false;
+  /** Autopilot (?auto=1): die KI lenkt das eigene Kart. */
+  private autoBrain: BotBrain | null = null;
+  private shownRaceId = -1;
+  private resultsShown = false;
+  private lastHudJson = '';
+  private lastHudAt = 0;
   private joinStartedAt = 0;
   private lastSaveJson = '';
 
@@ -140,6 +151,12 @@ export class App {
       start: () => {
         if (this.hostLobby?.canStart()) this.hostLobby.setPhase('game');
       },
+      again: () => {
+        if (!this.hostGame || !this.hostLobby) return;
+        this.hostGame.setRoster(this.hostLobby.slots(), this.hostLobby.bots);
+        this.hostGame.newRace();
+      },
+      setBots: (bots) => this.hostLobby?.setBots(bots),
       leave: () => this.leave(),
       backToLobby: () => {
         if (this.hostLobby) this.hostLobby.setPhase('lobby');
@@ -308,8 +325,12 @@ export class App {
       this.persistHost();
       this.refresh();
     };
-    lobby.onSeatsChanged = () => this.hostGame?.syncPlayers(lobby.slots());
-    lobby.onPlayerLink = (slot) => this.hostGame?.resetInput(slot);
+    lobby.onSeatsChanged = () => this.hostGame?.setRoster(lobby.slots(), lobby.bots);
+    lobby.onPlayerLink = (slot) => {
+      this.hostGame?.resetInput(slot);
+      this.hostGame?.setOnline(slot, true);
+    };
+    lobby.onPlayerDown = (slot) => this.hostGame?.setOnline(slot, false);
     lobby.onFast = (slot, view) => {
       if (!this.hostGame || view.getUint8(0) !== PKT_CMD) return;
       const d = decodeCmds(view);
@@ -360,6 +381,7 @@ export class App {
       this.clientGame?.resync();
       this.reportController();
     };
+    lobby.onFx = (kind) => this.localFx(kind);
     lobby.onChange = () => this.onClientChange(lobby);
   }
 
@@ -386,7 +408,7 @@ export class App {
       if (status === 'rejected') {
         if (reason === 'full') [title, text] = ['Lobby ist voll', 'Alle vier Plätze sind belegt.'];
         else if (reason === 'running') {
-          [title, text] = ['Testfahrt läuft bereits', 'Neue Spieler können erst beitreten, wenn der Host zurück in der Lobby ist.'];
+          [title, text] = ['Rennen läuft bereits', 'Neue Spieler können erst beitreten, wenn der Host zurück in der Lobby ist.'];
         } else [title, text] = ['Versionen passen nicht zusammen', 'Lade die Seite auf beiden Geräten neu.'];
       }
       this.ui.showModal(title, [text], [{ label: 'Zur Startseite', primary: true, run: () => undefined }]);
@@ -497,6 +519,7 @@ export class App {
       localSlot: slot,
       isHost: this.role === 'host',
       canStart: this.hostLobby?.canStart() ?? false,
+      bots: state.bots,
       waitingFor: state.players.filter((p) => !p.isHost && p.online && !p.ready).map((p) => p.name),
       localReady: me?.ready ?? false,
       controllerConnected: this.pairing.connected,
@@ -505,7 +528,7 @@ export class App {
       controllerRtt: this.pairing.rtt,
     };
     this.ui.renderLobby(model);
-    this.scene?.setRoster(state.players);
+    this.scene?.setRoster(this.drivers(state));
     this.pairing.pushInfo();
     this.syncPhase(state.phase);
   }
@@ -544,13 +567,24 @@ export class App {
     }
   }
 
+  /** Alle Fahrer mit Namen: Menschen aus der Lobby, auf freien Plätzen die KI. */
+  private drivers(state: LobbyState): { slot: number; name: string; bot: boolean }[] {
+    const list: { slot: number; name: string; bot: boolean }[] = [];
+    for (let slot = 0; slot < BOT_NAMES.length; slot++) {
+      const p = state.players.find((x) => x.slot === slot);
+      if (p) list.push({ slot, name: p.name, bot: false });
+      else if (state.bots) list.push({ slot, name: BOT_NAMES[slot], bot: true });
+    }
+    return list;
+  }
+
   private enterGame(): void {
     const state = this.lobbyState();
     if (!state) return;
     this.ui.show('game');
     if (!this.scene) {
       try {
-        this.scene = new TestScene($<HTMLCanvasElement>('stage'));
+        this.scene = new RaceScene($<HTMLCanvasElement>('stage'));
       } catch (err) {
         console.error(err);
         this.ui.showModal('3D-Darstellung nicht möglich', ['Dieser Browser stellt kein WebGL bereit.'], [
@@ -559,14 +593,32 @@ export class App {
         return;
       }
     }
-    this.scene.setRoster(state.players);
+    this.scene.setRoster(this.drivers(state));
+    this.autoBrain = this.debug.autopilot ? newBrain(this.localSlot()) : null;
+    this.shownRaceId = -1;
+    this.resultsShown = false;
+    this.lastHudJson = '';
     if (this.hostLobby) {
-      this.hostGame = new HostGame(this.hostLobby.localSlot);
-      this.hostGame.syncPlayers(this.hostLobby.slots());
+      const lobby = this.hostLobby;
+      const game = new HostGame(lobby.localSlot, { laps: this.debug.laps || undefined });
+      this.hostGame = game;
+      game.setRoster(lobby.slots(), lobby.bots);
+      for (const p of lobby.state().players) if (!p.isHost) game.setOnline(p.slot, p.online);
+      game.onFx = (slot, kind) => {
+        if (slot === lobby.localSlot) this.localFx(kind);
+        // Was ein Mitspieler selbst vorhersagt (Schub, Bande, Item bereit, Start),
+        // meldet sein eigener Bildschirm ohne Umweg; hier nur, was allein der Host weiß.
+        else if (kind === 'hit' || kind === 'bump' || kind === 'pickup' || kind === 'finish') lobby.sendFx(slot, kind);
+      };
+      game.newRace();
     } else if (this.clientLobby) {
-      this.clientGame = new ClientGame(this.clientLobby.slot);
+      const lobby = this.clientLobby;
+      this.clientGame = new ClientGame(lobby.slot, () => lobby.link?.rtt ?? -1);
+      this.clientGame.onFx = (kind) => this.localFx(kind);
     }
     this.inGame = true;
+    // Im Rennen stört die Diagnose; über den Knopf „Diagnose“ lässt sie sich einblenden.
+    this.overlay.visible = this.debug.debugInRace;
     (document.activeElement as HTMLElement | null)?.blur?.();
     this.ticker.start();
   }
@@ -579,19 +631,41 @@ export class App {
     this.clientGame = null;
     this.ents.length = 0;
     this.lastCmd = { steer: 0, buttons: 0 };
+    this.ui.hideResults();
+    this.ui.setCountdown(null);
+    this.ui.renderRaceHud({ visible: false, place: 0, of: 0, lap: 0, laps: 0, timeSec: 0, frozenTime: false, item: ITEM_NONE, rolling: false, speedKmh: 0, finished: false });
+    this.overlay.visible = this.debug.debugOverlay;
+    this.sendHud(true);
+  }
+
+  /** Ein spürbares Ereignis für diesen Spieler: ans Handy weiterreichen. */
+  private localFx(kind: FxKind): void {
+    this.pairing.sendFx(kind);
+  }
+
+  private localState(): KartState | null {
+    if (this.hostGame) return this.hostGame.authoritative(this.hostGame.localSlot);
+    if (this.clientGame?.ready) return this.clientGame.predictedState();
+    return null;
   }
 
   /** Ein Simulationsschritt (60 pro Sekunde). */
   private step(): void {
     this.ticks++;
+    const now = performance.now() / 1000;
     const ctrl = this.pairing.connected ? this.pairing.input.sample() : null;
-    const cmd = mergeInput(ctrl, this.keyboard.sample(), this.keyboard.steering);
+    let cmd = mergeInput(ctrl, this.keyboard.sample(), this.keyboard.steering);
+    if (this.autoBrain) {
+      const state = this.localState();
+      const canDrive = this.hostGame ? this.hostGame.localCanDrive() : (this.clientGame?.localCanDrive(now) ?? false);
+      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive);
+    }
     this.lastCmd = cmd;
     if (this.hostGame && this.hostLobby) {
       this.hostGame.step(cmd);
       if (this.hostGame.tick % SNAPSHOT_EVERY === 0) this.hostLobby.broadcastFast(this.hostGame.snapshot());
     } else if (this.clientGame && this.clientLobby) {
-      const packet = this.clientGame.tick(cmd);
+      const packet = this.clientGame.tick(cmd, now);
       if (packet) this.clientLobby.sendFast(packet);
     }
   }
@@ -607,8 +681,11 @@ export class App {
       const alpha = this.ticker.advance();
       const view = this.hostGame ?? this.clientGame;
       if (view) {
-        view.entities(alpha, now / 1000, dt, this.ents);
-        this.scene.frame(this.ents, view.localSlot, dt);
+        const t = now / 1000;
+        view.entities(alpha, t, dt, this.ents);
+        const race = view.race(t);
+        this.scene.frame(this.ents, view.localSlot, dt, race, view.tires(t), view.oils());
+        this.updateRaceUi(race, now);
       }
     }
 
@@ -622,6 +699,82 @@ export class App {
       if (this.overlay.visible) this.overlay.setSections(this.collectDebug());
     }
   };
+
+  /** Anzeige über dem Rennen: Countdown, Platz, Runde, Item, Ergebnisliste. */
+  private updateRaceUi(race: { raceId: number; phase: number; laps: number; untilGo: number }, nowMs: number): void {
+    const view = this.hostGame ?? this.clientGame;
+    const state = this.lobbyState();
+    if (!view || !state) return;
+    const me = this.ents.find((e) => e.slot === view.localSlot) ?? null;
+
+    if (race.raceId !== this.shownRaceId) {
+      // Neues Rennen (auch nach „Nochmal“): Ergebnisliste weg, Anzeige zurücksetzen.
+      this.shownRaceId = race.raceId;
+      this.resultsShown = false;
+      this.ui.hideResults();
+    }
+
+    // Countdown: 3 – 2 – 1 – Los
+    let countdown: string | null = null;
+    if (race.phase === RACE_COUNTDOWN && race.untilGo <= 3 && race.untilGo > 0) countdown = String(Math.ceil(race.untilGo));
+    else if (race.phase !== RACE_RESULTS && race.untilGo <= 0 && race.untilGo > -1.1) countdown = 'Los!';
+    this.ui.setCountdown(countdown);
+    this.ui.setHudNoteVisible(race.phase === RACE_COUNTDOWN);
+
+    const count = this.ents.length;
+    this.ui.renderRaceHud({
+      visible: me !== null,
+      place: me?.place ?? 0,
+      of: count,
+      lap: me?.lap ?? 1,
+      laps: race.laps,
+      timeSec: race.phase === RACE_RUNNING || race.phase === RACE_RESULTS ? Math.max(0, -race.untilGo) : 0,
+      frozenTime: me?.finished ?? false,
+      item: me?.item ?? ITEM_NONE,
+      rolling: (me?.roulette ?? 0) > 0,
+      speedKmh: me ? Math.round(Math.hypot(me.vx, me.vz) * 3.6) : 0,
+      finished: me?.finished ?? false,
+    });
+
+    if (race.phase === RACE_RESULTS && !this.resultsShown) {
+      this.resultsShown = true;
+      const names = new Map(this.drivers(state).map((d) => [d.slot, d]));
+      const rows: ResultRow[] = view.standings().map((st) => ({
+        place: st.place,
+        slot: st.slot,
+        name: names.get(st.slot)?.name ?? `Fahrer ${st.slot + 1}`,
+        bot: st.bot,
+        me: st.slot === view.localSlot,
+        timeSec: st.finished ? st.finishTicks / TICK_RATE : -1,
+      }));
+      this.ui.showResults(rows, this.role === 'host');
+    }
+
+    if (nowMs - this.lastHudAt > 120) {
+      this.lastHudAt = nowMs;
+      this.sendHud(false);
+    }
+  }
+
+  /** Dem Handy mitteilen, was es anzeigen soll (nur bei Änderungen). */
+  private sendHud(force: boolean): void {
+    const view = this.hostGame ?? this.clientGame;
+    const me = view ? this.ents.find((e) => e.slot === view.localSlot) : undefined;
+    const race = view?.race(performance.now() / 1000);
+    const hud = {
+      racing: this.inGame && !!me && !!race && race.phase !== RACE_RESULTS,
+      item: me?.item ?? ITEM_NONE,
+      rolling: (me?.roulette ?? 0) > 0,
+      place: me?.place ?? 0,
+      of: this.ents.length,
+      lap: me?.lap ?? 0,
+      laps: race?.laps ?? 0,
+    };
+    const json = JSON.stringify(hud);
+    if (!force && json === this.lastHudJson) return;
+    this.lastHudJson = json;
+    this.pairing.sendHud(hud);
+  }
 
   private everySecond(): void {
     this.seconds++;
@@ -800,6 +953,13 @@ export class App {
         return s ? { ...s } : null;
       },
       predicted: () => (this.clientGame?.ready ? { ...this.clientGame.predictedState() } : null),
+      race: () => (this.hostGame ?? this.clientGame)?.race(performance.now() / 1000) ?? null,
+      standings: () => (this.hostGame ?? this.clientGame)?.standings() ?? [],
+      tires: () => (this.hostGame ?? this.clientGame)?.tires(performance.now() / 1000) ?? [],
+      oils: () => (this.hostGame ?? this.clientGame)?.oils() ?? [],
+      // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
+      giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
+      debugHit: (slot: number) => this.hostGame?.debugHit(slot),
       clientStats: () => (this.clientGame ? { ...this.clientGame.stats, peak: this.rates.peakCorrection } : null),
       rates: () => ({ ...this.rates }),
       controller: () => ({
