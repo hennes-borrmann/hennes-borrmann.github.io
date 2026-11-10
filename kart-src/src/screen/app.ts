@@ -457,7 +457,7 @@ export class App {
     lobby.onFast = (slot, view) => {
       if (!this.hostGame || view.getUint8(0) !== PKT_CMD) return;
       const d = decodeCmds(view);
-      if (d) this.hostGame.receiveCmds(slot, d.newestSeq, d.cmds);
+      if (d) this.hostGame.receiveCmds(slot, d.newestSeq, d.cmds, d.time);
     };
 
     this.setRoomInUrl(code);
@@ -813,7 +813,8 @@ export class App {
     if (this.autoBrain) {
       const state = this.localState();
       const canDrive = this.hostGame ? this.hostGame.localCanDrive() : (this.clientGame?.localCanDrive(now) ?? false);
-      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive, { tick: this.ticks, place: 1, smoke: false });
+      const time = Math.floor((this.hostGame ?? this.clientGame)?.race(now).time ?? 0);
+      if (state) cmd = botCmd(state, this.autoBrain, [], canDrive, { tick: this.ticks, time, place: 1, smoke: false });
     }
     this.lastCmd = cmd;
     if (this.hostGame && this.hostLobby) {

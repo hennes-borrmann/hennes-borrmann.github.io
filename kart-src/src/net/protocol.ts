@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -143,34 +143,39 @@ export function seq16Newer(a: number, b: number): boolean {
 }
 
 // --- Binär: Eingaben Client → Host ------------------------------------------
-// [u8 typ][u32 seq der neuesten Eingabe][u8 anzahl][anzahl × (i8 lenkung, u8 tasten)]
+// [u8 typ][u32 seq der neuesten Eingabe][u8 anzahl][i32 rennzeit der neuesten Eingabe]
+// [anzahl × (i8 lenkung, u8 tasten)]
 // Die Eingaben stehen alt → neu. Jedes Paket wiederholt die letzten paar,
-// damit ein einzelnes verlorenes Paket keine Lücke reißt.
+// damit ein einzelnes verlorenes Paket keine Lücke reißt. Die Rennzeit (Ticks
+// seit "Los") ist der Takt, mit dem der Client diesen Schritt gerechnet hat;
+// ältere Eingaben im selben Paket liegen je einen Tick davor.
 
 export const CMD_REDUNDANCY = 4;
+const CMD_HEADER = 10;
 
-export function encodeCmds(newestSeq: number, cmds: Cmd[]): ArrayBuffer {
-  const buf = new ArrayBuffer(6 + cmds.length * 2);
+export function encodeCmds(newestSeq: number, cmds: Cmd[], time = 0): ArrayBuffer {
+  const buf = new ArrayBuffer(CMD_HEADER + cmds.length * 2);
   const v = new DataView(buf);
   v.setUint8(0, PKT_CMD);
   v.setUint32(1, newestSeq);
   v.setUint8(5, cmds.length);
+  v.setInt32(6, time);
   for (let i = 0; i < cmds.length; i++) {
-    v.setInt8(6 + i * 2, cmds[i].steer);
-    v.setUint8(7 + i * 2, cmds[i].buttons);
+    v.setInt8(CMD_HEADER + i * 2, cmds[i].steer);
+    v.setUint8(CMD_HEADER + 1 + i * 2, cmds[i].buttons);
   }
   return buf;
 }
 
-export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[] } | null {
-  if (view.byteLength < 6) return null;
+export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; time: number } | null {
+  if (view.byteLength < CMD_HEADER) return null;
   const count = view.getUint8(5);
-  if (view.byteLength < 6 + count * 2) return null;
+  if (view.byteLength < CMD_HEADER + count * 2) return null;
   const cmds: Cmd[] = [];
   for (let i = 0; i < count; i++) {
-    cmds.push({ steer: view.getInt8(6 + i * 2), buttons: view.getUint8(7 + i * 2) });
+    cmds.push({ steer: view.getInt8(CMD_HEADER + i * 2), buttons: view.getUint8(CMD_HEADER + 1 + i * 2) });
   }
-  return { newestSeq: view.getUint32(1), cmds };
+  return { newestSeq: view.getUint32(1), cmds, time: view.getInt32(6) };
 }
 
 // --- Binär: Snapshot Host → Client ------------------------------------------
@@ -197,7 +202,7 @@ export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 
-const STATE_SIZE = 44;
+const STATE_SIZE = 45;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
 const SNAP_THING_SIZE = 24;
@@ -268,6 +273,7 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 41, s.flags);
   v.setUint8(o + 42, s.char);
   v.setUint8(o + 43, s.tow);
+  v.setUint8(o + 44, s.draft);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -295,6 +301,7 @@ function readState(v: DataView, o: number): KartState {
     flags: v.getUint8(o + 41),
     char: v.getUint8(o + 42),
     tow: v.getUint8(o + 43),
+    draft: v.getUint8(o + 44),
   };
 }
 

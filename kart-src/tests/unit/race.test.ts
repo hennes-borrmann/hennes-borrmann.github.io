@@ -6,7 +6,7 @@ import { ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from
 import { TRACK } from '../../src/game/track';
 import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot } from '../../src/net/protocol';
 
-const CTX = { tick: 0, place: 1, smoke: false };
+const CTX = { tick: 0, time: 0, place: 1, smoke: false };
 const count = (host: HostGame, kind: number): number => host.things().filter((t) => t.kind === kind).length;
 
 function rng(seed: number): () => number {

@@ -32,6 +32,12 @@ export interface RaceView {
   boxes: number;
   /** Geschätzter Host-Tick von jetzt – Takt für alles, was auf allen Bildschirmen gleich laufen soll. */
   hostTick: number;
+  /**
+   * Rennzeit von jetzt in Ticks seit "Los" (gebrochen, im Countdown negativ),
+   * so wie das eigene Kart sie gerade erlebt: der Takt, in dem Verkehr, Geysire
+   * und Lava zu zeichnen sind (mechanics.ts).
+   */
+  time: number;
 }
 
 export interface GameView {

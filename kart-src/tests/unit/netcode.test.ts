@@ -15,7 +15,7 @@ import {
 } from '../../src/net/protocol';
 import { CODE_ALPHABET, isValidCode, normalizeCode, randomCode } from '../../src/net/codes';
 
-const ENV: StepEnv = { canDrive: true, speedFactor: 1 };
+const ENV: StepEnv = { canDrive: true, speedFactor: 1, time: 0 };
 
 function rng(seed: number): () => number {
   let s = seed;
@@ -30,7 +30,7 @@ function drive(i: number): Cmd {
   return { steer: Math.round(Math.sin(i / 37) * 40), buttons: BTN_GAS };
 }
 
-const CTX = { tick: 0, place: 1, smoke: false };
+const CTX = { tick: 0, time: 0, place: 1, smoke: false };
 
 describe('Protokoll', () => {
   it('Eingabepakete überstehen Kodieren/Dekodieren', () => {

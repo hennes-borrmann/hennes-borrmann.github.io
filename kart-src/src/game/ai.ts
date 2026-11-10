@@ -88,6 +88,8 @@ export interface BotBrain {
 export interface BotContext {
   /** Host-Tick (für pendelnde Hindernisse). */
   tick: number;
+  /** Rennzeit in Ticks seit "Los" (für Verkehr, Geysire, Lava – siehe mechanics.ts). */
+  time: number;
   /** Aktueller Platz dieses Fahrers. */
   place: number;
   /** Fährt gerade durch eine Rauchwolke. */

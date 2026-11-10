@@ -43,9 +43,9 @@ function soloRun(slot: number, laps: number, level: number, route = -1) {
   const limit = laps * 90 * 60;
   while (lapTimes.length < laps && tick < limit) {
     tick++;
-    const cmd = botCmd(s, brain, [], true, { tick, place: 1, smoke: false });
+    const cmd = botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false });
     const before = s.seg;
-    const ev = stepKart(s, cmd, { canDrive: true, speedFactor: brain.skill });
+    const ev = stepKart(s, cmd, { canDrive: true, speedFactor: brain.skill, time: tick });
     progress += segDelta(TRACK, before, s.seg);
     if (ev & EV_FALL) falls++;
     if (ev & EV_WALL) wallHits++;

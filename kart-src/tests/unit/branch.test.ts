@@ -112,7 +112,7 @@ describe('Abzweigungen (Werkshof)', () => {
   });
 
   it('Fahren durch die Gabelung: kein Ruck, keine unsichtbare Wand – egal auf welcher Linie', () => {
-    const env = { canDrive: true, speedFactor: 1 };
+    const env = { canDrive: true, speedFactor: 1, time: 0 };
     for (const b of t.branches) {
       // Von ganz links bis ganz rechts über die Fahrbahn verteilt in die Gabelung hinein, einfach geradeaus mit Gas.
       for (const lat of [-5, -2.5, 0, 2.5, 5]) {

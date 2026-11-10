@@ -19,6 +19,16 @@
 // wenn eine Kurve nachträglich etwas anders gelegt wird. In einer Abzweigung
 // ist 0 die Gabelung, 1 ihr erster eigener Stützpunkt, und so weiter.
 
+import {
+  PULSE_BOMB,
+  PULSE_VENT,
+  VEHICLE_SPECS,
+  vehicleAt,
+  type Flood,
+  type Pulse,
+  type TrafficDef,
+  type Vehicle,
+} from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
@@ -60,6 +70,15 @@ export interface PathFeatures {
   surfaces?: [number, number, SurfaceId][];
   /** Grund-Untergrund dieses Wegs; ohne Angabe Asphalt (bei Abzweigungen: wie die Hauptstrecke). */
   surface?: SurfaceId;
+  /**
+   * Geysire: brechen im Takt aus und schleudern hoch, was über ihnen steht.
+   * period und phase in Sekunden; lat = seitliche Lage in Metern.
+   */
+  vents?: { at: number; lat: number; period: number; phase: number }[];
+  /** Lavabomben: schlagen im Takt an dieser Stelle ein und lassen kurz eine Glutpfütze zurück. */
+  bombs?: { at: number; lat: number; period: number; phase: number }[];
+  /** Steigende Lava: [von, bis] wird im Takt überflutet (period, phase in Sekunden). */
+  floods?: { from: number; to: number; period: number; phase: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -103,6 +122,10 @@ export interface TrackDef extends PathFeatures {
   branches?: BranchDef[];
   /** Wo das Wahrzeichen der Welt steht (z. B. der Leuchtturm) – Stützpunkt-Einheiten der Hauptstrecke. */
   landmarkAt?: number;
+  /** Verkehr auf der Hauptstrecke (siehe mechanics.ts). */
+  traffic?: TrafficDef;
+  /** Ein Satz dazu, was diese Strecke von den anderen unterscheidet – für die Streckenwahl. */
+  twist?: string;
 }
 
 export interface BoostPad {
@@ -218,6 +241,10 @@ export interface Track {
   pads: BoostPad[];
   boxes: { x: number; y: number; z: number; seg: number }[];
   hazards: Hazard[];
+  /** Streckenmechanik (mechanics.ts): Verkehr, Geysire und Lavabomben, steigende Lava. */
+  vehicles: Vehicle[];
+  pulses: Pulse[];
+  floods: Flood[];
   laps: number;
 }
 
@@ -777,6 +804,9 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     pads: [],
     boxes: [],
     hazards: [],
+    vehicles: [],
+    pulses: [],
+    floods: [],
     laps: def.laps,
   };
   for (const p of paths) {
@@ -800,8 +830,113 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const h of p.f.hazards ?? []) {
       track.hazards.push({ seg: segAt(p, h.at), amp: h.amp, period: Math.round(h.period * 60), phase: h.phase });
     }
+    const pulse = (kind: number, d: { at: number; lat: number; period: number; phase: number }): void => {
+      const seg = segAt(p, d.at);
+      const vent = kind === PULSE_VENT;
+      track.pulses.push({
+        kind,
+        seg,
+        lat: d.lat,
+        x: px[seg] + rightX(track, seg) * d.lat,
+        y: py[seg] + d.lat * bank[seg],
+        z: pz[seg] + rightZ(track, seg) * d.lat,
+        radius: vent ? VENT_RADIUS : BOMB_RADIUS,
+        period: Math.round(d.period * 60),
+        phase: Math.round(d.phase * 60),
+        on: vent ? VENT_ON : BOMB_ON,
+        warn: vent ? VENT_WARN : BOMB_WARN,
+      });
+    };
+    for (const v of p.f.vents ?? []) pulse(PULSE_VENT, v);
+    for (const b of p.f.bombs ?? []) pulse(PULSE_BOMB, b);
+    for (const f of p.f.floods ?? []) {
+      const first = segAt(p, f.from);
+      const last = segAt(p, f.to);
+      const branch = branchOf[first];
+      // Fahrzeit von der Gabelung (bzw. vom Punkt 64 m davor, an dem die KI entscheidet) bis zur Flut
+      const run = branch >= 0 ? first - branches[branch].first : 0;
+      track.floods.push({
+        first,
+        count: Math.max(1, last - first + 1),
+        branch,
+        period: Math.round(f.period * 60),
+        phase: Math.round(f.phase * 60),
+        rise: FLOOD_RISE,
+        hold: Math.round(f.period * 60 * FLOOD_HOLD),
+        fall: FLOOD_FALL,
+        lead: Math.round(((run * step) / 25) * 60),
+      });
+    }
+  }
+  // Verkehr: nur auf der Hauptstrecke
+  let vid = 0;
+  for (const lane of def.traffic?.lanes ?? []) {
+    for (const [kind, at] of lane.cars) {
+      track.vehicles.push({ ...VEHICLE_SPECS[kind], id: vid++, kind, lat: lane.lat, speed: lane.speed, offset: at });
+    }
   }
   return track;
+}
+
+/** Geysir: Radius, Dauer des Ausbruchs und der Vorwarnung (Ticks). */
+const VENT_RADIUS = 2.1;
+const VENT_ON = 66;
+const VENT_WARN = 78;
+/** Lavabombe: Radius, Dauer (Einschlag samt Glutpfütze) und Vorwarnung – so lange wächst ihr Schatten. */
+const BOMB_RADIUS = 2.6;
+const BOMB_ON = 150;
+const BOMB_WARN = 110;
+/** Steigende Lava: Steigen und Fallen in Ticks, Stehen als Anteil der Periode. */
+const FLOOD_RISE = 150;
+const FLOOD_FALL = 150;
+const FLOOD_HOLD = 0.3;
+
+/** Wo ein Wagen eines Fahrzeugs gerade steht. */
+export interface VehiclePose {
+  x: number;
+  y: number;
+  z: number;
+  /** Fahrtrichtung (Radiant, wie KartState.heading). */
+  heading: number;
+  /** Steigung der Fahrbahn (Höhe pro Meter voraus) und Querneigung (Höhe pro Meter nach rechts). */
+  slope: number;
+  bank: number;
+  seg: number;
+  /** Seitliche Lage der Wagenmitte (Meter, rechts positiv). */
+  lat: number;
+}
+
+export function newVehiclePose(): VehiclePose {
+  return { x: 0, y: 0, z: 0, heading: 0, slope: 0, bank: 0, seg: 0, lat: 0 };
+}
+
+/**
+ * Lage des Wagens car (0 = vorderster) von Fahrzeug v zur Rennzeit time
+ * (Ticks seit "Los", auch gebrochen oder negativ).
+ */
+export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
+  const lap = t.n * t.step;
+  let s = vehicleAt(v, time, lap) - car * v.pitch;
+  if (s < 0) s += lap;
+  const i = Math.min(t.n - 1, Math.floor(s / t.step));
+  const along = s - i * t.step;
+  const f = along / t.step;
+  const j = (i + 1) % t.n;
+  // Richtung zwischen den Abschnitten überblenden – sonst ruckt ein langer Bus in der Kurve.
+  const hx = t.tx[i] + (t.tx[j] - t.tx[i]) * f;
+  const hz = t.tz[i] + (t.tz[j] - t.tz[i]) * f;
+  const lat = (v.lat * (t.rh[i] + (t.rh[j] - t.rh[i]) * f)) / t.def.roadHalf;
+  const bank = t.bank[i] + (t.bank[j] - t.bank[i]) * f;
+  const k = 1 / Math.hypot(hx, hz);
+  out.x = t.px[i] + t.tx[i] * along - hz * k * lat;
+  out.z = t.pz[i] + t.tz[i] * along + hx * k * lat;
+  out.y = t.py[i] + (t.py[j] - t.py[i]) * f + lat * bank;
+  out.heading = Math.atan2(hx, hz);
+  out.slope = (t.py[j] - t.py[i]) / t.step;
+  out.bank = bank;
+  out.seg = i;
+  out.lat = lat;
+  return out;
 }
 
 /** Vektor nach rechts (quer zur Fahrtrichtung) im Abschnitt seg. */
