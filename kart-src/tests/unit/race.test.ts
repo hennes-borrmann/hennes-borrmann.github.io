@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { botCmd, newBrain } from '../../src/game/ai';
 import { ClientGame } from '../../src/game/clientGame';
 import { HostGame } from '../../src/game/hostGame';
-import { ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
+import { BTN_GAS, BTN_ITEM, ITEM_BOOST, ITEM_OIL, ITEM_TIRE, NEUTRAL, forwardSpeed, type Cmd } from '../../src/game/sim';
 import { TRACK, setTrack } from '../../src/game/track';
 import { withoutMechanics } from './helpers';
 import { RACE_COUNTDOWN, RACE_RESULTS, RACE_RUNNING, THING_OIL, THING_TIRE, decodeCmds, decodeSnapshot, encodeCmds } from '../../src/net/protocol';
@@ -287,6 +287,28 @@ describe('Rennen über das Netz (simuliert)', () => {
     host.receiveCmds(1, 1, [{ steer: 0, buttons: 1 }], [5], host.raceId);
     host.step(NEUTRAL);
     expect(decodeSnapshot(new DataView(host.snapshot()))!.karts.find((k) => k.slot === 1)!.ack).toBe(1);
+  });
+
+  it('ein Item-Druck geht nicht verloren, wenn sich nach einem Hänger die Eingaben stauen', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    while (host.phase === RACE_COUNTDOWN) host.step(NEUTRAL);
+    for (let i = 0; i < 30; i++) host.step(NEUTRAL);
+    host.giveItem(1, ITEM_BOOST);
+    // 50 Schritte auf einmal (der Bildschirm des Mitspielers hing): nur im fünften ist die Item-Taste gedrückt.
+    const cmds: Cmd[] = [];
+    const times: number[] = [];
+    const now = host.tick - host.goTick;
+    for (let i = 0; i < 50; i++) {
+      cmds.push({ steer: 0, buttons: BTN_GAS | (i === 4 ? BTN_ITEM : 0) });
+      times.push(now + i);
+    }
+    host.receiveCmds(1, 50, cmds, times, host.raceId);
+    for (let i = 0; i < 12; i++) host.step(NEUTRAL);
+    const s = host.authoritative(1)!;
+    expect(s.item).toBe(0);
+    expect(s.boost).toBeGreaterThan(60);
   });
 
   it('nach einem Verbindungsabbruch sendet der Mitspieler nichts, bis der Host wieder einen Stand geschickt hat', () => {

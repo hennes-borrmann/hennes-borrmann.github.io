@@ -544,8 +544,11 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
         const w = pulseWarning(p, time);
         const h = ramLift(p, time, seconds);
         quat.setFromAxisAngle(yAxis, heading[i]);
+        // Die Kamera folgt dem Kart durch die Presse. Steht sie dabei im noch gesenkten Stempel, wäre das
+        // Bild schwarz – dann wird dieser eine Stempel nicht gezeichnet (Schatten und Lampe bleiben).
+        const inside = Math.hypot(cam.x - p.x, cam.z - p.z) < p.radius * 1.42 + 0.9 && cam.y > p.y + h - 0.5 && cam.y < p.y + h + RAM_H + 0.6;
         // Stempel
-        mat4.compose(pos.set(p.x, p.y + 0.012 + h, p.z), quat, scale.set(1, 1, 1));
+        mat4.compose(pos.set(p.x, p.y + 0.012 + h, p.z), quat, inside ? scale.set(0, 0, 0) : scale.set(1, 1, 1));
         ram.setMatrixAt(i, mat4);
         // Kolben: von der Oberseite des Stempels bis in die Zylinder
         const top = p.y + 0.012 + h + RAM_H;

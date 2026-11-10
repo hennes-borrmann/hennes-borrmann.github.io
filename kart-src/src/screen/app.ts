@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { vehicleAt } from '../game/mechanics';
+import { tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { TRACK, TRACK_COUNT, newVehiclePose, setTrack, vehiclePose } from '../game/track';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -1173,6 +1173,13 @@ export class App {
         });
       },
       pulses: () => TRACK.pulses.map((p) => ({ kind: p.kind, lat: p.lat, at: TRACK.prog[p.seg] * TRACK.step, period: p.period / 60 })),
+      // Gezeit zur Rennzeit dieses Bildschirms: Stand 0 (Ebbe) … 1 (Flut) und Höhe des Wasserspiegels.
+      tide: () => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = view ? view.race(performance.now() / 1000).time : 0;
+        const t = TRACK.tide;
+        return t ? { time, phase: tidePhase(t, time), level: tideLevel(t, time), period: t.period, wall: performance.timeOrigin + performance.now() } : null;
+      },
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
       tree: () => this.scene?.debugTree() ?? [],
       buildTimes: () => this.scene?.buildTimes() ?? [],

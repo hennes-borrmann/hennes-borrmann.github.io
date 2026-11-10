@@ -210,6 +210,8 @@ export class RaceScene {
   private mechTime = 0;
   private honkWait = 0;
   private burnWait = 0;
+  /** Wasserspiegel der Gezeit in diesem Bild (ohne Gezeit: unendlich tief). */
+  private waterLevel = -Infinity;
   /** Je Fahrzeug: lag das eigene Kart zuletzt dahinter (−1) oder davor (1)? */
   private passSide: Int8Array = new Int8Array(0);
   private readonly vpose = newVehiclePose();
@@ -530,16 +532,32 @@ export class RaceScene {
     // Flut: wer durchs Wasser fährt, spritzt – alle Karts in Sichtweite, zu hören nur das eigene.
     if (t.tide) {
       const level = tideLevel(t.tide, time);
+      this.waterLevel = level;
       for (const e of entities) {
         if (e.respawn > 0 || (e.flags & FLAG_AIR) !== 0 || !t.tidal[e.seg < t.total ? e.seg : 0]) continue;
         const depth = level - e.y;
         const speed = Math.hypot(e.vx, e.vz);
         if (depth <= WATER_FROM || speed < 3) continue;
-        if (Math.random() < Math.min(1, dt * (8 + speed))) {
+        // Viele kleine Tropfen seitlich der Räder – je schneller und tiefer, desto mehr.
+        const drops = Math.min(4, Math.floor(dt * (10 + speed * 2.2) + Math.random()));
+        const hx = Math.sin(e.heading);
+        const hz = Math.cos(e.heading);
+        for (let d = 0; d < drops; d++) {
           const side = Math.random() < 0.5 ? -1 : 1;
-          const hx = Math.sin(e.heading);
-          const hz = Math.cos(e.heading);
-          this.fx.puff(e.x - hz * side * 0.9 - hx, level + 0.1, e.z + hx * side * 0.9 - hz, -hz * side * 3 - hx * 2, 3 + Math.random() * 3, hx * side * 3 - hz * 2, 0.45, 0.5 + depth, 0xeaf6fb, 0.8, 9);
+          const out = 2 + Math.random() * 3 + speed * 0.08;
+          this.fx.puff(
+            e.x - hz * side * 0.9 + hx * (Math.random() - 0.3),
+            level + 0.05,
+            e.z + hx * side * 0.9 + hz * (Math.random() - 0.3),
+            -hz * side * out + hx * speed * 0.25,
+            2.5 + Math.random() * 3 + depth * 2,
+            hx * side * out + hz * speed * 0.25,
+            0.35 + Math.random() * 0.2,
+            0.16 + Math.random() * 0.2,
+            0xf2fbff,
+            0,
+            14,
+          );
         }
         if (me && e.slot === me.slot && this.burnWait === 0) {
           this.burnWait = 0.28;
@@ -958,7 +976,10 @@ export class RaceScene {
     const rl = this.v1.copy(A.wheelRearL).applyMatrix4(root.matrixWorld);
     const rr = this.v2.copy(A.wheelRearR).applyMatrix4(root.matrixWorld);
     const drifting = e.driftDir !== 0 && !air;
-    const dust = DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]];
+    const seg = e.seg < this.track.total ? e.seg : 0;
+    // Im Wasser staubt nichts – dort spritzt es (mechanicEvents).
+    const wet = this.track.tidal[seg] !== 0 && this.waterLevel - e.y > WATER_FROM;
+    const dust = wet ? 0 : DUST[this.track.surf[seg]];
     const lv = LEVELS[this.level];
     const budget = lv.particles / LEVELS[2].particles;
 

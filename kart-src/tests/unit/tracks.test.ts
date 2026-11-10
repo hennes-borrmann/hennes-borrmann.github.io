@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { AI_EASY, AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import {
   EV_FALL,
+  EV_FLAT,
   EV_HIT,
   EV_LAND,
   EV_PAD,
@@ -35,6 +36,7 @@ function soloRun(slot: number, laps: number, level: number, route = -1) {
   let tick = 0;
   let falls = 0;
   let hits = 0;
+  let flats = 0;
   let wallHits = 0;
   let jumps = 0;
   let landings = 0;
@@ -52,6 +54,7 @@ function soloRun(slot: number, laps: number, level: number, route = -1) {
     progress += segDelta(TRACK, before, s.seg);
     if (ev & EV_FALL) falls++;
     if (ev & EV_HIT) hits++;
+    if (ev & EV_FLAT) flats++;
     if (ev & EV_WALL) wallHits++;
     if (ev & EV_TAKEOFF) jumps++;
     if (ev & EV_LAND) landings++;
@@ -68,7 +71,7 @@ function soloRun(slot: number, laps: number, level: number, route = -1) {
       lapStart = tick;
     }
   }
-  return { lapTimes, falls, hits, wallHits, jumps, landings, air: airTicks / 60, offroad: offroad / 60, turbos, pads, maxSpeed, onBranch };
+  return { lapTimes, falls, hits, flats, wallHits, jumps, landings, air: airTicks / 60, offroad: offroad / 60, turbos, pads, maxSpeed, onBranch };
 }
 
 describe('Alle Strecken', () => {
@@ -103,7 +106,7 @@ describe('Alle Strecken', () => {
         for (let slot = 0; slot < 4; slot++) {
           const r = soloRun(slot, 3, level);
           lines.push(
-            `  Fahrer ${slot + 1}: ${r.lapTimes.map((x) => x.toFixed(1)).join(' / ')} s · Stürze ${r.falls} · Treffer ${r.hits} · Bande ${r.wallHits} · Sprünge ${r.jumps} (${r.air.toFixed(1)} s Luft) · Grün ${r.offroad.toFixed(1)} s · Turbos ${r.turbos} · Felder ${r.pads} · Spitze ${r.maxSpeed.toFixed(0)} m/s`,
+            `  Fahrer ${slot + 1}: ${r.lapTimes.map((x) => x.toFixed(1)).join(' / ')} s · Stürze ${r.falls} · Treffer ${r.hits} · geplättet ${r.flats} · Bande ${r.wallHits} · Sprünge ${r.jumps} (${r.air.toFixed(1)} s Luft) · Grün ${r.offroad.toFixed(1)} s · Turbos ${r.turbos} · Felder ${r.pads} · Spitze ${r.maxSpeed.toFixed(0)} m/s`,
           );
           expect(r.lapTimes.length).toBe(3);
           // Selbst die langsamste KI schafft im Schnitt gut 17 m/s.
@@ -114,6 +117,8 @@ describe('Alle Strecken', () => {
           expect(r.wallHits).toBeLessThanOrEqual(TRACK.vehicles.length > 0 ? 9 : 4);
           // Verkehr, Geysire und Lavabomben erwischen sie höchstens einmal pro Runde.
           expect(r.hits).toBeLessThanOrEqual(3);
+          // Auch die Stampfpressen: zwei Reihen je Runde, höchstens einmal pro Runde geplättet.
+          expect(r.flats).toBeLessThanOrEqual(3);
         }
         console.log(`${name}, Stärke ${level}\n${lines.join('\n')}`);
       });
