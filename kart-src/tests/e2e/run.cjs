@@ -1055,8 +1055,8 @@ async function main() {
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die beiden großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
-    await sleep(4000);
+    // Der Browser räumt die vier großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    await sleep(8000);
   }
 
   if (wants('netsim')) {
@@ -1075,8 +1075,14 @@ async function main() {
     await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c3.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
     await sleep(1500);
-    const link = await kart(c3.page, 'hostLink()');
-    check('Gemessene Umlaufzeit passt zur Simulation (≈ 160–260 ms)', link.rtt > 150 && link.rtt < 280, `${link.rtt.toFixed(0)} ms`);
+    // Die Umlaufzeit ist ein geglätteter Messwert: hing die Testmaschine beim Aufbau der Welt, braucht er ein paar Sekunden, bis er stimmt.
+    let link = await kart(c3.page, 'hostLink()');
+    const rttFirst = link.rtt;
+    for (const rttUntil = Date.now() + 6000; !(link.rtt > 150 && link.rtt < 280) && Date.now() < rttUntil; ) {
+      await sleep(500);
+      link = await kart(c3.page, 'hostLink()');
+    }
+    check('Gemessene Umlaufzeit passt zur Simulation (≈ 160–260 ms)', link.rtt > 150 && link.rtt < 280, `${link.rtt.toFixed(0)} ms${rttFirst > 280 ? ` (zuerst ${rttFirst.toFixed(0)} ms – Testmaschine hing)` : ''}`);
     // Hängt der Host kurz (hier: die Testmaschine), geht seine Rennuhr nach; der Mitspieler übernimmt sie binnen anderthalb Sekunden.
     let goDiff = 9;
     let goFirst = -1;
