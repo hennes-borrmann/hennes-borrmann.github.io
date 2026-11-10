@@ -60,6 +60,13 @@ const SMOKE_DISSOLVE = 2.0;
 const TIRE_SPIN_MAX = 16;
 const TOP_SPIN = 15;
 const SPARK_HOT = [0xffe04a, 0xfff3b0, 0xff8a2a] as const;
+/**
+ * Das Spiel erzeugt ein Ding im Moment des Tastendrucks, die Figur holt aber
+ * erst aus. So lange bleibt das Ding unsichtbar – es erscheint, wenn der
+ * Gegenstand die Hand verlässt (Wurf nach vorn bzw. über die Schulter).
+ */
+const THROW_DELAY = 0.2;
+const DROP_DELAY = 0.24;
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -420,10 +427,20 @@ export class ThingVisuals {
         // Beim ersten Abgleich (Szenenwechsel, Beitritt mitten im Rennen)
         // liegt alles schon da: kein Aufploppen, kein Platsch.
         if (!this.primed) v.age = 30;
-        else this.arrive(th, fx);
+        else {
+          v.age = -(th.kind === THING_TIRE || th.kind === THING_TOP ? THROW_DELAY : DROP_DELAY);
+          v.obj.visible = false;
+        }
       }
       v.seen = true;
+      const hidden = v.age < 0;
       v.age += dt;
+      if (v.age < 0) continue;
+      if (hidden) {
+        v.age = 0;
+        v.obj.visible = true;
+        this.arrive(th, fx);
+      }
       if (th.kind === THING_TIRE) this.tire(v, th, dt, fx);
       else if (th.kind === THING_OIL) this.oil(v, th, dt, time, fx);
       else if (th.kind === THING_TOP) this.top(v, th, dt, time, fx);
@@ -432,10 +449,16 @@ export class ThingVisuals {
     this.primed = true;
     for (const [key, v] of this.live) {
       if (v.seen) continue;
-      this.farewell(v, fx);
+      if (v.age >= 0) this.farewell(v, fx);
       this.group.remove(v.obj);
       this.live.delete(key);
     }
+  }
+
+  /** Ist das Ding schon zu sehen – oder holt die Figur noch aus? (Für den Schatten.) */
+  shown(th: SnapshotThing): boolean {
+    const v = this.live.get(th.kind * 1000 + th.id);
+    return !v || v.age >= 0;
   }
 
   /** Auftritt: der Ölfleck landet mit Platsch, die Rauchwolke pafft los. */

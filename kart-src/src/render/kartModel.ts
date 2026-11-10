@@ -2755,7 +2755,9 @@ const KITE_REST: THREE.Matrix4[] = [];
 for (let i = 0; i < KITE_BONES; i++)
   KITE_REST.push(new THREE.Matrix4().makeTranslation(0, i === 0 ? 0 : -KITE_TIP - (i - 1) * KITE_STEP, 0));
 /** Großzügige Hülle (im Raum von root) für Start, Flug und Abflug. */
-const KITE_BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 3, 4), 7);
+/** Größe des fliegenden Drachens: aus der Fahrkamera muss er auch bei vollem Tempo auffallen. */
+const KITE_SCALE = 2.1;
+const KITE_BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 4, 6), 13);
 
 let kiteGeo: { main: THREE.BufferGeometry; outline: THREE.BufferGeometry | null } | null = null;
 
@@ -4007,9 +4009,9 @@ export class KartVisual {
 
     // Flugbahn: schwankt lebendig hin und her, legt sich dabei in die Kurve
     const ph = t * 1.25 + this.slot;
-    const fx = 0.75 * Math.sin(ph) + 0.22 * Math.sin(t * 3.3 + 1);
-    const fy = 3.25 + 0.22 * Math.sin(t * 1.9) + 0.07 * Math.sin(t * 5.3);
-    const fz = 5.6 + 0.25 * Math.sin(t * 1.1);
+    const fx = 1.25 * Math.sin(ph) + 0.3 * Math.sin(t * 3.3 + 1);
+    const fy = 4.7 + 0.3 * Math.sin(t * 1.9) + 0.1 * Math.sin(t * 5.3);
+    const fz = 8.4 + 0.35 * Math.sin(t * 1.1);
     let roll = -0.32 * Math.cos(ph) + 0.08 * Math.sin(t * 4.1);
     let pitch = -0.08 + 0.06 * Math.sin(t * 2.3);
     let ks = 1;
@@ -4034,7 +4036,7 @@ export class KartVisual {
       pitch -= u * 2;
     }
     k0.rotation.set(pitch, 0.12 * Math.sin(ph), roll);
-    k0.scale.setScalar(Math.max(ks, 0.001));
+    k0.scale.setScalar(Math.max(ks * KITE_SCALE, 0.001));
     // Schwanz: weht zum Kart hin und schlägt Wellen
     for (let i = 1; i < KITE_BONES; i++) {
       kb[i].rotation.set(
@@ -4054,7 +4056,7 @@ export class KartVisual {
     if (len > 1e-4) {
       this.leash.position.copy(_iv);
       this.leash.quaternion.setFromUnitVectors(Y_AXIS, _iw.multiplyScalar(1 / len));
-      this.leash.scale.set(0.016, len, 0.016);
+      this.leash.scale.set(0.028, len, 0.028);
     } else this.leash.visible = false;
   }
 

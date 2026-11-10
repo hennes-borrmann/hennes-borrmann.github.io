@@ -534,8 +534,32 @@ export class World {
     }
 
     // Große Grundfläche bis zum Horizont: Boden, Wasser oder Lava.
-    const plane = new THREE.PlaneGeometry(9000, 9000);
-    plane.rotateX(-Math.PI / 2);
+    // Nicht als ein einziges Riesenviereck: über Kilometer gespannte Dreiecke
+    // verlieren beim Zeichnen so viel Tiefengenauigkeit, dass die Fläche bei
+    // weitem Blickwinkel bildweise durch die Fahrbahn schlägt. Deshalb ein
+    // Raster – rund um die Strecke fein, zum Horizont hin grob.
+    const cuts = [-4500, -2200, -1200, -800, -600, -480, -400, -320, -240, -160, -80, 0, 80, 160, 240, 320, 400, 480, 600, 800, 1200, 2200, 4500];
+    const plane = new THREE.BufferGeometry();
+    const pv: number[] = [];
+    const pu: number[] = [];
+    const pi: number[] = [];
+    const cn = cuts.length;
+    for (let iz = 0; iz < cn; iz++) {
+      for (let ix = 0; ix < cn; ix++) {
+        pv.push(cuts[ix], 0, cuts[iz]);
+        pu.push(cuts[ix] / 9000 + 0.5, 0.5 - cuts[iz] / 9000);
+      }
+    }
+    for (let iz = 0; iz < cn - 1; iz++) {
+      for (let ix = 0; ix < cn - 1; ix++) {
+        const a = iz * cn + ix;
+        pi.push(a, a + cn, a + 1, a + 1, a + cn, a + cn + 1);
+      }
+    }
+    plane.setAttribute('position', new THREE.Float32BufferAttribute(pv, 3));
+    plane.setAttribute('uv', new THREE.Float32BufferAttribute(pu, 2));
+    plane.setIndex(pi);
+    plane.computeVertexNormals();
     let mat: THREE.Material;
     if (th.liquidY !== null) {
       const m = fogShader(LIQUID_FRAG, {
@@ -551,7 +575,7 @@ export class World {
       (mat as THREE.MeshBasicMaterial).color.multiplyScalar(flat ? 1 : 0.86);
     }
     const base = new THREE.Mesh(plane, mat);
-    base.position.set(this.center.x, th.liquidY ?? th.farY - 0.08, this.center.z);
+    base.position.set(this.center.x, th.liquidY ?? th.farY - 0.2, this.center.z);
     this.group.add(base);
     this.disposables.push(plane, mat);
   }

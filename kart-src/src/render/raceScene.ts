@@ -740,7 +740,7 @@ export class RaceScene {
     this.flat.identity();
     for (const th of things) {
       if (th.kind === THING_TIRE || th.kind === THING_TOP) {
-        this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
+        if (this.things.shown(th)) this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
         if (th.kind === THING_TOP && me && th.target === localSlot) {
           threat = Math.max(threat, 1 - Math.hypot(th.x - me.x, th.z - me.z) / 75);
         }
@@ -947,7 +947,7 @@ export class RaceScene {
     cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
     this.applyShake(dt);
 
-    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 13 : me.boost > 0 ? 9 : 0);
+    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : 0);
     this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 5);
     if (Math.abs(cam.fov - this.camFov) > 0.05) {
       cam.fov = this.camFov;
