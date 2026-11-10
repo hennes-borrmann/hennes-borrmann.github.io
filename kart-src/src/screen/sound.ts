@@ -23,6 +23,7 @@ export interface AudioEngine {
   update(dtSec: number, karts: KartAudio[]): void;
   suspend(): void;
   resume(): void;
+  readonly debug?: { started: number; ended: number; state: string } | null;
 }
 
 /** Geräusche fremder Karts, die man hören soll – der Rest wäre nur Lärm. */
@@ -136,6 +137,12 @@ export class Sound {
 
   setMuted(muted: boolean): void {
     this.engine?.setMuted(muted);
+  }
+
+  /** Für Tests: läuft der Ton, und wie viele Klangquellen wurden gestartet? */
+  debug(): { started: number; ended: number; state: string; music: string | null } | null {
+    const d = this.engine?.debug;
+    return d ? { ...d, music: this.wantMusic } : null;
   }
 
   get available(): boolean {

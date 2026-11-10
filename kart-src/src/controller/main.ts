@@ -390,6 +390,9 @@ function renderHud(): void {
   box.dataset.state = hud?.rolling ? 'rolling' : info ? 'ready' : 'none';
   $('pad-item-icon').innerHTML = hud?.rolling ? itemSvg(ROLLING_ICON) : info ? itemSvg(info.icon) : '';
   $('pad-item-name').textContent = hud?.rolling ? '…' : info ? info.name : 'Item';
+  $('pad-item-hint').textContent = info ? info.hint : '';
+  // Lange Namen ("Brummkreisel") brauchen eine kleinere Schrift, um in die Taste zu passen.
+  box.dataset.long = String(!!info && info.name.length > 9);
   if (hud) {
     $('mid-place').textContent = hud.place > 0 ? `${hud.place}.` : '–';
     $('mid-lap').textContent = hud.laps > 0 ? `Runde ${hud.lap}/${hud.laps}` : '';

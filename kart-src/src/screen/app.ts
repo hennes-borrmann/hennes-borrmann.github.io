@@ -1,9 +1,10 @@
 // Ablaufsteuerung eines Bildschirms (iPad/Desktop).
 //
-// Zustände: Startseite → Lobby (als Host oder Mitspieler) → Testszene → Lobby.
+// Zustände: Startseite → Lobby (als Host oder Mitspieler) → Rennen → Lobby.
 // Diese Datei verbindet die Bausteine: Signaling-Endpunkte, Lobby,
 // Controller-Kopplung, Simulation, Darstellung und Diagnose.
 
+import { GameAudio } from '../audio';
 import { BUILD_ID } from '../build';
 import { BOT_NAMES, botCmd, newBrain, type BotBrain } from '../game/ai';
 import { ClientGame, CLIENT_INTERP_DELAY } from '../game/clientGame';
@@ -90,7 +91,12 @@ function loadFlag(key: string): boolean {
 
 /** Das Ton-Modul; fehlt es (oder kann der Browser keinen Ton), bleibt das Spiel stumm. */
 function createAudio(): AudioEngine | null {
-  return null;
+  try {
+    return new GameAudio();
+  } catch (err) {
+    console.warn('[audio] Ton nicht verfügbar:', err);
+    return null;
+  }
 }
 
 function loadQuality(): Quality {
@@ -241,7 +247,10 @@ export class App {
         }
       },
       settings: () => ({ quality: this.quality, ...this.sound.volumes(), muted: this.sound.muted, showFps: this.showFps }),
-      click: (kind) => this.sound.ui(kind),
+      click: (kind) => {
+        this.sound.unlock();
+        this.sound.ui(kind);
+      },
       toggleDebug: () => (this.overlay.visible = !this.overlay.visible),
       showPairing: () => this.ui.showPairingModal(this.pairUrl(), this.pairing.connected),
       nameChanged: (name) => {
@@ -259,6 +268,10 @@ export class App {
       if (e.code === 'F2') this.overlay.visible = !this.overlay.visible;
     });
     this.sound.music('menu');
+    // Ton darf erst nach einer Nutzeraktion starten – jede Berührung oder Taste genügt.
+    const unlock = (): void => this.sound.unlock();
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock);
 
     // Beim Verlassen/Neuladen der Seite die Verbindungen aktiv schließen, damit
     // die Gegenseiten nicht erst auf ein Zeitlimit warten müssen.
@@ -646,7 +659,7 @@ export class App {
     this.ui.setBanner(null);
   }
 
-  // --- Testszene ------------------------------------------------------------
+  // --- Rennen ---------------------------------------------------------------
 
   private syncPhase(phase: Phase): void {
     if (phase === 'game' && !this.inGame) this.enterGame();
@@ -684,6 +697,8 @@ export class App {
       }
     }
     this.scene.setTrack();
+    this.scene.reset();
+    this.ui.setCameraLabel(false);
     this.scene.onEvent = (e) => this.sound.sceneEvent(e);
     this.scene.setRoster(this.drivers(state));
     this.sound.music(TRACK.def.theme as MusicName);
@@ -1101,8 +1116,18 @@ export class App {
       race: () => (this.hostGame ?? this.clientGame)?.race(performance.now() / 1000) ?? null,
       standings: () => (this.hostGame ?? this.clientGame)?.standings() ?? [],
       things: () => ((this.hostGame ?? this.clientGame)?.things(performance.now() / 1000) ?? []).map((t) => ({ ...t })),
-      track: () => ({ index: TRACK.index, name: TRACK.def.name, length: TRACK.length }),
+      track: () => {
+        // gapAt/openAt: Meter hinter der Startlinie, an denen die erste Lücke bzw. das erste Stück ohne Bande liegt.
+        let gap = -1;
+        let open = -1;
+        for (let i = 0; i < TRACK.n; i++) {
+          if (gap < 0 && TRACK.edge[i] & 4) gap = i;
+          if (open < 0 && (TRACK.edge[i] & 7) === 3) open = i;
+        }
+        return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
+      },
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
+      audio: () => this.sound.debug(),
       place: (slot: number, meters: number, lat = 0) => this.hostGame?.debugPlace(slot, meters, lat),
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),

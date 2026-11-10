@@ -254,7 +254,8 @@ export class World {
         const outer = sgn * (wh + WALL_T);
         if (!open) {
           side(i, f0, f1, inner, 0, WALL_H, sgn < 0, panel);
-          side(i, f0, f1, outer, deck ? -DECK_D : -0.6, WALL_H, sgn > 0, shade(panel, 0.8));
+          // Außen reicht die Bande bis ins Gelände hinunter – auch dort, wo eine Schanze oder Kuppe die Fahrbahn anhebt.
+          side(i, f0, f1, outer, deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]), WALL_H, sgn > 0, shade(panel, 0.8));
           if (sgn < 0) top(solid, i, f0, f1, outer, inner, WALL_H, cCap);
           else top(solid, i, f0, f1, inner, outer, WALL_H, cCap);
         } else {
@@ -418,7 +419,7 @@ export class World {
     const d = Math.sqrt(bestD);
     const lat = best < 0 ? 0 : (x - t.px[best]) * rightX(t, best) + (z - t.pz[best]) * rightZ(t, best);
     const whb = best < 0 ? 0 : t.wh[best];
-    const roadY = best < 0 ? th.farY : t.py[best] + Math.max(-whb, Math.min(whb, lat)) * t.bank[best] - 0.3;
+    const roadY = best < 0 ? th.farY : t.base[best] + Math.max(-whb, Math.min(whb, lat)) * t.bank[best] - 0.3;
 
     // Grundform abseits der Strecke
     let base: number;
@@ -443,13 +444,21 @@ export class World {
       } else {
         base = idw + (th.farY - idw) * smooth((d - 22) / 46);
       }
-      // Unter Stegen und Brücken ist Wasser (bzw. Lava), kein Land.
-      let deckD = Infinity;
-      for (let i = 0; i < t.n; i += 3) {
-        if ((t.edge[i] & EDGE_DECK) === 0 || t.py[i] > 8) continue;
-        deckD = Math.min(deckD, Math.hypot(x - t.px[i], z - t.pz[i]));
+      // Wo die Fahrbahn frei steht und keine Bande hat (Steg, Grat, Sprung), fällt das
+      // Gelände daneben ab – man sieht, dass es dort hinuntergeht.
+      let drop = base;
+      let dropK = 0;
+      for (let i = 0; i < t.n; i += 2) {
+        if ((t.edge[i] & EDGE_DECK) === 0 || (t.edge[i] & (EDGE_OPEN_L | EDGE_OPEN_R)) === 0) continue;
+        const dd = Math.hypot(x - t.px[i], z - t.pz[i]);
+        if (dd > 36) continue;
+        const kk = 1 - smooth((dd - 11) / 25);
+        if (kk > dropK) {
+          dropK = kk;
+          drop = Math.max(th.farY, t.py[i] - 10);
+        }
       }
-      if (deckD < 40) base += (th.farY - base) * (1 - smooth((deckD - 12) / 28));
+      if (dropK > 0 && drop < base) base += (drop - base) * dropK;
     }
     const k = smooth((d - whb - 1.2) / 24);
     const bumps = (noise(x * 0.045, z * 0.045) - 0.5) * 2 * th.rough + (noise(x * 0.13 + 9, z * 0.13) - 0.5) * th.rough * 0.5;

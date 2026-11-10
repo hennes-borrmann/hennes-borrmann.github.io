@@ -97,6 +97,8 @@ export interface Track {
   pz: Float64Array;
   /** Höhe der Fahrbahnmitte. */
   py: Float64Array;
+  /** Höhe ohne Schanzen und Kuppen – dort liegt das Gelände darunter. */
+  base: Float64Array;
   /** Fahrtrichtung (Einheitsvektor, waagerecht). */
   tx: Float64Array;
   tz: Float64Array;
@@ -270,6 +272,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     });
   }
   for (const [from, to] of def.decks ?? []) spanU(from, to, (seg) => (edge[seg] |= EDGE_DECK));
+  const base = Float64Array.from(py);
   const respawn = new Int32Array(n);
   for (let i = 0; i < n; i++) respawn[i] = i;
   for (const r of def.ramps ?? []) {
@@ -324,6 +327,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     px,
     pz,
     py,
+    base,
     tx,
     tz,
     curv,
@@ -478,5 +482,11 @@ export let TRACK: Track = getTrack(0);
 /** Wechselt die aktive Strecke (für Simulation, KI und Darstellung zugleich). */
 export function setTrack(index: number): Track {
   TRACK = getTrack(index);
+  return TRACK;
+}
+
+/** Nur für Tests: eine eigens gebaute Strecke aktiv schalten. */
+export function useTrack(track: Track): Track {
+  TRACK = track;
   return TRACK;
 }

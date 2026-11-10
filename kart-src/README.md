@@ -2,13 +2,15 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 2 – spielbare Grundversion.** Eine Strecke, drei Runden, Drift mit Mini-Turbo, drei Items, KI-Gegner. Grafik und Sound sind noch Platzhalter; die kommen in Phase 3.
+**Stand: Phase 3.** Vier Strecken mit Höhen, Sprüngen und Abgründen, acht Items, vier Figuren, KI-Gegner in drei Stärken, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+
+Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
 ## Spielen
 
 **https://hennes-borrmann.github.io/kart/**
 
-Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen, Rennen starten. Mehr ist nicht nötig.
+Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen, Strecke wählen, Rennen starten.
 
 ### Steuerung
 
@@ -19,12 +21,47 @@ Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scanne
 | Bremse | Pfeil runter / S | Bremsen, im Stand rückwärts |
 | Drift | Shift | In der Kurve gedrückt halten, beim Loslassen gibt es Schub |
 | Item | Leertaste | Eingesammeltes Item benutzen |
+| – | Esc | Menü im Rennen (Einstellungen, Controller koppeln, zur Lobby) |
 
 **Drift:** Einlenken und Drift halten. Das Kart stellt sich quer und dreht in diese Richtung weiter; mit der Lenkung wählst du nur noch zwischen engem und weitem Bogen. Je länger (und je enger), desto höher die Stufe – die Funken wechseln von Türkis über Gelb zu Magenta. Erst das Loslassen bringt den Schub.
 
-**Items** (aus den gelben Kisten): *Zisch* gibt kräftigen Schub. Der *Rollreifen* rollt geradeaus, prallt an der Bande ab und wirft Getroffene aus der Bahn. Der *Ölfleck* bleibt hinter dir liegen.
+### Strecken
 
-Freie Plätze fahren KI-Gegner (in der Lobby abschaltbar). Sie werden etwas langsamer, wenn sie weit vorn liegen, und etwas schneller, wenn sie weit zurückliegen.
+| Strecke | Länge | Besonderheiten |
+| --- | --- | --- |
+| **Werkshof** | 720 m | Einsteigerstrecke: breit, überall Bande, sanfte Hügel, eine Laderampe zum Springen, ein rollendes Fass |
+| **Möwenklippe** | 820 m | Holzsteg ohne Geländer, Serpentine die Klippe hinauf, zwei Kuppen, Sprung über die Bucht, eine Krabbe quert |
+| **Glutkessel** | 760 m | Acht um einen Vulkan: überhöhte Kurven, schmaler Grat, Sprung über den Lavastrom, Felsbrücke über die eigene Strecke |
+| **Nachtschicht** | 700 m | Hochstraße bei Nacht: rechte Winkel, Sprung von Dach zu Dach, Parkhaus-Spirale über sich selbst hinweg |
+
+Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wieder auf die Strecke gesetzt – vor Sprüngen mit genug Anlauf. Bergab ist das Kart schneller als bergauf.
+
+### Items (aus den gelben Kisten)
+
+| Item | Wirkung |
+| --- | --- |
+| **Zisch** | kräftiger Schub |
+| **Rollreifen** | rollt geradeaus, prallt an der Bande ab, wirft Getroffene aus der Bahn |
+| **Ölfleck** | bleibt hinter dir liegen |
+| **Brummkreisel** | folgt der Strecke und steuert auf den Fahrer vor dir zu |
+| **Stoßfänger** | fängt zwölf Sekunden lang den nächsten Treffer ab |
+| **Kurzschluss** | drosselt alle, die vor dir liegen, für gut zwei Sekunden |
+| **Nebelkerze** | Rauchwolke hinter dir – wer hineinfährt, sieht kurz nichts |
+| **Sprungfeder** | Hüpfer aus der Fahrt: über Öl, Reifen und Hindernisse hinweg |
+
+Wer vorn liegt, bekommt eher Abwehr (Öl, Nebel, Stoßfänger); wer hinten liegt, eher Schub, Brummkreisel und Kurzschluss.
+
+### KI-Gegner
+
+Freie Plätze fahren KI-Gegner (in der Lobby abschaltbar), Stärke **Leicht**, **Mittel** oder **Schwer**. Sie nutzen dieselbe Physik und dieselben Items wie Menschen. „Leicht“ driftet nie und wird deutlich langsamer, wenn sie vorn liegt; „Schwer“ driftet in jeder Kurve und holt stärker auf.
+
+### Einstellungen (je Bildschirm)
+
+Knopf „Einstellungen“ in der Lobby oder im Menü während des Rennens:
+
+- **Grafik:** Automatisch, Niedrig, Mittel, Hoch. „Automatisch“ senkt die Auflösung, sobald das Bild unter 50 Bilder pro Sekunde fällt, und geht notfalls eine Stufe herunter.
+- **Bildrate anzeigen:** blendet oben die gemessenen Bilder pro Sekunde ein – so lässt sich prüfen, ob ein Gerät 60 schafft.
+- **Musik / Geräusche / Ton aus.**
 
 ## Wie das Spiel auf die Website kommt
 
@@ -44,7 +81,7 @@ npm install
 npm run dev          # http://localhost:5173  (Bildschirm), /c/ ist der Controller
 ```
 
-Am Desktop lässt sich ohne Handy fahren: Pfeiltasten oder WASD, Shift = Drift, Leertaste = Item. Zwei Bildschirme testest du mit zwei **Fenstern** nebeneinander (nicht zwei Tabs in einem Fenster – ein Tab im Hintergrund wird vom Browser angehalten).
+Am Desktop lässt sich ohne Handy fahren (Tasten siehe oben). Zwei Bildschirme testest du mit zwei **Fenstern** nebeneinander (nicht zwei Tabs in einem Fenster – ein Tab im Hintergrund wird vom Browser angehalten).
 
 Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS. Dafür ist die veröffentlichte Seite da.
 
@@ -53,10 +90,10 @@ Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS.
 1. iPad/Rechner: Seite öffnen, Namen eintragen, **Lobby erstellen**.
 2. Handy: QR-Code unter „Dein Controller“ scannen → **Tippen zum Starten** → Sensor erlauben → Handy quer halten → **Kalibrieren**.
 3. Zweiter Bildschirm: Einladungslink öffnen oder Raumcode eintippen, eigenes Handy koppeln, **Ich bin bereit**.
-4. Host: **Rennen starten**. Nach dem Countdown drei Runden fahren.
-5. Fahrgefühl: Beschleunigung, Lenkung, Drift und Mini-Turbo, Rempler, Items. Das Handy zeigt Platz, Runde und Item und vibriert bei Treffern (Android; das iPhone blitzt stattdessen am Rand auf).
+4. Host: Strecke und KI-Stärke wählen, **Rennen starten**.
+5. Auf dem iPad in den Einstellungen **Bildrate anzeigen** einschalten und im Rennen ablesen.
 6. Nach dem Ziel: Ergebnisliste, dann **Nochmal** oder **Zur Lobby** (wählt der Host).
-7. Diagnose (Knopf „Diagnose“ oder Taste F2) bei Bedarf: Latenz, Raten, „direkt“ oder „über TURN“.
+7. Diagnose (im Menü oder Taste F2) bei Bedarf: Latenz, Raten, „direkt“ oder „über TURN“.
 
 ## TURN – was ohne nicht geht
 
@@ -97,11 +134,14 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | `?lag=80&jitter=20&loss=5` | künstliche Verzögerung (ms pro Richtung), Schwankung, Paketverlust in % |
 | `?debug=0` / `?debug=1` | Diagnose ausgeblendet bzw. auch im Rennen von Anfang an sichtbar |
 | `?laps=1` | Rundenzahl überschreiben (zählt beim Host) |
+| `?track=2` / `?ai=0` | Strecke (0–3) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
+| `?q=low` | Grafik: `low`, `medium`, `high`, `auto` |
+| `?mute=1` | ohne Ton starten |
 | `?auto=1` | das eigene Kart fährt von selbst – zum Ausprobieren ohne Controller |
 | `?signal=host:port` | eigener PeerJS-Server |
 | `?peerlog=3` | ausführliches Verbindungsprotokoll in der Browser-Konsole |
 
-Die Schalter wandern automatisch in den QR-Code und den Einladungslink.
+Die Schalter für Netz, Grafik und Ton wandern automatisch in den QR-Code und den Einladungslink.
 
 ## Aufbau
 
@@ -109,31 +149,45 @@ Die Schalter wandern automatisch in den QR-Code und den Einladungslink.
 src/net/         Verbindungsschicht: Signaling-Endpunkt, Link (zuverlässiger + unreliable Kanal), Protokoll, ICE/TURN
 src/lobby/       Lobby auf dem Host und auf den Mitspieler-Bildschirmen, Platzvergabe, Wiedereinstieg
 src/controller/  Handy-Seite: Neigung → Lenkwert, Kalibrierung, Touch-Tasten, Verbindung zum Bildschirm
-src/game/        sim.ts Fahrphysik · track.ts Strecke · ai.ts KI-Fahrer · hostGame.ts Rennen auf dem Host
-                 (Ablauf, Items, Rempler) · clientGame.ts Vorhersage/Abgleich · interp.ts Interpolation
-src/render/      three.js-Szene (Strecke, Karts, Effekte) und Diagnose-Overlay
-src/screen/      Ablauf und Oberfläche des Bildschirms
-audio/           folgt in Phase 3
+src/game/        sim.ts Fahrphysik (Ebene + Höhe, Sprünge, Abstürze) · track.ts Streckenbau · tracks.ts die vier Strecken
+                 · ai.ts KI-Fahrer · hostGame.ts Rennen auf dem Host (Ablauf, Items, Rempler, Hindernisse)
+                 · clientGame.ts Vorhersage/Abgleich · interp.ts Interpolation
+src/render/      three.js-Szene: world.ts Fahrbahn, Gelände, Himmel · scenery.ts Kulissen · kartModel.ts Figuren
+                 · things.ts Items und Hindernisse · effects.ts Teilchen, Spuren, Comic-Wörter · toon.ts Farbstufen und Kontur
+src/audio/       Ton: Mischpult, Motoren, Geräusche, Musik – alles zur Laufzeit erzeugt
+src/screen/      Ablauf und Oberfläche des Bildschirms (Lobby, Renn-Anzeige, Minikarte, Einstellungen)
 ```
 
-Netzwerkmodell: Der Lobby-Ersteller rechnet das Rennen. Die anderen schicken ihre Eingaben (60/s) und bekommen den kompletten Spielstand zurück (30/s). Das eigene Kart wird vorhergesagt – samt Drift, Schub, Bande und Boost-Feldern – und beim Eintreffen des Host-Stands abgeglichen. Fremde Karts werden 85 ms verzögert interpoliert. Rempler, Treffer und Kisten entscheidet allein der Host.
+Netzwerkmodell: Der Lobby-Ersteller rechnet das Rennen. Die anderen schicken ihre Eingaben (60/s) und bekommen den kompletten Spielstand zurück (30/s). Das eigene Kart wird vorhergesagt – samt Drift, Schub, Bande, Sprüngen, Abstürzen und Boost-Feldern – und beim Eintreffen des Host-Stands abgeglichen. Fremde Karts werden 85 ms verzögert interpoliert. Rempler, Treffer, Kisten und Hindernisse entscheidet allein der Host.
 
-Eine weitere Strecke braucht nur eine neue `TrackDef` in `track.ts` (Stützpunkte, Breite, Boost-Felder, Kistenreihen). Fahrgefühl wird über die Konstanten am Anfang von `sim.ts` abgestimmt, die Stärke der KI in `ai.ts`.
+Eine neue Strecke ist nur eine weitere Beschreibung in `src/game/tracks.ts` (Stützpunkte mit Höhe, dazu Schanzen, Lücken, offene Kanten, Boost-Felder, Kisten); Gelände, Kulissen und Minikarte entstehen daraus von selbst.
+
+## Grafik: wie der Comic-Look entsteht
+
+- **Farbstufen statt Verläufe:** drei Helligkeitsstufen pro Fläche (Toon-Shading), kantige Flächen, Farbe pro Fläche.
+- **Tuschekontur:** Figuren, Items, Kulissen und Wolken werden ein zweites Mal gezeichnet – nur die Rückseiten, leicht aufgeblasen, in Tuschefarbe.
+- **Comic-Mittel:** Wörter wie „KRACH!“ bei Ereignissen, Tempostriche bei Schub, gerasterte Schatten, kurzer Bildstopp bei Treffern, Stauchen und Strecken der Karts.
+- Keine Schattenberechnung, keine Nachbearbeitung des Bildes: rund 30–45 Zeichenaufrufe und 40.000–70.000 Dreiecke pro Bild.
+
+## Ton: Quellen
+
+Es gibt keine Tondateien. Motoren, Geräusche und Musik werden im Browser mit der Web Audio API erzeugt (Oszillatoren, Rauschen, Filter, Hüllkurven); die Musikstücke sind eigene Kompositionen und stehen als Noten in `src/audio/songs.ts`. Fremde Aufnahmen, Samples oder Melodien werden nicht verwendet.
 
 ## Tests
 
 ```bash
-npm test             # Fahrphysik, Strecke, KI-Runden, komplette Rennen (auch über simulierte Leitung), Lenkung, Protokoll
+npm test             # Unit-Tests: Physik, Strecken, KI auf allen Strecken, Items, Netzcode
+npm run signal       # lokaler Signaling-Server (Port 9000) für den Browser-Test
+npm run build && npm run preview -- --port 4173
+node tests/e2e/run.cjs   # Browser-Test in Chromium: Lobby, Kopplung, Rennen, Wiederverbindung, Phase 3
 ```
 
-`tests/e2e/run.cjs` spielt den kompletten Ablauf in Chromium durch (Lobby, Kopplung, Fahren, Abbrüche, Neuladen). Dafür braucht es Playwright, `npm run signal` und `npm run preview -- --port 4173` – Details stehen im Kopf der Datei.
+Der Browser-Test läuft auf einem Rechner über die lokale Schleife. Er sagt nichts über echte Netze, Safari, iOS-Berechtigungen, echte Neigungssensoren oder die Bildrate eines iPads.
 
 ## Bekannte Grenzen
 
-- Verlässt der Host die Lobby, ist sie beendet (Host-Migration ist nicht gebaut). Lädt er nur neu, kommen alle von selbst zurück – in die Lobby, nicht ins laufende Rennen.
-- Rempler kennt nur der Host. Auf den anderen Bildschirmen rutscht das eigene Kart nach einem Rempler deshalb einen Moment später nach (bei guter Verbindung kaum sichtbar, bei schlechter als kleines Nachziehen).
-- Fällt die Verbindung eines Mitspielers im Rennen aus, fährt nach anderthalb Sekunden die KI für ihn weiter, bis er zurück ist.
-- Der Host muss im Vordergrund bleiben. Sperrt er das iPad oder wechselt die App, friert die Runde für alle ein.
-- Der Host sieht sein eigenes Fahrzeug ohne Verzögerung, alle anderen sehen ihn leicht verzögert. Dieser Vorteil liegt im Modell.
-- Das Signaling läuft über den öffentlichen PeerJS-Server. Er ist kostenlos und ohne Zusage zur Verfügbarkeit: fällt er aus, kann niemand beitreten oder koppeln (laufende Verbindungen bleiben bestehen).
-- iOS fragt nach einem abgelehnten Sensor-Zugriff erst wieder, wenn Safari komplett geschlossen wurde. Bis dahin gibt es Touch-Lenkung als Ersatz.
+- **Nicht auf echten Geräten geprüft** (von mir aus): iPhone/iPad, Safari, echte Sensoren, echte Netze, Bildrate auf dem iPad, Höreindruck des Tons.
+- **Ohne TURN** keine Verbindung über Mobilfunk und viele Schul-/Firmennetze (siehe oben).
+- **Der Host hat keinen Latenz-Nachteil** und muss im Vordergrund bleiben. Verlässt er die Lobby, ist das Rennen für alle vorbei (Host-Wechsel ist nicht eingebaut).
+- **Rempler, Treffer und Hindernisse** kennt nur der Host; beim Mitspieler zieht das eigene Kart danach einen Moment nach.
+- **Rauchwolke:** nimmt Menschen die Sicht und lässt die KI nur „eiern“ – wer den Streckenverlauf auswendig kennt, verliert wenig.

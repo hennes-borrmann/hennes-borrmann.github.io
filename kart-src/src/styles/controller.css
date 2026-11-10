@@ -380,6 +380,28 @@ html[data-rot="ccw"] .rot {
   background: var(--item);
 }
 
+.pbtn-item[data-long="true"] span {
+  font-size: clamp(16px, 5.2vmin, 28px);
+  letter-spacing: 0.04em;
+}
+
+.pbtn-item small {
+  letter-spacing: 0.08em;
+  text-transform: none;
+  font-size: 12px;
+  line-height: 1.15;
+  color: var(--text, #f2efe6);
+  opacity: 0.85;
+}
+
+.pbtn-item small:empty {
+  display: none;
+}
+
+.pbtn-item.down small {
+  color: #15130a;
+}
+
 .pbtn-icon {
   position: absolute;
   top: 12px;

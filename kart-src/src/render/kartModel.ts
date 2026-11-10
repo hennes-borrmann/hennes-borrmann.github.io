@@ -5,8 +5,14 @@
 // Skelett hängt (THREE.SkinnedMesh). Räder, Lenkrad, Kopf, Arme, Ohren, Schal
 // und Schwanz sind Knochen – so bewegt sich alles einzeln und kostet trotzdem
 // nur einen Zeichenaufruf fürs Netz und einen für die Tuschekontur. Dazu
-// kommen je ein Aufruf für die Aufkleber (Augen, Startnummer) und – nur wenn
-// sichtbar – für Flammen und Effekte (Schutzring, Blitze, Qualm).
+// kommt ein Aufruf für die Aufkleber (Augen, Ziffer der Startnummer) und – nur
+// solange sichtbar – je einer für die Flammen sowie zwei für die Effekte
+// (Schutzring, Blitze, Qualm samt Kontur). Macht 3 Aufrufe im Normalfall,
+// höchstens 6.
+//
+// Die Kontur ist eine umgestülpte Hülle (siehe toon.ts). Ihr Netz enthält nur
+// die Teile, die eine Linie bekommen sollen; die Dicke steckt je Ecke in der
+// Länge von "onormal" – so bleiben kleine Teile fein und nichts verklumpt.
 //
 // Koordinaten: y oben, das Kart schaut nach +z, die Räder stehen auf y = 0.
 // „Links“ ist +x, „rechts“ −x.
@@ -353,12 +359,7 @@ function lathe(prof: LP[], segs: number, colorAt?: (band: number, j: number) => 
 }
 
 /** Schlauch entlang eines Pfades, Radius fest oder je Stelle (t = 0..1). */
-function sweep(
-  path: readonly V3[],
-  radius: number | ((t: number) => number),
-  radSegs: number,
-  smooth = 0,
-): THREE.BufferGeometry {
+function sweep(path: readonly V3[], radius: number | ((t: number) => number), radSegs: number, smooth = 0): THREE.BufferGeometry {
   let pts = path.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
   if (smooth > 0) pts = new THREE.CatmullRomCurve3(pts, false, 'centripetal').getPoints(smooth);
   const m = pts.length;
@@ -527,7 +528,16 @@ function wheel(r: number, w: number, segs: number, wall: number, rim: number, ri
 /** Vereinfachte Hülle des Rads für die Kontur (ohne Felge). */
 function wheelHull(r: number, w: number, segs: number): THREE.BufferGeometry {
   const h = w / 2;
-  const g = lathe([[0, -h], [r, -h + w * 0.14], [r, h - w * 0.26], [r * 0.83, h], [0, h]], segs);
+  const g = lathe(
+    [
+      [0, -h],
+      [r, -h + w * 0.14],
+      [r, h - w * 0.26],
+      [r * 0.83, h],
+      [0, h],
+    ],
+    segs,
+  );
   g.rotateZ(-HALF_PI);
   return g;
 }
@@ -551,6 +561,8 @@ interface Put {
   outline?: number;
   /** Vereinfachte Form nur für die Kontur (gleiche Lage wie das Teil selbst). */
   hull?: THREE.BufferGeometry;
+  /** Konturdicke je Ecke (0..1), ausgewertet an der unverschobenen Geometrie. */
+  taper?: (x: number, y: number, z: number) => number;
   /** Zusätzlich an x gespiegelt, gebunden an diesen Knochen. */
   mirror?: number;
   skin?: SkinFn;
@@ -595,7 +607,7 @@ class Builder {
 
   /** Segmentzahl passend zur Detailstufe. */
   s(n: number, min = 4): number {
-    const f = this.detail === 2 ? 1 : this.detail === 1 ? 0.8 : 0.6;
+    const f = this.detail === 2 ? 1 : this.detail === 1 ? 0.8 : 0.55;
     return Math.max(min, Math.round(n * f));
   }
 
@@ -606,6 +618,16 @@ class Builder {
 
   get vertexCount(): number {
     return this.pos.length / 3;
+  }
+
+  /** Feinheiten (kleine Zierteile) gibt es erst ab Detailstufe 1. */
+  get fine(): boolean {
+    return this.detail > 0;
+  }
+
+  /** Polster: weich gerundet, auf der niedrigsten Stufe ein schlichter Quader. */
+  soft(w: number, h: number, d: number, r: number, segs: number): THREE.BufferGeometry {
+    return this.fine ? pillow(w, h, d, r, segs) : box(w, h, d);
   }
 
   /** Fügt ein Teil hinzu (die Geometrie wird dabei verbraucht). */
@@ -624,19 +646,25 @@ class Builder {
     else if (o.scale) _s.set(o.scale[0], o.scale[1], o.scale[2]);
     else _s.set(1, 1, 1);
     _m.compose(_p, _q, _s).premultiply(this.rest[o.bone]);
+    const hull = o.hull ?? geo;
+    let weights: number[] | null = null;
+    if (o.taper) {
+      const hp = hull.getAttribute('position');
+      weights = [];
+      for (let i = 0; i < hp.count; i++) weights.push(o.taper(hp.getX(i), hp.getY(i), hp.getZ(i)));
+    }
     geo.applyMatrix4(_m);
     if (!geo.getAttribute('normal')) geo.computeVertexNormals();
-    const hull = o.hull ?? geo;
     if (o.hull) {
       o.hull.applyMatrix4(_m);
       if (!o.hull.getAttribute('normal')) o.hull.computeVertexNormals();
     }
     const thick = this.outlines ? (o.outline ?? 1) * LINE : 0;
     this.appendMain(geo, o, o.bone, false);
-    if (thick > 0) this.appendHull(hull, o, o.bone, false, thick);
+    if (thick > 0) this.appendHull(hull, o, o.bone, false, thick, weights);
     if (o.mirror !== undefined) {
       this.appendMain(geo, o, o.mirror, true);
-      if (thick > 0) this.appendHull(hull, o, o.mirror, true, thick);
+      if (thick > 0) this.appendHull(hull, o, o.mirror, true, thick, weights);
     }
     geo.dispose();
     o.hull?.dispose();
@@ -685,7 +713,14 @@ class Builder {
    * reißt die Hülle an harten Kanten auf. An Kanten wird sie etwas verlängert,
    * damit die Linie dort nicht dünner ausfällt als auf Flächen.
    */
-  private appendHull(geo: THREE.BufferGeometry, o: Put, bone: number, mirrored: boolean, thick: number): void {
+  private appendHull(
+    geo: THREE.BufferGeometry,
+    o: Put,
+    bone: number,
+    mirrored: boolean,
+    thick: number,
+    weights: number[] | null,
+  ): void {
     const p = geo.getAttribute('position');
     const n = geo.getAttribute('normal');
     const index = geo.getIndex();
@@ -738,8 +773,9 @@ class Builder {
       const x = p.getX(i) * sx;
       const y = p.getY(i);
       const z = p.getZ(i);
+      const w = weights ? weights[i] : 1;
       this.oPos.push(x, y, z);
-      this.oNor.push(d[0] * sx, d[1], d[2]);
+      this.oNor.push(d[0] * sx * w, d[1] * w, d[2] * w);
       if (o.skin) {
         o.skin(x, y, z, tmp);
         this.oSi.push(tmp[0], tmp[2], 0, 0);
@@ -783,6 +819,9 @@ class Builder {
   }
 }
 
+/** Drehpunkt des Drifts: ein Stück vor der Mitte, damit das Heck ausbricht. */
+const DRIFT_PIVOT = 0.3;
+
 /** Großzügige Hülle fürs Sichtbarkeits-Culling (Kart samt Schal, Ring, Flammen). */
 const BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 0.7, 0), 2.6);
 
@@ -823,10 +862,9 @@ interface Spec {
   chainParent: number;
   chain: V3;
   chainStep: V3;
-  /** Zwei freie Knochen: Elternknochen und Lage (links; der zweite gespiegelt). */
+  /** Zwei freie Knochen je Figur (Motor/Kiefer, Schnauzbart, Antennen): Elternknochen und Lage. */
   auxParent: number;
   aux: V3;
-  auxMirror: boolean;
   aux1Parent: number;
   aux1: V3;
   /** Wo es bei „Kurzschluss“ qualmt. */
@@ -858,7 +896,6 @@ const SPECS: Spec[] = [
     chainStep: [0, 0, -0.1],
     auxParent: B.chassis, // Motorblock (zittert)
     aux: [0, 0.4, 0.58],
-    auxMirror: false,
     aux1Parent: B.head, // Unterkiefer
     aux1: [0, 0.15, 0.08],
     smoke: [0, 0.85, 0.6],
@@ -887,7 +924,6 @@ const SPECS: Spec[] = [
     chainStep: [0, 0, -0.21],
     auxParent: B.chassis,
     aux: [0, 0.5, 0],
-    auxMirror: false,
     aux1Parent: B.chassis,
     aux1: [0, 0.5, 0],
     smoke: [0, 0.8, -0.75],
@@ -897,15 +933,15 @@ const SPECS: Spec[] = [
     color: 0xffd23f,
     wf: { x: 0.6, z: 0.6, r: 0.27, w: 0.27 },
     wr: { x: 0.6, z: -0.62, r: 0.29, w: 0.29 },
-    hip: [0, 0.5, -0.2],
-    torsoLen: 0.34,
-    shoulder: [0.29, 0.23, 0.02],
+    hip: [0, 0.52, -0.22],
+    torsoLen: 0.33,
+    shoulder: [0.29, 0.22, 0.02],
     armR: 0.075,
-    upper: 0.24,
-    fore: 0.23,
+    upper: 0.27,
+    fore: 0.27,
     hand: 0.078,
-    steer: [0, 0.74, 0.22],
-    steerTilt: 0.6,
+    steer: [0, 0.69, 0.3],
+    steerTilt: 0.72,
     steerR: 0.15,
     exhaust: [0.2, 0.2, -1.03],
     exhaustUp: 0.1,
@@ -916,7 +952,6 @@ const SPECS: Spec[] = [
     chainStep: [0, 0, -0.1],
     auxParent: B.head, // Schnauzbart links/rechts
     aux: [0.1, 0.19, 0.27],
-    auxMirror: true,
     aux1Parent: B.head,
     aux1: [-0.1, 0.19, 0.27],
     smoke: [0, 0.75, -0.85],
@@ -944,10 +979,9 @@ const SPECS: Spec[] = [
     chain: [0.0, 0.62, -0.6],
     chainStep: [0, 0.24, -0.06],
     auxParent: B.chassis, // Zündkerzen-Antennen
-    aux: [0.33, 0.63, -0.86],
-    auxMirror: true,
+    aux: [0.3, 0.648, -0.86],
     aux1Parent: B.chassis,
-    aux1: [-0.33, 0.63, -0.86],
+    aux1: [-0.3, 0.648, -0.86],
     smoke: [0, 0.8, -0.8],
   },
 ];
@@ -958,7 +992,6 @@ interface Ctx {
   /** Aufkleber (Augen, Startnummer) – eigenes Netz mit Textur. */
   d: Builder;
   sp: Spec;
-  slot: number;
   /** Erste Ecke der Augen im Aufkleber-Netz (setzt addEyes). */
   eyeStart: number;
 }
@@ -1100,10 +1133,10 @@ function drawOpenEye(
     for (let i = 0; i < st.lashes; i++) {
       const a = -0.25 - i * 0.33;
       const ex = cx + Math.cos(a) * rx;
-      const ey = Math.max(cy + Math.sin(a) * ry, yl - k * (ex - cx) / dx);
+      const ey = Math.max(cy + Math.sin(a) * ry, yl - (k * (ex - cx)) / dx);
       g.beginPath();
       g.moveTo(ex - S * 0.01, ey);
-      g.lineTo(ex + S * 0.085, ey - S * (0.035 + i * 0.022));
+      g.lineTo(ex + S * 0.07, ey - S * (0.035 + i * 0.022));
       g.stroke();
     }
   }
@@ -1111,11 +1144,17 @@ function drawOpenEye(
 
 function drawEye(g: CanvasRenderingContext2D, x0: number, y0: number, st: EyeStyle, state: number): void {
   const S = CELL;
-  const cx = x0 + S / 2;
+  // Mit Wimpern rückt das Auge etwas zur Nase, damit sie in der Zelle Platz haben.
+  const cx = x0 + S / 2 - (st.lashes > 0 ? S * 0.035 : 0);
   const cy = y0 + S / 2;
   const rx = st.rx * S;
   const ry = st.ry * S;
   const lw = S * 0.05;
+  // Nichts darf in die Nachbarzelle ragen (dort gäbe es sonst Flecken neben dem Auge).
+  g.save();
+  g.beginPath();
+  g.rect(x0 + 3, y0 + 3, S - 6, S - 6);
+  g.clip();
   g.lineCap = 'round';
   g.lineJoin = 'round';
   g.strokeStyle = INK_CSS;
@@ -1125,6 +1164,17 @@ function drawEye(g: CanvasRenderingContext2D, x0: number, y0: number, st: EyeSty
       g.beginPath();
       g.ellipse(cx, cy - ry * 0.2, rx * 0.9, ry * 0.5, 0, Math.PI * 0.1, Math.PI * 0.9);
       g.stroke();
+      // Wimpern am geschlossenen Auge
+      g.lineWidth = lw * 1.1;
+      for (let i = 0; i < st.lashes; i++) {
+        const a = Math.PI * (0.14 + i * 0.1);
+        const ex = cx + Math.cos(a) * rx * 0.9;
+        const ey = cy - ry * 0.2 + Math.sin(a) * ry * 0.5;
+        g.beginPath();
+        g.moveTo(ex, ey);
+        g.lineTo(ex + S * 0.05, ey + S * 0.055);
+        g.stroke();
+      }
       break;
     case EYE.HAPPY:
       g.lineWidth = lw * 2.2;
@@ -1169,6 +1219,7 @@ function drawEye(g: CanvasRenderingContext2D, x0: number, y0: number, st: EyeSty
     default:
       drawOpenEye(g, cx, cy, S, st, st.lid, st.lidSlope, 1, 0, false);
   }
+  g.restore();
 }
 
 /** Zeichnet alle Augenzustände einer Figur und ihre Startnummer in ein Bild. */
@@ -1270,13 +1321,14 @@ function addEyes(c: Ctx, e: EyePlace): void {
  * Startnummernschild: helle Scheibe im Netz, Ziffer als Aufkleber darüber.
  * Die Scheibe schaut entlang ihrer +y-Achse; turn dreht die Ziffer in der
  * Scheibenebene (0: Oberkante der Ziffer nach −z, π: nach +z, ±π/2: seitlich).
+ * flat: ohne eigene Kontur (für Schilder, die bündig auf einer Fläche liegen).
  */
-function addNumber(c: Ctx, pos: V3, rot: V3, r: number, turn: number): void {
-  c.b.put(cyl(r, r, 0.024, c.b.s(12, 8)), { bone: B.chassis, color: WHITE, pos, rot, outline: 0.55 });
+function addNumber(c: Ctx, pos: V3, rot: V3, r: number, turn: number, flat = false): void {
+  c.b.put(cyl(r, r, 0.016, c.b.s(12, 8)), { bone: B.chassis, color: WHITE, pos, rot, outline: flat ? 0 : 0.55 });
   const a = r * 0.86;
   const co = Math.cos(turn);
   const si = Math.sin(turn);
-  const h = 0.019;
+  const h = 0.0135;
   const u0 = 0;
   const u1 = 1 / ATLAS_COLS;
   const v0 = 0;
@@ -1305,8 +1357,16 @@ interface WheelLook {
 function addWheels(c: Ctx, look: WheelLook): void {
   const { b, sp } = c;
   const segs = b.s(12, 8);
-  b.put(wheel(sp.wf.r, sp.wf.w, segs, look.wall, look.rim, look.rim2, look.hub), { bone: B.wFL, mirror: B.wFR, hull: wheelHull(sp.wf.r, sp.wf.w, segs) });
-  b.put(wheel(sp.wr.r, sp.wr.w, segs, look.wall, look.rim, look.rim2, look.hub), { bone: B.wRL, mirror: B.wRR, hull: wheelHull(sp.wr.r, sp.wr.w, segs) });
+  b.put(wheel(sp.wf.r, sp.wf.w, segs, look.wall, look.rim, look.rim2, look.hub), {
+    bone: B.wFL,
+    mirror: B.wFR,
+    hull: wheelHull(sp.wf.r, sp.wf.w, segs),
+  });
+  b.put(wheel(sp.wr.r, sp.wr.w, segs, look.wall, look.rim, look.rim2, look.hub), {
+    bone: B.wRL,
+    mirror: B.wRR,
+    hull: wheelHull(sp.wr.r, sp.wr.w, segs),
+  });
 }
 
 /** Achse zwischen zwei Rädern (sichtbar, wo die Karosserie schmal ist). */
@@ -1319,6 +1379,7 @@ function addSteering(c: Ctx, rimColor: number, spoke: number): void {
   const R = sp.steerR;
   b.put(new THREE.TorusGeometry(R, 0.02, 4, b.s(10, 8)), { bone: B.steer, color: rimColor, outline: 0.6 });
   b.put(box(R * 2, 0.03, 0.014), { bone: B.steer, color: spoke, outline: 0 });
+  if (!b.fine) return;
   b.put(box(0.03, R, 0.014), { bone: B.steer, color: spoke, pos: [0, R / 2, 0], outline: 0 });
   // Lenksäule nach vorn-unten ins Armaturenbrett
   b.put(cyl(0.016, 0.016, 0.34, 4), { bone: B.steer, color: DARK, pos: [0, 0, -0.17], rot: [HALF_PI, 0, 0], outline: 0 });
@@ -1357,8 +1418,25 @@ function addDriverBody(c: Ctx, look: BodyLook): void {
   b.put(torso, { bone: B.torso });
   // Arme: Oberarm, Unterarm, Hand – jeweils eigener Knochen.
   const segs = b.s(6, 5);
-  b.put(limb(sp.armR, sp.upper, segs, b.detail === 0 ? 1 : 2), { bone: B.armLU, color: look.sleeve, mirror: B.armRU, outline: 0.8 });
-  b.put(limb(sp.armR * 0.92, sp.fore, segs, 1), { bone: B.armLF, color: look.cuff, mirror: B.armRF, outline: 0.8 });
+  // Die runden Enden bekommen keine Kontur – sonst zeichnen sich an den Gelenken Ringe ab.
+  const shaft =
+    (len: number) =>
+    (_x: number, y: number): number =>
+      y < -1e-4 || y > len + 1e-4 ? 0 : 1;
+  b.put(limb(sp.armR, sp.upper, segs, b.detail === 0 ? 1 : 2), {
+    bone: B.armLU,
+    color: look.sleeve,
+    mirror: B.armRU,
+    outline: 0.8,
+    taper: shaft(sp.upper),
+  });
+  b.put(limb(sp.armR * 0.88, sp.fore, segs, 1), {
+    bone: B.armLF,
+    color: look.cuff,
+    mirror: B.armRF,
+    outline: 0.8,
+    taper: shaft(sp.fore),
+  });
   b.put(sphere(sp.hand, sp.hand * 0.9, sp.hand, 6, b.s(5, 4)), {
     bone: B.handL,
     color: look.glove,
@@ -1373,6 +1451,8 @@ interface HelmetOpts {
   stripeHalf?: number;
   rim?: number;
   ws?: number;
+  /** Glanzlicht: Richtung (Winkel um die Hochachse, 0 = vorn, positiv = links). */
+  gloss?: number;
 }
 
 /**
@@ -1380,11 +1460,11 @@ interface HelmetOpts {
  * hinten gekippt, mit Wulst an der Kante und optionalem Mittelstreifen.
  */
 function addHelmet(b: Builder, c: V3, r: V3, cut: number, tilt: number, color: number, o: HelmetOpts = {}): void {
-  const ws = b.s(o.ws ?? 12, 8);
+  const ws = b.s(o.ws ?? 14, 8);
   const hs = b.s(5, 3);
   const rot: V3 = [tilt, 0, 0];
   b.put(new THREE.SphereGeometry(1, ws, hs, 0, TAU, 0, cut), { bone: B.head, color, pos: c, rot, scale: r });
-  if (o.rim !== undefined) {
+  if (o.rim !== undefined && b.fine) {
     const ring = new THREE.TorusGeometry(Math.sin(cut), 0.055, 3, ws);
     ring.rotateX(HALF_PI);
     ring.translate(0, Math.cos(cut), 0);
@@ -1396,22 +1476,43 @@ function addHelmet(b: Builder, c: V3, r: V3, cut: number, tilt: number, color: n
     band.rotateZ(HALF_PI);
     b.put(band, { bone: B.head, color: o.stripe, pos: c, rot, scale: r, outline: 0 });
   }
+  if (o.gloss !== undefined && b.fine) {
+    // Comic-Glanzlicht: kleiner heller Fleck schräg oben auf der Schale
+    const spot = new THREE.SphereGeometry(1.016, 3, 2, HALF_PI + o.gloss - 0.3, 0.6, 0.42, 0.26);
+    b.put(spot, { bone: B.head, color: 0xffffff, pos: c, rot, scale: r, outline: 0 });
+  }
 }
 
 /** Spitzes Ohr (Fuchs, Katze): flacher Kegel mit hellem Innenohr und dunkler Spitze. */
 function addPointedEars(b: Builder, r: number, h: number, fur: number, inner: number, tip: number | null): void {
   const segs = b.s(6, 5);
   b.put(cone(r, h, segs), { bone: B.earL, color: fur, scale: [1, 1, 0.5], mirror: B.earR, outline: 0.9 });
-  b.put(cone(r * 0.62, h * 0.66, 4), { bone: B.earL, color: inner, pos: [0, h * 0.04, r * 0.24], scale: [1, 1, 0.3], mirror: B.earR, outline: 0 });
+  if (b.fine)
+    b.put(cone(r * 0.62, h * 0.66, 4), {
+      bone: B.earL,
+      color: inner,
+      pos: [0, h * 0.04, r * 0.24],
+      scale: [1, 1, 0.3],
+      mirror: B.earR,
+      outline: 0,
+    });
   if (tip !== null) {
     const th = h * 0.4;
-    b.put(cone((r * th) / h + 0.006, th + 0.006, segs), { bone: B.earL, color: tip, pos: [0, h - th, 0], scale: [1, 1, 0.56], mirror: B.earR, outline: 0 });
+    b.put(cone((r * th) / h + 0.006, th + 0.006, segs), {
+      bone: B.earL,
+      color: tip,
+      pos: [0, h - th, 0],
+      scale: [1, 1, 0.56],
+      mirror: B.earR,
+      outline: 0,
+    });
   }
 }
 
 /** Auspuffmündung: dunkles Loch am Rohrende. */
 function addPipeHole(c: Ctx, r: number): void {
   const e = c.sp.exhaust;
+  if (!c.b.fine) return;
   c.b.put(sphere(r, r, r * 0.35, 6, 3), {
     bone: B.chassis,
     color: 0x1c1920,
@@ -1425,8 +1526,15 @@ function addPipeHole(c: Ctx, r: number): void {
 /** Scheinwerfer: Chromtopf mit hellem Glas nach vorn. */
 function addLamp(c: Ctx, pos: V3, r: number): void {
   const b = c.b;
-  b.put(sphere(r, r, r * 0.95, 6, b.s(5, 4)), { bone: B.chassis, color: CHROME, pos, mirror: B.chassis, outline: 0.75 });
-  b.put(sphere(r * 0.76, r * 0.76, r * 0.36, 6, 3), { bone: B.chassis, color: 0xfff3b0, pos: [pos[0], pos[1], pos[2] + r * 0.72], mirror: B.chassis, outline: 0 });
+  b.put(sphere(r, r, r * 0.95, b.s(8, 6), b.s(5, 4)), { bone: B.chassis, color: CHROME, pos, mirror: B.chassis, outline: 0.75 });
+  if (b.fine)
+    b.put(sphere(r * 0.76, r * 0.76, r * 0.36, b.s(8, 6), 3), {
+      bone: B.chassis,
+      color: 0xfff3b0,
+      pos: [pos[0], pos[1], pos[2] + r * 0.72],
+      mirror: B.chassis,
+      outline: 0,
+    });
 }
 
 // ───────────────────────────── 0: Kolben-Kalle ─────────────────────────────
@@ -1443,20 +1551,43 @@ function buildKalle(c: Ctx): void {
   const S = b.s4(16);
   const rr = (z: number, hw: number, ht: number, hb: number, cy = 0.4): Ring => sring(z, cy, hw, ht, hb, 3.2, S, 0.07);
   b.put(
-    loft([rr(-1.0, 0.31, 0.165, 0.175, 0.415), rr(-0.92, 0.365, 0.205, 0.215, 0.41), rr(-0.66, 0.385, 0.22, 0.24), rr(-0.3, 0.39, 0.22, 0.25), rr(0.08, 0.37, 0.21, 0.25), rr(0.3, 0.32, 0.18, 0.23)], {
-      color: (_j, k) => (k === S / 4 - 1 || k === S / 4 ? CREAM : RED),
-      capColor: RED_D,
-    }),
+    loft(
+      [
+        rr(-1.0, 0.31, 0.165, 0.175, 0.415),
+        rr(-0.92, 0.365, 0.205, 0.215, 0.41),
+        rr(-0.66, 0.385, 0.22, 0.24),
+        rr(-0.3, 0.39, 0.22, 0.25),
+        rr(0.08, 0.37, 0.21, 0.25),
+        rr(0.3, 0.32, 0.18, 0.23),
+      ],
+      {
+        color: (_j, k) => (k === S / 4 - 1 || k === S / 4 ? CREAM : RED),
+        capColor: RED_D,
+      },
+    ),
     { bone: CH },
   );
   // Sitzmulde und Lehne
   b.put(sphere(0.27, 0.035, 0.25, b.s(10, 8), 3), { bone: CH, color: 0x3a2a26, pos: [0, 0.612, -0.27], outline: 0 });
-  b.put(pillow(0.5, 0.4, 0.12, 0.045, b.s4(8)), { bone: CH, color: LEATHER, pos: [0, 0.77, -0.6], rot: [-0.2, 0, 0] });
+  b.put(b.soft(0.5, 0.4, 0.12, 0.045, 8), { bone: CH, color: LEATHER, pos: [0, 0.77, -0.6], rot: [-0.2, 0, 0] });
   // Kühlermaske mit Chromstreben
   const gs = b.s4(12);
-  b.put(loft([sring(0.84, 0.42, 0.17, 0.2, 0.21, 3, gs), sring(0.93, 0.42, 0.2, 0.235, 0.23, 3, gs), sring(0.975, 0.42, 0.185, 0.22, 0.215, 3, gs)]), { bone: CH, color: RED });
-  b.put(loft([sring(0.97, 0.42, 0.14, 0.17, 0.165, 3, gs), sring(0.99, 0.42, 0.125, 0.155, 0.15, 3, gs)], { capA: false }), { bone: CH, color: 0x3b3f4d, outline: 0 });
-  if (b.detail > 0) for (let i = -1; i <= 1; i++) b.put(box(0.022, 0.3, 0.012), { bone: CH, color: CHROME, pos: [i * 0.065, 0.42, 0.992], outline: 0 });
+  b.put(
+    loft([
+      sring(0.84, 0.42, 0.17, 0.2, 0.21, 3, gs),
+      sring(0.93, 0.42, 0.2, 0.235, 0.23, 3, gs),
+      sring(0.975, 0.42, 0.185, 0.22, 0.215, 3, gs),
+    ]),
+    { bone: CH, color: RED },
+  );
+  b.put(loft([sring(0.97, 0.42, 0.14, 0.17, 0.165, 3, gs), sring(0.99, 0.42, 0.125, 0.155, 0.15, 3, gs)], { capA: false }), {
+    bone: CH,
+    color: 0x3b3f4d,
+    outline: 0,
+  });
+  if (b.fine)
+    for (let i = -1; i <= 1; i++)
+      b.put(box(0.022, 0.3, 0.012), { bone: CH, color: CHROME, pos: [i * 0.065, 0.42, 0.992], outline: 0 });
   addLamp(c, [0.295, 0.5, 0.9], 0.08);
   // Rahmen und Vorderachse
   b.put(box(0.06, 0.07, 0.72), { bone: CH, color: DARK, pos: [0.19, 0.25, 0.62], mirror: CH, outline: 0.6 });
@@ -1468,22 +1599,53 @@ function buildKalle(c: Ctx): void {
   b.put(box(0.11, 0.08, 0.4), { bone: EN, color: CHROME, pos: [0.125, 0.13, 0], rot: [0, 0, -0.6], mirror: EN, outline: 0.7 });
   b.put(box(0.2, 0.12, 0.3), { bone: EN, color: CHROME, pos: [0, 0.2, 0], outline: 0.7 });
   // Lufthutze: Keil mit dunklem Schlund nach vorn
-  const sc = (z: number, hw: number, h: number): Ring => ({ z, p: [hw, 0, hw, h * 0.7, hw * 0.7, h, -hw * 0.7, h, -hw, h * 0.7, -hw, 0] });
-  b.put(loft([sc(-0.17, 0.07, 0.05), sc(-0.02, 0.115, 0.14), sc(0.16, 0.13, 0.17)], { flat: true, color: (_j, k) => (k === 2 ? CREAM : RED), capColor: 0x241f26 }), {
-    bone: EN,
-    pos: [0, 0.255, 0],
+  const sc = (z: number, hw: number, h: number): Ring => ({
+    z,
+    p: [hw, 0, hw, h * 0.7, hw * 0.7, h, -hw * 0.7, h, -hw, h * 0.7, -hw, 0],
   });
+  b.put(
+    loft([sc(-0.16, 0.06, 0.04), sc(-0.02, 0.095, 0.1), sc(0.15, 0.105, 0.12)], {
+      flat: true,
+      color: (_j, k) => (k === 2 ? CREAM : RED),
+      capColor: 0x241f26,
+    }),
+    {
+      bone: EN,
+      pos: [0, 0.255, 0],
+    },
+  );
+  if (b.fine)
+    for (let i = -1; i <= 1; i++)
+      b.put(box(0.016, 0.085, 0.012), { bone: EN, color: CHROME, pos: [i * 0.05, 0.31, 0.152], outline: 0 });
   // Krümmer: drei Stummel je Seite
   for (let i = 0; i < 3; i++) {
-    b.put(box(0.055, 0.24, 0.055), { bone: EN, color: CHROME, pos: [0.24, 0.02, -0.17 + i * 0.13], aim: [0.75, -0.4, -0.55], mirror: EN, outline: 0.6 });
+    b.put(box(0.055, 0.24, 0.055), {
+      bone: EN,
+      color: CHROME,
+      pos: [0.24, 0.02, -0.17 + i * 0.13],
+      aim: [0.75, -0.4, -0.55],
+      mirror: EN,
+      outline: 0.6,
+    });
   }
 
   // — Auspuff: zwei dicke Rohre aus dem Heckblech —
-  b.put(sweep([[0.25, 0.3, -0.8], [0.25, 0.315, -0.96], [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]]], (t) => 0.058 + 0.03 * t * t, b.s(8, 6)), {
-    bone: CH,
-    color: CHROME,
-    mirror: CH,
-  });
+  b.put(
+    sweep(
+      [
+        [0.25, 0.3, -0.8],
+        [0.25, 0.315, -0.96],
+        [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]],
+      ],
+      (t) => 0.058 + 0.03 * t * t,
+      b.s(8, 6),
+    ),
+    {
+      bone: CH,
+      color: CHROME,
+      mirror: CH,
+    },
+  );
   addPipeHole(c, 0.07);
   addNumber(c, [0, 0.455, -1.01], [-(HALF_PI - 0.1), 0, 0], 0.115, Math.PI);
 
@@ -1498,29 +1660,62 @@ function buildKalle(c: Ctx): void {
   const TAN = 0xf3cf9c;
   const C: V3 = [0, 0.3, 0];
   const R: V3 = [0.33, 0.29, 0.3];
-  b.put(sphere(R[0], R[1], R[2], b.s(12, 8), b.s(8, 6)), { bone: H, color: FUR, pos: C });
+  b.put(sphere(R[0], R[1], R[2], b.s(14, 8), b.s(9, 6)), { bone: H, color: FUR, pos: C });
   // Schnauze und Nase
   b.put(sphere(0.165, 0.11, 0.13, b.s(8, 6), b.s(6, 4)), { bone: H, color: TAN, pos: [0, 0.225, 0.26], outline: 0.7 });
   b.put(sphere(0.068, 0.048, 0.045, 6, 4), { bone: H, color: 0x2b1d20, pos: [0, 0.285, 0.38], outline: 0 });
   // dunkler Mundraum hinter dem Kiefer
-  b.put(sphere(0.14, 0.03, 0.11, 6, 3), { bone: H, color: 0x3a1418, pos: [0, 0.165, 0.25], outline: 0 });
+  if (b.fine) b.put(sphere(0.14, 0.03, 0.11, 6, 3), { bone: H, color: 0x3a1418, pos: [0, 0.165, 0.25], outline: 0 });
   // kräftiger Unterkiefer mit zwei Hauern (klappt beim Jubeln auf)
   const J = B.aux1;
   const js = b.s4(8);
-  b.put(loft([sring(-0.02, -0.035, 0.15, 0.05, 0.06, 3, js), sring(0.1, -0.03, 0.185, 0.055, 0.075, 3.4, js), sring(0.25, -0.02, 0.17, 0.05, 0.07, 3.4, js), sring(0.325, -0.015, 0.11, 0.035, 0.05, 3, js)], { capA: false }), {
-    bone: J,
-    color: FUR_D,
-    outline: 0.8,
-  });
+  b.put(
+    loft(
+      [
+        sring(-0.02, -0.035, 0.15, 0.05, 0.06, 3, js),
+        sring(0.1, -0.03, 0.185, 0.055, 0.075, 3.4, js),
+        sring(0.25, -0.02, 0.17, 0.05, 0.07, 3.4, js),
+        sring(0.325, -0.015, 0.11, 0.035, 0.05, 3, js),
+      ],
+      { capA: false },
+    ),
+    {
+      bone: J,
+      color: FUR_D,
+      outline: 0.8,
+    },
+  );
   b.put(cone(0.03, 0.075, 4), { bone: J, color: WHITE, pos: [0.095, 0.015, 0.265], mirror: J, outline: 0.4 });
   // runde Ohren
-  b.put(sphere(0.115, 0.115, 0.055, b.s(8, 6), b.s(5, 4)), { bone: B.earL, color: FUR, pos: [0, 0.07, 0], mirror: B.earR, outline: 0.9 });
-  b.put(sphere(0.068, 0.068, 0.03, 6, 3), { bone: B.earL, color: TAN, pos: [0, 0.07, 0.04], mirror: B.earR, outline: 0 });
+  b.put(sphere(0.115, 0.115, 0.055, b.s(8, 6), b.s(5, 4)), {
+    bone: B.earL,
+    color: FUR,
+    pos: [0, 0.07, 0],
+    mirror: B.earR,
+    outline: 0.9,
+  });
+  if (b.fine)
+    b.put(sphere(0.068, 0.068, 0.03, 6, 3), { bone: B.earL, color: TAN, pos: [0, 0.07, 0.04], mirror: B.earR, outline: 0 });
   // Augenbrauen: dicke Tuschebalken, innen tiefer → grimmig, aber gutmütig
-  b.put(box(0.15, 0.042, 0.035), { bone: H, color: INK, pos: [0.135, 0.463, 0.24], rot: [-0.35, 0.42, 0.33], mirror: H, outline: 0 });
+  b.put(box(0.15, 0.042, 0.035), {
+    bone: H,
+    color: INK,
+    pos: [0.135, 0.463, 0.24],
+    rot: [-0.35, 0.42, 0.33],
+    mirror: H,
+    outline: 0,
+  });
   // Halbschale mit Streifen und Kinnriemen
   addHelmet(b, C, [0.352, 0.312, 0.322], 1.02, -0.3, RED, { stripe: CREAM, stripeHalf: 0.17, rim: 0x2b2530 });
-  if (b.detail > 0) b.put(box(0.03, 0.2, 0.012), { bone: H, color: 0x2b2530, pos: [0.305, 0.25, 0.085], rot: [0.25, 0, -0.16], mirror: H, outline: 0 });
+  if (b.fine)
+    b.put(box(0.03, 0.2, 0.012), {
+      bone: H,
+      color: 0x2b2530,
+      pos: [0.305, 0.25, 0.085],
+      rot: [0.25, 0, -0.16],
+      mirror: H,
+      outline: 0,
+    });
   addEyes(c, { c: C, r: R, phi: 0.41, psi: 0.14, dphi: 0.27, dpsi: 0.3, tilt: 0 });
 }
 
@@ -1536,7 +1731,7 @@ function buildVera(c: Ctx): void {
   const S = b.s4(16);
   const rr = (z: number, cy: number, hw: number, ht: number, hb: number): Ring => sring(z, cy, hw, ht, hb, 2.3, S, 0.055);
   const rings = [
-    rr(-1.04, 0.47, 0.03, 0.03, 0.03),
+    rr(-1.03, 0.47, 0.055, 0.05, 0.05),
     rr(-0.9, 0.46, 0.14, 0.13, 0.11),
     rr(-0.63, 0.44, 0.255, 0.27, 0.19),
     rr(-0.45, 0.42, 0.29, 0.24, 0.21),
@@ -1544,31 +1739,45 @@ function buildVera(c: Ctx): void {
     rr(0.1, 0.4, 0.29, 0.19, 0.2),
     rr(0.45, 0.385, 0.225, 0.155, 0.16),
     rr(0.78, 0.365, 0.135, 0.1, 0.1),
-    rr(0.97, 0.355, 0.055, 0.045, 0.045),
-    rr(1.06, 0.35, 0.012, 0.01, 0.01),
+    rr(0.97, 0.355, 0.06, 0.05, 0.05),
+    rr(1.05, 0.352, 0.024, 0.02, 0.02),
   ];
-  b.put(loft(rings, { color: (j, k) => (j >= 7 || k === S / 4 - 1 || k === S / 4 ? WHITE : TURQ), capA: false, capB: false }), { bone: CH });
+  b.put(loft(rings, { color: (j, k) => (j >= 7 || k === S / 4 - 1 || k === S / 4 ? WHITE : TURQ) }), { bone: CH });
   b.put(sphere(0.215, 0.03, 0.2, b.s(10, 8), 3), { bone: CH, color: 0x2e2630, pos: [0, 0.598, -0.2], outline: 0 });
-  b.put(pillow(0.34, 0.2, 0.08, 0.03, 8), { bone: CH, color: 0x6a4230, pos: [0, 0.71, -0.46], rot: [-0.25, 0, 0], outline: 0.8 });
+  b.put(b.soft(0.34, 0.2, 0.08, 0.03, 8), { bone: CH, color: 0x6a4230, pos: [0, 0.71, -0.46], rot: [-0.25, 0, 0], outline: 0.8 });
   // kleine Windschutzscheibe
   const glass: number[] = [];
   for (let i = 0; i <= 5; i++) glass.push(Math.cos((i / 5) * Math.PI) * 0.19, Math.sin((i / 5) * Math.PI) * 0.13);
-  b.put(prism(glass, 0.02), { bone: CH, color: 0xc6efff, pos: [0, 0.585, 0.13], rot: [-0.5, 0, 0], outline: 0.6 });
+  if (b.fine) b.put(prism(glass, 0.02), { bone: CH, color: 0xc6efff, pos: [0, 0.585, 0.13], rot: [-0.5, 0, 0], outline: 0.6 });
   // Heckflosse mit heller Kappe
   b.put(prism([-0.46, 0.6, -1.02, 0.5, -1.04, 0.97, -0.83, 0.97], 0.05), { bone: CH, color: TURQ_D, rot: [0, -HALF_PI, 0] });
   b.put(prism([-0.83, 0.97, -1.04, 0.97, -1.045, 1.07, -0.885, 1.07], 0.05), { bone: CH, color: WHITE, rot: [0, -HALF_PI, 0] });
-  addNumber(c, [0.026, 0.8, -0.88], [0, 0, -HALF_PI], 0.115, HALF_PI);
-  addNumber(c, [-0.026, 0.8, -0.88], [0, 0, HALF_PI], 0.115, -HALF_PI);
-  addNumber(c, [0, 0.535, 0.5], [0.13, 0, 0], 0.105, 0);
+  addNumber(c, [0.024, 0.8, -0.88], [0, 0, -HALF_PI], 0.115, HALF_PI, true);
+  addNumber(c, [-0.024, 0.8, -0.88], [0, 0, HALF_PI], 0.115, -HALF_PI, true);
+  if (b.fine) addNumber(c, [0, 0.527, 0.5], [0.13, 0, 0], 0.105, 0);
+  // … und eine aufs Heck neben die Flosse: die sieht man aus der Verfolgerkamera
+  addNumber(c, [-0.135, 0.612, -0.74], [-0.42, 0, 0.6], 0.088, Math.PI);
   // Achsen und seitliche Auspuffrohre mit Trichter
   addAxle(c, sp.wf, 0.028);
   addAxle(c, sp.wr, 0.028);
-  b.put(sweep([[0.275, 0.33, 0.28], [0.32, 0.335, -0.2], [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]]], (t) => 0.034 + 0.034 * Math.max(0, (t - 0.7) / 0.3), b.s(6, 5), 5), {
-    bone: CH,
-    color: CHROME,
-    mirror: CH,
-    outline: 0.8,
-  });
+  b.put(
+    sweep(
+      [
+        [0.2, 0.33, 0.34],
+        [0.32, 0.335, -0.2],
+        [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]],
+      ],
+      (t) => 0.034 + 0.034 * Math.max(0, (t - 0.65) / 0.35),
+      b.s(6, 5),
+      3,
+    ),
+    {
+      bone: CH,
+      color: CHROME,
+      mirror: CH,
+      outline: 0.8,
+    },
+  );
   addPipeHole(c, 0.052);
 
   addWheels(c, { wall: TIRE, rim: WHITE, rim2: TURQ, hub: TURQ_D });
@@ -1577,17 +1786,18 @@ function buildVera(c: Ctx): void {
 
   // — Schal: Wulst um den Hals, ein breites Ende weht nach hinten —
   const SCARF = 0xfff6e4;
-  const wrap = new THREE.TorusGeometry(0.115, 0.052, 5, b.s(10, 8));
+  const wrap = new THREE.TorusGeometry(0.115, 0.052, 4, b.s(9, 8));
   wrap.rotateX(HALF_PI);
   b.put(wrap, { bone: B.torso, color: SCARF, pos: [0, sp.torsoLen - 0.005, 0.01], scale: [1.1, 1, 1] });
   const len = 0.84;
   const strip: Ring[] = [];
-  for (let i = 8; i >= 0; i--) {
-    const w = 0.06 + 0.03 * Math.sin((i / 8) * Math.PI) + (i === 8 ? 0.012 : 0);
-    strip.push({ z: (-i / 8) * len, p: [w, -0.016, w, 0.016, -w, 0.016, -w, -0.016] });
+  const sn8 = b.fine ? 8 : 4;
+  for (let i = sn8; i >= 0; i--) {
+    const w = 0.06 + 0.03 * Math.sin((i / sn8) * Math.PI) + (i === sn8 ? 0.012 : 0);
+    strip.push({ z: (-i / sn8) * len, p: [w, -0.016, w, 0.016, -w, 0.016, -w, -0.016] });
   }
   const zBase = sp.hip[2] + sp.chain[2];
-  b.put(loft(strip, { flat: true, color: (j) => (j === 0 || j === 2 ? TURQ : SCARF) }), {
+  b.put(loft(strip, { flat: true, color: (j) => (j === 0 || (b.fine && j === 2) ? TURQ : SCARF) }), {
     bone: B.c0,
     outline: 0.8,
     skin: (_x, _y, z, out) => {
@@ -1611,34 +1821,86 @@ function buildVera(c: Ctx): void {
   const TIP = 0x3b2824;
   const C: V3 = [0, 0.28, 0];
   const R: V3 = [0.29, 0.265, 0.28];
-  b.put(sphere(R[0], R[1], R[2], b.s(12, 8), b.s(8, 6)), { bone: H, color: ORANGE, pos: C });
+  b.put(sphere(R[0], R[1], R[2], b.s(14, 8), b.s(9, 6)), { bone: H, color: ORANGE, pos: C });
   // helle Maske: Wangen und Kinn
-  b.put(sphere(0.255, 0.15, 0.235, b.s(10, 8), b.s(6, 4)), { bone: H, color: CREAM, pos: [0, 0.165, 0.045], outline: 0.8 });
-  b.put(cone(0.085, 0.21, b.s(6, 5)), { bone: H, color: CREAM, pos: [0.2, 0.15, 0.03], aim: [1, -0.3, -0.2], scale: [1, 1, 0.55], mirror: H, outline: 0.8 });
+  b.put(sphere(0.255, 0.15, 0.235, b.s(9, 8), b.s(5, 4)), { bone: H, color: CREAM, pos: [0, 0.165, 0.045], outline: 0.8 });
+  b.put(cone(0.085, 0.21, b.s(6, 5)), {
+    bone: H,
+    color: CREAM,
+    pos: [0.2, 0.15, 0.03],
+    aim: [1, -0.3, -0.2],
+    scale: [1, 1, 0.55],
+    mirror: H,
+    outline: 0.8,
+  });
   // spitze Schnauze: oben fuchsrot, unten hell
   const SS = b.s4(8);
   const sn = (z: number, hw: number, ht: number, hb: number, cy: number): Ring => sring(z, cy, hw, ht, hb, 2, SS);
-  b.put(loft([sn(0.14, 0.13, 0.095, 0.085, 0.215), sn(0.3, 0.095, 0.07, 0.06, 0.205), sn(0.42, 0.055, 0.042, 0.04, 0.2), sn(0.47, 0.03, 0.024, 0.024, 0.2)], { color: (_j, k) => (k < SS / 2 ? ORANGE : CREAM), capA: false }), {
-    bone: H,
-    outline: 0.7,
-  });
+  b.put(
+    loft(
+      [
+        sn(0.14, 0.13, 0.095, 0.085, 0.215),
+        sn(0.3, 0.095, 0.07, 0.06, 0.205),
+        sn(0.42, 0.055, 0.042, 0.04, 0.2),
+        sn(0.47, 0.03, 0.024, 0.024, 0.2),
+      ],
+      { color: (_j, k) => (k < SS / 2 ? ORANGE : CREAM), capA: false },
+    ),
+    {
+      bone: H,
+      outline: 0.7,
+    },
+  );
   b.put(sphere(0.042, 0.036, 0.036, 6, 4), { bone: H, color: 0x2b1d20, pos: [0, 0.213, 0.475], outline: 0 });
   addPointedEars(b, 0.105, 0.3, ORANGE, CREAM, TIP);
   // feine Brauen
-  b.put(box(0.1, 0.02, 0.026), { bone: H, color: INK, pos: [0.125, 0.425, 0.228], rot: [-0.4, 0.45, -0.22], mirror: H, outline: 0 });
+  b.put(box(0.1, 0.02, 0.026), {
+    bone: H,
+    color: INK,
+    pos: [0.125, 0.425, 0.228],
+    rot: [-0.4, 0.45, -0.22],
+    mirror: H,
+    outline: 0,
+  });
   // Fliegerkappe mit Ohrenklappen
   const CAP_R: V3 = [0.306, 0.281, 0.296];
-  addHelmet(b, C, CAP_R, 1.15, -0.38, TURQ, { rim: TURQ_D });
-  b.put(sphere(0.055, 0.13, 0.1, 6, b.s(5, 4)), { bone: H, color: TURQ, pos: [0.272, 0.21, -0.03], mirror: H, outline: 0.8 });
+  addHelmet(b, C, CAP_R, 1.15, -0.38, TURQ, { rim: TURQ_D, gloss: 2.4 });
+  b.put(sphere(0.055, 0.13, 0.1, 6, 4), { bone: H, color: TURQ, pos: [0.272, 0.21, -0.03], mirror: H, outline: 0.8 });
   // Fliegerbrille auf der Stirn, Riemen um die Kappe
   const strap = new THREE.TorusGeometry(0.247, 0.016, 3, b.s(12, 8));
-  b.put(strap, { bone: H, color: 0x4a332a, pos: [0, 0.4265, -0.0525], rot: [-1.876, 0, 0], scale: [1.075, 1, 1], outline: 0 });
+  if (b.fine)
+    b.put(strap, { bone: H, color: 0x4a332a, pos: [0, 0.4265, -0.0525], rot: [-1.876, 0, 0], scale: [1.075, 1, 1], outline: 0 });
   const gx = 0.082;
   const gPos: V3 = [gx, 0.508, 0.174];
   const gRot: V3 = [0.66, 0.38, 0];
-  b.put(cyl(0.066, 0.074, 0.05, b.s(8, 6)), { bone: H, color: CREAM, pos: gPos, rot: gRot, order: 'YXZ', mirror: H, outline: 0.55 });
-  b.put(cyl(0.048, 0.048, 0.058, b.s(8, 6)), { bone: H, color: 0x2b4a73, pos: gPos, rot: gRot, order: 'YXZ', mirror: H, outline: 0 });
-  if (b.detail > 0) b.put(sphere(0.018, 0.006, 0.012, 4, 2), { bone: H, color: WHITE, pos: [gx + 0.018, 0.546, 0.19], rot: gRot, order: 'YXZ', mirror: H, outline: 0 });
+  b.put(cyl(0.066, 0.074, 0.05, b.s(8, 5)), {
+    bone: H,
+    color: CREAM,
+    pos: gPos,
+    rot: gRot,
+    order: 'YXZ',
+    mirror: H,
+    outline: 0.55,
+  });
+  b.put(cyl(0.048, 0.048, 0.058, b.s(8, 5)), {
+    bone: H,
+    color: 0x2b4a73,
+    pos: gPos,
+    rot: gRot,
+    order: 'YXZ',
+    mirror: H,
+    outline: 0,
+  });
+  if (b.fine)
+    b.put(sphere(0.018, 0.006, 0.012, 4, 2), {
+      bone: H,
+      color: WHITE,
+      pos: [gx + 0.018, 0.546, 0.19],
+      rot: gRot,
+      order: 'YXZ',
+      mirror: H,
+      outline: 0,
+    });
   addEyes(c, { c: C, r: R, phi: 0.43, psi: 0.17, dphi: 0.26, dpsi: 0.27, tilt: 0.2 });
 }
 
@@ -1673,38 +1935,53 @@ function buildBert(c: Ctx): void {
   );
   b.put(tub, { bone: CH, rot: [-HALF_PI, 0, 0] });
   // Rückenlehne
-  b.put(pillow(0.56, 0.3, 0.1, 0.04, 8), { bone: CH, color: 0x7a5a48, pos: [0, 0.66, -0.56], rot: [-0.22, 0, 0], outline: 0.8 });
+  b.put(b.soft(0.56, 0.3, 0.1, 0.04, 8), { bone: CH, color: 0x7a5a48, pos: [0, 0.66, -0.56], rot: [-0.22, 0, 0], outline: 0.8 });
 
   // — dicke Stoßstangen vorn und hinten —
   for (const dir of [1, -1]) {
     const pts: V3[] = [];
     const half = dir > 0 ? 0.925 : 0.9;
-    for (let i = -3; i <= 3; i++) {
-      const a = (i / 3) * 0.95;
+    for (let i = -2; i <= 2; i++) {
+      const a = (i / 2) * 0.95;
       const cx = Math.sign(Math.sin(a)) * Math.pow(Math.abs(Math.sin(a)), 2 / E) * 0.58;
       const cz = Math.pow(Math.cos(a), 2 / E) * (half + 0.08);
       pts.push([cx, 0.3, zc + dir * cz]);
     }
     if (dir < 0) pts.reverse();
-    b.put(sweep(pts, 0.062, b.s(6, 5)), { bone: CH, color: CHROME });
+    b.put(sweep(pts, 0.062, b.s(6, 5), 4), { bone: CH, color: CHROME });
     b.put(box(0.09, 0.19, 0.08), { bone: CH, color: DARK, pos: [0.2, 0.3, zc + dir * (half + 0.085)], mirror: CH, outline: 0.7 });
   }
   // Scheinwerfer auf dem Wannenrand, Rücklichter
   addLamp(c, [0.25, 0.7, 0.74], 0.09);
-  b.put(sphere(0.05, 0.05, 0.035, 6, 3), { bone: CH, color: 0xff7a3c, pos: [0.3, 0.57, -0.84], mirror: CH, outline: 0.6 });
+  if (b.fine)
+    b.put(sphere(0.05, 0.05, 0.035, 6, 3), { bone: CH, color: 0xff7a3c, pos: [0.3, 0.57, -0.84], mirror: CH, outline: 0.6 });
   // Auspuffstummel
-  b.put(cyl(0.055, 0.048, 0.2, b.s(8, 6)), { bone: CH, color: CHROME, pos: [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2] + 0.1], rot: [HALF_PI - sp.exhaustUp, 0, 0], mirror: CH, outline: 0.8 });
+  b.put(cyl(0.055, 0.048, 0.2, 6), {
+    bone: CH,
+    color: CHROME,
+    pos: [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2] + 0.1],
+    rot: [HALF_PI - sp.exhaustUp, 0, 0],
+    mirror: CH,
+    outline: 0.8,
+  });
   addPipeHole(c, 0.046);
   addAxle(c, sp.wf, 0.035);
   addAxle(c, sp.wr, 0.035);
-  addNumber(c, [0, 0.43, -0.925], [-(HALF_PI - 0.1), 0, 0], 0.125, Math.PI);
-  addNumber(c, [0, 0.43, 0.91], [HALF_PI - 0.1, 0, 0], 0.125, 0);
+  addNumber(c, [0, 0.455, -0.927], [-(HALF_PI - 0.06), 0, 0], 0.12, Math.PI);
+  addNumber(c, [0, 0.455, 0.912], [HALF_PI - 0.06, 0, 0], 0.12, 0);
 
   addWheels(c, { wall: CREAM, rim: YEL, rim2: YEL_D, hub: CHROME });
   addSteering(c, 0x4a332a, CHROME);
   // gestreifter Badeanzug
   const NAVY = 0x2e4372;
-  addDriverBody(c, { rx: 0.31, rz: 0.24, suit: [NAVY, NAVY, WHITE, NAVY, WHITE, NAVY, WHITE], sleeve: 0x8fa3c2, cuff: 0x8fa3c2, glove: 0x7389ab });
+  addDriverBody(c, {
+    rx: 0.31,
+    rz: 0.24,
+    suit: [NAVY, NAVY, WHITE, NAVY, WHITE, NAVY, WHITE],
+    sleeve: 0x8fa3c2,
+    cuff: 0x8fa3c2,
+    glove: 0x7389ab,
+  });
 
   // — Kopf: Walross mit Schnauzbart, Stoßzähnen und Schirmhelm —
   const H = B.head;
@@ -1712,19 +1989,50 @@ function buildBert(c: Ctx): void {
   const SKIN_D = 0x7389ab;
   const C: V3 = [0, 0.29, 0];
   const R: V3 = [0.35, 0.3, 0.31];
-  b.put(sphere(R[0], R[1], R[2], b.s(12, 8), b.s(8, 6)), { bone: H, color: SKIN, pos: C });
+  b.put(sphere(R[0], R[1], R[2], b.s(14, 8), b.s(9, 6)), { bone: H, color: SKIN, pos: C });
   // Speckrolle im Nacken
   b.put(sphere(0.28, 0.085, 0.15, b.s(8, 6), 4), { bone: H, color: SKIN_D, pos: [0, 0.07, -0.19], outline: 0.8 });
   // Stoßzähne (hängen am Kopf), Schnauzbart-Polster (eigene Knochen: sie flattern)
-  b.put(sweep([[0.09, 0.14, 0.3], [0.1, 0.01, 0.355], [0.115, -0.13, 0.375]], (t) => 0.046 - 0.03 * t, b.s(6, 5)), { bone: H, color: 0xfffbe6, mirror: H, outline: 0.7 });
-  b.put(sphere(0.16, 0.12, 0.12, b.s(8, 6), b.s(6, 4)), { bone: B.aux0, color: CREAM, pos: [0.035, -0.035, 0.035], rot: [0, 0.25, -0.3], mirror: B.aux1, outline: 0.8 });
+  b.put(
+    sweep(
+      [
+        [0.09, 0.14, 0.3],
+        [0.1, 0.01, 0.355],
+        [0.115, -0.13, 0.375],
+      ],
+      (t) => 0.046 - 0.03 * t,
+      b.s(6, 5),
+    ),
+    { bone: H, color: 0xfffbe6, mirror: H, outline: 0.7 },
+  );
+  b.put(sphere(0.16, 0.12, 0.12, b.s(7, 6), b.s(5, 4)), {
+    bone: B.aux0,
+    color: CREAM,
+    pos: [0.035, -0.035, 0.035],
+    rot: [0, 0.25, -0.3],
+    mirror: B.aux1,
+    outline: 0.8,
+  });
   b.put(sphere(0.075, 0.05, 0.045, 6, 4), { bone: H, color: 0x2b1d20, pos: [0, 0.262, 0.385], outline: 0 });
   // buschige Brauen
-  b.put(sphere(0.075, 0.03, 0.035, 6, 3), { bone: H, color: CREAM, pos: [0.135, 0.468, 0.243], rot: [-0.3, 0.4, -0.3], mirror: H, outline: 0.45 });
+  b.put(sphere(0.075, 0.03, 0.035, 6, 3), {
+    bone: H,
+    color: CREAM,
+    pos: [0.135, 0.468, 0.243],
+    rot: [-0.3, 0.4, -0.3],
+    mirror: H,
+    outline: 0.45,
+  });
   // Helm mit Schirm
   const HR: V3 = [0.372, 0.322, 0.332];
   addHelmet(b, C, HR, 0.92, -0.25, YEL, { stripe: WHITE, stripeHalf: 0.16, rim: YEL_D });
-  b.put(sphere(0.215, 0.034, 0.17, b.s(8, 6), 4), { bone: H, color: YEL_D, pos: [0, 0.5, 0.295], rot: [0.3, 0, 0], outline: 0.8 });
+  b.put(sphere(0.215, 0.034, 0.17, b.s(8, 6), 4), {
+    bone: H,
+    color: YEL_D,
+    pos: [0, 0.5, 0.295],
+    rot: [0.3, 0, 0],
+    outline: 0.8,
+  });
   addEyes(c, { c: C, r: R, phi: 0.33, psi: 0.27, dphi: 0.22, dpsi: 0.23, tilt: -0.05 });
 }
 
@@ -1743,14 +2051,46 @@ function buildZoe(c: Ctx): void {
   // — Karosserie: kantiger Keil, bewusst mit harten Flächen —
   const wr = (z: number, hw: number, yt: number, yb: number, ch: number, sw: number): Ring => ({
     z,
-    p: [hw, yb + ch, hw, yt - ch, hw - ch, yt, sw, yt, -sw, yt, -hw + ch, yt, -hw, yt - ch, -hw, yb + ch, -hw + ch, yb, hw - ch, yb],
+    p: [
+      hw,
+      yb + ch,
+      hw,
+      yt - ch,
+      hw - ch,
+      yt,
+      sw,
+      yt,
+      -sw,
+      yt,
+      -hw + ch,
+      yt,
+      -hw,
+      yt - ch,
+      -hw,
+      yb + ch,
+      -hw + ch,
+      yb,
+      hw - ch,
+      yb,
+    ],
   });
   b.put(
-    loft([wr(-1.03, 0.39, 0.6, 0.27, 0.05, 0.1), wr(-0.95, 0.43, 0.66, 0.2, 0.06, 0.1), wr(-0.45, 0.43, 0.63, 0.16, 0.07, 0.1), wr(-0.05, 0.41, 0.57, 0.15, 0.07, 0.1), wr(0.55, 0.34, 0.41, 0.15, 0.06, 0.09), wr(0.95, 0.24, 0.275, 0.16, 0.04, 0.07), wr(1.05, 0.18, 0.225, 0.17, 0.02, 0.05)], {
-      flat: true,
-      color: (_j, k) => (k === 3 ? VIO_D : k === 1 || k === 5 ? 0xb3a4ff : VIO),
-      capColor: VIO_D,
-    }),
+    loft(
+      [
+        wr(-1.03, 0.39, 0.6, 0.27, 0.05, 0.1),
+        wr(-0.95, 0.43, 0.66, 0.2, 0.06, 0.1),
+        wr(-0.45, 0.43, 0.63, 0.16, 0.07, 0.1),
+        wr(-0.05, 0.41, 0.57, 0.15, 0.07, 0.1),
+        wr(0.55, 0.34, 0.41, 0.15, 0.06, 0.09),
+        wr(0.95, 0.24, 0.275, 0.16, 0.04, 0.07),
+        wr(1.05, 0.18, 0.225, 0.17, 0.02, 0.05),
+      ],
+      {
+        flat: true,
+        color: (_j, k) => (k === 3 ? VIO_D : k === 1 || k === 5 ? 0xb3a4ff : VIO),
+        capColor: VIO_D,
+      },
+    ),
     { bone: CH },
   );
   // Frontlippe, Seitenkästen, Sitzmulde, Kopfstütze
@@ -1759,10 +2099,30 @@ function buildZoe(c: Ctx): void {
   b.put(sphere(0.24, 0.03, 0.22, b.s(10, 8), 3), { bone: CH, color: 0x2a2440, pos: [0, 0.604, -0.2], outline: 0 });
   b.put(box(0.36, 0.24, 0.09), { bone: CH, color: 0x3b2f66, pos: [0, 0.74, -0.46], rot: [-0.2, 0, 0], outline: 0.8 });
   // Blitz auf der Haube
-  b.put(prism(BOLT, 0.016), { bone: CH, color: LEMON, pos: [0, 0.502, 0.24], rot: [-(HALF_PI - 0.262), 0, 0], scale: [0.5, 0.62, 1], outline: 0 });
+  b.put(prism(BOLT, 0.016), {
+    bone: CH,
+    color: LEMON,
+    pos: [0, 0.502, 0.24],
+    rot: [-(HALF_PI - 0.262), 0, 0],
+    scale: [0.5, 0.62, 1],
+    outline: 0,
+  });
   // eckige Auspuffblenden
-  b.put(box(0.17, 0.12, 0.1), { bone: CH, color: CHROME, pos: [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2] + 0.045], mirror: CH, outline: 0.7 });
-  b.put(box(0.12, 0.075, 0.02), { bone: CH, color: 0x1c1920, pos: [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2] - 0.008], mirror: CH, outline: 0 });
+  b.put(box(0.17, 0.12, 0.1), {
+    bone: CH,
+    color: CHROME,
+    pos: [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2] + 0.045],
+    mirror: CH,
+    outline: 0.7,
+  });
+  if (b.fine)
+    b.put(box(0.12, 0.075, 0.02), {
+      bone: CH,
+      color: 0x1c1920,
+      pos: [sp.exhaust[0], sp.exhaust[1], sp.exhaust[2] - 0.008],
+      mirror: CH,
+      outline: 0,
+    });
   addAxle(c, sp.wf, 0.03);
   addNumber(c, [0, 0.666, -0.875], [-0.05, 0, 0], 0.125, Math.PI);
   addNumber(c, [0, 0.3, 0.985], [0.86, 0, 0], 0.085, 0);
@@ -1789,7 +2149,10 @@ function buildZoe(c: Ctx): void {
 
   // — Schwanz: Blitz-Zickzack, schräg gestellt – von hinten und von der Seite zu erkennen —
   const FUR = 0xfaf6ff;
-  const tail: number[] = [0.0, 0.0, 0.1, 0.0, 0.23, 0.23, 0.11, 0.25, 0.3, 0.5, 0.16, 0.51, 0.36, 0.84, 0.03, 0.46, 0.16, 0.445, -0.04, 0.2, 0.09, 0.195];
+  const tail: number[] = [
+    0.0, 0.0, 0.1, 0.0, 0.16, 0.23, 0.035, 0.25, 0.15, 0.5, 0.007, 0.51, 0.11, 0.84, -0.108, 0.46, 0.027, 0.445, -0.1, 0.2, 0.032,
+    0.195,
+  ];
   const y0 = sp.chain[1];
   b.put(prism(tail, 0.07), {
     bone: B.c0,
@@ -1815,24 +2178,46 @@ function buildZoe(c: Ctx): void {
   const PINK = 0xff9ec4;
   const C: V3 = [0, 0.28, 0];
   const R: V3 = [0.31, 0.27, 0.28];
-  b.put(sphere(R[0], R[1], R[2], b.s(12, 8), b.s(8, 6)), { bone: H, color: FUR, pos: C });
+  b.put(sphere(R[0], R[1], R[2], b.s(14, 8), b.s(9, 6)), { bone: H, color: FUR, pos: C });
   // Wangenfell
-  b.put(cone(0.075, 0.16, b.s(6, 5)), { bone: H, color: FUR, pos: [0.24, 0.17, 0.05], aim: [1, -0.22, -0.1], scale: [1, 1, 0.55], mirror: H, outline: 0.8 });
+  b.put(cone(0.075, 0.16, b.s(6, 5)), {
+    bone: H,
+    color: FUR,
+    pos: [0.24, 0.17, 0.05],
+    aim: [1, -0.22, -0.1],
+    scale: [1, 1, 0.55],
+    mirror: H,
+    outline: 0.8,
+  });
   // Schnäuzchen, Nase, Mund
   b.put(sphere(0.062, 0.05, 0.05, 6, 4), { bone: H, color: WHITE, pos: [0.047, 0.165, 0.262], mirror: H, outline: 0.5 });
   b.put(sphere(0.028, 0.02, 0.02, 5, 3), { bone: H, color: PINK, pos: [0, 0.2, 0.305], outline: 0 });
-  b.put(sphere(0.035, 0.022, 0.02, 5, 3), { bone: H, color: 0x7a3550, pos: [0, 0.133, 0.262], outline: 0 });
+  if (b.fine) b.put(sphere(0.035, 0.022, 0.02, 5, 3), { bone: H, color: 0x7a3550, pos: [0, 0.133, 0.262], outline: 0 });
   // Schnurrhaare als Tuschestriche
-  if (b.detail > 0) {
+  if (b.fine) {
     for (const dy of [0.025, -0.02]) {
-      b.put(box(0.17, 0.009, 0.009), { bone: H, color: INK, pos: [0.19, 0.165 + dy, 0.245], rot: [0, 0.5, dy * 9], mirror: H, outline: 0 });
+      b.put(box(0.17, 0.009, 0.009), {
+        bone: H,
+        color: INK,
+        pos: [0.19, 0.165 + dy, 0.245],
+        rot: [0, 0.5, dy * 9],
+        mirror: H,
+        outline: 0,
+      });
     }
   }
   addPointedEars(b, 0.1, 0.24, FUR, PINK, null);
   // Helm mit Blitz am Hinterkopf
   const HR: V3 = [0.333, 0.292, 0.302];
-  addHelmet(b, C, HR, 1.12, -0.32, VIO, { rim: VIO_D });
-  b.put(prism(BOLT, 0.014), { bone: H, color: LEMON, pos: [0, 0.37, -0.287], rot: [0.3, Math.PI, 0], scale: [0.4, 0.3, 1], outline: 0 });
+  addHelmet(b, C, HR, 1.12, -0.32, VIO, { rim: VIO_D, gloss: 2.4 });
+  b.put(prism(BOLT, 0.014), {
+    bone: H,
+    color: LEMON,
+    pos: [0, 0.37, -0.287],
+    rot: [0.3, Math.PI, 0],
+    scale: [0.4, 0.3, 1],
+    outline: 0,
+  });
   addEyes(c, { c: C, r: R, phi: 0.4, psi: 0.1, dphi: 0.3, dpsi: 0.36, tilt: 0.06 });
 }
 
@@ -1843,14 +2228,21 @@ const BUILDERS = [buildKalle, buildVera, buildBert, buildZoe];
 /** Schutzring, Blitze und Qualm – ein Netz, sichtbar nur bei Bedarf. */
 function buildFx(b: Builder, color: number): void {
   // Stoßfänger: verchromter Ring mit drei Gummipuffern in Spielerfarbe
-  const ring = new THREE.TorusGeometry(1.2, 0.055, b.s(6, 5), b.s(28, 16));
+  const ring = new THREE.TorusGeometry(1.2, 0.058, 4, b.s(22, 12));
   ring.rotateX(HALF_PI);
   b.put(ring, { bone: B.guard, color: CHROME });
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * TAU;
     const pos: V3 = [Math.sin(a) * 1.2, 0, Math.cos(a) * 1.2];
-    b.put(pillow(0.42, 0.2, 0.16, 0.05, 8), { bone: B.guard, color, pos, rot: [0, a, 0] });
-    b.put(box(0.3, 0.05, 0.02), { bone: B.guard, color: WHITE, pos: [Math.sin(a) * 1.285, 0, Math.cos(a) * 1.285], rot: [0, a, 0], outline: 0 });
+    b.put(sphere(0.24, 0.115, 0.1, 6, 4), { bone: B.guard, color, pos, rot: [0, a, 0], hull: box(0.36, 0.17, 0.14) });
+    if (b.fine)
+      b.put(box(0.26, 0.045, 0.02), {
+        bone: B.guard,
+        color: WHITE,
+        pos: [Math.sin(a) * 1.292, 0, Math.cos(a) * 1.292],
+        rot: [0, a, 0],
+        outline: 0,
+      });
   }
   // Kurzschluss: zwei Blitze …
   b.put(prism(BOLT, 0.035), { bone: B.bolt0, color: 0xfff06a, scale: 0.5, outline: 0.6 });
@@ -1858,9 +2250,10 @@ function buildFx(b: Builder, color: number): void {
   // … und zwei Qualmwölkchen
   for (const bone of [B.puff0, B.puff1]) {
     const dark = bone === B.puff1;
-    b.put(sphere(0.15, 0.13, 0.14, b.s(7, 5), b.s(5, 4)), { bone, color: dark ? 0x8f8898 : 0xb5afbf, outline: 0.6 });
-    b.put(sphere(0.11, 0.1, 0.11, b.s(7, 5), b.s(5, 4)), { bone, color: dark ? 0x9e97a8 : 0xc6c1ce, pos: [0.13, 0.05, 0.02], outline: 0.6 });
-    b.put(sphere(0.1, 0.09, 0.1, b.s(7, 5), b.s(5, 4)), { bone, color: dark ? 0x8f8898 : 0xb5afbf, pos: [-0.12, 0.06, -0.03], outline: 0.6 });
+    b.put(sphere(0.15, 0.13, 0.14, 6, 4), { bone, color: dark ? 0x8f8898 : 0xb5afbf, outline: 0.6 });
+    b.put(sphere(0.115, 0.1, 0.11, 6, 4), { bone, color: dark ? 0x9e97a8 : 0xc6c1ce, pos: [0.13, 0.05, 0.02], outline: 0.6 });
+    if (b.fine)
+      b.put(sphere(0.1, 0.09, 0.1, 5, 3), { bone, color: dark ? 0x8f8898 : 0xb5afbf, pos: [-0.12, 0.06, -0.03], outline: 0.6 });
   }
 }
 
@@ -1978,6 +2371,25 @@ export class KartVisual {
   private flopXV = 0;
   private flopZ = 0;
   private flopZV = 0;
+  // Zwischenwerte für die Ankerpunkte
+  private aCd = 1;
+  private aSd = 0;
+  private aCs = 1;
+  private aSs = 0;
+  // Werte des laufenden Bildes, die sich die Teilschritte von update() teilen
+  private fDt = 0;
+  private fSpeed = 0;
+  private fSteer = 0;
+  private fStage = 0;
+  private fSpin = 0;
+  private fV = 0;
+  private fV1 = 0;
+  private fWind = 0;
+  private fSpinYaw = 0;
+  private fDriftYaw = 0;
+  private fHop = 0;
+  private fIdle = 1;
+  private fCough = 0;
 
   constructor(slot: number, detail: KartDetail = 2) {
     this.slot = ((Math.floor(slot) % 4) + 4) % 4;
@@ -2021,7 +2433,7 @@ export class KartVisual {
     empty.dispose();
 
     this.rebuild();
-    this.placeAnchors(0, 0, 0);
+    this.placeAnchors();
   }
 
   /** Stauchen und Strecken auslösen: amount > 0 staucht (Landung, Treffer), < 0 streckt (Schubbeginn). */
@@ -2120,7 +2532,7 @@ export class KartVisual {
     const lines = this.detail > 0;
     const main = new Builder(this.rest, this.detail, lines);
     const decal = new Builder(this.rest, this.detail, false, true);
-    const ctx: Ctx = { b: main, d: decal, sp: this.spec, slot: this.slot, eyeStart: 0 };
+    const ctx: Ctx = { b: main, d: decal, sp: this.spec, eyeStart: 0 };
     BUILDERS[this.slot](ctx);
     const fx = new Builder(this.rest, this.detail, lines);
     buildFx(fx, this.spec.color);
@@ -2156,7 +2568,11 @@ export class KartVisual {
     this.setEyes(state);
   }
 
-  private swapOutline(mesh: THREE.SkinnedMesh, old: THREE.SkinnedMesh | null, geo: THREE.BufferGeometry | null): THREE.SkinnedMesh | null {
+  private swapOutline(
+    mesh: THREE.SkinnedMesh,
+    old: THREE.SkinnedMesh | null,
+    geo: THREE.BufferGeometry | null,
+  ): THREE.SkinnedMesh | null {
     if (!geo) {
       // Ohne Kontur ganz aus dem Baum nehmen, damit sie niemand versehentlich einblendet.
       if (old) mesh.remove(old);
@@ -2195,27 +2611,27 @@ export class KartVisual {
   /** Pro Bild: Räder drehen/einschlagen, Karosserie neigt sich, Figur lebt. */
   update(dtSec: number, pose: KartPose): void {
     const dt = dtSec > 0 ? Math.min(dtSec, 0.05) : 0;
-    const sp = this.spec;
-    const bn = this.bones;
-    const rp = this.restPos;
-    const rr = this.restRot;
+    this.fDt = dt;
     this.time += dt;
-    const t = this.time;
 
     // — Eingaben (NaN abfangen) —
     const speed = pose.speed === pose.speed ? pose.speed : 0;
     const steer = clamp(pose.steer === pose.steer ? pose.steer : 0, -1, 1);
     const drift = pose.driftDir > 0 ? 1 : pose.driftDir < 0 ? -1 : 0;
-    const stage = clamp(pose.driftStage === pose.driftStage ? pose.driftStage : 0, 0, 3);
     const spin = clamp(pose.spin === pose.spin ? pose.spin : 0, 0, 1);
     const v = Math.min(Math.abs(speed) / 26, 1.35);
     const v1 = Math.min(v, 1);
-    const wind = v1 * v1 * (3 - 2 * v1);
+    this.fSpeed = speed;
+    this.fSteer = steer;
+    this.fStage = clamp(pose.driftStage === pose.driftStage ? pose.driftStage : 0, 0, 3);
+    this.fSpin = spin;
+    this.fV = v;
+    this.fV1 = v1;
+    this.fWind = v1 * v1 * (3 - 2 * v1);
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
     this.lastSpeed = speed;
-    const acc = this.accel;
     this.boostS = damp(this.boostS, pose.boost ? 1 : 0, 9, dt);
     this.airS = damp(this.airS, pose.air ? 1 : 0, 10, dt);
     this.winS = damp(this.winS, pose.emote === 'win' ? 1 : 0, 8, dt);
@@ -2224,12 +2640,13 @@ export class KartVisual {
     this.spinS = damp(this.spinS, spin > 0 ? 1 : 0, 12, dt);
     this.offS = damp(this.offS, pose.offroad ? 1 : 0, 8, dt);
     this.driftS = damp(this.driftS, drift, 9, dt);
-    const { boostS, airS, winS, loseS, stallS, spinS, offS, driftS } = this;
-    const idle = (1 - 0.7 * v1) * (1 - stallS);
+    this.armsUp = damp(this.armsUp, pose.air || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
+    this.flameS = damp(this.flameS, pose.boost ? 1 : 0, pose.boost ? 18 : 11, dt);
+    this.lean = damp(this.lean, steer * 0.2 * (0.3 + 0.7 * v1) + this.driftS * 0.22, 8, dt);
 
     // Nachschwingen: seitlich (Kurve) und längs (Beschleunigung)
-    const latT = -(steer * v1 + driftS * 0.5);
-    const lonT = clamp(-acc * 0.02, -0.5, 0.5);
+    const latT = -(steer * v1 + this.driftS * 0.5);
+    const lonT = clamp(-this.accel * 0.02, -0.5, 0.5);
     this.swayXV += ((latT - this.swayX) * 150 - this.swayXV * 9) * dt;
     this.swayX += this.swayXV * dt;
     this.swayZV += ((lonT - this.swayZ) * 150 - this.swayZV * 9) * dt;
@@ -2238,17 +2655,33 @@ export class KartVisual {
     this.flopX += this.flopXV * dt;
     this.flopZV += ((lonT - this.flopZ) * 46 - this.flopZV * 4.5) * dt;
     this.flopZ += this.flopZV * dt;
-    const { swayX, swayZ, flopX, flopZ } = this;
 
-    // — Räder —
-    this.wheelF += (speed * dt) / sp.wf.r;
-    this.wheelR += (speed * dt) / sp.wr.r;
+    // Die Teilschritte lesen ihre Werte aus den Feldern – so wandern keine
+    // Fließkommazahlen als Argumente durch die Aufrufe.
+    this.moveWheels();
+    this.moveBody();
+    this.moveDriver();
+    this.moveExtras();
+    this.moveEffects(pose.guard);
+    this.pickEyes(pose);
+    this.placeAnchors();
+  }
+
+  /** Räder: drehen passend zum Tempo, vorn einschlagen, im Gelände rütteln. */
+  private moveWheels(): void {
+    const sp = this.spec;
+    const bn = this.bones;
+    const rp = this.restPos;
+    const t = this.time;
+    const dt = this.fDt;
+    this.wheelF += (this.fSpeed * dt) / sp.wf.r;
+    this.wheelR += (this.fSpeed * dt) / sp.wr.r;
     if (Math.abs(this.wheelF) > 6000) this.wheelF %= TAU;
     if (Math.abs(this.wheelR) > 6000) this.wheelR %= TAU;
-    const yawF = -steer * 0.5 + driftS * 0.26;
+    const yawF = -this.fSteer * 0.5 + this.driftS * 0.26;
     const bulge = 1 + Math.max(this.sq, 0) * 0.3;
-    const hang = airS * 0.035;
-    const rough = offS * v1;
+    const hang = this.airS * 0.035;
+    const rough = this.offS * this.fV1;
     for (let i = 0; i < 4; i++) {
       const w = bn[B.wFL + i];
       const front = i < 2;
@@ -2256,88 +2689,141 @@ export class KartVisual {
       w.position.y = rp[(B.wFL + i) * 3 + 1] - hang + rough * 0.018 * Math.abs(Math.sin(t * 31 + i * 2.3));
       w.scale.x = bulge;
     }
+  }
 
-    // — Schleudern, Hüpfen, Drift —
+  /** Karosserie: schleudern, im Drift schräg stellen, rollen, nicken, zittern, stauchen. */
+  private moveBody(): void {
+    const bn = this.bones;
+    const t = this.time;
+    const dt = this.fDt;
+    const { boostS, airS, winS, stallS, driftS } = this;
+    const v1 = this.fV1;
+    const spin = this.fSpin;
+
+    // Schleudern: zwei volle Umdrehungen, weich auslaufend
     const e = 1 - spin;
     const spinYaw = spin > 0 ? TAU * 2 * (1 - e * e * e) : 0;
-    const hopPhase = t * 8.5;
-    const hop = winS * Math.max(0, Math.sin(hopPhase));
+    this.fSpinYaw = spinYaw;
     bn[B.spin].rotation.y = spinYaw;
-    const driftYaw = -driftS * (0.31 + 0.04 * stage);
-    const pivot = 0.3;
+    // Drift: Drehung um einen Punkt vorn, damit das Heck ausbricht
+    const driftYaw = -driftS * (0.31 + 0.04 * this.fStage);
+    this.fDriftYaw = driftYaw;
     const dr = bn[B.drift];
     dr.rotation.y = driftYaw;
-    dr.position.set(-pivot * Math.sin(driftYaw), 0, pivot - pivot * Math.cos(driftYaw));
+    dr.position.set(-DRIFT_PIVOT * Math.sin(driftYaw), 0, DRIFT_PIVOT - DRIFT_PIVOT * Math.cos(driftYaw));
 
-    // — Karosserie: rollen, nicken, zittern, stauchen —
-    const rollT = -steer * v1 * 0.075 - driftS * 0.11 + (spin > 0 ? Math.sin(spinYaw) * 0.1 : 0);
-    const pitchT = clamp(-acc * 0.0035, -0.08, 0.09) - boostS * 0.07 + airS * 0.05 + stallS * 0.03;
+    const hopPhase = t * 8.5;
+    const hop = winS * Math.max(0, Math.sin(hopPhase));
+    const idle = (1 - 0.7 * v1) * (1 - stallS);
+    const rough = this.offS * v1;
+    const cough = stallS * Math.pow(Math.max(0, Math.sin(t * 13)), 8);
+    this.fHop = hop;
+    this.fIdle = idle;
+    this.fCough = cough;
+
+    const rollT = -this.fSteer * v1 * 0.075 - driftS * 0.11 + (spin > 0 ? Math.sin(spinYaw) * 0.1 : 0);
+    const pitchT = clamp(-this.accel * 0.0035, -0.08, 0.09) - boostS * 0.07 + airS * 0.05 + stallS * 0.03;
     this.rollV += ((rollT - this.roll) * 140 - this.rollV * 13) * dt;
     this.roll += this.rollV * dt;
     this.pitchV += ((pitchT - this.pitch) * 140 - this.pitchV * 13) * dt;
     this.pitch += this.pitchV * dt;
     this.sqV += (-this.sq * 190 - this.sqV * 8.5) * dt;
     this.sq += this.sqV * dt;
+    // Stauchen: Höhe runter, Breite und Länge rauf (Volumen bleibt etwa gleich)
     const sq = clamp(this.sq + winS * 0.1 * Math.cos(hopPhase), -1, 1);
     const sy = sq > 0 ? 1 - 0.36 * sq : 1 - 0.28 * sq;
     const sxz = 1 / Math.sqrt(sy);
-    const cough = stallS * Math.pow(Math.max(0, Math.sin(t * 13)), 8);
     const ch = bn[B.chassis];
     ch.scale.set(sxz, sy, sxz);
     ch.position.y =
-      Math.sin(t * 61) * 0.0035 * idle + cough * 0.012 + hop * 0.07 + airS * 0.03 + rough * 0.02 * Math.sin(t * 33) * Math.sin(t * 21 + 1);
+      Math.sin(t * 61) * 0.0035 * idle +
+      cough * 0.012 +
+      hop * 0.07 +
+      airS * 0.03 +
+      rough * 0.02 * Math.sin(t * 33) * Math.sin(t * 21 + 1);
     ch.rotation.set(
       this.pitch + rough * 0.02 * Math.sin(t * 27),
       0,
       this.roll + Math.sin(t * 47 + 2) * 0.006 * idle + cough * 0.03 * Math.sin(t * 90) + rough * 0.025 * Math.sin(t * 19 + 2),
     );
+  }
 
-    // — Oberkörper —
-    this.lean = damp(this.lean, steer * 0.2 * (0.3 + 0.7 * v1) + driftS * 0.22, 8, dt);
-    const lean = this.lean;
+  /** Fahrer: Oberkörper und Kopf lehnen sich in die Kurve, Ohren, Lenkrad, Arme. */
+  private moveDriver(): void {
+    const sp = this.spec;
+    const bn = this.bones;
+    const rp = this.restPos;
+    const t = this.time;
+    const dt = this.fDt;
+    const { boostS, airS, winS, loseS, stallS, spinS, driftS, lean } = this;
+    const acc = this.accel;
+    const steer = this.fSteer;
+
     const torso = bn[B.torso];
     torso.rotation.set(-boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06, 0, lean);
-    torso.position.y = rp[B.torso * 3 + 1] + hop * 0.04;
+    torso.position.y = rp[B.torso * 3 + 1] + this.fHop * 0.04;
     torso.updateMatrix();
 
-    // — Kopf: federt nach, schaut in die Kurve —
+    // Kopf: federt nach, schaut in die Kurve, wird bei Schub nach hinten gedrückt
     const hxT =
-      -boostS * 0.3 + loseS * 0.55 - winS * 0.2 - airS * 0.14 + clamp(-acc * 0.006, -0.12, 0.15) + stallS * 0.08 + Math.sin(t * 2.1) * 0.02;
+      -boostS * 0.3 +
+      loseS * 0.55 -
+      winS * 0.2 -
+      airS * 0.14 +
+      clamp(-acc * 0.006, -0.12, 0.15) +
+      stallS * 0.08 +
+      Math.sin(t * 2.1) * 0.02;
     const hzT = lean * 0.7 + stallS * 0.1 * Math.sin(t * 7) + spinS * 0.22 * Math.sin(t * 14);
     this.headXV += ((hxT - this.headX) * 110 - this.headXV * 9) * dt;
     this.headX += this.headXV * dt;
     this.headZV += ((hzT - this.headZ) * 110 - this.headZV * 9) * dt;
     this.headZ += this.headZV * dt;
-    const hyT = (-steer * 0.32 - driftS * 0.3) * (1 - spinS) + stallS * 0.28 * Math.sin(t * 9.5) + loseS * 0.1 * Math.sin(t * 1.3);
+    const hyT =
+      (-steer * 0.32 - driftS * 0.3) * (1 - spinS) + stallS * 0.28 * Math.sin(t * 9.5) + loseS * 0.1 * Math.sin(t * 1.3);
     this.headY = damp(this.headY, hyT, 10, dt);
     bn[B.head].rotation.set(this.headX, this.headY, this.headZ);
 
-    // — Ohren —
+    // Ohren: legen sich im Fahrtwind an, zucken ab und zu, hängen bei Niederlage
     const twitch = Math.pow(Math.max(0, Math.sin(t * 1.7 + this.slot * 2)), 24);
-    const earBack = -0.32 * wind + swayZ * 0.5 - airS * 0.15;
+    const earBack = -0.32 * this.fWind + this.swayZ * 0.5 - airS * 0.15;
     const earOut = sp.earTilt + loseS * 0.55 + stallS * 0.3 - winS * 0.1;
-    bn[B.earL].rotation.set(earBack, 0, -earOut + swayX * 0.25 - twitch * 0.22);
-    bn[B.earR].rotation.set(earBack, 0, earOut + swayX * 0.25);
+    bn[B.earL].rotation.set(earBack, 0, -earOut + this.swayX * 0.25 - twitch * 0.22);
+    bn[B.earR].rotation.set(earBack, 0, earOut + this.swayX * 0.25);
 
-    // — Figur-eigenes Zubehör —
+    // Lenkrad dreht mit, die Hände bleiben dran
+    const st = bn[B.steer];
+    st.rotation.set(this.restRot[B.steer * 3], 0, -steer * 1.15 + driftS * 0.35);
+    st.updateMatrix();
+    this.solveArm(1);
+    this.solveArm(-1);
+  }
+
+  /** Figur-eigenes Zubehör: Motor und Kiefer, Schal, Schnauzbart, Schwanz und Antennen. */
+  private moveExtras(): void {
+    const bn = this.bones;
+    const t = this.time;
+    const { airS, winS, loseS, stallS, spinS, swayX, swayZ, flopX, flopZ } = this;
+    const wind = this.fWind;
     switch (this.slot) {
       case 0: {
         // Motor zittert, Kiefer klappt auf
         const en = bn[B.aux0];
-        const shake = 0.35 + idle * 0.65 + boostS * 0.8;
-        en.position.y = rp[B.aux0 * 3 + 1] + Math.sin(t * 58) * 0.006 * shake + cough * 0.02;
+        const cough = this.fCough;
+        const shake = 0.35 + this.fIdle * 0.65 + this.boostS * 0.8;
+        en.position.y = this.restPos[B.aux0 * 3 + 1] + Math.sin(t * 58) * 0.006 * shake + cough * 0.02;
         en.rotation.z = Math.sin(t * 58 + 1) * 0.022 * shake + cough * 0.06 * Math.sin(t * 80);
         const open = Math.max(winS * (0.55 + 0.45 * Math.sin(t * 17)), stallS * 0.75, airS * 0.6, spinS * 0.7);
         bn[B.aux1].rotation.x = open * 0.42;
         break;
       }
       case 1: {
-        // Schal: hängt im Stand, weht bei Tempo waagrecht und flattert
+        // Schal: liegt im Stand auf dem Heck, weht bei Tempo waagrecht und flattert
         for (let i = 0; i < 4; i++) {
           const wave = Math.sin(t * (8 + 10 * wind) - i * 1.15);
           const hangX = (i === 0 ? -0.5 : -0.2) * (1 - wind);
           const rx = (i === 0 ? 0.14 + airS * 0.2 : 0) + hangX + wave * (0.05 + 0.26 * wind) * (i === 0 ? 0.5 : 1) + flopZ * 0.12;
-          const ry = (i === 0 ? -0.2 : 0) + flopX * (i === 0 ? 0.3 : 0.12) + Math.sin(t * (6 + 7 * wind) - i * 0.9 + 1.7) * 0.16 * wind;
+          const ry =
+            (i === 0 ? -0.2 : 0) + flopX * (i === 0 ? 0.3 : 0.12) + Math.sin(t * (6 + 7 * wind) - i * 0.9 + 1.7) * 0.16 * wind;
           bn[B.c0 + i].rotation.set(rx, ry, wave * 0.35 * wind);
         }
         break;
@@ -2345,10 +2831,13 @@ export class KartVisual {
       case 2: {
         // Schnauzbart flattert im Fahrtwind
         for (let i = 0; i < 2; i++) {
-          const m = bn[B.aux0 + i];
           const side = i === 0 ? 1 : -1;
           const flutter = Math.sin(t * 21 + i * 2.1) * 0.07 * wind;
-          m.rotation.set(flutter - loseS * 0.12, side * (-0.32 * wind + swayZ * 0.5) + flutter, side * (-loseS * 0.3 + winS * 0.2) + swayX * 0.2);
+          bn[B.aux0 + i].rotation.set(
+            flutter - loseS * 0.12,
+            side * (0.32 * wind - swayZ * 0.5) + flutter,
+            side * (-loseS * 0.3 + winS * 0.2) + swayX * 0.2,
+          );
         }
         break;
       }
@@ -2357,48 +2846,60 @@ export class KartVisual {
         for (let i = 0; i < 3; i++) {
           const swish = Math.sin(t * 2.6 - i * 0.8) * 0.13 * (1 - 0.5 * wind) + Math.sin(t * 15 - i) * 0.05 * wind;
           bn[B.c0 + i].rotation.set(
-            (i === 0 ? -0.22 : -0.1) * wind + flopZ * 0.2 + loseS * (i === 0 ? -0.3 : -0.16) + spinS * 0.15 * Math.sin(t * 20 + i),
+            (i === 0 ? -0.22 : -0.1) * wind +
+              flopZ * 0.2 +
+              loseS * (i === 0 ? -0.3 : -0.16) +
+              spinS * 0.15 * Math.sin(t * 20 + i),
             0,
             swish + flopX * 0.14 + stallS * 0.2 * Math.sin(t * 30 + i * 2),
           );
         }
         for (let i = 0; i < 2; i++) {
           const side = i === 0 ? 1 : -1;
-          bn[B.aux0 + i].rotation.set(-0.2 - 0.3 * wind + swayZ * 0.9 + stallS * 0.1 * Math.sin(t * 40 + i), 0, -side * 0.3 + swayX * 0.6);
+          bn[B.aux0 + i].rotation.set(
+            -0.2 - 0.3 * wind + swayZ * 0.9 + stallS * 0.1 * Math.sin(t * 40 + i),
+            0,
+            -side * 0.3 + swayX * 0.6,
+          );
         }
       }
     }
+  }
 
-    // — Lenkrad und Arme —
-    const st = bn[B.steer];
-    const wheelAngle = -steer * 1.15 + driftS * 0.35;
-    st.rotation.set(rr[B.steer * 3], 0, wheelAngle);
-    st.updateMatrix();
-    const upT = pose.air || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0;
-    this.armsUp = damp(this.armsUp, upT, 10, dt);
-    this.solveArm(1, t);
-    this.solveArm(-1, t);
+  /** Flammen, Schutzring, Blitze und Qualm. */
+  private moveEffects(guard: boolean): void {
+    const sp = this.spec;
+    const bn = this.bones;
+    const t = this.time;
+    const dt = this.fDt;
+    const stallS = this.stallS;
 
-    // — Flammen —
-    this.flameS = damp(this.flameS, pose.boost ? 1 : 0, pose.boost ? 18 : 11, dt);
+    // Flammen: pulsieren, werden mit dem Tempo länger
     const fs = this.flameS;
     this.flames.visible = fs > 0.03;
     for (let i = 0; i < 2; i++) {
       const flick = 0.85 + 0.22 * Math.sin(t * 71 + i * 2) + 0.12 * Math.sin(t * 173 + i);
       const wide = fs * (0.92 + 0.16 * Math.sin(t * 53 + i * 1.3));
-      bn[B.flameL + i].scale.set(wide, wide, fs * flick * (1 + 0.25 * v));
+      bn[B.flameL + i].scale.set(wide, wide, fs * flick * (1 + 0.25 * this.fV));
     }
 
-    // — Schutzring: ploppt auf, kreist —
-    this.guardV += (((pose.guard ? 1 : 0) - this.guardS) * 260 - this.guardV * 15) * dt;
-    this.guardS = Math.max(0, this.guardS + this.guardV * dt);
+    // Schutzring: ploppt federnd auf, kreist ums Kart. Ausgeblendet wird er
+    // zügig und ohne Nachfedern – so blinkt er sauber, wenn das Spiel ihn kurz
+    // vor Ablauf im Takt ein- und ausschaltet.
+    if (guard) {
+      this.guardV += ((1 - this.guardS) * 260 - this.guardV * 15) * dt;
+      this.guardS += this.guardV * dt;
+    } else {
+      this.guardS = damp(this.guardS, 0, 30, dt);
+      this.guardV = 0;
+    }
     const gs = this.guardS > 0.004 ? this.guardS : 0;
     const gd = bn[B.guard];
     gd.scale.setScalar(gs);
     gd.rotation.set(Math.sin(t * 2.1) * 0.1, t * 3.4, Math.cos(t * 1.7) * 0.1);
-    gd.position.y = rp[B.guard * 3 + 1] + Math.sin(t * 3) * 0.03;
+    gd.position.y = this.restPos[B.guard * 3 + 1] + Math.sin(t * 3) * 0.03;
 
-    // — Kurzschluss: Blitze zucken, Qualm steigt —
+    // Kurzschluss: Blitze zucken an wechselnden Stellen, Qualm steigt auf
     for (let i = 0; i < 2; i++) {
       const ft = t * 11 + i * 0.5;
       const tick = Math.floor(ft);
@@ -2407,31 +2908,37 @@ export class KartVisual {
       const r3 = hash(tick * 2.3 + i * 3.7 + 9);
       const on = ft - tick < 0.62 ? 1 : 0;
       const a = r1 * TAU;
-      const rad = 0.5 + 0.4 * r2;
+      const rad = 0.7 + 0.35 * r2;
       const bo = bn[B.bolt0 + i];
-      bo.position.set(Math.cos(a) * rad, 0.45 + 0.75 * r3, Math.sin(a) * rad);
+      bo.position.set(Math.cos(a) * rad, 0.5 + 0.7 * r3, Math.sin(a) * rad);
       bo.rotation.set(0, HALF_PI - a, (r2 - 0.5) * 1.6);
-      bo.scale.setScalar(stallS > 0.02 ? stallS * on * (0.8 + 0.6 * r3) : 0);
+      bo.scale.setScalar(stallS > 0.02 ? stallS * on * (0.75 + 0.4 * r3) : 0);
       const p = t * 0.85 + i * 0.5;
       const life = p - Math.floor(p);
       const pf = bn[B.puff0 + i];
-      pf.position.set(sp.smoke[0] + (i === 0 ? 0.14 : -0.14) * life + Math.sin(t * 3 + i) * 0.03, sp.smoke[1] + life * 0.8, sp.smoke[2] - life * 0.3);
+      pf.position.set(
+        sp.smoke[0] + (i === 0 ? 0.14 : -0.14) * life + Math.sin(t * 3 + i) * 0.03,
+        sp.smoke[1] + life * 0.8,
+        sp.smoke[2] - life * 0.3,
+      );
       pf.rotation.y = life * 2 + i;
       const grow = (0.45 + 0.8 * life) * Math.min(1, (1 - life) * 5) * Math.min(1, life * 8);
       pf.scale.setScalar(stallS > 0.02 ? stallS * grow : 0);
     }
     this.fx.visible = gs > 0 || stallS > 0.02;
+  }
 
-    // — Augen —
+  /** Augen: Kringel beim Schleudern, verdattert bei Kurzschluss, sonst je nach Lage – und ab und zu blinzeln. */
+  private pickEyes(pose: KartPose): void {
     let eye: number = EYE.OPEN;
-    if (spin > 0) eye = EYE.DIZZY;
+    if (this.fSpin > 0) eye = EYE.DIZZY;
     else if (pose.stall) eye = EYE.STUN;
     else if (pose.emote === 'win') eye = EYE.HAPPY;
     else if (pose.emote === 'lose') eye = EYE.SAD;
     else if (pose.boost) eye = EYE.FIERCE;
     else if (pose.air) eye = EYE.WOW;
     else {
-      this.blinkT -= dt;
+      this.blinkT -= this.fDt;
       if (this.blinkT < 0.11) eye = EYE.BLINK;
       if (this.blinkT < 0) {
         this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0;
@@ -2439,16 +2946,15 @@ export class KartVisual {
       }
     }
     this.setEyes(eye);
-
-    this.placeAnchors(spinYaw, driftYaw, pivot);
   }
 
   /**
    * Spannt einen Arm zwischen Schulter und Ziel (Hand am Lenkrad oder oben):
    * Ellbogen aus den beiden Armlängen, Knochen passend gedreht und gestreckt.
    */
-  private solveArm(side: number, t: number): void {
+  private solveArm(side: number): void {
     const sp = this.spec;
+    const t = this.time;
     const bn = this.bones;
     const torso = bn[B.torso];
     const upper = bn[side > 0 ? B.armLU : B.armRU];
@@ -2462,7 +2968,11 @@ export class KartVisual {
     const up = this.armsUp;
     if (up > 0.001) {
       const wave = this.winS * Math.sin(t * 11 + side);
-      _t.set(side * (sp.shoulder[0] + 0.16 + 0.07 * wave), sp.shoulder[1] + 0.36 + 0.03 * this.winS * Math.cos(t * 11), sp.shoulder[2] + 0.1).applyMatrix4(torso.matrix);
+      _t.set(
+        side * (sp.shoulder[0] + 0.16 + 0.07 * wave),
+        sp.shoulder[1] + 0.36 + 0.03 * this.winS * Math.cos(t * 11),
+        sp.shoulder[2] + 0.1,
+      ).applyMatrix4(torso.matrix);
       _hd.lerp(_t, up);
     }
     _u.subVectors(_hd, _sh);
@@ -2514,25 +3024,27 @@ export class KartVisual {
   }
 
   /** Effekt-Punkte nachführen: sie drehen sich mit Drift und Schleudern mit. */
-  private placeAnchors(spinYaw: number, driftYaw: number, pivot: number): void {
+  private placeAnchors(): void {
     const sp = this.spec;
     const a = this.anchors;
-    const cd = Math.cos(driftYaw);
-    const sd = Math.sin(driftYaw);
-    const cs = Math.cos(spinYaw);
-    const ss = Math.sin(spinYaw);
-    const put = (out: THREE.Vector3, x: number, y: number, z: number): void => {
-      const dz = z - pivot;
-      const x1 = x * cd + dz * sd;
-      const z1 = -x * sd + dz * cd + pivot;
-      out.set(x1 * cs + z1 * ss, y, -x1 * ss + z1 * cs);
-    };
-    put(a.wheelRearL, sp.wr.x, 0, sp.wr.z);
-    put(a.wheelRearR, -sp.wr.x, 0, sp.wr.z);
-    put(a.wheelFrontL, sp.wf.x, 0, sp.wf.z);
-    put(a.wheelFrontR, -sp.wf.x, 0, sp.wf.z);
-    put(a.exhaustL, sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]);
-    put(a.exhaustR, -sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]);
-    put(a.head, 0, sp.hip[1] + sp.torsoLen + 0.3, sp.hip[2]);
+    this.aCd = Math.cos(this.fDriftYaw);
+    this.aSd = Math.sin(this.fDriftYaw);
+    this.aCs = Math.cos(this.fSpinYaw);
+    this.aSs = Math.sin(this.fSpinYaw);
+    this.anchor(a.wheelRearL, sp.wr.x, 0, sp.wr.z);
+    this.anchor(a.wheelRearR, -sp.wr.x, 0, sp.wr.z);
+    this.anchor(a.wheelFrontL, sp.wf.x, 0, sp.wf.z);
+    this.anchor(a.wheelFrontR, -sp.wf.x, 0, sp.wf.z);
+    this.anchor(a.exhaustL, sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]);
+    this.anchor(a.exhaustR, -sp.exhaust[0], sp.exhaust[1], sp.exhaust[2]);
+    this.anchor(a.head, 0, sp.hip[1] + sp.torsoLen + 0.3, sp.hip[2]);
+  }
+
+  /** Ein Punkt der Ruhelage → root: erst Drift (um den Drehpunkt vorn), dann Schleudern. */
+  private anchor(out: THREE.Vector3, x: number, y: number, z: number): void {
+    const dz = z - DRIFT_PIVOT;
+    const x1 = x * this.aCd + dz * this.aSd;
+    const z1 = -x * this.aSd + dz * this.aCd + DRIFT_PIVOT;
+    out.set(x1 * this.aCs + z1 * this.aSs, y, -x1 * this.aSs + z1 * this.aCs);
   }
 }

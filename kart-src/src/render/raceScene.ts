@@ -187,6 +187,9 @@ export class RaceScene {
   private frameTimes = 0;
   private frameCount = 0;
   private lastDrop = 0;
+  private smoothSeconds = 0;
+  private triedHigh = false;
+  private highFailed = false;
   private time = 0;
 
   // Kamera
@@ -257,6 +260,22 @@ export class RaceScene {
     this.puffs.clear();
     this.sparks.clear();
     this.pops.clear();
+  }
+
+  /** Vor jedem Einstieg ins Rennen: nichts aus dem letzten Rennen darf nachwirken. */
+  reset(): void {
+    this.raceId = -1;
+    this.camReady = false;
+    this.cameraMode = 'chase';
+    this.shake = 0;
+    this.hitstop = 0;
+    this.smoke = 0;
+    this.skids.clear();
+    this.puffs.clear();
+    this.sparks.clear();
+    this.pops.clear();
+    this.things?.clear();
+    for (const k of this.karts.values()) k.fresh = true;
   }
 
   setRoster(drivers: SceneDriver[]): void {
@@ -399,7 +418,7 @@ export class RaceScene {
       if (e.driftDir !== 0 && k.driftDir === 0) this.emit('drift-start', k, local);
       if (!air && wasAir && e.respawn === 0 && k.respawn === 0) {
         if (k.airTime > 0.28) {
-          this.burst(e.x, e.y + 0.2, e.z, 10, 6, 0xd9cfc0, false, 0.8, 0.5, 1.5);
+          this.burst(e.x, e.y + 0.2, e.z, 9, 6, 0xd9cfc0, false, 0.5, 0.45, 1.5);
           k.visual.squash(Math.min(1.2, 0.4 + k.airTime));
           this.emit('land', k, local);
           if (local) this.shake = Math.max(this.shake, Math.min(0.45, k.airTime * 0.4));
@@ -429,7 +448,7 @@ export class RaceScene {
       }
       if (e.guard > k.guard + 60) this.emit('use-guard', k, local);
       if (e.roulette > 0 && k.roulette === 0) {
-        this.burst(e.x, e.y + 1.2, e.z, 10, 7, 0xffd23f, false, 0.26, 0.5, 6);
+        this.burst(e.x, e.y + 1.2, e.z, 12, 8, 0xffe04a, true, 0.3, 0.45, 5);
         this.emit('pickup', k, local);
       }
       if (e.roulette === 0 && k.roulette > 0 && e.item !== ITEM_NONE) this.emit('item-ready', k, local);
@@ -598,7 +617,7 @@ export class RaceScene {
         this.shadows.add(e.x, ground, e.z, this.q1, 2.5, e.y - ground);
       }
 
-      this.trail(k, e, speed, vf, air, pose.driftStage, dt);
+      this.trail(k, e, speed, air, pose.driftStage, dt);
 
       if (local) {
         me = e;
@@ -610,8 +629,11 @@ export class RaceScene {
           k.label.name = d?.name ?? '';
           this.scene.add(k.label);
         }
-        k.label.position.set(e.x, e.y + 2.75, e.z);
-        k.label.visible = dist < 80 && dist > 4;
+        // Auf jede Entfernung etwa gleich groß; ganz nah stört das Schild nur.
+        const ls = Math.max(0.5, Math.min(1.7, dist / 20));
+        k.label.scale.set(3.6 * ls, 0.9 * ls, 1);
+        k.label.position.set(e.x, e.y + 2.5 + ls * 0.4, e.z);
+        k.label.visible = dist < 90 && dist > 8;
       }
     }
     for (const k of this.karts.values()) {
@@ -657,7 +679,7 @@ export class RaceScene {
   }
 
   /** Funken, Staub, Flammen und Bremsspuren eines Karts. */
-  private trail(k: KartView, e: RenderEntity, speed: number, vf: number, air: boolean, stage: number, dt: number): void {
+  private trail(k: KartView, e: RenderEntity, speed: number, air: boolean, stage: number, dt: number): void {
     const root = k.visual.root;
     root.updateMatrixWorld();
     const A = k.visual.anchors;
@@ -693,10 +715,10 @@ export class RaceScene {
         this.skids.add(k.rl.x, k.rl.y, k.rl.z, rl.x, rl.y, rl.z, 0.3);
         this.skids.add(k.rr.x, k.rr.y, k.rr.z, rr.x, rr.y, rr.z, 0.3);
       }
-      if (Math.random() < 22 * budget * dt) {
+      if (Math.random() < 16 * budget * dt) {
         this.color.set(0xe9e6f2);
         const w = Math.random() < 0.5 ? rl : rr;
-        this.puffs.emit(w.x, w.y + 0.2, w.z, (Math.random() - 0.5) * 2, 1 + Math.random(), (Math.random() - 0.5) * 2, 0.45, 0.5, this.color, 1.8, -0.5, 2, 0.8);
+        this.puffs.emit(w.x, w.y + 0.15, w.z, e.vx * 0.5 + (Math.random() - 0.5) * 2, 0.8 + Math.random(), e.vz * 0.5 + (Math.random() - 0.5) * 2, 0.32, 0.26, this.color, 0.9, -0.5, 3, 0.7);
       }
     }
     k.rl.copy(rl);
@@ -706,7 +728,7 @@ export class RaceScene {
     if (!air && e.flags & FLAG_OFFROAD && speed > 6 && Math.random() < 26 * budget * dt) {
       this.color.set(this.world!.theme.shoulder).multiplyScalar(0.9);
       const w = Math.random() < 0.5 ? rl : rr;
-      this.puffs.emit(w.x, w.y + 0.15, w.z, (Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.5, 0.45, this.color, 1.6, 3, 1.5, 0.9);
+      this.puffs.emit(w.x, w.y + 0.15, w.z, e.vx * 0.4 + (Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, e.vz * 0.4 + (Math.random() - 0.5) * 3, 0.4, 0.3, this.color, 1.0, 4, 2, 0.9);
     }
     if (e.boost > 0 && Math.random() < 90 * budget * dt) {
       const ex = (Math.random() < 0.5 ? this.v1.copy(A.exhaustL) : this.v1.copy(A.exhaustR)).applyMatrix4(root.matrixWorld);
@@ -716,11 +738,6 @@ export class RaceScene {
     if (e.stall > 0 && Math.random() < 14 * dt) {
       this.color.set(0x4a4654);
       this.puffs.emit(e.x, e.y + 1.1, e.z, (Math.random() - 0.5) * 1.5, 2.2, (Math.random() - 0.5) * 1.5, 0.8, 0.4, this.color, 1.2, -1, 1, 0.85);
-    }
-    if (vf > V_MAX * 0.9 && !air && !drifting && e.boost === 0 && Math.random() < 5 * budget * dt) {
-      this.color.set(0xdedbe8);
-      const w = Math.random() < 0.5 ? rl : rr;
-      this.puffs.emit(w.x, w.y + 0.1, w.z, 0, 0.6, 0, 0.3, 0.25, this.color, 1.2, 0, 2, 0.5);
     }
   }
 
@@ -793,8 +810,8 @@ export class RaceScene {
     } else if (done) {
       this.orbit += dt * 0.5;
       yaw = me.heading + Math.PI + Math.sin(this.orbit) * 1.1;
-      dist = 6.2;
-      height = 2.1;
+      dist = 8.4;
+      height = 2.7;
       lookAhead = 0;
     } else this.orbit = 0;
 
@@ -874,10 +891,19 @@ export class RaceScene {
       }
       this.lastDrop = now;
       this.resize();
+      // Wer von "Hoch" wieder herunter musste, bleibt für diese Sitzung unten.
+      if (this.triedHigh) this.highFailed = true;
     } else if (fps > 57.5 && now - this.lastDrop > 8 && this.scale < 1) {
       this.scale = Math.min(1, this.scale + 0.05);
       this.resize();
+    } else if (fps > 58.5 && this.scale >= 1 && this.level === 1 && !this.highFailed && now - this.lastDrop > 12 && ++this.smoothSeconds > 12) {
+      // Läuft "Mittel" lange rund, einmal "Hoch" versuchen (volle Auflösung, feinere Karts).
+      this.level = 2;
+      this.triedHigh = true;
+      this.smoothSeconds = 0;
+      this.applyLevel();
     }
+    if (fps <= 58.5) this.smoothSeconds = 0;
   }
 
   /** Zustand aller sichtbaren Karts für die Dauergeräusche. */

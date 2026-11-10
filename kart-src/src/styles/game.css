@@ -299,6 +299,8 @@
   right: var(--safe-r);
   width: clamp(110px, 15vw, 164px);
   height: clamp(110px, 15vw, 164px);
+  background: rgba(22, 19, 28, 0.34);
+  border-radius: 22px;
 }
 
 .hud-menu {
@@ -336,6 +338,8 @@
   z-index: 6;
   display: grid;
   place-items: center;
+  padding: 14px;
+  overflow: auto;
   background: rgba(22, 19, 28, 0.6);
 }
 
@@ -716,6 +720,15 @@
 
 /* --- Lobby: Strecke und Gegner --------------------------------------------- */
 
+.player-fig {
+  margin-left: 10px;
+  font: 500 12.5px/1 var(--font-body);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .setup {
   margin-top: 26px;
 }
@@ -967,6 +980,31 @@
   .hud-note {
     max-width: calc(100% - 40px);
     bottom: 32%;
+  }
+}
+
+/* Flache Bildschirme (Handy quer): Menü zweispaltig, damit alles hineinpasst. */
+@media (max-height: 520px) {
+  .menu-card {
+    width: min(560px, 100%);
+    padding: 14px 16px 16px;
+  }
+
+  .menu-card h2 {
+    font-size: 22px;
+  }
+
+  .menu-room {
+    margin: 4px 0 10px;
+  }
+
+  .menu-list {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .menu-list button {
+    height: 40px;
+    font-size: 15px;
   }
 }
 

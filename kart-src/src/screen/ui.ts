@@ -1,5 +1,5 @@
 // Oberfläche des Bildschirms: Startseite, Lobby, Bedienelemente über der
-// Testszene sowie Meldungen. Reine Anzeige – die Logik sitzt in app.ts.
+// Rennen sowie Meldungen. Reine Anzeige – die Logik sitzt in app.ts.
 
 import { BOT_NAMES } from '../game/ai';
 import type { LobbyPlayer } from '../net/protocol';
@@ -240,7 +240,7 @@ export class ScreenUi {
     this.app.dataset.view = view;
     if (view !== 'game') $('menu').hidden = true;
     // Die Diagnose hängt in der Lobby fest im Layout (verdeckt nichts) und
-    // schwebt nur über der Testszene.
+    // schwebt nur über dem Rennen.
     const debug = $('debug');
     if (view === 'lobby') $('debug-slot').append(debug);
     else this.app.append(debug);
@@ -333,7 +333,7 @@ export class ScreenUi {
 
     $('hud-note').textContent = m.controllerConnected
       ? ''
-      : 'Kein Handy verbunden – „Controller“ zeigt den QR-Code. Zum Testen am Desktop: Pfeiltasten/WASD, Shift = Drift, Leertaste = Item.';
+      : 'Kein Handy verbunden – den QR-Code gibt es im Menü unter „Controller koppeln“. Am Rechner: Pfeiltasten/WASD, Shift = Drift, Leertaste = Item.';
   }
 
   setBanner(text: string | null, tone: 'warn' | 'bad' = 'warn'): void {
@@ -375,7 +375,7 @@ export class ScreenUi {
     const hud = $('race-hud');
     if (hud.hidden === m.visible) hud.hidden = !m.visible;
     if (!m.visible) return;
-    this.setText('rh-place', `${m.place}.`);
+    this.setText('rh-place', String(m.place));
     this.setText('rh-of', `von ${m.of}`);
     this.setText('rh-lap', `${m.lap}/${m.laps}`);
     if (!m.frozenTime) this.shownTime = m.timeSec;
@@ -551,7 +551,13 @@ export class ScreenUi {
         continue;
       }
       const me = slot === m.localSlot;
-      const name = h('span', { class: 'player-name' }, p.name, me ? h('span', { class: 'you', text: 'du' }) : null);
+      const name = h(
+        'span',
+        { class: 'player-name' },
+        p.name,
+        me ? h('span', { class: 'you', text: 'du' }) : null,
+        h('span', { class: 'player-fig', text: `fährt ${BOT_NAMES[slot]}` }),
+      );
       const tags = h('span', { class: 'player-tags' });
       if (p.isHost) tags.append(h('span', { class: 'tag tag-host', text: 'Host' }));
       if (!p.online) tags.append(h('span', { class: 'tag tag-bad', text: 'getrennt' }));
