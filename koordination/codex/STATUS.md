@@ -4,6 +4,6 @@ Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 20:43 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
-| C-001 | in Arbeit | codex/koordination | ausstehend | tsc OK / 123 Tests OK; 9 Wegwerfproben OK | Prüfung des Claude-Stands `326bd88167b7e1e1974d3f3992cfe744c9827714`; nur Bericht. |
-| C-002 | angenommen | codex/c-002-musik | ausstehend | ungeprüft | Nach C-001; ausschließlich die zwei freigegebenen neuen Dateien. |
+| C-001 | fertig | codex/koordination | 94453f98616dccbb669647d5755e13e557109d17 | tsc OK / 123 Tests OK; 9 Wegwerfproben OK | Prüfung des Claude-Stands `326bd88167b7e1e1974d3f3992cfe744c9827714`; nur Bericht. |
+| C-002 | in Arbeit | codex/c-002-musik | ausstehend | ungeprüft | Komposition und Formatprüfung begonnen; ausschließlich die zwei freigegebenen neuen Dateien. |
 | C-003 | angenommen | codex/c-003-turn | ausstehend | ungeprüft | Nach C-002; ausschließlich neuer Ordner `werkzeug/turn-worker/`. |
