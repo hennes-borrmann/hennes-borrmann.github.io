@@ -762,7 +762,7 @@ export class RaceScene {
     this.updateCamera(me, meView, race, dt);
     const fast = me ? (me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
-    this.world.update(this.time, dt, this.camera.position, race.boxes);
+    this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx);
     if (this.needsCompile) {
       // Alle Shader jetzt übersetzen – auch die der noch unsichtbaren Effekte (Flammen,
       // Schutzring, Tempostriche). Sonst ruckelt es beim ersten Schub oder Treffer.

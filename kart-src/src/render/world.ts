@@ -15,6 +15,8 @@ import {
   type Track,
 } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RGB, type V3 } from './build';
+import type { FxSink } from './fxApi';
+import { buildLife, type Life } from './life';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
@@ -107,6 +109,7 @@ export class World {
   private boxScale: Float32Array;
   private nonDeck: number[] = [];
   private idwSegs: number[] = [];
+  private life: Life | null = null;
 
   constructor(
     readonly track: Track,
@@ -148,6 +151,25 @@ export class World {
     const scenery = buildScenery(this);
     this.group.add(scenery.group);
     this.disposables.push(scenery);
+    this.life = buildLife(this);
+    if (this.life) {
+      this.group.add(this.life.group);
+      this.disposables.push(this.life);
+    }
+  }
+
+  /**
+   * Abstand eines Punkts zur nächsten Bande in Metern (negativ = auf der
+   * Strecke). Kulissen halten damit Abstand zur Fahrbahn.
+   */
+  clearance(x: number, z: number): number {
+    const t = this.track;
+    let best = Infinity;
+    for (let k = 0; k < t.n; k += 2) {
+      const d = Math.hypot(x - t.px[k], z - t.pz[k]) - t.wh[k];
+      if (d < best) best = d;
+    }
+    return best;
   }
 
   // --- Fahrbahn --------------------------------------------------------------
@@ -731,8 +753,9 @@ export class World {
 
   // --- Pro Bild --------------------------------------------------------------
 
-  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number): void {
+  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink): void {
     for (const m of this.timed) m.uniforms.time.value = time;
+    this.life?.update(time, dt, camera, fx);
     this.skyGroup.position.set(camera.x, 0, camera.z);
     this.clouds.rotation.y = time * 0.004;
     const rays = this.skyGroup.getObjectByName('rays');

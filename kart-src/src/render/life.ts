@@ -1,0 +1,39 @@
+// Leben in den Welten: alles, was sich abseits der Strecke von selbst bewegt –
+// ausbrechende Vulkane, Möwen, Kräne, Verkehr. Reine Kulisse: nichts davon
+// berührt die Fahrbahn oder greift ins Rennen ein.
+//
+// Jede Welt hat ihre eigene Datei unter life/. Sie bekommt die fertige Welt
+// (Gelände, Thema, Strecke) und liefert eine Gruppe samt update().
+
+import type * as THREE from 'three';
+import type { FxSink } from './fxApi';
+import { buildGlutLife } from './life/glut';
+import { buildKlippeLife } from './life/klippe';
+import { buildNachtLife } from './life/nacht';
+import { buildWerkshofLife } from './life/werkshof';
+import type { World } from './world';
+
+export interface Life {
+  readonly group: THREE.Group;
+  /**
+   * Pro Bild. time = Sekunden seit Aufbau der Szene, cam = Kameraposition,
+   * fx = Teilchen der Szene (Funken und Comic-Bällchen, siehe fxApi.ts).
+   */
+  update(time: number, dt: number, cam: THREE.Vector3, fx: FxSink): void;
+  dispose(): void;
+}
+
+export function buildLife(world: World): Life | null {
+  switch (world.track.def.theme) {
+    case 'werkshof':
+      return buildWerkshofLife(world);
+    case 'klippe':
+      return buildKlippeLife(world);
+    case 'glut':
+      return buildGlutLife(world);
+    case 'nacht':
+      return buildNachtLife(world);
+    default:
+      return null;
+  }
+}

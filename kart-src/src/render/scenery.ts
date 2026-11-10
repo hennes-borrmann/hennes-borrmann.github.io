@@ -43,14 +43,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
   disposables.push(toon, glow);
 
   /** Abstand zur nächsten Fahrbahn-Bande (negativ = auf der Strecke). */
-  const clearance = (x: number, z: number): number => {
-    let best = Infinity;
-    for (let k = 0; k < t.n; k += 2) {
-      const d = Math.hypot(x - t.px[k], z - t.pz[k]) - t.wh[k];
-      if (d < best) best = d;
-    }
-    return best;
-  };
+  const clearance = (x: number, z: number): number => world.clearance(x, z);
 
   /** Zufällige Plätze neben der Strecke, zwischen minOut und maxOut Metern hinter der Bande. */
   const scatter = (
