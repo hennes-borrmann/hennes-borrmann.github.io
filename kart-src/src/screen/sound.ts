@@ -43,12 +43,14 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'use-emp',
   'use-smoke',
   'use-spring',
+  'use-kite',
 ]);
 
 export class Sound {
   private readonly none: KartAudio[] = [];
   private lastCount: string | null = null;
   private rouletteAt = 0;
+  private warnAt = 0;
   private wantMusic: MusicName | null = null;
 
   constructor(
@@ -111,6 +113,13 @@ export class Sound {
     if (!rolling || nowMs - this.rouletteAt < 85) return;
     this.rouletteAt = nowMs;
     this.engine?.sfx('roulette-tick');
+  }
+
+  /** Ein Brummkreisel sucht das eigene Kart: Warnton, je näher desto schneller. */
+  warn(threat: number, nowMs: number): void {
+    if (threat <= 0 || nowMs - this.warnAt < 620 - threat * 380) return;
+    this.warnAt = nowMs;
+    this.engine?.sfx('warn');
   }
 
   results(place: number, of: number): void {

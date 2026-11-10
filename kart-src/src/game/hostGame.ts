@@ -31,6 +31,7 @@ import {
   EV_TURBO,
   EV_USE_BOOST,
   EV_USE_EMP,
+  EV_USE_KITE,
   EV_USE_OIL,
   EV_USE_SMOKE,
   EV_USE_TIRE,
@@ -44,6 +45,7 @@ import {
   ITEM_NONE,
   ITEM_OIL,
   ITEM_SMOKE,
+  ITEM_KITE,
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
@@ -112,6 +114,8 @@ const TOP_RADIUS = 1.7;
 const TOP_LIFE_TICKS = 10 * 60;
 const SMOKE_RADIUS = 7.5;
 const SMOKE_LIFE_TICKS = 9 * 60;
+/** Erst ab diesem Rückstand (Meter auf das Kart davor) gibt es den Abschleppdrachen. */
+const KITE_MIN_GAP = 45;
 export const HAZARD_RADIUS = 1.5;
 /** Höchstzahl gleichzeitiger Dinge je Art – hält die Snapshots klein. */
 const MAX_PER_KIND = 6;
@@ -536,6 +540,7 @@ export class HostGame implements GameView {
     if (ev & EV_USE_SMOKE) this.spawnDrop(k, THING_SMOKE);
     if (ev & EV_USE_TOP) this.spawnTop(k);
     if (ev & EV_USE_EMP) this.shortCircuit(k);
+    if (ev & EV_USE_KITE) this.fx(k, 'boost');
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD)) this.fx(k, 'boost');
     if (ev & EV_ITEM_READY) this.fx(k, 'item');
     if (ev & EV_WALL) this.fx(k, 'wall');
@@ -560,14 +565,20 @@ export class HostGame implements GameView {
   }
 
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
-  private pickItem(place: number, count: number): number {
+  private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder
-    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22];
-    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8];
-    else if (place === count) table = [26, 14, 0, 26, 6, 16, 0, 12];
-    else table = [18, 20, 10, 16, 10, 6, 10, 10];
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache
+    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22, 0];
+    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8, 0];
+    else if (place === count) table = [22, 14, 0, 24, 6, 14, 0, 10, 0];
+    else table = [18, 20, 10, 16, 10, 6, 10, 10, 0];
+    // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
+    // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
+    if (count > 1 && behind > KITE_MIN_GAP) {
+      if (place === count) table[8] = 22;
+      else if (count >= 4 && place === count - 1) table[8] = 8;
+    }
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;
@@ -576,6 +587,15 @@ export class HostGame implements GameView {
       if (r < 0) return items[i];
     }
     return ITEM_BOOST;
+  }
+
+  /** Rückstand auf das Kart davor in Metern (0 für den Führenden). */
+  private gapAhead(k: HostKart): number {
+    let gap = Infinity;
+    for (const o of this.karts.values()) {
+      if (o !== k && o.progress > k.progress) gap = Math.min(gap, (o.progress - k.progress) * TRACK.step);
+    }
+    return gap === Infinity ? 0 : gap;
   }
 
   private addThing(kind: number, k: HostKart, x: number, y: number, z: number, life: number): Thing {
@@ -697,7 +717,7 @@ export class HostGame implements GameView {
           if (Math.abs(segDelta(t, b.seg, s.seg)) > 6 || Math.abs(s.y - b.y) > 2.5) continue;
           if (Math.hypot(s.x - b.x, s.z - b.z) < BOX_RADIUS) {
             this.boxTimers[i] = BOX_RESPAWN_TICKS;
-            s.nextItem = this.pickItem(k.place, count);
+            s.nextItem = this.pickItem(k.place, count, this.gapAhead(k));
             s.roulette = ROULETTE_TICKS;
             this.fx(k, 'pickup');
             break;
@@ -814,6 +834,25 @@ export class HostGame implements GameView {
     }
   }
 
+  /** Ein gezogenes Kart schiebt ein anderes quer aus seiner Bahn – ohne Dreher, aber mit Schwung. */
+  private sweepAside(tow: HostKart, other: HostKart): void {
+    const a = tow.state;
+    const b = other.state;
+    if (Math.abs(a.y - b.y) > 2.6 || Math.hypot(b.x - a.x, b.z - a.z) > KART_RADIUS * 2 + 0.5) return;
+    // Seite, auf der das andere Kart relativ zur Flugrichtung liegt
+    const rx = -Math.cos(a.heading);
+    const rz = Math.sin(a.heading);
+    const side = (b.x - a.x) * rx + (b.z - a.z) * rz >= 0 ? 1 : -1;
+    b.x += rx * side * 0.5;
+    b.z += rz * side * 0.5;
+    b.vx += rx * side * 9;
+    b.vz += rz * side * 9;
+    if (other.bumpCooldown === 0) {
+      other.bumpCooldown = 30;
+      this.fx(other, 'bump');
+    }
+  }
+
   /** Rempler: Karts schieben sich auseinander und tauschen Tempo entlang der Stoßrichtung. */
   private collideKarts(): void {
     const list = [...this.karts.values()];
@@ -822,6 +861,11 @@ export class HostGame implements GameView {
         const a = list[i];
         const b = list[j];
         if (a.finished || b.finished || a.state.respawn > 0 || b.state.respawn > 0) continue;
+        // Wer am Drachen hängt, fegt die anderen beiseite und wird selbst nicht aufgehalten.
+        if (a.state.tow > 0 || b.state.tow > 0) {
+          if (a.state.tow > 0 !== b.state.tow > 0) this.sweepAside(a.state.tow > 0 ? a : b, a.state.tow > 0 ? b : a);
+          continue;
+        }
         // Auf der Brücke und darunter begegnet man sich nicht.
         if (Math.abs(a.state.y - b.state.y) > 1.6) continue;
         const dx = b.state.x - a.state.x;

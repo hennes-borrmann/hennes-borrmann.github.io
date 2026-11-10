@@ -882,6 +882,8 @@ export class App {
     const intro = race.phase === RACE_COUNTDOWN && race.untilGo > 3.15 && race.untilGo < COUNTDOWN_TICKS / TICK_RATE;
     this.ui.setRaceTitle(intro ? TRACK.def.name : null, `Strecke ${TRACK.index + 1} · ${race.laps} ${race.laps === 1 ? 'Runde' : 'Runden'}`);
     this.sound.roulette((me?.roulette ?? 0) > 0, nowMs);
+    const threat = race.phase === RACE_RUNNING ? (this.scene?.threat ?? 0) : 0;
+    this.sound.warn(threat, nowMs);
 
     // Falsch herum? Erst nach einem Moment melden, damit ein Dreher nicht gleich Alarm schlägt.
     let wrongWay = false;
@@ -915,8 +917,8 @@ export class App {
         me: st.slot === view.localSlot,
         done: st.finished,
       })),
-      banner: wrongWay ? 'Falsch herum!' : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
-      bannerTone: wrongWay ? 'bad' : 'info',
+      banner: wrongWay ? 'Falsch herum!' : threat > 0 ? 'Kreisel im Anflug!' : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
+      bannerTone: wrongWay || threat > 0 ? 'bad' : 'info',
       fps: this.showFps && this.scene ? this.scene.stats.fps : null,
       smoke: this.scene?.smoke ?? 0,
     });
