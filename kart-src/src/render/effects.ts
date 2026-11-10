@@ -337,11 +337,28 @@ export class ComicPops {
   readonly group = new THREE.Group();
   private readonly pops: Pop[] = [];
   private readonly textures = new Map<string, THREE.CanvasTexture>();
+  private readonly blank: THREE.CanvasTexture;
   private next = 0;
 
+  /** Häufige Wörter vorab zeichnen und in den Grafikspeicher laden (kein Ruckler beim ersten Treffer). */
+  prewarm(renderer: THREE.WebGLRenderer, words: [string, string][]): void {
+    for (const [word, style] of words) {
+      const key = `${style}:${word}`;
+      if (this.textures.has(key)) continue;
+      const tex = popTexture(word, style);
+      this.textures.set(key, tex);
+      renderer.initTexture(tex);
+    }
+  }
+
   constructor(count = 8) {
+    // Platzhalter-Textur: so entsteht von Anfang an die Shader-Fassung "mit Bild",
+    // und das erste Wort im Rennen löst kein Nachübersetzen aus.
+    const blank = document.createElement('canvas');
+    blank.width = blank.height = 2;
+    this.blank = new THREE.CanvasTexture(blank);
     for (let i = 0; i < count; i++) {
-      const mat = new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, fog: false });
+      const mat = new THREE.SpriteMaterial({ map: this.blank, transparent: true, depthTest: false, depthWrite: false, fog: false });
       const sprite = new THREE.Sprite(mat);
       sprite.visible = false;
       sprite.renderOrder = 20;
@@ -359,9 +376,7 @@ export class ComicPops {
     }
     const p = this.pops[this.next];
     this.next = (this.next + 1) % this.pops.length;
-    const mat = p.sprite.material;
-    mat.map = tex;
-    mat.needsUpdate = true;
+    p.sprite.material.map = tex;
     p.sprite.position.set(x, y, z);
     p.sprite.visible = true;
     p.age = 0;
@@ -395,6 +410,7 @@ export class ComicPops {
 
   dispose(): void {
     for (const t of this.textures.values()) t.dispose();
+    this.blank.dispose();
     for (const p of this.pops) p.sprite.material.dispose();
   }
 }

@@ -202,6 +202,8 @@ export class RaceScene {
   private hitstop = 0;
   private orbit = 0;
   private raceId = -1;
+  /** Neue Welt oder neue Karts: vor dem nächsten Bild alle Shader übersetzen. */
+  private needsCompile = true;
 
   private readonly color = new THREE.Color();
   private readonly v1 = new THREE.Vector3();
@@ -242,6 +244,19 @@ export class RaceScene {
     this.scene.fog = this.world.fog;
     this.scene.background = new THREE.Color(this.world.theme.sky[2]);
     this.camReady = false;
+    this.needsCompile = true;
+    this.pops.prewarm(this.renderer, [
+      ['ZISCH!', 'warm'],
+      ['WUSCH!', 'cool'],
+      ['WUSCH!', 'violet'],
+      ['KRACH!', 'hot'],
+      ['RUMMS!', 'white'],
+      ['PLUMPS!', 'white'],
+      ['BOING!', 'cool'],
+      ['KLONK!', 'white'],
+      ['BZZZT!', 'violet'],
+      ['ZIEL!', 'warm'],
+    ]);
     this.applyLevel();
   }
 
@@ -309,6 +324,7 @@ export class RaceScene {
     const lv = LEVELS[this.level];
     this.stats.level = this.level;
     for (const k of this.karts.values()) k.visual.setDetail(lv.kart);
+    this.needsCompile = true;
     if (this.things) setOutlinesVisible(this.things.group, this.level > 0);
     this.skids.mesh.visible = lv.skid;
     this.resize();
@@ -334,6 +350,7 @@ export class RaceScene {
     const visual = new KartVisual(slot, LEVELS[this.level].kart);
     visual.root.rotation.order = 'YXZ';
     this.scene.add(visual.root);
+    this.needsCompile = true;
     k = {
       slot,
       visual,
@@ -673,6 +690,12 @@ export class RaceScene {
     const fast = me ? (me.boost > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
     this.world.update(this.time, dt, this.camera.position, race.boxes);
+    if (this.needsCompile) {
+      // Alle Shader jetzt übersetzen – auch die der noch unsichtbaren Effekte (Flammen,
+      // Schutzring, Tempostriche). Sonst ruckelt es beim ersten Schub oder Treffer.
+      this.needsCompile = false;
+      this.renderer.compile(this.scene, this.camera);
+    }
     this.renderer.render(this.scene, this.camera);
     this.stats.calls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;

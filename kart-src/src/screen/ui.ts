@@ -374,7 +374,24 @@ export class ScreenUi {
   renderRaceHud(m: RaceHudModel): void {
     const hud = $('race-hud');
     if (hud.hidden === m.visible) hud.hidden = !m.visible;
-    if (!m.visible) return;
+    if (!m.visible) {
+      // Nichts aus dem Rennen darf stehen bleiben: Rauchschleier, Hinweise, Zielbanner.
+      if (this.hudCache.smoke !== '0') {
+        this.hudCache.smoke = '0';
+        $('smoke-veil').style.opacity = '0';
+      }
+      for (const [key, id] of [
+        ['banner', 'race-banner'],
+        ['flag', 'finish-flag'],
+        ['fps', 'fps'],
+      ]) {
+        if (this.hudCache[key]) {
+          this.hudCache[key] = '';
+          $(id).hidden = true;
+        }
+      }
+      return;
+    }
     this.setText('rh-place', String(m.place));
     this.setText('rh-of', `von ${m.of}`);
     this.setText('rh-lap', `${m.lap}/${m.laps}`);
