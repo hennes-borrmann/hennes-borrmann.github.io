@@ -8,5 +8,6 @@ import { GLUT } from './tracks/glut';
 import { KLIPPE } from './tracks/klippe';
 import { NACHT } from './tracks/nacht';
 import { WERKSHOF } from './tracks/werkshof';
+import { WOLKEN } from './tracks/wolken';
 
-export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT];
+export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN];
