@@ -8,8 +8,10 @@
 //   ?jitter=20    zufällige Zusatzverzögerung 0..n ms (nur schneller Kanal)
 //   ?loss=5       Paketverlust in Prozent (nur schneller Kanal)
 //   ?signal=host:port   eigener PeerJS-Server statt des öffentlichen
-//   ?debug=0      Debug-Overlay beim Start ausblenden
+//   ?debug=0      Diagnose ausblenden; ?debug=1 zeigt sie auch im Rennen von Anfang an
 //   ?peerlog=3    ausführliches PeerJS-Protokoll in der Browser-Konsole (0–3)
+//   ?laps=1       Rundenzahl überschreiben (gilt für den Host)
+//   ?auto=1       das eigene Kart fährt von selbst (zum Testen ohne Controller)
 
 export type TurnMode = 'auto' | 'force' | 'off';
 
@@ -20,11 +22,16 @@ export interface DebugParams {
   loss: number;
   signal: string | null;
   debugOverlay: boolean;
+  /** Diagnose auch im Rennen von Anfang an zeigen (?debug=1). */
+  debugInRace: boolean;
   /** PeerJS-Protokollstufe: 0 nichts, 1 Fehler, 2 Warnungen, 3 alles. */
   peerLog: number;
+  /** Rundenzahl, 0 = Vorgabe der Strecke. */
+  laps: number;
+  autopilot: boolean;
 }
 
-const FORWARDED = ['turn', 'lag', 'jitter', 'loss', 'signal', 'debug', 'peerlog'];
+const FORWARDED = ['turn', 'lag', 'jitter', 'loss', 'signal', 'debug', 'peerlog', 'laps', 'auto'];
 
 function num(params: URLSearchParams, key: string, max: number): number {
   const v = Number(params.get(key));
@@ -41,7 +48,10 @@ export function readDebugParams(search: string = location.search): DebugParams {
     loss: num(p, 'loss', 90),
     signal: p.get('signal'),
     debugOverlay: p.get('debug') !== '0',
+    debugInRace: p.get('debug') === '1',
     peerLog: p.has('peerlog') ? Math.max(0, Math.min(3, Number(p.get('peerlog')) || 0)) : 1,
+    laps: Math.round(num(p, 'laps', 9)),
+    autopilot: p.get('auto') === '1',
   };
 }
 

@@ -1,10 +1,12 @@
 // Oberfläche des Bildschirms: Startseite, Lobby, Bedienelemente über der
 // Testszene sowie Meldungen. Reine Anzeige – die Logik sitzt in app.ts.
 
+import { BOT_NAMES } from '../game/ai';
 import type { LobbyPlayer } from '../net/protocol';
-import { MAX_PLAYERS } from '../game/sim';
+import { ITEM_NONE, MAX_PLAYERS } from '../game/sim';
 import { CODE_ALPHABET, ROOM_CODE_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { $, h, ms } from '../util/dom';
+import { ITEMS, ROLLING_ICON, itemSvg } from '../util/items';
 import { PLAYER_COLOR_NAMES, playerColor } from '../util/players';
 import { qrSvg } from '../util/qr';
 
@@ -18,6 +20,8 @@ export interface LobbyModel {
   localSlot: number;
   isHost: boolean;
   canStart: boolean;
+  /** Freie Plätze werden mit KI-Gegnern aufgefüllt. */
+  bots: boolean;
   waitingFor: string[];
   localReady: boolean;
   controllerConnected: boolean;
@@ -31,6 +35,37 @@ export interface LobbyModel {
   controllerRtt: number;
 }
 
+export interface RaceHudModel {
+  visible: boolean;
+  place: number;
+  of: number;
+  lap: number;
+  laps: number;
+  timeSec: number;
+  /** Die Uhr bleibt stehen, sobald das eigene Kart im Ziel ist. */
+  frozenTime: boolean;
+  item: number;
+  rolling: boolean;
+  speedKmh: number;
+  finished: boolean;
+}
+
+export interface ResultRow {
+  place: number;
+  slot: number;
+  name: string;
+  bot: boolean;
+  me: boolean;
+  /** Fahrzeit in Sekunden, -1 = nicht im Ziel. */
+  timeSec: number;
+}
+
+export function formatTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const rest = sec - m * 60;
+  return `${m}:${rest < 10 ? '0' : ''}${rest.toFixed(1)}`;
+}
+
 export interface ModalAction {
   label: string;
   primary?: boolean;
@@ -42,6 +77,9 @@ export interface UiHandlers {
   join(code: string, name: string): void;
   ready(ready: boolean): void;
   start(): void;
+  /** Host: dasselbe Rennen noch einmal. */
+  again(): void;
+  setBots(bots: boolean): void;
   leave(): void;
   backToLobby(): void;
   toggleCamera(): void;
@@ -68,6 +106,9 @@ export class ScreenUi {
   private lastQrUrl = '';
   private lastPlayersJson = '';
   private localReady = false;
+  private readonly hudCache: Record<string, string> = {};
+  private lastCountdown: string | null = null;
+  private shownTime = 0;
 
   constructor(on: UiHandlers) {
     this.btnCreate.addEventListener('click', () => {
@@ -108,6 +149,10 @@ export class ScreenUi {
     });
     this.btnLeave.addEventListener('click', () => on.leave());
     this.btnBack.addEventListener('click', () => on.backToLobby());
+    $('btn-again').addEventListener('click', () => on.again());
+    $('btn-lobby').addEventListener('click', () => on.backToLobby());
+    const chkBots = $<HTMLInputElement>('chk-bots');
+    chkBots.addEventListener('change', () => on.setBots(chkBots.checked));
     $('btn-camera').addEventListener('click', () => on.toggleCamera());
     $('btn-debug').addEventListener('click', () => on.toggleDebug());
     $('btn-debug-lobby').addEventListener('click', () => on.toggleDebug());
@@ -179,7 +224,7 @@ export class ScreenUi {
     status.dataset.on = String(m.controllerConnected && m.controllerState === 'active' && !m.controllerMismatch);
 
     // Liste nur neu aufbauen, wenn sich etwas Sichtbares geändert hat.
-    const json = JSON.stringify([m.players, m.localSlot]);
+    const json = JSON.stringify([m.players, m.localSlot, m.bots]);
     if (json !== this.lastPlayersJson) {
       this.lastPlayersJson = json;
       this.renderPlayers(m);
@@ -194,13 +239,22 @@ export class ScreenUi {
     this.btnLeave.textContent = m.isHost ? 'Lobby schließen' : 'Lobby verlassen';
     this.btnBack.textContent = m.isHost ? 'Zur Lobby' : 'Verlassen';
 
+    const chkBots = $<HTMLInputElement>('chk-bots');
+    chkBots.checked = m.bots;
+    chkBots.disabled = !m.isHost;
+    $('bots-note').textContent = m.isHost
+      ? ''
+      : m.bots
+        ? 'Der Host füllt freie Plätze mit KI-Gegnern auf.'
+        : 'Der Host fährt ohne KI-Gegner.';
+
     let hint = '';
     if (m.isHost) {
       if (m.waitingFor.length > 0) hint = `Noch nicht bereit: ${m.waitingFor.join(', ')}`;
-      else if (m.players.length === 1) hint = 'Du kannst allein starten oder auf Mitspieler warten.';
+      else if (m.players.length === 1) hint = m.bots ? 'Du kannst gegen die KI starten oder auf Mitspieler warten.' : 'Du kannst allein starten oder auf Mitspieler warten.';
       else hint = 'Alle bereit.';
     } else {
-      hint = m.localReady ? 'Der Host startet die Testfahrt.' : 'Melde dich bereit, wenn dein Controller verbunden ist.';
+      hint = m.localReady ? 'Der Host startet das Rennen.' : 'Melde dich bereit, wenn dein Controller verbunden ist.';
     }
     $('lobby-hint').textContent = hint;
 
@@ -235,7 +289,93 @@ export class ScreenUi {
     this.modal.hidden = true;
   }
 
-  /** QR-Code zum (Neu-)Koppeln während der Testfahrt. */
+  // --- Rennen ---------------------------------------------------------------
+
+  /** Schreibt nur ins Dokument, wenn sich der Text wirklich geändert hat (läuft jedes Bild). */
+  private setText(id: string, text: string): void {
+    if (this.hudCache[id] === text) return;
+    this.hudCache[id] = text;
+    $(id).textContent = text;
+  }
+
+  renderRaceHud(m: RaceHudModel): void {
+    const hud = $('race-hud');
+    if (hud.hidden === m.visible) hud.hidden = !m.visible;
+    if (!m.visible) return;
+    this.setText('rh-place', `${m.place}.`);
+    this.setText('rh-of', `von ${m.of}`);
+    this.setText('rh-lap', `${m.lap}/${m.laps}`);
+    if (!m.frozenTime) this.shownTime = m.timeSec;
+    this.setText('rh-time', formatTime(this.shownTime));
+    this.setText('rh-speed', String(m.speedKmh));
+
+    const state = m.rolling ? 'rolling' : m.item === ITEM_NONE ? 'none' : `item${m.item}`;
+    if (this.hudCache.item !== state) {
+      this.hudCache.item = state;
+      const box = $('rh-item');
+      box.dataset.state = m.rolling ? 'rolling' : m.item === ITEM_NONE ? 'none' : 'ready';
+      const info = ITEMS[m.item];
+      $('rh-item-icon').innerHTML = m.rolling ? itemSvg(ROLLING_ICON) : info ? itemSvg(info.icon) : '';
+      $('rh-item-name').textContent = m.rolling ? '…' : info ? info.name : 'kein Item';
+    }
+
+    const flag = $('finish-flag');
+    const text = m.finished ? `Ziel! Platz ${m.place}` : '';
+    if (this.hudCache.flag !== text) {
+      this.hudCache.flag = text;
+      flag.textContent = text;
+      flag.hidden = !text;
+    }
+  }
+
+  /** Der Hinweis zur Tastatur stört beim Fahren – nur vor dem Start zeigen. */
+  setHudNoteVisible(visible: boolean): void {
+    const note = $('hud-note');
+    if (note.hidden === visible) note.hidden = !visible;
+  }
+
+  setCountdown(text: string | null): void {
+    if (text === this.lastCountdown) return;
+    this.lastCountdown = text;
+    const el = $('countdown');
+    el.hidden = text === null;
+    if (text === null) return;
+    el.textContent = text;
+    el.dataset.go = String(text === 'Los!');
+    // Animation neu starten
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  }
+
+  showResults(rows: ResultRow[], isHost: boolean): void {
+    const list = $('results-list');
+    list.replaceChildren();
+    for (const r of rows) {
+      const chip = h('span', { class: 'chip', text: String(r.slot + 1) });
+      chip.style.setProperty('--c', playerColor(r.slot));
+      list.append(
+        h(
+          'li',
+          { class: `result${r.me ? ' result-me' : ''}` },
+          h('span', { class: 'result-place', text: `${r.place}.` }),
+          chip,
+          h('span', { class: 'result-name' }, r.name, r.bot ? h('span', { class: 'tag', text: 'KI' }) : null, r.me ? h('span', { class: 'you', text: 'du' }) : null),
+          h('span', { class: 'result-time', text: r.timeSec >= 0 ? formatTime(r.timeSec) : 'nicht im Ziel' }),
+        ),
+      );
+    }
+    $('btn-again').hidden = !isHost;
+    $('btn-lobby').hidden = !isHost;
+    $('results-note').textContent = isHost ? '' : 'Der Host entscheidet, wie es weitergeht.';
+    $('results').hidden = false;
+  }
+
+  hideResults(): void {
+    $('results').hidden = true;
+  }
+
+  /** QR-Code zum (Neu-)Koppeln während des Rennens. */
   showPairingModal(pairUrl: string, connected: boolean): void {
     const qr = h('div', { class: 'qr qr-large' });
     qr.append(qrSvg(pairUrl));
@@ -263,7 +403,13 @@ export class ScreenUi {
       chip.style.setProperty('--c', playerColor(slot));
       if (!p) {
         list.append(
-          h('li', { class: 'player player-empty' }, chip, h('span', { class: 'player-name', text: 'frei' })),
+          h(
+            'li',
+            { class: `player player-empty${m.bots ? ' player-bot' : ''}` },
+            chip,
+            h('span', { class: 'player-name', text: m.bots ? BOT_NAMES[slot] : 'frei' }),
+            m.bots ? h('span', { class: 'player-tags' }, h('span', { class: 'tag', text: 'KI' })) : null,
+          ),
         );
         continue;
       }

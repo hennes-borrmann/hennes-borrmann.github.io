@@ -363,6 +363,108 @@ html[data-rot="ccw"] .rot {
 .pbtn-item {
   --c: var(--item);
   grid-area: 1 / 1;
+  position: relative;
+}
+
+/* Kein Item: gedämpft. Item bereit: deutlich hervorgehoben. */
+.pbtn-item[data-state="none"] {
+  --c: #5a5338;
+}
+
+.pbtn-item[data-state="ready"] {
+  background: #3a3212;
+  box-shadow: inset 0 0 0 3px var(--item);
+}
+
+.pbtn-item.down {
+  background: var(--item);
+}
+
+.pbtn-icon {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: clamp(34px, 13vmin, 64px);
+  height: clamp(34px, 13vmin, 64px);
+  pointer-events: none;
+}
+
+.pbtn-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pbtn-item[data-state="rolling"] .pbtn-icon {
+  animation: rolling 0.45s steps(3) infinite;
+}
+
+@keyframes rolling {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mid-race {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.mid-place {
+  font: 800 clamp(44px, 17vmin, 78px) / 0.85 var(--font-display);
+  color: var(--accent);
+  transform: skewX(-9deg);
+}
+
+.mid-lap {
+  font: 600 14px/1 var(--font-display);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #c9c6bd;
+}
+
+/* Rückmeldung zum Sehen: der Rand blitzt kurz auf (ersetzt auf dem iPhone die Vibration). */
+.flash {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 0 10px var(--flash, #f2efe6);
+}
+
+.flash[data-tone="bad"] {
+  --flash: var(--bad);
+  background: rgba(255, 107, 94, 0.22);
+}
+
+.flash[data-tone="boost"] {
+  --flash: #ff8a2a;
+}
+
+.flash[data-tone="item"] {
+  --flash: var(--item);
+}
+
+.flash[data-tone="go"] {
+  --flash: var(--ok);
+}
+
+.flash.on {
+  animation: flash 0.38s ease-out;
+}
+
+@keyframes flash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .steerzone {

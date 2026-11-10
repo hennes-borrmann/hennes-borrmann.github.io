@@ -59,7 +59,10 @@
         <span class="steerzone-label">Lenken</span>
         <span class="steerzone-hint">Daumen nach links und rechts schieben</span>
       </div>
-      <div class="pbtn pbtn-item" data-btn="item"><span>Item</span></div>
+      <div id="pad-item" class="pbtn pbtn-item" data-btn="item" data-state="none">
+        <div id="pad-item-icon" class="pbtn-icon"></div>
+        <span id="pad-item-name">Item</span>
+      </div>
       <div class="pbtn pbtn-drift" data-btn="drift"><span>Drift</span></div>
       <div class="pbtn pbtn-brake" data-btn="brake"><span>Bremse</span><small>Rückwärts</small></div>
       <div class="pbtn pbtn-gas" data-btn="gas"><span>Gas</span></div>
@@ -68,6 +71,10 @@
         <div class="mid-player">
           <span id="mid-chip" class="chip"></span>
           <span id="mid-name" class="mid-name">–</span>
+        </div>
+        <div id="mid-race" class="mid-race" hidden>
+          <strong id="mid-place" class="mid-place">1.</strong>
+          <span id="mid-lap" class="mid-lap">Runde 1/3</span>
         </div>
         <p id="mid-status" class="mid-status" data-tone="warn">verbinde …</p>
         <div class="meter">
@@ -81,6 +88,8 @@
         </div>
       </div>
     </section>
+
+    <div id="flash" class="flash"></div>
 
     <div id="sheet" class="sheet" data-ui hidden>
       <div class="sheet-card">

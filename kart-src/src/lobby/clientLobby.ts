@@ -7,6 +7,7 @@ import type { Link } from '../net/link';
 import {
   PROTOCOL_VERSION,
   roomPeerId,
+  type FxKind,
   type HostToScreen,
   type LobbyState,
   type RejectReason,
@@ -47,6 +48,8 @@ export class ClientLobby {
   onFast: ((view: DataView) => void) | null = null;
   /** Verbindung zum Host steht (wieder) – Spielzustand neu abgleichen. */
   onLinkUp: (() => void) | null = null;
+  /** Spürbares Ereignis vom Host (Treffer, Rempler, Kiste). */
+  onFx: ((kind: FxKind) => void) | null = null;
 
   private everJoined: boolean;
   private retryTimer = 0;
@@ -207,6 +210,9 @@ export class ClientLobby {
           if (me) this.ready = me.ready;
         }
         this.onChange?.();
+        break;
+      case 'fx':
+        this.onFx?.(msg.k);
         break;
       case 'reject':
         this.rejectReason = msg.reason;

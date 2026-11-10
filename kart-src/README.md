@@ -2,13 +2,29 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 1 – Verbindung und Lobby.** Es gibt noch kein Rennen, nur eine Testfläche mit einem Würfel pro Spieler.
+**Stand: Phase 2 – spielbare Grundversion.** Eine Strecke, drei Runden, Drift mit Mini-Turbo, drei Items, KI-Gegner. Grafik und Sound sind noch Platzhalter; die kommen in Phase 3.
 
 ## Spielen
 
 **https://hennes-borrmann.github.io/kart/**
 
-Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen. Mehr ist nicht nötig.
+Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen, Rennen starten. Mehr ist nicht nötig.
+
+### Steuerung
+
+| Handy | Tastatur | Wirkung |
+| --- | --- | --- |
+| Neigen | Pfeiltasten / A, D | Lenken |
+| Gas | Pfeil hoch / W | Beschleunigen |
+| Bremse | Pfeil runter / S | Bremsen, im Stand rückwärts |
+| Drift | Shift | In der Kurve gedrückt halten, beim Loslassen gibt es Schub |
+| Item | Leertaste | Eingesammeltes Item benutzen |
+
+**Drift:** Einlenken und Drift halten. Das Kart stellt sich quer und dreht in diese Richtung weiter; mit der Lenkung wählst du nur noch zwischen engem und weitem Bogen. Je länger (und je enger), desto höher die Stufe – die Funken wechseln von Türkis über Gelb zu Magenta. Erst das Loslassen bringt den Schub.
+
+**Items** (aus den gelben Kisten): *Zisch* gibt kräftigen Schub. Der *Rollreifen* rollt geradeaus, prallt an der Bande ab und wirft Getroffene aus der Bahn. Der *Ölfleck* bleibt hinter dir liegen.
+
+Freie Plätze fahren KI-Gegner (in der Lobby abschaltbar). Sie werden etwas langsamer, wenn sie weit vorn liegen, und etwas schneller, wenn sie weit zurückliegen.
 
 ## Wie das Spiel auf die Website kommt
 
@@ -37,9 +53,10 @@ Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS.
 1. iPad/Rechner: Seite öffnen, Namen eintragen, **Lobby erstellen**.
 2. Handy: QR-Code unter „Dein Controller“ scannen → **Tippen zum Starten** → Sensor erlauben → Handy quer halten → **Kalibrieren**.
 3. Zweiter Bildschirm: Einladungslink öffnen oder Raumcode eintippen, eigenes Handy koppeln, **Ich bin bereit**.
-4. Host: **Testfahrt starten**. Fahren, lenken, Drift (Würfel neigt sich), Item (Würfel hüpft).
-5. Diagnose (unten links, Taste F2 oder Knopf „Diagnose“) ablesen: Latenz, Raten, „direkt“ oder „über TURN“.
-6. Robustheit: Handy sperren und entsperren, Seite auf Handy oder Bildschirm neu laden, WLAN kurz aus. Jeder sollte von selbst auf seinen Platz zurückkommen.
+4. Host: **Rennen starten**. Nach dem Countdown drei Runden fahren.
+5. Fahrgefühl: Beschleunigung, Lenkung, Drift und Mini-Turbo, Rempler, Items. Das Handy zeigt Platz, Runde und Item und vibriert bei Treffern (Android; das iPhone blitzt stattdessen am Rand auf).
+6. Nach dem Ziel: Ergebnisliste, dann **Nochmal** oder **Zur Lobby** (wählt der Host).
+7. Diagnose (Knopf „Diagnose“ oder Taste F2) bei Bedarf: Latenz, Raten, „direkt“ oder „über TURN“.
 
 ## TURN – was ohne nicht geht
 
@@ -78,7 +95,9 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | --- | --- |
 | `?turn=force` / `?turn=off` | nur TURN bzw. TURN ignorieren |
 | `?lag=80&jitter=20&loss=5` | künstliche Verzögerung (ms pro Richtung), Schwankung, Paketverlust in % |
-| `?debug=0` | Diagnose beim Start ausgeblendet |
+| `?debug=0` / `?debug=1` | Diagnose ausgeblendet bzw. auch im Rennen von Anfang an sichtbar |
+| `?laps=1` | Rundenzahl überschreiben (zählt beim Host) |
+| `?auto=1` | das eigene Kart fährt von selbst – zum Ausprobieren ohne Controller |
 | `?signal=host:port` | eigener PeerJS-Server |
 | `?peerlog=3` | ausführliches Verbindungsprotokoll in der Browser-Konsole |
 
@@ -90,25 +109,30 @@ Die Schalter wandern automatisch in den QR-Code und den Einladungslink.
 src/net/         Verbindungsschicht: Signaling-Endpunkt, Link (zuverlässiger + unreliable Kanal), Protokoll, ICE/TURN
 src/lobby/       Lobby auf dem Host und auf den Mitspieler-Bildschirmen, Platzvergabe, Wiedereinstieg
 src/controller/  Handy-Seite: Neigung → Lenkwert, Kalibrierung, Touch-Tasten, Verbindung zum Bildschirm
-src/game/        Simulation (fester 60-Hz-Takt), Host-Autorität, Vorhersage/Abgleich, Interpolation, Eingaben
-src/render/      three.js-Szene und Diagnose-Overlay
+src/game/        sim.ts Fahrphysik · track.ts Strecke · ai.ts KI-Fahrer · hostGame.ts Rennen auf dem Host
+                 (Ablauf, Items, Rempler) · clientGame.ts Vorhersage/Abgleich · interp.ts Interpolation
+src/render/      three.js-Szene (Strecke, Karts, Effekte) und Diagnose-Overlay
 src/screen/      Ablauf und Oberfläche des Bildschirms
 audio/           folgt in Phase 3
 ```
 
-Netzwerkmodell: Der Lobby-Ersteller rechnet die Simulation. Die anderen schicken ihre Eingaben (60/s) und bekommen Zustände zurück (30/s). Das eigene Fahrzeug wird vorhergesagt und beim Eintreffen des Host-Stands abgeglichen, fremde Fahrzeuge werden 85 ms verzögert interpoliert.
+Netzwerkmodell: Der Lobby-Ersteller rechnet das Rennen. Die anderen schicken ihre Eingaben (60/s) und bekommen den kompletten Spielstand zurück (30/s). Das eigene Kart wird vorhergesagt – samt Drift, Schub, Bande und Boost-Feldern – und beim Eintreffen des Host-Stands abgeglichen. Fremde Karts werden 85 ms verzögert interpoliert. Rempler, Treffer und Kisten entscheidet allein der Host.
+
+Eine weitere Strecke braucht nur eine neue `TrackDef` in `track.ts` (Stützpunkte, Breite, Boost-Felder, Kistenreihen). Fahrgefühl wird über die Konstanten am Anfang von `sim.ts` abgestimmt, die Stärke der KI in `ai.ts`.
 
 ## Tests
 
 ```bash
-npm test             # Rechenkern: Lenkung, Filter, Protokoll, Vorhersage mit simulierter Leitung
+npm test             # Fahrphysik, Strecke, KI-Runden, komplette Rennen (auch über simulierte Leitung), Lenkung, Protokoll
 ```
 
 `tests/e2e/run.cjs` spielt den kompletten Ablauf in Chromium durch (Lobby, Kopplung, Fahren, Abbrüche, Neuladen). Dafür braucht es Playwright, `npm run signal` und `npm run preview -- --port 4173` – Details stehen im Kopf der Datei.
 
 ## Bekannte Grenzen
 
-- Verlässt der Host die Lobby, ist sie beendet (Host-Migration ist nicht gebaut). Lädt er nur neu, kommen alle von selbst zurück – in die Lobby, nicht in die laufende Testfahrt.
+- Verlässt der Host die Lobby, ist sie beendet (Host-Migration ist nicht gebaut). Lädt er nur neu, kommen alle von selbst zurück – in die Lobby, nicht ins laufende Rennen.
+- Rempler kennt nur der Host. Auf den anderen Bildschirmen rutscht das eigene Kart nach einem Rempler deshalb einen Moment später nach (bei guter Verbindung kaum sichtbar, bei schlechter als kleines Nachziehen).
+- Fällt die Verbindung eines Mitspielers im Rennen aus, fährt nach anderthalb Sekunden die KI für ihn weiter, bis er zurück ist.
 - Der Host muss im Vordergrund bleiben. Sperrt er das iPad oder wechselt die App, friert die Runde für alle ein.
 - Der Host sieht sein eigenes Fahrzeug ohne Verzögerung, alle anderen sehen ihn leicht verzögert. Dieser Vorteil liegt im Modell.
 - Das Signaling läuft über den öffentlichen PeerJS-Server. Er ist kostenlos und ohne Zusage zur Verfügbarkeit: fällt er aus, kann niemand beitreten oder koppeln (laufende Verbindungen bleiben bestehen).

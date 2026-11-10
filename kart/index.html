@@ -7,9 +7,9 @@
 <meta name="robots" content="noindex">
 <title>Schräglage – Kart-Prototyp</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23101214'/%3E%3Cpath d='M9 24 15 8h8l-6 16z' fill='%23ffd23f'/%3E%3C/svg%3E">
-  <script type="module" crossorigin src="./assets/screen-CC-MB51M.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/wakeLock-9cf0Bh2B.js">
-  <link rel="stylesheet" crossorigin href="./assets/screen-HOI7Xao9.css">
+  <script type="module" crossorigin src="./assets/screen-BfGiwAqt.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/items-DMGF_VWm.js">
+  <link rel="stylesheet" crossorigin href="./assets/screen-C2vbL5s4.css">
 </head>
 <body>
 <div id="app" data-view="boot">
@@ -23,7 +23,7 @@
     <header class="brand">
       <h1 class="brand-mark">Schräglage</h1>
       <p class="brand-tag">Kart-Racer für den großen Bildschirm, gelenkt mit dem Handy.</p>
-      <p class="brand-phase">Phase 1 · Verbindungstest</p>
+      <p class="brand-phase">Phase 2 · Spielbare Grundversion</p>
     </header>
 
     <div class="home-grid">
@@ -72,7 +72,8 @@
       <div class="players">
         <h2 class="eyebrow">Spieler</h2>
         <ol id="lobby-players" class="player-list"></ol>
-        <p class="players-note">Freie Plätze bleiben in Phase 1 leer. KI-Gegner kommen mit Phase 2.</p>
+        <label id="bots-toggle" class="bots-toggle"><input id="chk-bots" type="checkbox"> <span>Freie Plätze mit KI-Gegnern auffüllen</span></label>
+        <p id="bots-note" class="players-note"></p>
       </div>
 
       <aside class="pairing">
@@ -98,7 +99,7 @@
       <button id="btn-leave" class="btn btn-quiet" type="button">Lobby verlassen</button>
       <p id="lobby-hint" class="lobby-hint"></p>
       <button id="btn-ready" class="btn" type="button">Ich bin bereit</button>
-      <button id="btn-start" class="btn btn-primary" type="button">Testfahrt starten</button>
+      <button id="btn-start" class="btn btn-primary" type="button">Rennen starten</button>
     </footer>
   </main>
 
@@ -115,7 +116,35 @@
         <button id="btn-back" class="btn btn-small" type="button">Zur Lobby</button>
       </div>
     </div>
+    <div id="race-hud" class="race-hud" hidden>
+      <div class="rh-lap">
+        <span class="eyebrow">Runde</span>
+        <strong id="rh-lap">1/3</strong>
+        <span id="rh-time" class="rh-time">0:00.0</span>
+      </div>
+      <div class="rh-place"><strong id="rh-place">1</strong><span id="rh-of">/ 4</span></div>
+      <div class="rh-speed"><strong id="rh-speed">0</strong><span>km/h</span></div>
+      <div id="rh-item" class="rh-item" data-state="none">
+        <div id="rh-item-icon" class="rh-item-icon"></div>
+        <span id="rh-item-name" class="rh-item-name"></span>
+      </div>
+    </div>
+    <div id="countdown" class="countdown" hidden></div>
+    <div id="finish-flag" class="finish-flag" hidden></div>
     <p id="hud-note" class="hud-note"></p>
+
+    <section id="results" class="results" hidden>
+      <div class="results-card">
+        <p class="eyebrow">Zieleinlauf</p>
+        <h2>Ergebnis</h2>
+        <ol id="results-list" class="results-list"></ol>
+        <p id="results-note" class="results-note"></p>
+        <div class="results-actions">
+          <button id="btn-lobby" class="btn" type="button">Zur Lobby</button>
+          <button id="btn-again" class="btn btn-primary" type="button">Nochmal</button>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div id="banner" class="banner" role="status" hidden></div>

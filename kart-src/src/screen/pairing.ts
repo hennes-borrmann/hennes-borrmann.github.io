@@ -12,6 +12,7 @@ import {
   PKT_CTRL_INPUT,
   PROTOCOL_VERSION,
   type ControllerToScreen,
+  type FxKind,
   type ScreenToController,
 } from '../net/protocol';
 
@@ -73,6 +74,16 @@ export class ControllerPairing {
     if (!force && json === this.lastInfoJson) return;
     this.lastInfoJson = json;
     this.sendTo(this.link, { t: 'paired', ...info, build: BUILD_ID });
+  }
+
+  /** Anzeige auf dem Handy: Item, Platz, Runde. */
+  sendHud(hud: { racing: boolean; item: number; rolling: boolean; place: number; of: number; lap: number; laps: number }): void {
+    if (this.link && this.link.state === 'open') this.sendTo(this.link, { t: 'hud', ...hud });
+  }
+
+  /** Spürbares Ereignis: das Handy vibriert bzw. blitzt auf. */
+  sendFx(kind: FxKind): void {
+    if (this.link && this.link.state === 'open') this.sendTo(this.link, { t: 'fx', k: kind });
   }
 
   async refreshPath(): Promise<void> {
