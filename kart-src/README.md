@@ -2,7 +2,7 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 3 mit Ausbau Schritt 1.** Vier Strecken mit Höhen, Sprüngen und Abgründen, acht Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+**Stand: Phase 3 mit Ausbau Schritt 2.** Vier Strecken mit Höhen, Sprüngen und Abgründen, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
 
 Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
@@ -38,6 +38,8 @@ Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wie
 
 ### Items (aus den gelben Kisten)
 
+Neun Items:
+
 | Item | Wirkung |
 | --- | --- |
 | **Zisch** | kräftiger Schub |
@@ -48,8 +50,11 @@ Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wie
 | **Kurzschluss** | drosselt alle, die vor dir liegen, für gut zwei Sekunden |
 | **Nebelkerze** | Rauchwolke hinter dir – wer hineinfährt, sieht kurz nichts |
 | **Sprungfeder** | Hüpfer aus der Fahrt: über Öl, Reifen und Hindernisse hinweg |
+| **Abschleppdrache** | zieht dich vier Sekunden lang von selbst mit rund 145 km/h die Strecke entlang, auch über Lücken; wer im Weg steht, wird beiseitegeschoben; Lenken verschiebt die Spur, die Bremse kappt die Schnur |
 
-Wer vorn liegt, bekommt eher Abwehr (Öl, Nebel, Stoßfänger); wer hinten liegt, eher Schub, Brummkreisel und Kurzschluss.
+Wer vorn liegt, bekommt eher Abwehr (Öl, Nebel, Stoßfänger); wer hinten liegt, eher Schub, Brummkreisel und Kurzschluss. Den Abschleppdrachen gibt es nur auf dem letzten Platz (bei vier Fahrern selten auch auf dem vorletzten) und nur, wenn das Kart davor mehr als 45 m Vorsprung hat.
+
+Die Figur hält ihr Item sichtbar in der Hand und benutzt es mit einer eigenen Bewegung. Sucht ein Brummkreisel das eigene Kart, warnen ein Hinweis und ein Ton, der schneller wird, je näher er kommt.
 
 ### Figuren
 

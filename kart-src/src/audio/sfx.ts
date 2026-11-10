@@ -16,6 +16,7 @@ const MIN_GAP: Partial<Record<SfxName, number>> = {
   land: 0.15,
   'drift-start': 0.2,
   boost: 0.12,
+  warn: 0.22,
 };
 const DEFAULT_GAP = 0.04;
 
@@ -46,6 +47,8 @@ const LEVEL: Record<SfxName, number> = {
   'use-emp': 3.4,
   'use-smoke': 2.2,
   'use-spring': 3.8,
+  'use-kite': 4.5,
+  warn: 2.2,
   hit: 3.8,
   'guard-block': 4.4,
   stall: 2.2,
@@ -329,6 +332,17 @@ export class SfxPlayer {
         break;
       case 'use-spring':
         v.tone('sine', 190, 760, 0.42, 0.34, { hold: 0, vibHz: 21, vibDepth: 0.16 }).tone('triangle', 380, 1500, 0.3, 0.1, { vibHz: 21, vibDepth: 0.16 }).noise(800, 2400, 0.06, 0.12, { q: 2 });
+        break;
+
+      case 'use-kite':
+        v.noise(700, 3200, 0.5, 0.26, { q: 1.4, attack: 0.05 })
+          .tone('triangle', 420, 1260, 0.5, 0.14, { attack: 0.04, vibHz: 17, vibDepth: 0.05 })
+          .noise(1800, 1200, 0.07, 0.16, { q: 4, at: 0.1 })
+          .noise(1800, 1200, 0.07, 0.14, { q: 4, at: 0.22 })
+          .tone('sine', 110, 70, 0.2, 0.3);
+        break;
+      case 'warn':
+        v.tone('pulse25', 1320, 1318, 0.07, 0.2).tone('pulse25', 1760, 1756, 0.09, 0.2, { at: 0.09 });
         break;
 
       // --- Treffer und Stöße ---

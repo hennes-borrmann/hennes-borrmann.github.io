@@ -28,6 +28,7 @@ import {
   rightZ,
   segDelta,
   trackHeading,
+  wrapSeg,
 } from './track';
 
 export const TICK_RATE = 60;
@@ -56,7 +57,9 @@ export const ITEM_EMP = 6;
 export const ITEM_SMOKE = 7;
 /** "Sprungfeder": Hüpfer aus dem Stand – über Hindernisse, Öl und Abkürzungen. */
 export const ITEM_SPRING = 8;
-export const ITEM_COUNT = 9;
+/** "Abschleppdrache": zieht das Kart ein paar Sekunden von selbst die Strecke entlang – nur für die Hinteren. */
+export const ITEM_KITE = 9;
+export const ITEM_COUNT = 10;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -109,6 +112,8 @@ export interface KartState {
   stall: number;
   /** Verbleibende Ticks, bis das Kart nach einem Absturz wieder aufgesetzt ist. */
   respawn: number;
+  /** Verbleibende Ticks am Abschleppdrachen. */
+  tow: number;
   item: number;
   /** Das Item, das nach der Auslosung erscheint. */
   nextItem: number;
@@ -142,8 +147,11 @@ export const EV_FALL = 1 << 14;
 export const EV_RESPAWNED = 1 << 15;
 /** Vom Boden abgehoben. */
 export const EV_TAKEOFF = 1 << 16;
+export const EV_USE_KITE = 1 << 17;
+/** Der Abschleppdrache hat losgelassen. */
+export const EV_TOW_END = 1 << 18;
 export const EV_USE_ANY =
-  EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING;
+  EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
 // --- Abstimmung --------------------------------------------------------------
 // Diese Werte bestimmen das Fahrgefühl. Geschwindigkeiten in m/s.
@@ -192,6 +200,12 @@ export const RESPAWN_TICKS = 55;
 const RESPAWN_HEIGHT = 2.4;
 export const GUARD_TICKS = 12 * 60;
 export const STALL_TICKS = 150;
+/** Abschleppdrache: Dauer, Tempo, Flughöhe über der Fahrbahn. */
+export const TOW_TICKS = 240;
+export const V_TOW = 40;
+const TOW_LIFT = 1.0;
+const TOW_ACCEL = 70;
+const TOW_LOOK = 9;
 const STALL_FACTOR = 0.55;
 
 export const NEUTRAL: Cmd = { steer: 0, buttons: 0 };
@@ -287,6 +301,7 @@ export function newState(): KartState {
     guard: 0,
     stall: 0,
     respawn: 0,
+    tow: 0,
     item: ITEM_NONE,
     nextItem: ITEM_NONE,
     roulette: 0,
@@ -312,6 +327,7 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.guard = src.guard;
   dst.stall = src.stall;
   dst.respawn = src.respawn;
+  dst.tow = src.tow;
   dst.item = src.item;
   dst.nextItem = src.nextItem;
   dst.roulette = src.roulette;
@@ -356,7 +372,8 @@ export const HIT_BLOCKED = 2;
  * HIT_NONE = gerade unverwundbar, HIT_BLOCKED = der Stoßfänger hat ihn abgefangen.
  */
 export function hitKart(s: KartState): number {
-  if (s.shield > 0 || s.spin > 0 || s.respawn > 0) return HIT_NONE;
+  // Am Drachen hängend fliegt das Kart über alles hinweg.
+  if (s.shield > 0 || s.spin > 0 || s.respawn > 0 || s.tow > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -374,7 +391,7 @@ export function hitKart(s: KartState): number {
 
 /** Kurzschluss: der Motor läuft kurz nur gedrosselt. Rückgabe wie hitKart. */
 export function stallKart(s: KartState): number {
-  if (s.respawn > 0 || s.stall > 0) return HIT_NONE;
+  if (s.respawn > 0 || s.stall > 0 || s.tow > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -423,6 +440,56 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.y = t.py[s.seg] + (s.respawn / RESPAWN_TICKS) * RESPAWN_HEIGHT;
     s.flags = (itemBtn ? FLAG_ITEM_HELD : 0) | (s.respawn > 0 ? FLAG_AIR : 0);
     if (s.respawn === 0) ev |= EV_RESPAWNED;
+    return ev;
+  }
+
+  // --- Abschleppdrache: das Kart hängt am Drachen und wird die Strecke entlanggezogen ---
+  if (s.tow > 0 && !env.canDrive) s.tow = 0;
+  if (s.tow > 0) {
+    s.tow--;
+    s.driftDir = 0;
+    s.driftCharge = 0;
+    s.spin = 0;
+    // Gelenkt wird von selbst; die eigene Lenkung verschiebt nur die Spur.
+    const nudge = Math.max(-1, Math.min(1, cmd.steer / 127));
+    projectOnTrack(t, s.x, s.z, s.seg);
+    const ahead = wrapSeg(t, proj.seg + Math.round(TOW_LOOK / t.step));
+    const room = Math.max(0.5, t.rh[ahead] - 1.5);
+    const lane = Math.max(-room, Math.min(room, proj.lat * 0.9 + nudge * 3.5));
+    const want = Math.atan2(t.px[ahead] + rightX(t, ahead) * lane - s.x, t.pz[ahead] + rightZ(t, ahead) * lane - s.z);
+    s.heading = wrapAngle(s.heading + wrapAngle(want - s.heading) * Math.min(1, 9 * DT));
+    const hx = Math.sin(s.heading);
+    const hz = Math.cos(s.heading);
+    const v = Math.min(V_TOW, Math.max(8, s.vx * hx + s.vz * hz) + TOW_ACCEL * DT);
+    s.vx = hx * v;
+    s.vz = hz * v;
+    s.x += s.vx * DT;
+    s.z += s.vz * DT;
+    projectOnTrack(t, s.x, s.z, s.seg);
+    s.seg = proj.seg;
+    let tlat = proj.lat;
+    const tlimit = t.wh[s.seg] - KART_RADIUS;
+    if (Math.abs(tlat) > tlimit) {
+      const side = tlat > 0 ? 1 : -1;
+      s.x -= rightX(t, s.seg) * side * (Math.abs(tlat) - tlimit);
+      s.z -= rightZ(t, s.seg) * side * (Math.abs(tlat) - tlimit);
+      tlat = side * tlimit;
+    }
+    // Schwebt eine Armlänge über der Fahrbahn – auch über Lücken hinweg.
+    const hover = centerHeight(t, s.seg, proj.along) + tlat * t.bank[s.seg] + TOW_LIFT;
+    s.y += (hover - s.y) * Math.min(1, 7 * DT);
+    s.vy = 0;
+    // Ende: abgelaufen oder mit der Bremse gekappt – aber nie über einem Abgrund.
+    const cut = (cmd.buttons & BTN_BRAKE) !== 0 && s.tow < TOW_TICKS - 30;
+    if (s.tow === 0 || cut) {
+      if (groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
+      else {
+        s.tow = 0;
+        s.boost = Math.max(s.boost, 45);
+        ev |= EV_TOW_END;
+      }
+    }
+    s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
     return ev;
   }
 
@@ -686,6 +753,12 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
           flags |= FLAG_AIR;
           ev |= EV_USE_SPRING | EV_TAKEOFF;
         }
+        break;
+      case ITEM_KITE:
+        s.tow = TOW_TICKS;
+        s.boost = 0;
+        s.stall = 0;
+        ev |= EV_USE_KITE;
         break;
       default:
         used = false;

@@ -470,6 +470,112 @@ export class SpeedLines {
   }
 }
 
+// --- Blitze ----------------------------------------------------------------------
+
+/** Gezackte Leuchtbänder zwischen zwei Punkten – der Kurzschluss springt sichtbar vom Auslöser zum Opfer. */
+export class Bolts {
+  readonly group = new THREE.Group();
+  private readonly bolts: { mesh: THREE.Mesh; pos: Float32Array; life: number; a: THREE.Vector3; b: THREE.Vector3 }[] = [];
+  private next = 0;
+  private static readonly SEGS = 9;
+
+  constructor(count = 6) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xd9ccff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    for (let i = 0; i < count; i++) {
+      const pos = new Float32Array(Bolts.SEGS * 18);
+      const geo = new THREE.BufferGeometry();
+      const attr = new THREE.BufferAttribute(pos, 3);
+      attr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('position', attr);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      mesh.renderOrder = 7;
+      this.group.add(mesh);
+      this.bolts.push({ mesh, pos, life: 0, a: new THREE.Vector3(), b: new THREE.Vector3() });
+    }
+  }
+
+  strike(ax: number, ay: number, az: number, bx: number, by: number, bz: number): void {
+    const bolt = this.bolts[this.next];
+    this.next = (this.next + 1) % this.bolts.length;
+    bolt.a.set(ax, ay, az);
+    bolt.b.set(bx, by, bz);
+    bolt.life = 0.42;
+    bolt.mesh.visible = true;
+  }
+
+  update(dt: number): void {
+    const n = Bolts.SEGS;
+    for (const bolt of this.bolts) {
+      if (bolt.life <= 0) continue;
+      bolt.life -= dt;
+      if (bolt.life <= 0) {
+        bolt.mesh.visible = false;
+        continue;
+      }
+      // Jedes Bild neu zacken: der Blitz zuckt. Zum Ende hin wird er dünner.
+      const { a, b, pos } = bolt;
+      const w = 0.32 * Math.min(1, bolt.life / 0.2);
+      const len = a.distanceTo(b);
+      const jag = Math.min(2.2, len * 0.09);
+      let px = a.x;
+      let py = a.y;
+      let pz = a.z;
+      for (let i = 0; i < n; i++) {
+        const k = (i + 1) / n;
+        const end = i === n - 1;
+        const qx = a.x + (b.x - a.x) * k + (end ? 0 : (Math.random() - 0.5) * jag);
+        const qy = a.y + (b.y - a.y) * k + (end ? 0 : (Math.random() - 0.5) * jag + Math.sin(k * Math.PI) * len * 0.06);
+        const qz = a.z + (b.z - a.z) * k + (end ? 0 : (Math.random() - 0.5) * jag);
+        const o = i * 18;
+        // senkrechtes Band: gut sichtbar aus der Verfolgerkamera
+        pos[o] = px;
+        pos[o + 1] = py - w;
+        pos[o + 2] = pz;
+        pos[o + 3] = qx;
+        pos[o + 4] = qy - w;
+        pos[o + 5] = qz;
+        pos[o + 6] = qx;
+        pos[o + 7] = qy + w;
+        pos[o + 8] = qz;
+        pos[o + 9] = px;
+        pos[o + 10] = py - w;
+        pos[o + 11] = pz;
+        pos[o + 12] = qx;
+        pos[o + 13] = qy + w;
+        pos[o + 14] = qz;
+        pos[o + 15] = px;
+        pos[o + 16] = py + w;
+        pos[o + 17] = pz;
+        px = qx;
+        py = qy;
+        pz = qz;
+      }
+      bolt.mesh.geometry.getAttribute('position').needsUpdate = true;
+    }
+  }
+
+  clear(): void {
+    for (const bolt of this.bolts) {
+      bolt.life = 0;
+      bolt.mesh.visible = false;
+    }
+  }
+
+  dispose(): void {
+    for (const bolt of this.bolts) bolt.mesh.geometry.dispose();
+    (this.bolts[0]?.mesh.material as THREE.Material | undefined)?.dispose();
+  }
+}
+
 // --- Schatten ------------------------------------------------------------------
 
 /** Gerasterter Fleck unter jedem Kart – zeigt bei Sprüngen, wo der Boden ist. */

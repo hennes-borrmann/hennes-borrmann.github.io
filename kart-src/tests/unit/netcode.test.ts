@@ -59,6 +59,7 @@ describe('Protokoll', () => {
     s.stall = 99;
     s.respawn = 12;
     s.char = 3;
+    s.tow = 201;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -71,8 +72,8 @@ describe('Protokoll', () => {
           track: 2,
           karts: [{ slot: 2, bot: true, ptick: 5, ack: 7, state: s, lap: 2, place: 3, finished: true, finishTicks: 4321 }],
           things: [
-            { id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0 },
-            { id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0 },
+            { id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 },
+            { id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 },
           ],
         }),
       ),
@@ -90,9 +91,10 @@ describe('Protokoll', () => {
     expect([k.state.item, k.state.nextItem, k.state.roulette]).toEqual([ITEM_OIL, 2, 9]);
     expect(snap.track).toBe(2);
     expect(k.state.char).toBe(3);
+    expect(k.state.tow).toBe(201);
     expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([s.y, 4.5, 700, 99, 12]);
-    expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0 });
-    expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0 });
+    expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 });
+    expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 });
   });
 
   it('16-Bit-Zähler erkennt "neuer" auch über den Überlauf', () => {

@@ -796,14 +796,18 @@ async function main() {
     await useItem(4);
     let topSeen = [0, 0];
     let benHit = false;
+    let warned = false;
     for (let i = 0; i < 40 && !benHit; i++) {
       await sleep(60);
       const [lh, lc, b] = await Promise.all([kart(h6.page, 'things()'), kart(c6.page, 'things()'), kart(h6.page, 'authoritative(1)')]);
       if (lh.some((t) => t.kind === 3)) topSeen[0]++;
       if (lc.some((t) => t.kind === 3)) topSeen[1]++;
+      // Auf Bens Bildschirm steht, dass der Kreisel ihn sucht (Ziel = sein Platz) – daraus entsteht die Warnung.
+      if (lc.some((t) => t.kind === 3 && t.target === 1)) warned = true;
       benHit = b.spin > 0;
     }
     check('Brummkreisel: auf beiden Bildschirmen zu sehen und trifft Ben vor Anna', topSeen[0] > 0 && topSeen[1] > 0 && benHit, `${topSeen.join(' / ')} Messungen`);
+    check('Ben wird gewarnt: der Kreisel hat seinen Platz als Ziel', warned);
 
     // Kurzschluss: trifft nur, wer vorn liegt; Bens Vorhersage übernimmt die Drosselung
     await sleep(2500);
@@ -820,6 +824,31 @@ async function main() {
     await sleep(100);
     const after = await kart(h6.page, 'authoritative(0)');
     check('Stoßfänger: aktiv nach dem Einsatz, fängt einen Treffer ab', guarded.guard > 0 && after.guard === 0 && after.spin === 0, `${guarded.guard} Ticks Schutz`);
+
+    // Abschleppdrache: zieht Anna von selbst über die Strecke; Ben sieht es; die Bremse kappt
+    await kart(h6.page, 'place(0, 300, 0)');
+    await sleep(200);
+    const kiteFrom = await kart(h6.page, 'authoritative(0)');
+    await useItem(9);
+    let towHost = 0;
+    let towClient = 0;
+    let fastest = 0;
+    for (let i = 0; i < 14; i++) {
+      await sleep(90);
+      const [a, list] = await Promise.all([kart(h6.page, 'authoritative(0)'), kart(c6.page, 'entities()')]);
+      if (a.tow > 0) towHost++;
+      fastest = Math.max(fastest, Math.hypot(a.vx, a.vz));
+      const shown = list.find((e) => e.slot === 0);
+      if (shown && shown.tow > 0) towClient++;
+    }
+    const kiteMid = await kart(h6.page, 'authoritative(0)');
+    check('Abschleppdrache zieht Anna ohne Gas und ohne Lenken mit rund 40 m/s', towHost >= 6 && fastest > 38 && kiteMid.seg - kiteFrom.seg > 35, `${towHost} Messungen am Drachen, Spitze ${fastest.toFixed(0)} m/s, ${kiteMid.seg - kiteFrom.seg} m weiter`);
+    check('Ben sieht Anna am Drachen', towClient >= 3, `${towClient} Messungen`);
+    await h6.page.keyboard.down('ArrowDown');
+    await sleep(200);
+    await h6.page.keyboard.up('ArrowDown');
+    const kiteCut = await kart(h6.page, 'authoritative(0)');
+    check('Die Bremse kappt den Drachen', kiteCut.tow === 0 && kiteCut.respawn === 0, `noch ${kiteCut.tow} Ticks`);
 
     // Sprungfeder
     await kart(h6.page, 'place(0, 20, 0)');

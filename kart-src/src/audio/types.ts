@@ -24,6 +24,8 @@ export type SfxName =
   | 'use-emp' // Kurzschluss (elektrischer Schlag für die Gegner)
   | 'use-smoke' // Nebelkerze (Zischen, Puff)
   | 'use-spring' // Sprungfeder (Boing, aber eigenständig)
+  | 'use-kite' // Abschleppdrache steigt auf (Flattern, Sirren der Schnur)
+  | 'warn' // ein Brummkreisel hat dich im Visier (kurzer Warnton, wiederholt)
   | 'hit' // eigenes Kart getroffen, schleudert
   | 'guard-block' // Treffer vom Stoßfänger abgefangen (metallisches Klonk)
   | 'stall' // vom Kurzschluss erwischt (Motor stottert)

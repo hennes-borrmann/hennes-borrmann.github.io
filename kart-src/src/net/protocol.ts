@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -177,12 +177,12 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[] } |
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
 //        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 43 Byte]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 44 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)
 //   ack   = letzte vom Host verarbeitete Eingabe-Nummer dieses Spielers
-// Ding:  [u8 id][u8 art][u8 restzeit in 1/4 s][f32 x][f32 y][f32 z][f32 vx][f32 vz]
+// Ding:  [u8 id][u8 art][u8 restzeit in 1/4 s][f32 x][f32 y][f32 z][f32 vx][f32 vz][i8 ziel]
 //   "Dinge" sind alles, was außer Karts auf der Strecke unterwegs ist:
 //   Rollreifen, Ölflecken, Brummkreisel, Rauchwolken.
 
@@ -195,10 +195,10 @@ export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 
-const STATE_SIZE = 43;
+const STATE_SIZE = 44;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
-const SNAP_THING_SIZE = 23;
+const SNAP_THING_SIZE = 24;
 
 export interface SnapshotKart {
   slot: number;
@@ -224,6 +224,8 @@ export interface SnapshotThing {
   z: number;
   vx: number;
   vz: number;
+  /** Brummkreisel: Platz des Karts, das er sucht; sonst -1. */
+  target: number;
 }
 
 export interface Snapshot {
@@ -263,6 +265,7 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 40, s.roulette);
   v.setUint8(o + 41, s.flags);
   v.setUint8(o + 42, s.char);
+  v.setUint8(o + 43, s.tow);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -289,6 +292,7 @@ function readState(v: DataView, o: number): KartState {
     roulette: v.getUint8(o + 40),
     flags: v.getUint8(o + 41),
     char: v.getUint8(o + 42),
+    tow: v.getUint8(o + 43),
   };
 }
 
@@ -328,6 +332,7 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
     v.setFloat32(o + 11, t.z);
     v.setFloat32(o + 15, t.vx);
     v.setFloat32(o + 19, t.vz);
+    v.setInt8(o + 23, t.target);
     o += SNAP_THING_SIZE;
   }
   return buf;
@@ -376,6 +381,7 @@ export function decodeSnapshot(view: DataView): Snapshot | null {
       z: view.getFloat32(o + 11),
       vx: view.getFloat32(o + 15),
       vz: view.getFloat32(o + 19),
+      target: view.getInt8(o + 23),
     });
     o += SNAP_THING_SIZE;
   }

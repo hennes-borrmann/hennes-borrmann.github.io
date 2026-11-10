@@ -11,6 +11,7 @@ import {
   FLAG_OFFROAD,
   FLAG_WALL,
   ITEM_EMP,
+  ITEM_KITE,
   ITEM_NONE,
   ITEM_OIL,
   ITEM_SMOKE,
@@ -25,7 +26,8 @@ import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, type 
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
-import { BlobShadows, ComicPops, Particles, SkidMarks, SpeedLines } from './effects';
+import { BlobShadows, Bolts, ComicPops, Particles, SkidMarks, SpeedLines } from './effects';
+import type { FxSink } from './fxApi';
 import { KartVisual, type KartDetail, type KartPose } from './kartModel';
 import { ThingVisuals } from './things';
 import { setOutlinesVisible } from './toon';
@@ -64,6 +66,7 @@ export interface SceneEvent {
     | 'use-emp'
     | 'use-smoke'
     | 'use-spring'
+    | 'use-kite'
     | 'finish';
   slot: number;
   local: boolean;
@@ -108,6 +111,7 @@ interface KartView {
   stall: number;
   guard: number;
   respawn: number;
+  tow: number;
   roulette: number;
   item: number;
   flags: number;
@@ -164,6 +168,8 @@ export class RaceScene {
   cameraMode: 'chase' | 'top' = 'chase';
   /** Wie tief das eigene Kart in einer Rauchwolke steckt (0..1) – die Oberfläche legt einen Schleier darüber. */
   smoke = 0;
+  /** Wie nah ein Brummkreisel ist, der das eigene Kart sucht (0 = keiner, 1 = gleich da). */
+  threat = 0;
   onEvent: ((e: SceneEvent) => void) | null = null;
   readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1 };
 
@@ -181,6 +187,12 @@ export class RaceScene {
   private readonly pops = new ComicPops();
   private readonly speedLines = new SpeedLines();
   private readonly shadows = new BlobShadows(24);
+  private readonly bolts = new Bolts();
+  /** In diesem Bild: wer einen Kurzschluss ausgelöst hat und wen er gerade erwischt. */
+  private readonly empFrom: KartView[] = [];
+  private readonly empHit: KartView[] = [];
+  /** Teilchen für Bausteine, die das Teilchensystem nicht kennen (Items, Hindernisse). */
+  private readonly fx: FxSink;
 
   private quality: Quality;
   private level = 1;
@@ -225,7 +237,12 @@ export class RaceScene {
     this.puffs = new Particles(cap, false);
     this.sparks = new Particles(Math.round(cap * 0.7), true);
     this.skids = new SkidMarks(520);
-    this.scene.add(this.camera, this.puffs.points, this.sparks.points, this.skids.mesh, this.pops.group, this.shadows.mesh);
+    this.scene.add(this.camera, this.puffs.points, this.sparks.points, this.skids.mesh, this.pops.group, this.shadows.mesh, this.bolts.group);
+    const c = this.color;
+    this.fx = {
+      spark: (x, y, z, vx, vy, vz, life, size, color, gravity = 9) => this.sparks.emit(x, y, z, vx, vy, vz, life, size, c.set(color), -size * 0.8, gravity, 1),
+      puff: (x, y, z, vx, vy, vz, life, size, color, grow = 0, gravity = 0) => this.puffs.emit(x, y, z, vx, vy, vz, life, size, c.set(color), grow, gravity, 1.5, 0.95),
+    };
     this.camera.add(this.speedLines.mesh);
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -291,6 +308,8 @@ export class RaceScene {
     this.sparks.clear();
     this.pops.clear();
     this.things?.clear();
+    this.bolts.clear();
+    this.threat = 0;
     for (const k of this.karts.values()) k.fresh = true;
   }
 
@@ -364,7 +383,21 @@ export class RaceScene {
       char,
       visual,
       label: null,
-      pose: { speed: 0, steer: 0, driftDir: 0, driftStage: 0, boost: false, air: false, spin: 0, guard: false, stall: false, offroad: false, emote: 'none' },
+      pose: {
+        speed: 0,
+        steer: 0,
+        driftDir: 0,
+        driftStage: 0,
+        boost: false,
+        air: false,
+        spin: 0,
+        guard: false,
+        stall: false,
+        offroad: false,
+        emote: 'none',
+        held: 0,
+        tow: false,
+      },
       seen: true,
       fresh: true,
       steer: 0,
@@ -377,6 +410,7 @@ export class RaceScene {
       stall: 0,
       guard: 0,
       respawn: 0,
+      tow: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -434,7 +468,7 @@ export class RaceScene {
           this.shake = Math.max(this.shake, 0.6);
         }
       }
-      if (e.boost > 0 && e.boost > k.boost + 20) {
+      if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0) {
         const turbo = k.driftDir !== 0 ? Math.max(1, k.driftStage) : 0;
         this.pop(turbo ? 'WUSCH!' : 'ZISCH!', e, turbo === 3 ? 'violet' : turbo ? 'cool' : 'warm', 2.6 + turbo * 0.35);
         k.visual.squash(-0.8);
@@ -461,7 +495,16 @@ export class RaceScene {
         k.hasTrail = false;
       }
       if (e.respawn === 0 && k.respawn > 0) this.emit('respawn', k, local);
+      if (e.tow > 0 && k.tow === 0) {
+        this.pop('ZIEH!', e, 'cool', 3.4);
+        this.burst(e.x, e.y + 0.4, e.z, 10, 7, 0xe9e6f2, false, 0.5, 0.5, 2);
+        k.visual.squash(-1);
+        this.emit('use-kite', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.22);
+      }
+      if (e.tow === 0 && k.tow > 0) this.burst(e.x, e.y + 0.3, e.z, 6, 4, 0xe9e6f2, false, 0.4, 0.4, 1);
       if (e.stall > 0 && k.stall === 0) {
+        this.empHit.push(k);
         this.pop('BZZZT!', e, 'violet', 3.6);
         this.burst(e.x, e.y + 1, e.z, 12, 6, 0xb9a8ff, true, 0.5, 0.5, 4);
         this.emit('stall', k, local);
@@ -479,7 +522,12 @@ export class RaceScene {
       }
       if (e.roulette === 0 && k.roulette > 0 && e.item !== ITEM_NONE) this.emit('item-ready', k, local);
       if (e.item === ITEM_NONE && k.item !== ITEM_NONE && k.roulette === 0) {
-        if (k.item === ITEM_TIRE) {
+        // Die Figur macht die passende Bewegung: werfen, kippen, hochreißen …
+        k.visual.useItem(k.item);
+        if (k.item === ITEM_EMP) this.empFrom.push(k);
+        if (k.item === ITEM_KITE) {
+          // Wirkung und Ton kommen mit dem Start des Zugs (siehe oben).
+        } else if (k.item === ITEM_TIRE) {
           this.pop('HUI!', e, 'white', 2.6);
           this.emit('use-tire', k, local);
         } else if (k.item === ITEM_OIL) {
@@ -518,6 +566,7 @@ export class RaceScene {
     k.stall = e.stall;
     k.guard = e.guard;
     k.respawn = e.respawn;
+    k.tow = e.tow;
     k.roulette = e.roulette;
     k.item = e.item;
     k.flags = e.flags;
@@ -553,6 +602,8 @@ export class RaceScene {
     }
 
     for (const k of this.karts.values()) k.seen = false;
+    this.empFrom.length = 0;
+    this.empHit.length = 0;
     this.shadows.begin();
     let me: RenderEntity | null = null;
     let meView: KartView | null = null;
@@ -611,6 +662,9 @@ export class RaceScene {
       pose.guard = e.guard > 0 && (e.guard > 90 || Math.floor(this.time * 10) % 2 === 0);
       pose.stall = e.stall > 0;
       pose.offroad = (e.flags & FLAG_OFFROAD) !== 0;
+      // Während der Auslosung ist die Hand noch leer; danach hält die Figur das Item hoch.
+      pose.held = e.roulette > 0 ? 0 : e.item;
+      pose.tow = e.tow > 0;
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
 
       // Hören: Entfernung und Richtung zur Kamera
@@ -620,7 +674,7 @@ export class RaceScene {
       k.audio.local = local;
       k.audio.speed = Math.abs(vf) / V_MAX;
       k.audio.throttle = !e.finished && race.phase !== RACE_COUNTDOWN && e.spin === 0;
-      k.audio.boost = e.boost > 0;
+      k.audio.boost = e.boost > 0 || e.tow > 0;
       k.audio.drift = e.driftDir !== 0 ? Math.max(0.5, pose.driftStage) : 0;
       k.audio.offroad = pose.offroad;
       k.audio.air = air;
@@ -669,18 +723,26 @@ export class RaceScene {
       k.fresh = true;
     }
     this.bumps(entities, localSlot);
+    // Kurzschluss: vom Auslöser springt ein Blitz zu jedem, den es erwischt hat.
+    for (const from of this.empFrom) {
+      for (const hit of this.empHit) {
+        const a = from.visual.root.position;
+        const b = hit.visual.root.position;
+        this.bolts.strike(a.x, a.y + 1.6, a.z, b.x, b.y + 1.2, b.z);
+      }
+    }
 
     // Dinge und Hindernisse
-    this.things.update(things, dt, this.time);
+    this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
     let smoke = 0;
+    let threat = 0;
     this.flat.identity();
     for (const th of things) {
       if (th.kind === THING_TIRE || th.kind === THING_TOP) {
-        this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
-        if (th.kind === THING_TOP && Math.random() < dt * 40) {
-          this.color.set(0xffe04a);
-          this.sparks.emit(th.x, th.y, th.z, (Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.35, 0.35, this.color, -0.6, 2, 1);
+        if (this.things.shown(th)) this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
+        if (th.kind === THING_TOP && me && th.target === localSlot) {
+          threat = Math.max(threat, 1 - Math.hypot(th.x - me.x, th.z - me.z) / 75);
         }
       } else if (th.kind === THING_SMOKE && me) {
         const d = Math.hypot(th.x - me.x, th.z - me.z);
@@ -690,13 +752,15 @@ export class RaceScene {
     for (const h of this.things.hazards) this.shadows.add(h.position.x, h.position.y, h.position.z, this.flat, 3.4, 0);
     this.shadows.end();
     this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
+    this.threat = Math.max(0, threat);
+    this.bolts.update(dt);
 
     this.puffs.update(dt);
     this.sparks.update(dt);
     this.pops.update(dt);
 
     this.updateCamera(me, meView, race, dt);
-    const fast = me ? (me.boost > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
+    const fast = me ? (me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
     this.world.update(this.time, dt, this.camera.position, race.boxes);
     if (this.needsCompile) {
@@ -883,7 +947,7 @@ export class RaceScene {
     cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
     this.applyShake(dt);
 
-    const wantFov = 60 + frac * 7 + (me.boost > 0 ? 9 : 0);
+    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : 0);
     this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 5);
     if (Math.abs(cam.fov - this.camFov) > 0.05) {
       cam.fov = this.camFov;

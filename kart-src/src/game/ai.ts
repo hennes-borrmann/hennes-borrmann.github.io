@@ -17,6 +17,7 @@ import {
   ITEM_BOOST,
   ITEM_EMP,
   ITEM_GUARD,
+  ITEM_KITE,
   ITEM_NONE,
   ITEM_OIL,
   ITEM_SMOKE,
@@ -169,6 +170,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     b.drifting = 0;
     return { steer: 0, buttons: 0 };
   }
+  // Am Abschleppdrachen: nichts tun – vor allem nicht bremsen, das würde die Schnur kappen.
+  if (s.tow > 0) {
+    b.stuck = 0;
+    b.drifting = 0;
+    b.itemPressed = false;
+    return { steer: 0, buttons: 0 };
+  }
   const vf = forwardSpeed(s);
   const v = Math.abs(vf);
   const air = (s.flags & FLAG_AIR) !== 0;
@@ -303,6 +311,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         break;
       case ITEM_EMP:
         press = b.holding > 50 && (ctx.place > 1 || late);
+        break;
+      case ITEM_KITE:
+        // Der Drache lenkt selbst – sofort nutzen.
+        press = b.holding > 25 && !air;
         break;
       case ITEM_SPRING:
         // Nur wo nichts passieren kann: gerade, mit Bande, kein Sprung voraus.

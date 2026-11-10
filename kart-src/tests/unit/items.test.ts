@@ -1,14 +1,18 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { botCmd, newBrain } from '../../src/game/ai';
 import { HostGame } from '../../src/game/hostGame';
 import {
   EV_FALL,
   EV_LAND,
+  EV_TOW_END,
+  EV_USE_KITE,
   EV_RESPAWNED,
   EV_TAKEOFF,
   FLAG_AIR,
   GUARD_TICKS,
   ITEM_EMP,
   ITEM_GUARD,
+  ITEM_KITE,
   ITEM_NONE,
   ITEM_SMOKE,
   ITEM_SPRING,
@@ -16,7 +20,9 @@ import {
   ITEM_TOP,
   NEUTRAL,
   STALL_TICKS,
+  TOW_TICKS,
   V_MAX,
+  V_TOW,
   forwardSpeed,
   gridState,
   hitKart,
@@ -24,7 +30,21 @@ import {
   type Cmd,
   type KartState,
 } from '../../src/game/sim';
-import { EDGE_GAP, EDGE_OPEN_L, TRACK, buildTrack, hazardLat, rightX, rightZ, setTrack, trackHeading, useTrack } from '../../src/game/track';
+import {
+  EDGE_GAP,
+  EDGE_OPEN_L,
+  TRACK,
+  TRACK_COUNT,
+  buildTrack,
+  hazardLat,
+  proj,
+  projectOnTrack,
+  rightX,
+  rightZ,
+  setTrack,
+  trackHeading,
+  useTrack,
+} from '../../src/game/track';
 import { RACE_RUNNING, THING_SMOKE, THING_TIRE, THING_TOP, decodeSnapshot } from '../../src/net/protocol';
 
 const GAS: Cmd = { steer: 0, buttons: 1 };
@@ -320,6 +340,109 @@ describe('Neue Items', () => {
     }
     expect(hit).toBe(true);
     expect(fx).toContain('0:hit');
+  });
+
+  it('Abschleppdrache: zieht von selbst durch Kurven und über die Lücke, niemand stürzt', () => {
+    for (let ti = 0; ti < TRACK_COUNT; ti++) {
+      setTrack(ti);
+      const t = TRACK;
+      // Von jeder zehnten Stelle der Strecke aus einmal ziehen lassen – auch direkt vor Sprüngen und auf Stegen.
+      for (let start = 0; start < t.n; start += 10) {
+        if (t.edge[start] & EDGE_GAP) continue;
+        const s = gridState(0);
+        placeAt(s, start, 2, 20);
+        s.item = ITEM_KITE;
+        let ev = stepKart(s, PRESS, ENV);
+        expect(ev & EV_USE_KITE).toBeTruthy();
+        expect(s.tow).toBe(TOW_TICKS);
+        let dist = 0;
+        let top = 0;
+        for (let i = 0; i < TOW_TICKS + 120 && (s.tow > 0 || s.flags & FLAG_AIR); i++) {
+          const x = s.x;
+          const z = s.z;
+          ev |= stepKart(s, NEUTRAL, ENV);
+          if (s.tow > 0) {
+            dist += Math.hypot(s.x - x, s.z - z);
+            top = Math.max(top, Math.hypot(s.vx, s.vz));
+            // Bleibt über der Fahrbahn, auch in Kurven.
+            projectOnTrack(t, s.x, s.z, s.seg);
+            expect(Math.abs(proj.lat)).toBeLessThan(t.wh[s.seg]);
+          }
+        }
+        expect(ev & EV_FALL).toBe(0);
+        expect(ev & EV_TOW_END).toBeTruthy();
+        expect(top).toBeCloseTo(V_TOW, 0);
+        expect(dist).toBeGreaterThan(140);
+        // Danach wieder am Boden, auf festem Untergrund.
+        expect(s.flags & FLAG_AIR).toBe(0);
+        expect(t.edge[s.seg] & EDGE_GAP).toBe(0);
+      }
+    }
+    setTrack(0);
+  });
+
+  it('Abschleppdrache: Bremse kappt, Treffer prallen ab, andere werden beiseitegeschoben', () => {
+    const host = runningHost([0, 1]);
+    const fx: string[] = [];
+    host.onFx = (slot, kind) => fx.push(`${slot}:${kind}`);
+    const a = host.authoritative(0)!;
+    const b = host.authoritative(1)!;
+    placeAt(a, 10, 0, 20);
+    placeAt(b, 26, 0.4, 5);
+    host.giveItem(0, ITEM_KITE);
+    host.step({ steer: 0, buttons: 8 });
+    expect(a.tow).toBeGreaterThan(200);
+    expect(hitKart(a)).toBe(0);
+    let latB = 0;
+    for (let i = 0; i < 60; i++) {
+      host.step(NEUTRAL);
+      projectOnTrack(TRACK, b.x, b.z, b.seg);
+      latB = Math.max(latB, Math.abs(proj.lat));
+    }
+    // Kart 1 stand im Weg: zur Seite geschoben, aber nicht aus der Bahn geworfen.
+    expect(latB).toBeGreaterThan(1.5);
+    expect(b.spin).toBe(0);
+    expect(fx).toContain('1:bump');
+    expect(a.tow).toBeGreaterThan(0);
+    // Bremsen kappt den Drachen sofort.
+    host.step({ steer: 0, buttons: 2 });
+    expect(a.tow).toBe(0);
+    expect(a.boost).toBeGreaterThan(0);
+  });
+
+  it('KI nutzt den Abschleppdrachen und lässt sich die volle Zeit ziehen', () => {
+    setTrack(2);
+    const s = gridState(1);
+    placeAt(s, 40, 0, 22);
+    const brain = newBrain(1, 1);
+    s.item = ITEM_KITE;
+    let towed = 0;
+    let ev = 0;
+    for (let tick = 1; tick <= 420; tick++) {
+      ev |= stepKart(s, botCmd(s, brain, [], true, { tick, place: 4, smoke: false }), ENV);
+      if (s.tow > 0) towed++;
+    }
+    expect(ev & EV_USE_KITE).toBeTruthy();
+    expect(towed).toBeGreaterThanOrEqual(TOW_TICKS - 1);
+    expect(ev & EV_FALL).toBe(0);
+    setTrack(0);
+  });
+
+  it('Abschleppdrache gibt es nur für Abgehängte', () => {
+    const host = runningHost([0, 1, 2, 3]);
+    const pick = (host as unknown as { pickItem(place: number, count: number, behind?: number): number }).pickItem.bind(host);
+    const share = (place: number, behind: number): number => {
+      let n = 0;
+      for (let i = 0; i < 4000; i++) if (pick(place, 4, behind) === ITEM_KITE) n++;
+      return n / 4000;
+    };
+    expect(share(4, 20)).toBe(0);
+    expect(share(1, 200)).toBe(0);
+    expect(share(2, 200)).toBe(0);
+    expect(share(3, 200)).toBeGreaterThan(0.02);
+    expect(share(3, 200)).toBeLessThan(0.15);
+    expect(share(4, 200)).toBeGreaterThan(0.12);
+    expect(share(4, 200)).toBeLessThan(0.3);
   });
 
   it('Item-Verteilung: Führender bekommt Abwehr, Letzter Aufholhilfen', () => {

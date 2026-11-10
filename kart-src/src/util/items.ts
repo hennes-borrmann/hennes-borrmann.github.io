@@ -4,6 +4,7 @@ import {
   ITEM_BOOST,
   ITEM_EMP,
   ITEM_GUARD,
+  ITEM_KITE,
   ITEM_OIL,
   ITEM_SMOKE,
   ITEM_SPRING,
@@ -56,6 +57,11 @@ export const ITEMS: Record<number, ItemInfo> = {
     name: 'Nebelkerze',
     hint: 'Nimmt Verfolgern die Sicht',
     icon: '<path d="M7.200 19.500a4.700 4.700 0 0 1-.9-9.300 6.200 6.200 0 0 1 12-1.100 5.200 5.200 0 0 1-.8 10.400z" fill="currentColor"/>',
+  },
+  [ITEM_KITE]: {
+    name: 'Abschleppdrache',
+    hint: 'Zieht dich nach vorn · Bremse kappt',
+    icon: `<path d="M12 1.500 20 9.500 12 17 4 9.500z" fill="currentColor"/><path d="M12 17c-.500 2 1.500 2.500 1 4.500M9.500 19.500l2.300.800M11.800 22.300l2.400-.900" ${STROKE}/>`,
   },
   [ITEM_SPRING]: {
     name: 'Sprungfeder',
