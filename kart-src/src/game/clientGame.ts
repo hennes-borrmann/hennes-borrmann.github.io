@@ -28,6 +28,7 @@ import {
   EV_BLOCK,
   EV_DRAFT,
   EV_FALL,
+  EV_FLAT,
   EV_HIT,
   EV_ITEM_READY,
   EV_LAND,
@@ -183,7 +184,7 @@ export class ClientGame implements GameView {
     this.env.time = this.envTime;
     const ev = stepKart(this.predicted, cmd, this.env);
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.onFx?.('boost');
-    if (ev & EV_HIT) this.onFx?.('hit');
+    if (ev & (EV_HIT | EV_FLAT)) this.onFx?.('hit');
     if (ev & EV_BLOCK) this.onFx?.('block');
     if (ev & EV_WALL) this.onFx?.('wall');
     if (ev & EV_ITEM_READY) this.onFx?.('item');

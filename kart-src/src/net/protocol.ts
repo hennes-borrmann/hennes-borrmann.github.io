@@ -202,7 +202,7 @@ export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 
-const STATE_SIZE = 45;
+const STATE_SIZE = 46;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
 const SNAP_THING_SIZE = 24;
@@ -274,6 +274,7 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 42, s.char);
   v.setUint8(o + 43, s.tow);
   v.setUint8(o + 44, s.draft);
+  v.setUint8(o + 45, s.flat);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -302,6 +303,7 @@ function readState(v: DataView, o: number): KartState {
     char: v.getUint8(o + 42),
     tow: v.getUint8(o + 43),
     draft: v.getUint8(o + 44),
+    flat: v.getUint8(o + 45),
   };
 }
 

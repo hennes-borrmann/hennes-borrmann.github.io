@@ -27,6 +27,7 @@ import {
   EV_BLOCK,
   EV_DRAFT,
   EV_FALL,
+  EV_FLAT,
   EV_HIT,
   EV_ITEM_READY,
   EV_LAND,
@@ -567,7 +568,7 @@ export class HostGame implements GameView {
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.fx(k, 'boost');
     // Treffer durch die Strecke selbst (Verkehr, Geysir, Lavabombe) sagt der Bildschirm eines
     // Mitspielers selbst vorher und meldet sie dort – von hier aus nur für das eigene Kart.
-    if (k.local && ev & EV_HIT) this.fx(k, 'hit');
+    if (k.local && ev & (EV_HIT | EV_FLAT)) this.fx(k, 'hit');
     if (k.local && ev & EV_BLOCK) this.fx(k, 'block');
     if (ev & EV_ITEM_READY) this.fx(k, 'item');
     if (ev & EV_WALL) this.fx(k, 'wall');

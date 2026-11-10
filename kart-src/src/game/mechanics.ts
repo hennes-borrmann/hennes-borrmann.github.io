@@ -78,6 +78,8 @@ export const CRASH_SPEED = 7;
 
 export const PULSE_VENT = 0;
 export const PULSE_BOMB = 1;
+/** Stampfpresse: schlägt im Takt herunter und plättet, was darunter steht. */
+export const PULSE_PRESS = 2;
 
 /**
  * Eine Stelle, an der im Takt etwas passiert. Der Zyklus beginnt mit dem
@@ -157,3 +159,74 @@ export function floodPeak(f: Flood, from: number, to: number): number {
   for (let t = from; t <= to; t += 15) peak = Math.max(peak, floodLevel(f, t));
   return Math.max(peak, floodLevel(f, to));
 }
+
+// --- Förderbänder ----------------------------------------------------------------
+
+/**
+ * Ein Stück Fahrbahn, das sich bewegt: wer darauf fährt, wird mitgenommen –
+ * längs (schneller oder langsamer) oder quer (zur Seite geschoben). Bänder
+ * laufen immer; sie hängen nicht von der Rennzeit ab.
+ */
+export interface Belt {
+  /** Erster Abschnitt und Anzahl (zusammenhängend auf einem Weg). */
+  first: number;
+  count: number;
+  /** Seitlicher Bereich von … bis (Meter, rechts positiv). */
+  lat0: number;
+  lat1: number;
+  /** Tempo des Bands in m/s: längs (vorwärts positiv) und quer (nach rechts positiv). */
+  along: number;
+  across: number;
+}
+
+// --- Ebbe und Flut -----------------------------------------------------------------
+
+/**
+ * Der Wasserspiegel steigt und fällt im Takt. Wo die Fahrbahn tiefer liegt als
+ * das Wasser, bremst es – je tiefer, desto mehr. Dazu schwappt eine Welle.
+ */
+export interface Tide {
+  /** Wasserhöhe bei Ebbe und bei Flut (Meter, dieselbe Höhe wie die Fahrbahn). */
+  low: number;
+  high: number;
+  /** Alles in Ticks. */
+  period: number;
+  phase: number;
+  /** Welle: Ausschlag in Metern und Periode in Ticks. */
+  wave: number;
+  wavePeriod: number;
+}
+
+/** Anteil der Periode, in dem das Wasser steigt bzw. fällt (dazwischen steht es). */
+const TIDE_TURN = 0.16;
+
+/** Stand der Gezeit ohne Welle: 0 = Ebbe … 1 = Flut. Der Zyklus beginnt mit Ebbe. */
+export function tidePhase(t: Tide, time: number): number {
+  let c = ((time + t.phase) % t.period) / t.period;
+  if (c < 0) c += 1;
+  const stay = 0.5 - TIDE_TURN;
+  const ease = (k: number): number => k * k * (3 - 2 * k);
+  if (c < stay) return 0;
+  if (c < 0.5) return ease((c - stay) / TIDE_TURN);
+  if (c < 0.5 + stay) return 1;
+  return 1 - ease((c - 0.5 - stay) / TIDE_TURN);
+}
+
+/** Höhe des Wasserspiegels zur Rennzeit time (mit Welle). */
+export function tideLevel(t: Tide, time: number): number {
+  return t.low + (t.high - t.low) * tidePhase(t, time) + t.wave * Math.sin((time / t.wavePeriod) * 2 * Math.PI);
+}
+
+/** Ab dieser Wassertiefe (Meter) bremst es; WATER_DRAG je Meter Tiefe, höchstens WATER_MAX. */
+export const WATER_FROM = 0.06;
+export const WATER_DRAG = 0.9;
+export const WATER_MAX = 0.55;
+
+/** Faktor auf die Höchstgeschwindigkeit bei dieser Wassertiefe. */
+export function waterFactor(depth: number): number {
+  return depth <= WATER_FROM ? 1 : 1 - Math.min(WATER_MAX, depth * WATER_DRAG);
+}
+
+/** Geplättet (Stampfpresse): so lange fährt das Kart flach und langsam (Ticks). */
+export const FLAT_TICKS = 130;
+export const FLAT_FACTOR = 0.55;

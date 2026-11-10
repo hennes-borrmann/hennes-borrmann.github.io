@@ -19,13 +19,19 @@ import {
   DRAFT_FULL,
   DRAFT_PULL_FROM,
   DRAFT_PULL_TICKS,
+  FLAT_FACTOR,
+  FLAT_TICKS,
   FLOOD_FROM,
+  PULSE_PRESS,
   PULSE_VENT,
+  WATER_FROM,
   WAKE_HALF,
   WAKE_LENGTH,
   floodLevel,
   pulseCycle,
+  tideLevel,
   vehicleAt,
+  waterFactor,
 } from './mechanics';
 import {
   EDGE_OPEN_L,
@@ -142,6 +148,8 @@ export interface KartState {
   tow: number;
   /** Windschatten: Ladung 0..255; ab DRAFT_FULL gibt das Ausscheren Schub. */
   draft: number;
+  /** Verbleibende Ticks geplättet (Stampfpresse): das Kart ist flach und langsam. */
+  flat: number;
   item: number;
   /** Das Item, das nach der Auslosung erscheint. */
   nextItem: number;
@@ -186,6 +194,10 @@ export const EV_HIT = 1 << 20;
 export const EV_BLOCK = 1 << 21;
 /** Fährt durch Lava. */
 export const EV_BURN = 1 << 22;
+/** Von einer Stampfpresse geplättet. */
+export const EV_FLAT = 1 << 23;
+/** Fährt durch Wasser (Flut). */
+export const EV_SPLASH = 1 << 24;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -352,6 +364,7 @@ export function newState(): KartState {
     respawn: 0,
     tow: 0,
     draft: 0,
+    flat: 0,
     item: ITEM_NONE,
     nextItem: ITEM_NONE,
     roulette: 0,
@@ -379,6 +392,7 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.respawn = src.respawn;
   dst.tow = src.tow;
   dst.draft = src.draft;
+  dst.flat = src.flat;
   dst.item = src.item;
   dst.nextItem = src.nextItem;
   dst.roulette = src.roulette;
@@ -437,6 +451,24 @@ export function hitKart(s: KartState): number {
   s.boost = 0;
   s.vx *= 0.45;
   s.vz *= 0.45;
+  return HIT_SPIN;
+}
+
+/** Stampfpresse: das Kart wird geplättet und fährt eine Weile flach und langsam. Rückgabe wie hitKart. */
+export function flattenKart(s: KartState): number {
+  if (s.shield > 0 || s.flat > 0 || s.respawn > 0 || s.tow > 0) return HIT_NONE;
+  if (s.guard > 0) {
+    s.guard = 0;
+    s.shield = 50;
+    return HIT_BLOCKED;
+  }
+  s.flat = FLAT_TICKS;
+  s.shield = FLAT_TICKS + 40;
+  s.driftDir = 0;
+  s.driftCharge = 0;
+  s.boost = 0;
+  s.vx *= 0.4;
+  s.vz *= 0.4;
   return HIT_SPIN;
 }
 
@@ -610,6 +642,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.shield > 0) s.shield--;
   if (s.guard > 0) s.guard--;
   if (s.stall > 0) s.stall--;
+  if (s.flat > 0) s.flat--;
   const spinning = s.spin > 0;
   if (spinning) s.spin--;
   if (s.roulette > 0) {
@@ -773,6 +806,16 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (boosting) vmax = V_BOOST * env.speedFactor;
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
+    if (s.flat > 0) vmax *= FLAT_FACTOR;
+    // Flut: wo die Fahrbahn unter Wasser steht, bremst es – je tiefer, desto mehr.
+    if (t.tide && t.tidal[seg0]) {
+      const depth = tideLevel(t.tide, env.time) - y0;
+      if (depth > WATER_FROM) {
+        vmax *= waterFactor(depth);
+        if (vf > vmax + 2) vf -= 24 * DT;
+        if (((env.time % 10) + 10) % 10 === 0 && v > 4) ev |= EV_SPLASH;
+      }
+    }
     // Aus dem Windschatten ausgeschert: kurz mehr Tempo – aber nur auf dem Gas, die Bremse bleibt die Bremse.
     if (s.draft >= DRAFT_PULL_FROM && !boosting) vmax *= DRAFT_PULL;
     // Lava auf der Fahrbahn: zäh wie Teer.
@@ -816,6 +859,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.vz = fz * vf + rz * vl;
   s.x += s.vx * DT;
   s.z += s.vz * DT;
+  // Förderband: der Boden nimmt das Kart mit.
+  if (!wasAir && t.belts.length > 0) {
+    for (const b of t.belts) {
+      if (seg0 < b.first || seg0 >= b.first + b.count || lat0 < b.lat0 || lat0 > b.lat1) continue;
+      s.x += (t.tx[seg0] * b.along + rightX(t, seg0) * b.across) * DT;
+      s.z += (t.tz[seg0] * b.along + rightZ(t, seg0) * b.across) * DT;
+      break;
+    }
+  }
 
   // --- Strecke: Abschnitt, Bande ---
   projectOnTrack(t, s.x, s.z, s.seg);
@@ -943,6 +995,13 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     const reach = p.radius + KART_RADIUS * 0.6;
     if (dx * dx + dz * dz > reach * reach) continue;
     if (pulseCycle(p, env.time) >= p.on) continue;
+    if (p.kind === PULSE_PRESS) {
+      // Die Presse plättet: kein Dreher, aber das Kart ist eine Weile flach und langsam.
+      const r = flattenKart(s);
+      if (r === HIT_BLOCKED) ev |= EV_BLOCK;
+      else if (r === HIT_SPIN) ev |= EV_FLAT;
+      continue;
+    }
     const r = hitKart(s);
     if (r === HIT_BLOCKED) ev |= EV_BLOCK;
     else if (r === HIT_SPIN) {

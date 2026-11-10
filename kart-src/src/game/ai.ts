@@ -32,7 +32,7 @@ import {
   type Cmd,
   type KartState,
 } from './sim';
-import { FLOOD_FROM, floodPeak, pulseCycle, vehicleAt } from './mechanics';
+import { FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -46,6 +46,7 @@ import {
   rightX,
   rightZ,
   segDelta,
+  walk,
 } from './track';
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
@@ -287,6 +288,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
             const arrive = ctx.time + f.lead + (DECIDE_AT * t.step * 60) / 25;
             take = floodPeak(f, arrive - 30, arrive + (f.count * t.step * 60) / 22) <= FLOOD_FROM;
           }
+          // Steht die Hauptstrecke hinter der Gabelung bei Flut unter Wasser, lohnt die Abzweigung – bei Ebbe nicht.
+          if (t.tide && t.tidal[walk(t, t.branches[k].from, 40)]) {
+            const arrive = ctx.time + ((DECIDE_AT + 70) * t.step * 60) / 25;
+            const wet = tidePhase(t.tide, arrive);
+            if (wet > 0.6) take = true;
+            else if (wet < 0.15) take = false;
+          }
         }
         b.route = take ? b.route | (1 << k) : b.route & ~(1 << k);
       }
@@ -329,7 +337,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   let jam = false;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
-  if ((t.vehicles.length > 0 || t.pulses.length > 0) && !air) {
+  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide) && !air) {
     blocks = 0;
     projectOnTrack(t, s.x, s.z, s.seg);
     const here = proj.lat;
@@ -387,9 +395,28 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     AI_TRACE.want = lat;
     AI_TRACE.blocks = '';
     for (let k = 0; k < blocks; k++) AI_TRACE.blocks += `[${BLOCK_LO[k].toFixed(1)},${BLOCK_HI[k].toFixed(1)} w${BLOCK_W[k].toFixed(1)}]`;
+    // Förderbänder: auf das schnellste Band zuhalten, rückwärts laufende meiden.
+    for (const belt of t.belts) {
+      if (target < belt.first || target >= belt.first + belt.count) continue;
+      if (belt.along > 1) lat = Math.max(belt.lat0 + 0.9, Math.min(belt.lat1 - 0.9, lat));
+      else if (belt.along < -1) block(belt.lat0 - 0.4, belt.lat1 + 0.4, 0.5);
+    }
+    // Flut: wo das Wasser bei meiner Ankunft tiefer als eine Handbreit steht, lieber nicht fahren.
+    if (t.tide && t.tidal[target]) {
+      const level = tideLevel(t.tide, ctx.time + (look / Math.max(v, 8)) * 60) + 0.05;
+      const tilt = t.bank[target];
+      const dry = t.py[target] + 0.12;
+      if (Math.abs(tilt) > 0.012) {
+        // Die Wasserlinie quer zur Fahrbahn: auf der tiefen Seite steht es, auf der hohen ist es trocken.
+        const line = (level - dry) / tilt;
+        if (tilt > 0) block(-99, line + 0.9, level - dry > 0.35 ? 1 : 0.6);
+        else block(line - 0.9, 99, level - dry > 0.35 ? 1 : 0.6);
+      }
+    }
     if (blocks > 0) {
       const free = freeLat(lat, here, room);
-      if (Number.isNaN(free)) jam = true;
+      // Alles dicht? Im Verkehr heißt das bremsen; steht nur überall Wasser, einfach durch.
+      if (Number.isNaN(free)) jam = t.vehicles.length > 0;
       else lat = free;
     }
   }
