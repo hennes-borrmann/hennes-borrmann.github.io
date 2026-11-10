@@ -34,14 +34,22 @@ interface Seat {
   controller: boolean;
   ctrlRtt: number;
   offlineSince: number | null;
+  /** Gewählte Figur (0..3). */
+  character: number;
 }
 
 export interface HostLobbySave {
   code: string;
-  seats: { slot: number; token: string; name: string; isHost: boolean }[];
+  seats: { slot: number; token: string; name: string; isHost: boolean; character?: number }[];
   bots?: boolean;
   aiLevel?: number;
   track?: number;
+}
+
+/** Gültige Figur 0..3; sonst der Rückfallwert (üblich: die Standardfigur des Platzes). */
+export function cleanCharacter(raw: unknown, fallback: number): number {
+  const n = typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw < 4 ? raw : fallback;
+  return ((n % 4) + 4) % 4;
 }
 
 export function cleanName(raw: unknown, fallback: string): string {
@@ -95,6 +103,7 @@ export class HostLobby {
           token: s.token,
           name: s.name,
           isHost: s.isHost,
+          character: cleanCharacter(s.character, s.slot),
           link: null,
           ready: false,
           controller: false,
@@ -138,6 +147,7 @@ export class HostLobby {
         name: s.name,
         isHost: s.isHost,
         online: s.isHost || s.link !== null,
+        character: s.character,
         controller: s.controller,
         ctrlRtt: s.ctrlRtt,
         ready: s.ready,
@@ -178,6 +188,19 @@ export class HostLobby {
 
   linkOf(slot: number): Link | null {
     return this.seats[slot]?.link ?? null;
+  }
+
+  setLocalCharacter(character: number): void {
+    const own = this.seats[this.localSlot]!;
+    own.character = cleanCharacter(character, own.slot);
+    this.changed();
+  }
+
+  /** Figur je Platz (für das Rennen); freie Plätze fehlen. */
+  characters(): number[] {
+    const out: number[] = [];
+    for (const s of this.seats) if (s) out[s.slot] = s.character;
+    return out;
   }
 
   setLocalName(name: string): void {
@@ -244,7 +267,7 @@ export class HostLobby {
       code: this.code,
       seats: this.seats
         .filter((s): s is Seat => s !== null)
-        .map((s) => ({ slot: s.slot, token: s.token, name: s.name, isHost: s.isHost })),
+        .map((s) => ({ slot: s.slot, token: s.token, name: s.name, isHost: s.isHost, character: s.character })),
       bots: this.bots,
       aiLevel: this.aiLevel,
       track: this.track,
@@ -253,12 +276,13 @@ export class HostLobby {
 
   // ---------------------------------------------------------------------
 
-  private newSeat(slot: number, token: string, name: string, isHost: boolean): Seat {
+  private newSeat(slot: number, token: string, name: string, isHost: boolean, character?: number): Seat {
     return {
       slot,
       token,
       name,
       isHost,
+      character: cleanCharacter(character, slot),
       link: null,
       ready: false,
       controller: false,
@@ -300,7 +324,7 @@ export class HostLobby {
         this.reject(link, 'full');
         return;
       }
-      seat = this.newSeat(free, token, cleanName(msg.name, `Spieler ${free + 1}`), false);
+      seat = this.newSeat(free, token, cleanName(msg.name, `Spieler ${free + 1}`), false, msg.char);
       this.seats[free] = seat;
       isNew = true;
     } else {
@@ -346,6 +370,10 @@ export class HostLobby {
         break;
       case 'name':
         seat.name = cleanName(msg.v, seat.name);
+        this.changed();
+        break;
+      case 'char':
+        seat.character = cleanCharacter(msg.v, seat.character);
         this.changed();
         break;
       case 'status': {

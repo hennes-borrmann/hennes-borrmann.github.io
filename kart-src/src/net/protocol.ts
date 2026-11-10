@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -73,6 +73,8 @@ export interface LobbyPlayer {
   ready: boolean;
   /** Umlaufzeit Bildschirm↔Host in ms, -1 = unbekannt, 0 beim Host selbst. */
   ping: number;
+  /** Gewählte Figur (0..3). */
+  character: number;
 }
 
 export interface LobbyState {
@@ -90,8 +92,10 @@ export interface LobbyState {
 export type RejectReason = 'full' | 'running' | 'version';
 
 export type ScreenToHost =
-  | { t: 'hello'; v: number; token: string; name: string; build?: string }
+  /** char = gewünschte Figur; fehlt sie, bekommt der Platz seine Standardfigur. */
+  | { t: 'hello'; v: number; token: string; name: string; build?: string; char?: number }
   | { t: 'ready'; v: boolean }
+  | { t: 'char'; v: number }
   | { t: 'name'; v: string }
   | { t: 'status'; controller: boolean; ctrlRtt: number }
   | { t: 'leave' };
@@ -173,7 +177,7 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[] } |
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
 //        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 42 Byte]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 43 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)
@@ -191,7 +195,7 @@ export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 
-const STATE_SIZE = 42;
+const STATE_SIZE = 43;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
 const SNAP_THING_SIZE = 23;
@@ -258,6 +262,7 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 39, (s.item & 15) | ((s.nextItem & 15) << 4));
   v.setUint8(o + 40, s.roulette);
   v.setUint8(o + 41, s.flags);
+  v.setUint8(o + 42, s.char);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -283,6 +288,7 @@ function readState(v: DataView, o: number): KartState {
     nextItem: items >> 4,
     roulette: v.getUint8(o + 40),
     flags: v.getUint8(o + 41),
+    char: v.getUint8(o + 42),
   };
 }
 

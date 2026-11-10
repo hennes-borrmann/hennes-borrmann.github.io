@@ -3,10 +3,11 @@
 
 import { BOT_NAMES } from '../game/ai';
 import type { LobbyPlayer } from '../net/protocol';
-import { ITEM_NONE, MAX_PLAYERS } from '../game/sim';
+import { CHARACTERS, ITEM_NONE, MAX_PLAYERS } from '../game/sim';
 import { CODE_ALPHABET, ROOM_CODE_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { $, h, ms } from '../util/dom';
 import { TRACK_COUNT, getTrack, type Track } from '../game/track';
+import { portraitUrl } from '../render/portraits';
 import { ITEMS, ROLLING_ICON, itemSvg } from '../util/items';
 import { Minimap, trackPath } from './minimap';
 import { PLAYER_COLOR_NAMES, playerColor } from '../util/players';
@@ -28,6 +29,8 @@ export interface LobbyModel {
   aiLevel: number;
   /** Gewählte Strecke. */
   track: number;
+  /** Eigene Figur. */
+  character: number;
   quality: 'auto' | 'low' | 'medium' | 'high';
   waitingFor: string[];
   localReady: boolean;
@@ -80,6 +83,7 @@ export interface ResultRow {
   name: string;
   bot: boolean;
   me: boolean;
+  character: number;
   /** Fahrzeit in Sekunden, -1 = nicht im Ziel. */
   timeSec: number;
 }
@@ -106,6 +110,7 @@ export interface UiHandlers {
   setBots(bots: boolean): void;
   setAiLevel(level: number): void;
   setTrack(track: number): void;
+  setCharacter(character: number): void;
   setQuality(q: 'auto' | 'low' | 'medium' | 'high'): void;
   setVolumes(music: number, sfx: number): void;
   setMuted(muted: boolean): void;
@@ -144,6 +149,10 @@ export class ScreenUi {
   private lastCountdown: string | null = null;
   private shownTime = 0;
   private lastSetupJson = '';
+  private lastCharJson = '';
+  private readonly portraits = new Map<string, string>();
+  private portraitJobs: { key: string; character: number; slot: number; targets: HTMLImageElement[] }[] = [];
+  private portraitTimer = 0;
   private lastOrderJson = '';
   private readonly minimap = new Minimap($<HTMLCanvasElement>('minimap'));
   private readonly on: UiHandlers;
@@ -315,6 +324,11 @@ export class ScreenUi {
     chkBots.checked = m.bots;
     chkBots.disabled = !m.isHost;
     $('bots-note').textContent = m.isHost ? '' : 'Strecke und Gegner legt der Host fest.';
+    const charJson = JSON.stringify([m.character, m.localSlot]);
+    if (charJson !== this.lastCharJson) {
+      this.lastCharJson = charJson;
+      this.renderCharacters(m);
+    }
     const setupJson = JSON.stringify([m.track, m.aiLevel, m.bots, m.isHost]);
     if (setupJson !== this.lastSetupJson) {
       this.lastSetupJson = setupJson;
@@ -508,14 +522,13 @@ export class ScreenUi {
     const list = $('results-list');
     list.replaceChildren();
     for (const r of rows) {
-      const chip = h('span', { class: 'chip', text: String(r.slot + 1) });
-      chip.style.setProperty('--c', playerColor(r.slot));
+      const face = this.face(r.character, r.slot, 'result-face', false);
       list.append(
         h(
           'li',
           { class: `result${r.me ? ' result-me' : ''}` },
           h('span', { class: 'result-place', text: `${r.place}.` }),
-          chip,
+          face,
           h('span', { class: 'result-name' }, r.name, r.bot ? h('span', { class: 'tag', text: 'KI' }) : null, r.me ? h('span', { class: 'you', text: 'du' }) : null),
           h('span', { class: 'result-time', text: r.timeSec >= 0 ? formatTime(r.timeSec) : 'nicht im Ziel' }),
         ),
@@ -561,7 +574,12 @@ export class ScreenUi {
             'li',
             { class: `player player-empty${m.bots ? ' player-bot' : ''}` },
             chip,
-            h('span', { class: 'player-name', text: m.bots ? BOT_NAMES[slot] : 'frei' }),
+            h(
+              'span',
+              { class: 'player-name' },
+              m.bots ? this.face(slot, slot, 'player-face') : null,
+              h('span', { class: 'player-id' }, h('span', { class: 'player-id-name', text: m.bots ? BOT_NAMES[slot] : 'frei' })),
+            ),
             m.bots ? h('span', { class: 'player-tags' }, h('span', { class: 'tag', text: 'KI' })) : null,
           ),
         );
@@ -571,9 +589,13 @@ export class ScreenUi {
       const name = h(
         'span',
         { class: 'player-name' },
-        p.name,
-        me ? h('span', { class: 'you', text: 'du' }) : null,
-        h('span', { class: 'player-fig', text: `fährt ${BOT_NAMES[slot]}` }),
+        this.face(p.character, slot, 'player-face'),
+        h(
+          'span',
+          { class: 'player-id' },
+          h('span', { class: 'player-id-name' }, p.name, me ? h('span', { class: 'you', text: 'du' }) : null),
+          h('span', { class: 'player-fig', text: `fährt ${CHARACTERS[p.character]?.name ?? ''}` }),
+        ),
       );
       const tags = h('span', { class: 'player-tags' });
       if (p.isHost) tags.append(h('span', { class: 'tag tag-host', text: 'Host' }));
@@ -597,10 +619,98 @@ export class ScreenUi {
         h('span', { class: 'stat-label', text: 'Ping' }),
         p.isHost ? 'Host' : p.online ? ms(p.ping) : '–',
       );
-      const row = h('li', { class: `player${me ? ' player-me' : ''}${p.online ? '' : ' player-off'}` }, chip, name, tags, controller, ready, ping);
+      const row = h(
+        'li',
+        { class: `player${me ? ' player-me' : ''}${p.online ? '' : ' player-off'}` },
+        chip,
+        name,
+        tags,
+        controller,
+        ready,
+        ping,
+      );
       row.title = `Platz ${slot + 1} · ${PLAYER_COLOR_NAMES[slot]}`;
       list.append(row);
     }
+  }
+
+  /**
+   * Bild einer Figur in der Farbe eines Platzes. Die Bilder entstehen aus den
+   * 3D-Modellen – eins nach dem anderen im Hintergrund, damit die Lobby dabei
+   * bedienbar bleibt. Bis ein Bild fertig ist, steht dort ein farbiger Kreis.
+   * @param render false = nur bereits fertige Bilder verwenden (im Rennen wird nichts nachgerendert)
+   */
+  private face(character: number, slot: number, cls: string, render = true): HTMLImageElement {
+    const img = h('img', { class: cls, alt: '' });
+    img.style.setProperty('--c', playerColor(slot));
+    const key = `${character}:${slot}`;
+    const ready = this.portraits.get(key);
+    if (ready) img.src = ready;
+    else {
+      img.dataset.empty = 'true';
+      if (render) {
+        let job = this.portraitJobs.find((j) => j.key === key);
+        if (!job) this.portraitJobs.push((job = { key, character, slot, targets: [] }));
+        job.targets.push(img);
+        this.pumpPortraits();
+      }
+    }
+    return img;
+  }
+
+  private pumpPortraits(): void {
+    if (this.portraitTimer !== 0 || this.portraitJobs.length === 0) return;
+    this.portraitTimer = window.setTimeout(() => {
+      this.portraitTimer = 0;
+      const job = this.portraitJobs.shift();
+      if (!job) return;
+      const url = portraitUrl(job.character, job.slot, 192);
+      if (url) {
+        this.portraits.set(job.key, url);
+        for (const img of job.targets) {
+          img.src = url;
+          delete img.dataset.empty;
+        }
+      }
+      this.pumpPortraits();
+    }, 30);
+  }
+
+  /** Vor dem Rennen: noch ausstehende Bilder verwerfen – der Grafikkontext gehört jetzt dem Rennen. */
+  cancelPortraits(): void {
+    window.clearTimeout(this.portraitTimer);
+    this.portraitTimer = 0;
+    this.portraitJobs = [];
+  }
+
+  /** Figurenwahl: vier Karten mit Bild und Fahrwerten. */
+  private renderCharacters(m: LobbyModel): void {
+    const list = $('char-list');
+    list.replaceChildren();
+    const labels = ['Tempo', 'Antritt', 'Kurven'];
+    CHARACTERS.forEach((c, i) => {
+      const bars = h('span', { class: 'char-bars' });
+      c.bars.forEach((value, k) => {
+        const pips = h('span', { class: 'pips' });
+        for (let n = 1; n <= 5; n++) pips.append(h('i', { class: n <= value ? 'on' : '' }));
+        bars.append(h('span', { class: 'char-bar' }, h('span', { text: labels[k] }), pips));
+      });
+      const card = h(
+        'button',
+        { class: 'char-card', type: 'button' },
+        this.face(i, Math.max(0, m.localSlot), 'char-face'),
+        h('span', { class: 'char-name', text: c.name }),
+        bars,
+      ) as HTMLButtonElement;
+      card.dataset.on = String(i === m.character);
+      card.setAttribute('aria-pressed', String(i === m.character));
+      card.addEventListener('click', () => {
+        this.on.click('click');
+        this.on.setCharacter(i);
+      });
+      list.append(card);
+    });
+    $('char-trait').textContent = CHARACTERS[m.character]?.trait ?? '';
   }
 
   /** Streckenkarten und KI-Stärke in der Lobby. */

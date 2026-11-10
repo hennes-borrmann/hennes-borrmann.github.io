@@ -407,14 +407,17 @@ async function main() {
     await kart(host.page, 'debugHit(1)');
     // Die Anzeige folgt mit dem nächsten gezeichneten Bild; mehrmals nachsehen.
     const spinSeen = [0, 0];
-    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0); i++) {
+    let hitFlash = false;
+    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0 && hitFlash); i++) {
       await sleep(100);
+      // Das Handy zeigt immer nur das jüngste Zeichen – gleich mit nachsehen, bevor ein anderes folgt.
+      if ((await ctl(phoneB.page, 'lastFlash()')) === 'bad') hitFlash = true;
       const [eh, ec] = await Promise.all([kart(host.page, 'entities()'), kart(client.page, 'entities()')]);
       spinSeen[0] = Math.max(spinSeen[0], eh.find((e) => e.slot === 1).spin);
       spinSeen[1] = Math.max(spinSeen[1], ec.find((e) => e.slot === 1).spin);
     }
     check('Treffer: Ben schleudert beim Host und auf seinem eigenen Bildschirm', spinSeen[0] > 0 && spinSeen[1] > 0, `${spinSeen[0]} / ${spinSeen[1]} Ticks`);
-    check('… und sein Handy meldet den Treffer', (await ctl(phoneB.page, 'lastFlash()')) === 'bad');
+    check('… und sein Handy meldet den Treffer', hitFlash || (await ctl(phoneB.page, 'lastFlash()')) === 'bad');
 
     // Anhalten: danach müssen beide Bildschirme exakt dasselbe zeigen.
     await sleep(3500);
@@ -713,6 +716,20 @@ async function main() {
     await h6.page.locator('#ai-level button[data-level="2"]').click();
     await c6.page.waitForFunction(() => window.__kart.lobby().track === 1 && window.__kart.lobby().aiLevel === 2, null, { timeout: 5000 });
     check('Wahl des Hosts kommt beim Mitspieler an', (await c6.page.locator('.track-card[data-on="true"] .track-name').textContent()) === 'Möwenklippe' && (await c6.page.locator('#ai-level button[aria-pressed="true"]').textContent()) === 'Schwer');
+    // Figurenwahl: jeder wählt selbst, dieselbe Figur darf doppelt vorkommen
+    // Die Bilder der Figuren entstehen nacheinander im Hintergrund.
+    const drawn = await h6.page.waitForFunction(() => [...document.querySelectorAll('.char-card img.char-face')].filter((i) => i.src.startsWith('data:image/png')).length === 4, null, { timeout: 15000 }).then(() => true, () => false);
+    check('Vier Figuren stehen zur Wahl, mit Bild und Fahrwerten', (await h6.page.locator('.char-card').count()) === 4 && drawn && (await h6.page.locator('.char-card .pips i.on').count()) > 8);
+    const before6 = await kart(h6.page, 'lobby()');
+    check('Ohne Wahl fährt jeder die Figur seines Platzes', before6.players.every((p) => p.character === p.slot), before6.players.map((p) => p.character).join(', '));
+    await h6.page.locator('.char-card').nth(3).click();
+    await c6.page.locator('.char-card').nth(3).click();
+    await c6.page.waitForFunction(() => window.__kart.lobby().players.every((p) => p.character === 3), null, { timeout: 5000 });
+    await h6.page.waitForFunction(() => window.__kart.lobby().players.every((p) => p.character === 3), null, { timeout: 5000 });
+    check('Beide wählen dieselbe Figur – auf beiden Bildschirmen sichtbar', (await h6.page.locator('.char-card[data-on="true"] .char-name').textContent()) === 'Zünd-Zoe' && (await c6.page.locator('.player .player-fig').first().textContent()).includes('Zünd-Zoe'));
+    await c6.page.locator('.char-card').nth(1).click();
+    await h6.page.waitForFunction(() => window.__kart.lobby().players.find((p) => !p.isHost).character === 1, null, { timeout: 5000 });
+    check('Ben wechselt zur Füchsin – der Host sieht es', true);
     await shot(h6.page, 'lobby-phase3.png');
     await c6.page.click('#btn-ready');
     await h6.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
@@ -722,6 +739,8 @@ async function main() {
     await c6.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 20000 });
     const [trH, trC] = await Promise.all([kart(h6.page, 'track()'), kart(c6.page, 'track()')]);
     check('Beide fahren auf der gewählten Strecke', trH.index === 1 && trC.index === 1, `${trH.name} / ${trC.name}, ${trH.length.toFixed(0)} m`);
+    const [charsH, charsC] = await Promise.all([h6, c6].map(async (s) => (await kart(s.page, 'entities()')).sort((a, b) => a.slot - b.slot).map((e) => e.char)));
+    check('Im Rennen fahren alle ihre gewählte Figur, die KI die ihres Platzes', JSON.stringify(charsH) === '[3,1,2,3]' && JSON.stringify(charsC) === '[3,1,2,3]', `Host ${charsH.join('')} / Ben ${charsC.join('')}`);
 
     // Sprung: Anna (Host, Tastatur) nimmt Anlauf auf die Schanze
     await kart(h6.page, `place(0, ${trH.gapAt - 45}, 0)`);

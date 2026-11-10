@@ -90,6 +90,7 @@ export interface KartAudio {
 
 interface KartView {
   slot: number;
+  char: number;
   visual: KartVisual;
   label: THREE.Sprite | null;
   pose: KartPose;
@@ -344,15 +345,23 @@ export class RaceScene {
     this.sparks.setViewport(h * ratio, this.camera.fov);
   }
 
-  private kartView(slot: number): KartView {
+  private kartView(slot: number, char: number): KartView {
     let k = this.karts.get(slot);
-    if (k) return k;
-    const visual = new KartVisual(slot, LEVELS[this.level].kart);
+    if (k && k.char === char) return k;
+    if (k) {
+      // Andere Figur gewählt als im letzten Rennen: Kart neu bauen.
+      this.scene.remove(k.visual.root);
+      if (k.label) this.scene.remove(k.label);
+      k.visual.dispose();
+      this.karts.delete(slot);
+    }
+    const visual = new KartVisual(char, LEVELS[this.level].kart, slot);
     visual.root.rotation.order = 'YXZ';
     this.scene.add(visual.root);
     this.needsCompile = true;
     k = {
       slot,
+      char,
       visual,
       label: null,
       pose: { speed: 0, steer: 0, driftDir: 0, driftStage: 0, boost: false, air: false, spin: 0, guard: false, stall: false, offroad: false, emote: 'none' },
@@ -412,7 +421,7 @@ export class RaceScene {
   private detect(k: KartView, e: RenderEntity, local: boolean, dt: number): void {
     const air = (e.flags & FLAG_AIR) !== 0;
     const wasAir = (k.flags & FLAG_AIR) !== 0;
-    const stage = e.driftDir !== 0 ? turboStage(e.driftCharge) : 0;
+    const stage = e.driftDir !== 0 ? turboStage(e.driftCharge, e.char) : 0;
     if (!k.fresh) {
       if (e.spin > 0 && k.spin === 0) {
         this.pop('KRACH!', e, 'hot', 4.2);
@@ -550,7 +559,7 @@ export class RaceScene {
 
     for (const e of entities) {
       const local = e.slot === localSlot;
-      const k = this.kartView(e.slot);
+      const k = this.kartView(e.slot, e.char);
       k.seen = true;
       const speed = Math.hypot(e.vx, e.vz);
       const fx = Math.sin(e.heading);
@@ -594,7 +603,7 @@ export class RaceScene {
       pose.speed = vf;
       pose.steer = k.steer;
       pose.driftDir = e.driftDir;
-      pose.driftStage = e.driftDir !== 0 ? turboStage(e.driftCharge) : 0;
+      pose.driftStage = e.driftDir !== 0 ? turboStage(e.driftCharge, e.char) : 0;
       pose.boost = e.boost > 0;
       pose.air = air;
       pose.spin = e.spin > 0 ? 1 - e.spin / SPIN_TICKS : 0;

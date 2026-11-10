@@ -47,6 +47,7 @@ import {
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
+  CHARACTERS,
   KART_RADIUS,
   MAX_PLAYERS,
   NEUTRAL,
@@ -178,6 +179,8 @@ export class HostGame implements GameView {
   private readonly env: StepEnv = { canDrive: false, speedFactor: 1 };
   private readonly boxTimers: Uint16Array;
   private thingList: Thing[] = [];
+  /** Gewählte Figur je Platz; fehlt ein Eintrag (KI), gilt die Standardfigur des Platzes. */
+  private chars: number[] = [];
   private readonly botCtx: BotContext = { tick: 0, place: 1, smoke: false };
   private nextId = 1;
   private firstFinishTick = -1;
@@ -198,7 +201,8 @@ export class HostGame implements GameView {
    * Gleicht die Karts mit der Spielerliste ab: Menschen auf ihren Plätzen,
    * auf den freien Plätzen KI-Gegner (falls gewünscht).
    */
-  setRoster(humans: number[], bots: boolean): void {
+  setRoster(humans: number[], bots: boolean, chars: number[] = []): void {
+    this.chars = chars;
     const wanted = new Map<number, boolean>();
     for (let slot = 0; slot < MAX_PLAYERS; slot++) {
       if (humans.includes(slot)) wanted.set(slot, false);
@@ -206,6 +210,7 @@ export class HostGame implements GameView {
     }
     for (const [slot, isBot] of wanted) {
       const existing = this.karts.get(slot);
+      if (existing && !isBot) existing.state.char = this.charOf(slot, false);
       if (existing && existing.bot === isBot) continue;
       if (existing && isBot) {
         // Ein Mensch hat das Rennen verlassen: die KI fährt sein Kart von dort weiter.
@@ -232,7 +237,7 @@ export class HostGame implements GameView {
     this.thingList = [];
     this.boxTimers.fill(0);
     for (const k of this.karts.values()) {
-      copyState(k.state, gridState(k.slot));
+      copyState(k.state, gridState(k.slot, this.charOf(k.slot, k.bot)));
       copyState(k.prev, k.state);
       k.progress = segDelta(TRACK, 0, k.state.seg);
       k.lap = 1;
@@ -482,8 +487,14 @@ export class HostGame implements GameView {
 
   // -----------------------------------------------------------------------
 
+  /** Figur eines Platzes: Menschen fahren ihre Wahl, KI-Gegner die Figur ihres Platzes. */
+  private charOf(slot: number, bot: boolean): number {
+    const c = bot ? undefined : this.chars[slot];
+    return c === undefined || c < 0 ? slot % CHARACTERS.length : c % CHARACTERS.length;
+  }
+
   private createKart(slot: number, bot: boolean): HostKart {
-    const state = gridState(slot);
+    const state = gridState(slot, this.charOf(slot, bot));
     return {
       slot,
       local: slot === this.localSlot && !bot,
@@ -827,11 +838,14 @@ export class HostGame implements GameView {
         b.state.z += nz * push;
         const rel = (b.state.vx - a.state.vx) * nx + (b.state.vz - a.state.vz) * nz;
         if (rel < 0) {
-          const impulse = (-(1 + 0.45) * rel) / 2;
-          a.state.vx -= impulse * nx;
-          a.state.vz -= impulse * nz;
-          b.state.vx += impulse * nx;
-          b.state.vz += impulse * nz;
+          // Schwere Figuren werden weniger weggeschoben als leichte.
+          const ma = (CHARACTERS[a.state.char] ?? CHARACTERS[0]).mass;
+          const mb = (CHARACTERS[b.state.char] ?? CHARACTERS[0]).mass;
+          const impulse = (-(1 + 0.45) * rel) / (1 / ma + 1 / mb);
+          a.state.vx -= (impulse / ma) * nx;
+          a.state.vz -= (impulse / ma) * nz;
+          b.state.vx += (impulse / mb) * nx;
+          b.state.vz += (impulse / mb) * nz;
           if (rel < -2.5) {
             for (const k of [a, b]) {
               if (k.bumpCooldown === 0) {

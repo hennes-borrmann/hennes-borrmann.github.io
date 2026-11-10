@@ -12,6 +12,7 @@ import {
   BTN_DRIFT,
   BTN_GAS,
   BTN_ITEM,
+  CHARACTERS,
   FLAG_AIR,
   ITEM_BOOST,
   ITEM_EMP,
@@ -122,7 +123,7 @@ function wrapAngle(a: number): number {
 
 // Dieselben Grenzwerte wie in sim.ts (dort nicht exportiert, weil nur die KI sie zum Planen braucht).
 const R_MIN = 4.5;
-const A_LAT = 31;
+const BASE_A_LAT = 31;
 const DRIFT_WIDE = 0.55;
 const DRIFT_TIGHT = 1.55;
 
@@ -171,6 +172,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const vf = forwardSpeed(s);
   const v = Math.abs(vf);
   const air = (s.flags & FLAG_AIR) !== 0;
+  // Jede Figur hält in Kurven etwas anders – die KI plant mit den Werten ihrer eigenen.
+  const A_LAT = BASE_A_LAT * (CHARACTERS[s.char] ?? CHARACTERS[0]).grip;
 
   // --- Was liegt voraus? ---
   const near = curvatureAhead(s.seg, 0, 14);

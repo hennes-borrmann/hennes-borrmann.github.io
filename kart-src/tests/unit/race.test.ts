@@ -29,6 +29,8 @@ describe('Rennen auf dem Host', () => {
     let lastTireCount = 0;
     let lastOilCount = 0;
     let moved = false;
+    // Alles, was im Lauf des Rennens auf der Strecke lag oder flog (Reifen, Öl, Kreisel, Rauch).
+    const seen = new Set<string>();
     for (let i = 0; i < 60 * 200 && host.phase !== RACE_RESULTS; i++) {
       host.step(NEUTRAL);
       if (host.phase === RACE_COUNTDOWN) {
@@ -41,6 +43,7 @@ describe('Rennen auf dem Host', () => {
       lastTireCount = t;
       lastOilCount = o;
       maxTires = Math.max(maxTires, t);
+      for (const th of host.things()) seen.add(`${th.kind}:${th.id}`);
     }
     const st = host.standings();
     console.log(
@@ -51,8 +54,8 @@ describe('Rennen auf dem Host', () => {
     expect(st.map((s) => s.place)).toEqual([1, 2, 3, 4]);
     expect(st.every((s) => s.finished)).toBe(true);
     for (let i = 1; i < st.length; i++) expect(st[i].finishTicks).toBeGreaterThanOrEqual(st[i - 1].finishTicks);
-    // Items wurden eingesammelt und benutzt.
-    expect(tires + oils).toBeGreaterThan(2);
+    // Items wurden eingesammelt und benutzt. Welche, ist ausgelost – gezählt wird deshalb jede Art.
+    expect(seen.size).toBeGreaterThan(2);
   });
 
   it('Items wirken: Schub, Rollreifen trifft, Ölfleck trifft', () => {

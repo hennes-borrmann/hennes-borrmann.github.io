@@ -2,7 +2,7 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 3.** Vier Strecken mit Höhen, Sprüngen und Abgründen, acht Items, vier Figuren, KI-Gegner in drei Stärken, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+**Stand: Phase 3 mit Ausbau Schritt 1.** Vier Strecken mit Höhen, Sprüngen und Abgründen, acht Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
 
 Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
@@ -50,6 +50,19 @@ Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wie
 | **Sprungfeder** | Hüpfer aus der Fahrt: über Öl, Reifen und Hindernisse hinweg |
 
 Wer vorn liegt, bekommt eher Abwehr (Öl, Nebel, Stoßfänger); wer hinten liegt, eher Schub, Brummkreisel und Kurzschluss.
+
+### Figuren
+
+Jeder Spieler wählt in der Lobby eine von vier Figuren; dieselbe Figur darf mehrfach vorkommen. Die Lackfarbe des Karts bleibt am Spielerplatz (rot, türkis, gelb, violett), damit man gleiche Figuren unterscheiden kann.
+
+| Figur | Stärke | Preis dafür |
+| --- | --- | --- |
+| **Kolben-Kalle** | rund 1 % mehr Höchsttempo | 12 % weniger Beschleunigung, etwas weniger Halt in Kurven |
+| **Vera Vergaser** | 14 % mehr Beschleunigung – nach Kurven, Treffern und Stürzen schneller wieder da | minimal weniger Höchsttempo, leicht (wird bei Remplern weiter geschoben) |
+| **Bremsen-Bert** | verliert neben der Fahrbahn deutlich weniger Tempo, schwer (wird kaum weggeschoben) | keine besondere Stärke beim reinen Fahren |
+| **Zünd-Zoe** | 5 % mehr Halt in schnellen Kurven, Mini-Turbo lädt 8 % schneller | knapp 1 % weniger Höchsttempo |
+
+Abgeglichen wird per Simulation (`tests/unit/characters.test.ts`): dieselbe KI fährt mit jeder Figur jede Strecke, einmal mit und einmal ohne Drift. Die besten Runden liegen je Strecke höchstens rund 1 % auseinander, im Mittel über alle Strecken unter 0,5 %. Ob es sich für Menschen fair anfühlt, kann nur ein Test mit Menschen zeigen.
 
 ### KI-Gegner
 

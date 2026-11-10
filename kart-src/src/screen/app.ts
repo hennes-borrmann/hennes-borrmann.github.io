@@ -37,6 +37,7 @@ import {
   type Phase,
 } from '../net/protocol';
 import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../render/debugOverlay';
+import { disposePortraits } from '../render/portraits';
 import { RaceScene, type KartAudio, type Quality } from '../render/raceScene';
 import { $, ms } from '../util/dom';
 import { keepAwake, wakeLockMode } from '../util/wakeLock';
@@ -80,6 +81,15 @@ const EMPTY_HUD = {
 const HOST_ONLY_FX = new Set<FxKind>(['hit', 'bump', 'pickup', 'finish', 'block', 'stall', 'lap', 'finallap']);
 
 type Role = 'none' | 'host' | 'client';
+
+function loadCharacter(): number {
+  try {
+    const v = Number(localStorage.getItem('kart.char') ?? '-1');
+    return Number.isInteger(v) && v >= 0 && v < 4 ? v : -1;
+  } catch {
+    return -1;
+  }
+}
 
 function loadFlag(key: string): boolean {
   try {
@@ -169,6 +179,8 @@ export class App {
   private joinStartedAt = 0;
   private lastSaveJson = '';
   private quality: Quality = loadQuality();
+  /** Zuletzt gewählte Figur, -1 = noch keine Wahl (dann gilt die Standardfigur des Platzes). */
+  private character = loadCharacter();
   private showFps = loadFlag('kart.fps');
   private readonly sound: Sound;
   private readonly kartAudio: KartAudio[] = [];
@@ -219,12 +231,22 @@ export class App {
       },
       again: () => {
         if (!this.hostGame || !this.hostLobby) return;
-        this.hostGame.setRoster(this.hostLobby.slots(), this.hostLobby.bots);
+        this.hostGame.setRoster(this.hostLobby.slots(), this.hostLobby.bots, this.hostLobby.characters());
         this.hostGame.newRace();
       },
       setBots: (bots) => this.hostLobby?.setBots(bots),
       setAiLevel: (level) => this.hostLobby?.setAiLevel(level),
       setTrack: (track) => this.hostLobby?.setTrack(Math.max(0, Math.min(TRACK_COUNT - 1, track))),
+      setCharacter: (character) => {
+        this.character = character;
+        try {
+          localStorage.setItem('kart.char', String(character));
+        } catch {
+          /* gilt dann nur für diese Sitzung */
+        }
+        this.hostLobby?.setLocalCharacter(character);
+        this.clientLobby?.setCharacter(character);
+      },
       setQuality: (q) => this.setQuality(q),
       leave: () => this.leave(),
       backToLobby: () => {
@@ -404,6 +426,7 @@ export class App {
       if (this.debug.ai >= 0) lobby.aiLevel = this.debug.ai;
     }
     lobby.track = Math.min(TRACK_COUNT - 1, lobby.track);
+    if (!saved && this.character >= 0) lobby.setLocalCharacter(this.character);
     this.hostLobby = lobby;
 
     ep.onIncoming = (link) => {
@@ -424,7 +447,7 @@ export class App {
       this.persistHost();
       this.refresh();
     };
-    lobby.onSeatsChanged = () => this.hostGame?.setRoster(lobby.slots(), lobby.bots);
+    lobby.onSeatsChanged = () => this.hostGame?.setRoster(lobby.slots(), lobby.bots, lobby.characters());
     lobby.onPlayerLink = (slot) => {
       this.hostGame?.resetInput(slot);
       this.hostGame?.setOnline(slot, true);
@@ -469,7 +492,7 @@ export class App {
     this.ui.setHomeMessage(resumeToken ? `Kehre in Lobby ${code} zurück …` : `Verbinde mit Lobby ${code} …`);
     this.ui.show('home');
 
-    const lobby = new ClientLobby(() => this.screenEp, code, this.playerToken, name || 'Spieler', resumeToken !== null);
+    const lobby = new ClientLobby(() => this.screenEp, code, this.playerToken, name || 'Spieler', resumeToken !== null, this.character);
     this.clientLobby = lobby;
     lobby.onFast = (view) => {
       if (!this.clientGame || view.getUint8(0) !== PKT_SNAPSHOT) return;
@@ -621,6 +644,7 @@ export class App {
       bots: state.bots,
       aiLevel: state.aiLevel,
       track: state.track,
+      character: me?.character ?? Math.max(0, slot),
       quality: this.quality,
       waitingFor: state.players.filter((p) => !p.isHost && p.online && !p.ready).map((p) => p.name),
       localReady: me?.ready ?? false,
@@ -670,12 +694,12 @@ export class App {
   }
 
   /** Alle Fahrer mit Namen: Menschen aus der Lobby, auf freien Plätzen die KI. */
-  private drivers(state: LobbyState): { slot: number; name: string; bot: boolean }[] {
-    const list: { slot: number; name: string; bot: boolean }[] = [];
+  private drivers(state: LobbyState): { slot: number; name: string; bot: boolean; character: number }[] {
+    const list: { slot: number; name: string; bot: boolean; character: number }[] = [];
     for (let slot = 0; slot < BOT_NAMES.length; slot++) {
       const p = state.players.find((x) => x.slot === slot);
-      if (p) list.push({ slot, name: p.name, bot: false });
-      else if (state.bots) list.push({ slot, name: BOT_NAMES[slot], bot: true });
+      if (p) list.push({ slot, name: p.name, bot: false, character: p.character });
+      else if (state.bots) list.push({ slot, name: BOT_NAMES[slot], bot: true, character: slot });
     }
     return list;
   }
@@ -685,6 +709,9 @@ export class App {
     if (!state) return;
     this.ui.show('game');
     setTrack(state.track);
+    // Der Porträt-Renderer der Lobby gibt seinen Grafikkontext frei, bevor das Rennen einen braucht.
+    this.ui.cancelPortraits();
+    disposePortraits();
     if (!this.scene) {
       try {
         this.scene = new RaceScene($<HTMLCanvasElement>('stage'), this.quality);
@@ -712,7 +739,7 @@ export class App {
       const lobby = this.hostLobby;
       const game = new HostGame(lobby.localSlot, { laps: this.debug.laps || undefined, aiLevel: lobby.aiLevel });
       this.hostGame = game;
-      game.setRoster(lobby.slots(), lobby.bots);
+      game.setRoster(lobby.slots(), lobby.bots, lobby.characters());
       for (const p of lobby.state().players) if (!p.isHost) game.setOnline(p.slot, p.online);
       game.onFx = (slot, kind) => {
         if (slot === lobby.localSlot) this.localFx(kind);
@@ -903,6 +930,7 @@ export class App {
         name: names.get(st.slot)?.name ?? `Fahrer ${st.slot + 1}`,
         bot: st.bot,
         me: st.slot === view.localSlot,
+        character: names.get(st.slot)?.character ?? st.slot,
         timeSec: st.finished ? st.finishTicks / TICK_RATE : -1,
       }));
       this.ui.showResults(rows, this.role === 'host', TRACK.def.name);
