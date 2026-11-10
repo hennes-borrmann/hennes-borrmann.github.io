@@ -1,0 +1,23 @@
+# Vorlage ohne Zugangsdaten. Veröffentlichung erfolgt durch den Repository-Besitzer.
+name = "schraeglage-turn"
+main = "src/index.js"
+compatibility_date = "2026-11-10"
+workers_dev = true
+
+[vars]
+# 30 Minuten ab Ausstellung; diese Vorlage erlaubt 60 bis 3600 Sekunden.
+TURN_TTL_SECONDS = "1800"
+
+# Mit `wrangler secret put` anlegen, NICHT unter [vars] eintragen:
+# TURN_KEY_ID
+# TURN_KEY_API_TOKEN
+
+# Wrangler ab 4.36.0. Die Nummer ist eine selbst gewählte Kennung, kein Secret.
+# Im eigenen Cloudflare-Konto eine noch nicht verwendete positive Nummer wählen.
+[[ratelimits]]
+name = "TURN_LIMITER"
+namespace_id = "1001"
+
+[ratelimits.simple]
+limit = 20
+period = 60
