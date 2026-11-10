@@ -58,6 +58,7 @@ describe('Protokoll', () => {
     s.guard = 700;
     s.stall = 99;
     s.respawn = 12;
+    s.char = 3;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -88,6 +89,7 @@ describe('Protokoll', () => {
     expect([k.state.seg, k.state.boost, k.state.driftDir, k.state.driftCharge]).toEqual([s.seg, 42, -1, 130]);
     expect([k.state.item, k.state.nextItem, k.state.roulette]).toEqual([ITEM_OIL, 2, 9]);
     expect(snap.track).toBe(2);
+    expect(k.state.char).toBe(3);
     expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([s.y, 4.5, 700, 99, 12]);
     expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0 });
     expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0 });

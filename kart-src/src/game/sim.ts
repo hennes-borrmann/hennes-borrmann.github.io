@@ -115,6 +115,8 @@ export interface KartState {
   /** Verbleibende Ticks der Auslosung. */
   roulette: number;
   flags: number;
+  /** Gewählte Figur (Index in CHARACTERS) – bestimmt die Fahrwerte. */
+  char: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -194,6 +196,79 @@ const STALL_FACTOR = 0.55;
 
 export const NEUTRAL: Cmd = { steer: 0, buttons: 0 };
 
+// --- Figuren -------------------------------------------------------------------
+// Die vier Figuren fahren fast gleich – jede hat eine kleine Stärke und zahlt
+// dafür an anderer Stelle. Die Faktoren sind so abgestimmt, dass die
+// Rundenzeiten auf allen Strecken dicht beieinander liegen (siehe
+// tests/unit/characters.test.ts).
+
+export interface Character {
+  name: string;
+  /** Ein Satz für die Figurenwahl. */
+  trait: string;
+  /** Anzeige 1..5: Tempo, Beschleunigung, Kurvenlage. */
+  bars: [number, number, number];
+  /** Faktor auf die Höchstgeschwindigkeit (ohne Schub). */
+  vmax: number;
+  /** Faktor auf die Beschleunigung. */
+  accel: number;
+  /** Faktor auf den Halt in schnellen Kurven. */
+  grip: number;
+  /** Anteil der Höchstgeschwindigkeit neben der Fahrbahn. */
+  offroad: number;
+  /** Faktor auf die Ladung, die ein Mini-Turbo braucht (kleiner = lädt schneller). */
+  charge: number;
+  /** Gewicht bei Remplern: Schwere werden weniger weggeschoben. */
+  mass: number;
+}
+
+export const CHARACTERS: Character[] = [
+  {
+    name: 'Kolben-Kalle',
+    trait: 'Schnell auf der Geraden, braucht etwas länger auf Touren.',
+    bars: [5, 2, 3],
+    vmax: 1.01,
+    accel: 0.88,
+    grip: 0.985,
+    offroad: OFFROAD_FACTOR,
+    charge: 1,
+    mass: 1.15,
+  },
+  {
+    name: 'Vera Vergaser',
+    trait: 'Kommt am schnellsten wieder in Fahrt – nach Kurven, Treffern und Stürzen.',
+    bars: [3, 5, 3],
+    vmax: 0.998,
+    accel: 1.14,
+    grip: 1,
+    offroad: OFFROAD_FACTOR,
+    charge: 1,
+    mass: 0.9,
+  },
+  {
+    name: 'Bremsen-Bert',
+    trait: 'Ausgeglichen und unerschütterlich: verliert wenig im Grünen und bei Remplern.',
+    bars: [3, 3, 3],
+    vmax: 0.999,
+    accel: 1,
+    grip: 1,
+    offroad: 0.7,
+    charge: 1,
+    mass: 1.4,
+  },
+  {
+    name: 'Zünd-Zoe',
+    trait: 'Klebt in Kurven, und der Drift lädt schneller.',
+    bars: [2, 3, 5],
+    vmax: 0.993,
+    accel: 1,
+    grip: 1.05,
+    offroad: OFFROAD_FACTOR,
+    charge: 0.92,
+    mass: 0.95,
+  },
+];
+
 export function newState(): KartState {
   return {
     x: 0,
@@ -216,6 +291,7 @@ export function newState(): KartState {
     nextItem: ITEM_NONE,
     roulette: 0,
     flags: 0,
+    char: 0,
   };
 }
 
@@ -240,13 +316,15 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.nextItem = src.nextItem;
   dst.roulette = src.roulette;
   dst.flags = src.flags;
+  dst.char = src.char;
   return dst;
 }
 
 /** Zustand am Startplatz. */
-export function gridState(slot: number): KartState {
+export function gridState(slot: number, char = slot): KartState {
   const g = gridPosition(TRACK, slot);
   const s = newState();
+  s.char = ((char % CHARACTERS.length) + CHARACTERS.length) % CHARACTERS.length;
   s.x = g.x;
   s.y = g.y;
   s.z = g.z;
@@ -256,10 +334,11 @@ export function gridState(slot: number): KartState {
 }
 
 /** Stufe des Mini-Turbos für eine Ladung: 0 (noch nichts) bis 3. */
-export function turboStage(charge: number): number {
-  if (charge >= TURBO_AT[2]) return 3;
-  if (charge >= TURBO_AT[1]) return 2;
-  if (charge >= TURBO_AT[0]) return 1;
+export function turboStage(charge: number, char = 0): number {
+  const k = (CHARACTERS[char] ?? CHARACTERS[0]).charge;
+  if (charge >= TURBO_AT[2] * k) return 3;
+  if (charge >= TURBO_AT[1] * k) return 2;
+  if (charge >= TURBO_AT[0] * k) return 1;
   return 0;
 }
 
@@ -354,6 +433,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const brake = drive && (cmd.buttons & BTN_BRAKE) !== 0;
   const driftBtn = drive && (cmd.buttons & BTN_DRIFT) !== 0;
   const wasOffroad = (s.flags & FLAG_OFFROAD) !== 0;
+  const ch = CHARACTERS[s.char] ?? CHARACTERS[0];
 
   // Boden an der alten Stelle: Bezug für Steigung und für Stufen.
   const x0 = s.x;
@@ -372,7 +452,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.driftDir !== 0) {
     if (!driftBtn || vf < DRIFT_MIN_SPEED * 0.6) {
       // Nur wer die Taste loslässt, bekommt den Mini-Turbo. Wer zu langsam wird, verliert ihn.
-      const stage = turboStage(s.driftCharge);
+      const stage = turboStage(s.driftCharge, s.char);
       if (drive && !driftBtn && stage > 0) {
         s.boost = Math.max(s.boost, TURBO_TICKS[stage - 1]);
         ev |= EV_TURBO;
@@ -389,7 +469,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Lenken ---
   // Langsam: fester kleinster Wendekreis. Schnell: begrenzt durch die Haftung.
   const v = Math.abs(vf);
-  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, A_LAT / v)) * (wasAir ? AIR_STEER : 1);
+  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * ch.grip) / v)) * (wasAir ? AIR_STEER : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
@@ -420,9 +500,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
     // --- Beschleunigen und Bremsen ---
     const boosting = s.boost > 0;
-    let vmax = V_MAX * env.speedFactor;
+    let vmax = V_MAX * env.speedFactor * ch.vmax;
     if (boosting) vmax = V_BOOST * env.speedFactor;
-    else if (wasOffroad) vmax *= OFFROAD_FACTOR;
+    else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
     // Steigung in Fahrtrichtung: s.vy ist am Boden die Geschwindigkeit, mit der das Kart dem Hang folgt.
     const slope = Math.max(-0.3, Math.min(0.3, s.vy / Math.max(6, v)));
@@ -441,7 +521,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
-      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
       if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
@@ -522,13 +602,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.vy -= GRAVITY * DT;
   s.y += s.vy * DT;
   if (s.y <= g) {
-    if (wasAir && s.vy < -7) ev |= EV_LAND;
+    if (wasAir && s.vy < -5) ev |= EV_LAND;
     s.y = g;
     // Am Boden ist die Steiggeschwindigkeit die des Hangs. Endet der Hang
     // (Kuppe, Schanze), nimmt das Kart sie mit und hebt ab.
     s.vy = g0 > NO_GROUND / 2 ? Math.max(-14, Math.min(14, (g - g0) / DT)) : 0;
   }
-  const air = s.y > g + AIR_EPS;
+  // Abheben erst ab einer Handbreit über dem Boden; wer einmal fliegt, fliegt bis zur Berührung.
+  const air = s.y > g + AIR_EPS || (wasAir && s.y > g);
   if (air) {
     flags |= FLAG_AIR;
     if (!wasAir) ev |= EV_TAKEOFF;

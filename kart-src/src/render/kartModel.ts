@@ -47,7 +47,7 @@ export interface KartPose {
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
 export type KartDetail = 0 | 1 | 2;
 
-/** Name der Figur je Platz, z. B. für die Lobby. */
+/** Name der Figur (Index = character), z. B. für die Lobby. */
 export const DRIVER_NAMES: string[] = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
 
 // ───────────────────────────── Grundlagen ─────────────────────────────
@@ -114,7 +114,113 @@ const DARK = 0x2d2a36; // Gummi, Rahmen
 const STEEL = 0x5a6173;
 const CHROME = 0xe3ebf4;
 const WHITE = 0xfdf9f0;
+const LEMON = 0xfff48a;
 const INK_CSS = '#16131c';
+
+// ───────────────────────────── Lackfarben ─────────────────────────────
+//
+// Die Figur wählt jeder frei, die Lackfarbe hängt am Spielerplatz. Alles, was
+// am Kart „Lack“ ist – Karosserie, Helm, Kappe, Felgen, Streifen –, kommt aus
+// einer Palette, die aus der Lackfarbe abgeleitet wird. Fell, Gesichter,
+// Reifen und Chrom bleiben bei der Figur.
+
+/** Lackfarbe je Platz – dieselben Werte wie PLAYER_COLORS in util/players.ts. */
+const PAINT_BASE = [0xff5a4e, 0x1fc8b6, 0xffd23f, 0x9b87ff];
+
+interface Paint {
+  /** Lack. */
+  base: number;
+  /** Dunklere Variante: Unterkante, Kappenrand, Flosse, Schirm, Felgenring. */
+  dark: number;
+  /** Hellere Variante: Fasen und Glanzkanten. */
+  light: number;
+  /** Sehr dunkler Ton der Teamfarbe: Anzug, Polster. */
+  deep: number;
+  /** Noch dunkler: Sitzmulde, Lenkradkranz. */
+  deeper: number;
+  /** Zweite Akzentfarbe (Blitze, Zündkerzenkappen) – kontrastiert zum Lack. */
+  accent: number;
+  /** Zierlinie auf zu hellem Lack (statt Weiß/Creme). */
+  ink: number;
+}
+
+function hexToHsl(hex: number): [number, number, number] {
+  const r = ((hex >> 16) & 255) / 255;
+  const g = ((hex >> 8) & 255) / 255;
+  const b = (hex & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+
+function hslToHex(h: number, s: number, l: number): number {
+  h = ((h % 1) + 1) % 1;
+  s = clamp(s, 0, 1);
+  l = clamp(l, 0, 1);
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const ch = (t: number): number => {
+    t = ((t % 1) + 1) % 1;
+    const v = t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p;
+    return Math.round(v * 255);
+  };
+  return (ch(h + 1 / 3) << 16) | (ch(h) << 8) | ch(h - 1 / 3);
+}
+
+/** Relative Helligkeit (wie bei WCAG), 0..1. */
+function luminance(hex: number): number {
+  const lin = (c: number): number => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * lin((hex >> 16) & 255) + 0.7152 * lin((hex >> 8) & 255) + 0.0722 * lin(hex & 255);
+}
+
+/** Kontrastverhältnis zweier Farben (1 = gleich hell, 21 = Schwarz auf Weiß). */
+function contrast(a: number, b: number): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/** Unterhalb davon verschwimmt eine Zierlinie auf dem Lack (Weiß auf Gelb ≈ 1,45). */
+const MIN_TRIM_CONTRAST = 1.7;
+
+// Handabgestimmte Töne der angestammten Kombinationen – damit Figur i im Lack
+// von Platz i genau so aussieht wie bisher. Alles Übrige wird abgeleitet.
+const TUNED: Record<number, Partial<Paint>> = {
+  0xff5a4e: { dark: 0xc93b35 },
+  0x1fc8b6: { dark: 0x13968a },
+  0xffd23f: { dark: 0xe0a41c },
+  0x9b87ff: { dark: 0x6a55d4, light: 0xb3a4ff, deep: 0x3b2f66, deeper: 0x2a2440, accent: LEMON },
+};
+
+function makePaint(base: number): Paint {
+  const [h, s, l] = hexToHsl(base);
+  // Gelb wird abgedunkelt schnell oliv – die dunklen Töne dort Richtung Braun drehen.
+  const hd = h > 0.08 && h < 0.21 ? h - 0.045 : h;
+  const derived: Paint = {
+    base,
+    dark: hslToHex(h, s * 0.72, l * 0.74),
+    light: hslToHex(h, s * 0.95, l + (1 - l) * 0.45),
+    deep: hslToHex(hd, Math.min(s, 0.42), 0.28),
+    deeper: hslToHex(hd, Math.min(s, 0.3), 0.2),
+    // Zitronengelb, solange es sich vom Lack abhebt; sonst die Gegenfarbe.
+    accent: contrast(LEMON, base) >= 1.6 ? LEMON : hslToHex(h + 0.5, 0.68, 0.46),
+    ink: hslToHex(hd, 0.22, 0.17),
+  };
+  return { ...derived, ...TUNED[base] };
+}
+
+const PAINTS: Paint[] = PAINT_BASE.map(makePaint);
 
 // ───────────────────────────── Netz-Bausteine ─────────────────────────────
 
@@ -835,7 +941,6 @@ interface WheelSpec {
 }
 
 interface Spec {
-  color: number;
   wf: WheelSpec;
   wr: WheelSpec;
   /** Hüfte: Drehpunkt des Oberkörpers. */
@@ -874,7 +979,6 @@ interface Spec {
 const SPECS: Spec[] = [
   // 0 – Kolben-Kalle: Hot-Rod, hinten riesige Räder, vorn kleine
   {
-    color: 0xff5a4e,
     wf: { x: 0.585, z: 0.7, r: 0.25, w: 0.22 },
     wr: { x: 0.575, z: -0.56, r: 0.37, w: 0.36 },
     hip: [0, 0.47, -0.3],
@@ -902,7 +1006,6 @@ const SPECS: Spec[] = [
   },
   // 1 – Vera Vergaser: schlanker Renner
   {
-    color: 0x1fc8b6,
     wf: { x: 0.625, z: 0.68, r: 0.29, w: 0.18 },
     wr: { x: 0.63, z: -0.58, r: 0.32, w: 0.21 },
     hip: [0, 0.44, -0.2],
@@ -930,7 +1033,6 @@ const SPECS: Spec[] = [
   },
   // 2 – Bremsen-Bert: Badewanne auf Rädern
   {
-    color: 0xffd23f,
     wf: { x: 0.6, z: 0.6, r: 0.27, w: 0.27 },
     wr: { x: 0.6, z: -0.62, r: 0.29, w: 0.29 },
     hip: [0, 0.52, -0.22],
@@ -958,7 +1060,6 @@ const SPECS: Spec[] = [
   },
   // 3 – Zünd-Zoe: kantiger Keil mit Zündkerzen
   {
-    color: 0x9b87ff,
     wf: { x: 0.6, z: 0.7, r: 0.26, w: 0.22 },
     wr: { x: 0.6, z: -0.58, r: 0.31, w: 0.28 },
     hip: [0, 0.45, -0.18],
@@ -992,8 +1093,20 @@ interface Ctx {
   /** Aufkleber (Augen, Startnummer) – eigenes Netz mit Textur. */
   d: Builder;
   sp: Spec;
+  /** Lackfarben des Platzes. */
+  p: Paint;
+  /** Angestammte Kombination (Figur i im Lack von Platz i): handabgestimmt, keine Kontrastregel. */
+  native: boolean;
   /** Erste Ecke der Augen im Aufkleber-Netz (setzt addEyes). */
   eyeStart: number;
+}
+
+/**
+ * Helle Zierlinie (Weiß/Creme) der Figur – oder, wenn sie sich vom Lack nicht
+ * abhebt (Gelb), ein dunkler Strich in der Teamfarbe.
+ */
+function trim(c: Ctx, light: number): number {
+  return c.native || contrast(light, c.p.base) >= MIN_TRIM_CONTRAST ? light : c.p.ink;
 }
 
 // ───────────────────────────── Aufkleber: Augen und Startnummer ─────────────────────────────
@@ -1222,15 +1335,15 @@ function drawEye(g: CanvasRenderingContext2D, x0: number, y0: number, st: EyeSty
   g.restore();
 }
 
-/** Zeichnet alle Augenzustände einer Figur und ihre Startnummer in ein Bild. */
-function makeAtlas(slot: number): THREE.CanvasTexture | null {
+/** Zeichnet alle Augenzustände einer Figur und die Startnummer ihres Platzes in ein Bild. */
+function makeAtlas(character: number, slot: number): THREE.CanvasTexture | null {
   if (typeof document === 'undefined') return null;
   const canvas = document.createElement('canvas');
   canvas.width = CELL * ATLAS_COLS;
   canvas.height = CELL * ATLAS_ROWS;
   const g = canvas.getContext('2d');
   if (!g) return null;
-  const st = EYE_STYLES[slot];
+  const st = EYE_STYLES[character];
   for (let s = 0; s < 8; s++) drawEye(g, (s % ATLAS_COLS) * CELL, Math.floor(s / ATLAS_COLS) * CELL, st, s);
   // Startnummer: kräftige, schräge Ziffer
   g.save();
@@ -1541,9 +1654,9 @@ function addLamp(c: Ctx, pos: V3, r: number): void {
 
 function buildKalle(c: Ctx): void {
   const { b, sp } = c;
-  const RED = sp.color;
-  const RED_D = 0xc93b35;
-  const CREAM = 0xffefd2;
+  const RED = c.p.base;
+  const RED_D = c.p.dark;
+  const CREAM = trim(c, 0xffefd2);
   const LEATHER = 0x6a4230;
   const CH = B.chassis;
 
@@ -1723,8 +1836,10 @@ function buildKalle(c: Ctx): void {
 
 function buildVera(c: Ctx): void {
   const { b, sp } = c;
-  const TURQ = sp.color;
-  const TURQ_D = 0x13968a;
+  const TURQ = c.p.base;
+  const TURQ_D = c.p.dark;
+  // Zierweiß am Kart (Bug, Streifen, Flossenkappe, Felgen)
+  const TRIM = trim(c, WHITE);
   const CH = B.chassis;
 
   // — Karosserie: Zigarre mit spitzer Nase und Kopfstütze —
@@ -1742,7 +1857,7 @@ function buildVera(c: Ctx): void {
     rr(0.97, 0.355, 0.06, 0.05, 0.05),
     rr(1.05, 0.352, 0.024, 0.02, 0.02),
   ];
-  b.put(loft(rings, { color: (j, k) => (j >= 7 || k === S / 4 - 1 || k === S / 4 ? WHITE : TURQ) }), { bone: CH });
+  b.put(loft(rings, { color: (j, k) => (j >= 7 || k === S / 4 - 1 || k === S / 4 ? TRIM : TURQ) }), { bone: CH });
   b.put(sphere(0.215, 0.03, 0.2, b.s(10, 8), 3), { bone: CH, color: 0x2e2630, pos: [0, 0.598, -0.2], outline: 0 });
   b.put(b.soft(0.34, 0.2, 0.08, 0.03, 8), { bone: CH, color: 0x6a4230, pos: [0, 0.71, -0.46], rot: [-0.25, 0, 0], outline: 0.8 });
   // kleine Windschutzscheibe
@@ -1751,7 +1866,7 @@ function buildVera(c: Ctx): void {
   if (b.fine) b.put(prism(glass, 0.02), { bone: CH, color: 0xc6efff, pos: [0, 0.585, 0.13], rot: [-0.5, 0, 0], outline: 0.6 });
   // Heckflosse mit heller Kappe
   b.put(prism([-0.46, 0.6, -1.02, 0.5, -1.04, 0.97, -0.83, 0.97], 0.05), { bone: CH, color: TURQ_D, rot: [0, -HALF_PI, 0] });
-  b.put(prism([-0.83, 0.97, -1.04, 0.97, -1.045, 1.07, -0.885, 1.07], 0.05), { bone: CH, color: WHITE, rot: [0, -HALF_PI, 0] });
+  b.put(prism([-0.83, 0.97, -1.04, 0.97, -1.045, 1.07, -0.885, 1.07], 0.05), { bone: CH, color: TRIM, rot: [0, -HALF_PI, 0] });
   addNumber(c, [0.024, 0.8, -0.88], [0, 0, -HALF_PI], 0.115, HALF_PI, true);
   addNumber(c, [-0.024, 0.8, -0.88], [0, 0, HALF_PI], 0.115, -HALF_PI, true);
   if (b.fine) addNumber(c, [0, 0.527, 0.5], [0.13, 0, 0], 0.105, 0);
@@ -1780,7 +1895,7 @@ function buildVera(c: Ctx): void {
   );
   addPipeHole(c, 0.052);
 
-  addWheels(c, { wall: TIRE, rim: WHITE, rim2: TURQ, hub: TURQ_D });
+  addWheels(c, { wall: TIRE, rim: TRIM, rim2: TURQ, hub: TURQ_D });
   addSteering(c, 0x4a332a, CHROME);
   addDriverBody(c, { rx: 0.2, rz: 0.15, suit: [0x8a5632], sleeve: 0x8a5632, cuff: 0x8a5632, glove: 0xf4dfb4 });
 
@@ -1908,9 +2023,12 @@ function buildVera(c: Ctx): void {
 
 function buildBert(c: Ctx): void {
   const { b, sp } = c;
-  const YEL = sp.color;
-  const YEL_D = 0xe0a41c;
+  const YEL = c.p.base;
+  const YEL_D = c.p.dark;
   const CREAM = 0xfff6e2;
+  // heller Wannenrand und Helmstreifen
+  const RIM = trim(c, CREAM);
+  const STRIPE = trim(c, WHITE);
   const INSIDE = 0x5a4a52;
   const CH = B.chassis;
   const E = 2.7;
@@ -1931,7 +2049,7 @@ function buildBert(c: Ctx): void {
       tr(0.6, 0.45, 0.865, 0.885),
       tr(0.5, 0.425, 0.84, 0.86),
     ],
-    { color: (j) => (j === 0 ? YEL_D : j < 3 ? YEL : j < 6 ? CREAM : INSIDE), capColor: INSIDE },
+    { color: (j) => (j === 0 ? YEL_D : j < 3 ? YEL : j < 6 ? RIM : INSIDE), capColor: INSIDE },
   );
   b.put(tub, { bone: CH, rot: [-HALF_PI, 0, 0] });
   // Rückenlehne
@@ -2025,7 +2143,7 @@ function buildBert(c: Ctx): void {
   });
   // Helm mit Schirm
   const HR: V3 = [0.372, 0.322, 0.332];
-  addHelmet(b, C, HR, 0.92, -0.25, YEL, { stripe: WHITE, stripeHalf: 0.16, rim: YEL_D });
+  addHelmet(b, C, HR, 0.92, -0.25, YEL, { stripe: STRIPE, stripeHalf: 0.16, rim: YEL_D });
   b.put(sphere(0.215, 0.034, 0.17, b.s(8, 6), 4), {
     bone: H,
     color: YEL_D,
@@ -2043,9 +2161,12 @@ const BOLT: readonly number[] = [-0.04, 0.5, 0.24, 0.5, 0.07, 0.08, 0.26, 0.08, 
 
 function buildZoe(c: Ctx): void {
   const { b, sp } = c;
-  const VIO = sp.color;
-  const VIO_D = 0x6a55d4;
-  const LEMON = 0xfff48a;
+  const VIO = c.p.base;
+  const VIO_D = c.p.dark;
+  const VIO_L = c.p.light;
+  const DEEP = c.p.deep;
+  const DEEPER = c.p.deeper;
+  const ACC = c.p.accent;
   const CH = B.chassis;
 
   // — Karosserie: kantiger Keil, bewusst mit harten Flächen —
@@ -2087,7 +2208,7 @@ function buildZoe(c: Ctx): void {
       ],
       {
         flat: true,
-        color: (_j, k) => (k === 3 ? VIO_D : k === 1 || k === 5 ? 0xb3a4ff : VIO),
+        color: (_j, k) => (k === 3 ? VIO_D : k === 1 || k === 5 ? VIO_L : VIO),
         capColor: VIO_D,
       },
     ),
@@ -2096,12 +2217,12 @@ function buildZoe(c: Ctx): void {
   // Frontlippe, Seitenkästen, Sitzmulde, Kopfstütze
   b.put(box(0.6, 0.035, 0.22), { bone: CH, color: DARK, pos: [0, 0.145, 0.97], outline: 0.7 });
   b.put(box(0.1, 0.16, 0.5), { bone: CH, color: VIO_D, pos: [0.43, 0.3, -0.02], rot: [0, 0.06, 0], mirror: CH, outline: 0.8 });
-  b.put(sphere(0.24, 0.03, 0.22, b.s(10, 8), 3), { bone: CH, color: 0x2a2440, pos: [0, 0.604, -0.2], outline: 0 });
-  b.put(box(0.36, 0.24, 0.09), { bone: CH, color: 0x3b2f66, pos: [0, 0.74, -0.46], rot: [-0.2, 0, 0], outline: 0.8 });
+  b.put(sphere(0.24, 0.03, 0.22, b.s(10, 8), 3), { bone: CH, color: DEEPER, pos: [0, 0.604, -0.2], outline: 0 });
+  b.put(box(0.36, 0.24, 0.09), { bone: CH, color: DEEP, pos: [0, 0.74, -0.46], rot: [-0.2, 0, 0], outline: 0.8 });
   // Blitz auf der Haube
   b.put(prism(BOLT, 0.016), {
     bone: CH,
-    color: LEMON,
+    color: ACC,
     pos: [0, 0.502, 0.24],
     rot: [-(HALF_PI - 0.262), 0, 0],
     scale: [0.5, 0.62, 1],
@@ -2141,11 +2262,11 @@ function buildZoe(c: Ctx): void {
     [0, 0.45],
   ];
   b.put(lathe(plug, 6), { bone: B.aux0, mirror: B.aux1, outline: 0.7 });
-  b.put(sphere(0.04, 0.04, 0.04, 6, 4), { bone: B.aux0, color: LEMON, pos: [0, 0.475, 0], mirror: B.aux1, outline: 0.55 });
+  b.put(sphere(0.04, 0.04, 0.04, 6, 4), { bone: B.aux0, color: ACC, pos: [0, 0.475, 0], mirror: B.aux1, outline: 0.55 });
 
-  addWheels(c, { wall: TIRE, rim: VIO_D, rim2: LEMON, hub: WHITE });
-  addSteering(c, 0x2a2440, LEMON);
-  addDriverBody(c, { rx: 0.19, rz: 0.145, suit: [0x3b2f66], sleeve: 0x3b2f66, cuff: 0x3b2f66, glove: WHITE });
+  addWheels(c, { wall: TIRE, rim: VIO_D, rim2: ACC, hub: WHITE });
+  addSteering(c, DEEPER, ACC);
+  addDriverBody(c, { rx: 0.19, rz: 0.145, suit: [DEEP], sleeve: DEEP, cuff: DEEP, glove: WHITE });
 
   // — Schwanz: Blitz-Zickzack, schräg gestellt – von hinten und von der Seite zu erkennen —
   const FUR = 0xfaf6ff;
@@ -2212,7 +2333,7 @@ function buildZoe(c: Ctx): void {
   addHelmet(b, C, HR, 1.12, -0.32, VIO, { rim: VIO_D, gloss: 2.4 });
   b.put(prism(BOLT, 0.014), {
     bone: H,
-    color: LEMON,
+    color: ACC,
     pos: [0, 0.37, -0.287],
     rot: [0.3, Math.PI, 0],
     scale: [0.4, 0.3, 1],
@@ -2306,8 +2427,12 @@ export class KartVisual {
     head: new THREE.Vector3(),
   };
 
-  private readonly slot: number;
+  /** Figur und Kartform (0..3, siehe DRIVER_NAMES). */
+  readonly character: number;
+  /** Spielerplatz (0..3): Lackfarbe und Startnummer (slot + 1). */
+  readonly slot: number;
   private readonly spec: Spec;
+  private readonly paint: Paint;
   private detail: KartDetail;
   private readonly bones: THREE.Bone[] = [];
   private readonly rest: THREE.Matrix4[] = [];
@@ -2391,10 +2516,18 @@ export class KartVisual {
   private fIdle = 1;
   private fCough = 0;
 
-  constructor(slot: number, detail: KartDetail = 2) {
-    this.slot = ((Math.floor(slot) % 4) + 4) % 4;
-    this.spec = SPECS[this.slot];
+  /**
+   * character wählt Figur und Kart, slot den Platz: Lackfarbe und Startnummer.
+   * Ohne slot fährt die Figur in ihrer angestammten Farbe.
+   */
+  constructor(character: number, detail: KartDetail = 2, slot: number = character) {
+    const wrap = (n: number): number => (Number.isFinite(n) ? ((Math.floor(n) % 4) + 4) % 4 : 0);
+    this.character = wrap(character);
+    this.slot = wrap(slot);
+    this.spec = SPECS[this.character];
+    this.paint = PAINTS[this.slot];
     this.detail = detail;
+    // Zufallsfolge (Blinzeln) je Platz – zwei gleiche Figuren blinzeln nicht im Gleichtakt.
     this.seed = (this.slot + 1) * 7919;
     this.root.name = `kart-${this.slot}`;
 
@@ -2409,7 +2542,7 @@ export class KartVisual {
       depthWrite: false,
       fog: false,
     });
-    this.atlas = makeAtlas(this.slot);
+    this.atlas = makeAtlas(this.character, this.slot);
     this.decalMat = new THREE.MeshBasicMaterial({ map: this.atlas, alphaTest: 0.5 });
 
     const empty = new THREE.BufferGeometry();
@@ -2532,10 +2665,17 @@ export class KartVisual {
     const lines = this.detail > 0;
     const main = new Builder(this.rest, this.detail, lines);
     const decal = new Builder(this.rest, this.detail, false, true);
-    const ctx: Ctx = { b: main, d: decal, sp: this.spec, eyeStart: 0 };
-    BUILDERS[this.slot](ctx);
+    const ctx: Ctx = {
+      b: main,
+      d: decal,
+      sp: this.spec,
+      p: this.paint,
+      native: this.character === this.slot,
+      eyeStart: 0,
+    };
+    BUILDERS[this.character](ctx);
     const fx = new Builder(this.rest, this.detail, lines);
-    buildFx(fx, this.spec.color);
+    buildFx(fx, this.paint.base);
     const fl = new Builder(this.rest, this.detail, false);
     buildFlames(fl);
 
@@ -2804,7 +2944,7 @@ export class KartVisual {
     const t = this.time;
     const { airS, winS, loseS, stallS, spinS, swayX, swayZ, flopX, flopZ } = this;
     const wind = this.fWind;
-    switch (this.slot) {
+    switch (this.character) {
       case 0: {
         // Motor zittert, Kiefer klappt auf
         const en = bn[B.aux0];

@@ -72,6 +72,8 @@ export class ClientLobby {
     private readonly token: string,
     private name: string,
     resume: boolean,
+    /** Gewünschte Figur, -1 = Standardfigur des zugeteilten Platzes. */
+    private character = -1,
   ) {
     this.everJoined = resume;
     this.status = resume ? 'reconnecting' : 'connecting';
@@ -87,6 +89,11 @@ export class ClientLobby {
   setReady(ready: boolean): void {
     this.ready = ready;
     this.sendMsg({ t: 'ready', v: ready });
+  }
+
+  setCharacter(character: number): void {
+    this.character = character;
+    this.sendMsg({ t: 'char', v: character });
   }
 
   setName(name: string): void {
@@ -166,6 +173,7 @@ export class ClientLobby {
     this.link = link;
     link.onOpen = () => {
       const hello: ScreenToHost = { t: 'hello', v: PROTOCOL_VERSION, token: this.token, name: this.name, build: BUILD_ID };
+      if (this.character >= 0) hello.char = this.character;
       link.send(hello as unknown as Record<string, unknown>);
     };
     link.onMessage = (raw) => this.handleMessage(link, raw as HostToScreen);
