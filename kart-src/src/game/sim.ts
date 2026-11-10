@@ -17,6 +17,8 @@
 import {
   CRASH_SPEED,
   DRAFT_FULL,
+  DRAFT_PULL_FROM,
+  DRAFT_PULL_TICKS,
   FLOOD_FROM,
   PULSE_VENT,
   WAKE_HALF,
@@ -288,7 +290,7 @@ export const CHARACTERS: Character[] = [
     name: 'Kolben-Kalle',
     trait: 'Schnell auf der Geraden, braucht etwas länger auf Touren.',
     bars: [5, 2, 3],
-    vmax: 1.006,
+    vmax: 1.003,
     accel: 0.88,
     grip: 0.985,
     offroad: OFFROAD_FACTOR,
@@ -321,7 +323,7 @@ export const CHARACTERS: Character[] = [
     name: 'Zünd-Zoe',
     trait: 'Klebt in Kurven, und der Drift lädt schneller.',
     bars: [2, 3, 5],
-    vmax: 0.993,
+    vmax: 0.996,
     accel: 1,
     grip: 1.05,
     offroad: OFFROAD_FACTOR,
@@ -461,9 +463,10 @@ function wrapAngle(a: number): number {
 
 /** Anteil, um den volle Lava die Höchstgeschwindigkeit drückt. */
 const LAVA_DRAG = 0.5;
-/** Tempozuschlag im vollen Windschatten und Schub beim Ausscheren (Ticks). */
-const DRAFT_PULL = 1.07;
-const DRAFT_TICKS = 50;
+/** Tempozuschlag nach dem Ausscheren aus dem Windschatten. */
+const DRAFT_PULL = 1.2;
+/** Nur wer das Heck mit der Kartmitte innerhalb der Fahrzeugbreite (plus so viel) trifft, fährt wirklich auf. */
+const CRASH_INSET = 0.3;
 const VENT_LAUNCH = 10.5;
 /** Internes Bit aus stepTraffic: das Kart wurde verschoben. */
 const TRAFFIC_MOVED = 1 << 30;
@@ -528,21 +531,22 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
       // Geschwindigkeit des Karts aus Sicht des Fahrzeugs
       let ku = s.vx * hx + s.vz * hz;
       let kw = -s.vx * hz + s.vz * hx;
-      if (pw < pu) {
-        // Seitlich: hinausschieben und entlangstreifen wie an einer Bande.
+      if (pw < pu || Math.abs(dw) > v.halfWidth + CRASH_INSET) {
+        // Seitlich – oder nur die Ecke erwischt: hinausschieben und
+        // entlangstreifen wie an einer Bande. Das kostet Tempo, aber keinen Dreher.
         const side = dw > 0 ? 1 : -1;
         s.x += -hz * side * pw;
         s.z += hx * side * pw;
         const vn = -kw * side;
-        if (vn > 0) {
-          kw += side * vn * 1.3;
-          const loss = Math.min(0.3, 0.008 + vn * 0.02);
-          ku -= (ku - v.speed) * loss;
-          if (vn > 5) {
-            ev |= EV_WALL;
-            s.driftDir = 0;
-            s.driftCharge = 0;
-          }
+        if (vn > 0) kw += side * vn * 1.3;
+        // Wer die Ecke von hinten erwischt, verliert einen Teil seines Überschusses.
+        const corner = pw >= pu ? 0.35 : 0;
+        const loss = Math.max(corner, vn > 0 ? Math.min(0.3, 0.008 + vn * 0.02) : 0);
+        if (loss > 0 && ku > v.speed) ku -= (ku - v.speed) * loss;
+        if (vn > 5 || (corner > 0 && Math.abs(ku - v.speed) > 4)) {
+          ev |= EV_WALL;
+          s.driftDir = 0;
+          s.driftCharge = 0;
         }
       } else {
         // Von hinten aufgefahren – oder das Fahrzeug schiebt das Kart vor sich her.
@@ -564,12 +568,13 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
       s.vz = hz * ku + hx * kw;
     }
   }
-  // Windschatten lädt, solange man dicht hinter einem Fahrzeug bleibt; wer danach ausschert, bekommt Schub.
-  if (inWake && s.spin === 0 && (s.flags & FLAG_AIR) === 0 && s.vx * s.vx + s.vz * s.vz > 14 * 14) {
-    s.draft = Math.min(255, s.draft + 2);
+  // Windschatten lädt, solange man dicht hinter einem Fahrzeug bleibt; wer danach ausschert, bekommt Zug.
+  if (s.draft >= DRAFT_PULL_FROM) {
+    s.draft = s.spin > 0 || s.draft - 1 < DRAFT_PULL_FROM ? 0 : s.draft - 1;
+  } else if (inWake && s.spin === 0 && (s.flags & FLAG_AIR) === 0 && s.vx * s.vx + s.vz * s.vz > 10 * 10) {
+    s.draft = Math.min(DRAFT_FULL, s.draft + 2);
   } else if (s.draft >= DRAFT_FULL && s.spin === 0) {
-    s.draft = 0;
-    s.boost = Math.max(s.boost, DRAFT_TICKS);
+    s.draft = DRAFT_PULL_FROM + DRAFT_PULL_TICKS;
     ev |= EV_DRAFT;
   } else if (s.draft > 0) s.draft = Math.max(0, s.draft - 4);
   return ev;
@@ -734,7 +739,12 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // zwischen weitem und engem Bogen. Eng hineinlenken lädt schneller.
     const into = steer * s.driftDir;
     yaw = s.driftDir * yawMax * (DRIFT_WIDE + ((DRIFT_TIGHT - DRIFT_WIDE) * (into + 1)) / 2);
-    if (!wasAir) s.driftCharge = Math.min(255, s.driftCharge + (into > 0.35 ? 2 : 1));
+    if (!wasAir) {
+      // Auf losem Grund lädt der Mini-Turbo schneller: in einem Teil der Ticks zählt er doppelt.
+      // (Welche Ticks, hängt nur vom Stand der Ladung ab – so rechnet jedes Gerät gleich.)
+      const extra = ground.charge > 0 && (s.driftCharge * 7) % 20 < ground.charge * 20 ? 1 : 0;
+      s.driftCharge = Math.min(255, s.driftCharge + (into > 0.35 ? 2 : 1) + extra);
+    }
   } else {
     yaw = steer * yawMax * (vf < 0 ? -1 : 1);
   }
@@ -763,8 +773,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (boosting) vmax = V_BOOST * env.speedFactor;
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
-    // Im vollen Windschatten zieht es das Kart mit.
-    if (s.draft >= DRAFT_FULL && !boosting) vmax *= DRAFT_PULL;
+    // Aus dem Windschatten ausgeschert: kurz mehr Tempo – aber nur auf dem Gas, die Bremse bleibt die Bremse.
+    if (s.draft >= DRAFT_PULL_FROM && !boosting) vmax *= DRAFT_PULL;
     // Lava auf der Fahrbahn: zäh wie Teer.
     if (t.floods.length > 0) {
       const lava = lavaAt(t, seg0, env.time);
@@ -786,15 +796,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     } else if (spinning) {
       const d = 16 * DT;
       vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
-    } else if (boosting) {
-      // Schub wirkt auch ohne Gas.
+    } else if (boosting && !brake) {
+      // Schub wirkt auch ohne Gas – aber die Bremse geht vor (sonst schiebt ein Mini-Turbo ins Heck des Busses).
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
       if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
-      if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
+      if (vf > 0.4) vf = Math.max(0, vf - BRAKE * ground.brake * DT);
       else vf = Math.max(-V_REVERSE, vf - 16 * DT);
     } else {
       const d = (wasOffroad ? COAST + 12 : COAST) * DT;

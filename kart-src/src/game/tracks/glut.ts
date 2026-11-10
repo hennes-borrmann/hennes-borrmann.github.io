@@ -13,6 +13,7 @@ export const GLUT: TrackDef = {
   name: 'Glutkessel',
   theme: 'glut',
   blurb: 'Lavasprung oder Bogen, Grat oder Höhle, Felsbrücke über die eigene Spur.',
+  twist: 'Der Vulkan spielt mit: Geysire brechen aus, Lavabomben schlagen ein, und durch die Höhle schießt im Takt ein Lavaschwall – die Ampel an der Gabelung warnt.',
   grade: 3,
   points: [
     // 0–1: Start im Tal nach Norden
@@ -95,9 +96,25 @@ export const GLUT: TrackDef = {
     [17.3, 22.6],
     [25.0, 29.4],
   ],
-  hazards: [
-    { at: 11.8, amp: 4, period: 4.2, phase: 0.6 },
-    { at: 31.2, amp: 4, period: 4.6, phase: 0 },
+  // Geysire: je drei quer über die Bahn, reihum – eine Spur ist immer frei.
+  vents: [
+    { at: 11.5, lat: -3.9, period: 5.4, phase: 0 },
+    { at: 11.62, lat: 0, period: 5.4, phase: 1.8 },
+    { at: 11.74, lat: 3.9, period: 5.4, phase: 3.6 },
+    { at: 13.3, lat: 3.6, period: 4.8, phase: 0.6 },
+    { at: 13.42, lat: -3.6, period: 4.8, phase: 3.0 },
+    { at: 27.2, lat: -3.4, period: 5, phase: 1.2 },
+    { at: 27.34, lat: 3.4, period: 5, phase: 3.7 },
+  ],
+  // Lavabomben am Fuß des Kraters und auf der Abfahrt: der Schatten zeigt, wo sie landen.
+  bombs: [
+    { at: 8.3, lat: -2.8, period: 9, phase: 0 },
+    { at: 8.7, lat: 3, period: 9, phase: 4.5 },
+    { at: 14.3, lat: 2.6, period: 8, phase: 2 },
+    { at: 14.6, lat: -3, period: 8, phase: 6 },
+    { at: 29.9, lat: -2.6, period: 7.5, phase: 1 },
+    { at: 30.25, lat: 2.8, period: 7.5, phase: 4.6 },
+    { at: 31.6, lat: 0, period: 10, phase: 3 },
   ],
   branches: [
     // a: Lavahöhle – unter dem Grat hindurch und durch die Flanke des Vulkans hinauf
@@ -123,7 +140,12 @@ export const GLUT: TrackDef = {
       shoulder: 2.4,
       tunnels: [[6.2, 9.6]],
       boxRows: [7.6],
-      pads: [{ at: 10.2, lat: 0 }],
+      // Die Höhle ist der schnellere Weg (zwei Schubfelder) – solange kein Lavaschwall durchläuft.
+      pads: [
+        { at: 5.9, lat: 0 },
+        { at: 10.2, lat: 0 },
+      ],
+      floods: [{ from: 6.9, to: 8.9, period: 26, phase: 6 }],
     },
     // b: geradeaus über den Lavastrom – schmal, ohne Bande, mit großem Sprung
     {

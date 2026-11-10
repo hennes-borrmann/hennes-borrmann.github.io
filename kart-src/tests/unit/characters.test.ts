@@ -1,3 +1,4 @@
+import { withoutMechanics } from './helpers';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { CHARACTERS, EV_FALL, forwardSpeed, gridState, stepKart, turboStage } from '../../src/game/sim';
@@ -13,6 +14,11 @@ afterAll(() => {
  * @param drifter true = driftet in jeder Kurve, false = fährt alles ohne Drift
  */
 function bestLap(char: number, drifter: boolean): number {
+  // Ohne Verkehr und Lava: hier wird das Fahrwerk verglichen, nicht das Glück im Verkehr.
+  return withoutMechanics(() => quietLap(char, drifter));
+}
+
+function quietLap(char: number, drifter: boolean): number {
   const s = gridState(0, char);
   const brain = drifter ? newBrain(0, AI_HARD) : newBrain(3, AI_MEDIUM);
   brain.skill = 1;

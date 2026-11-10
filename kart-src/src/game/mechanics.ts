@@ -63,8 +63,14 @@ export function vehicleAt(v: Vehicle, time: number, lap: number): number {
 /** Windschatten: so weit hinter dem Heck und so weit seitlich der Fahrzeugmitte wirkt er (Meter). */
 export const WAKE_LENGTH = 18;
 export const WAKE_HALF = 1.7;
-/** Ladung, ab der der Windschatten beim Ausscheren Schub gibt (Ticks × 2). */
+/**
+ * Windschatten im Zustand eines Karts (KartState.draft): 0 … DRAFT_FULL lädt er
+ * (zwei je Tick hinter einem Fahrzeug); wer geladen ausschert, bekommt Zug –
+ * dann zählt der Wert von DRAFT_PULL_FROM + DRAFT_PULL_TICKS herunter.
+ */
 export const DRAFT_FULL = 80;
+export const DRAFT_PULL_FROM = 100;
+export const DRAFT_PULL_TICKS = 85;
 /** Ab diesem Tempounterschied (m/s) ist ein Auffahrunfall ein Treffer, darunter nur ein Stoß. */
 export const CRASH_SPEED = 7;
 
