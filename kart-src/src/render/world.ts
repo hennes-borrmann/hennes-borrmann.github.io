@@ -126,6 +126,14 @@ export class World {
   /** Mitte und Ausdehnung der Strecke (für Übersichtskamera und Kulissen). */
   readonly center = new THREE.Vector3();
   radius = 100;
+  /**
+   * Was auf dem Meer schwimmt (Boote der Kulisse). Steht der Meeresspiegel
+   * nicht fest (Gezeiten, mechanics/tide.ts), wird die Gruppe mit ihm gehoben:
+   * ihre Höhe ist dann der Abstand des Pegels zu theme.liquidY.
+   */
+  readonly floating = new THREE.Group();
+  /** Die große Wasser- bzw. Lavafläche bis zum Horizont (null, wo es keine gibt). */
+  water: THREE.Mesh | null = null;
 
   private readonly skyGroup = new THREE.Group();
   private readonly clouds = new THREE.Group();
@@ -177,7 +185,7 @@ export class World {
     this.sun = new THREE.DirectionalLight(th.sunColor, th.sunIntensity);
     this.sun.position.set(th.sunDir[0], th.sunDir[1], th.sunDir[2]).multiplyScalar(100);
     this.hemi = new THREE.HemisphereLight(th.hemiSky, th.hemiGround, th.hemiIntensity);
-    this.group.add(this.sun, this.hemi);
+    this.group.add(this.sun, this.hemi, this.floating);
 
     const t0 = performance.now();
     this.buildRoad();
@@ -1030,6 +1038,7 @@ export class World {
     const base = new THREE.Mesh(plane, mat);
     base.position.set(this.center.x, th.liquidY ?? th.farY - 0.2, this.center.z);
     this.group.add(base);
+    if (th.liquidY !== null) this.water = base;
     this.disposables.push(plane, mat);
   }
 

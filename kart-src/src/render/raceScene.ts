@@ -296,7 +296,7 @@ export class RaceScene {
     this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
     this.scene.add(this.world.group, this.things.group);
-    this.mechanics = buildMechanics(TRACK, this.level > 0);
+    this.mechanics = buildMechanics(TRACK, this.level > 0, this.world);
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
     this.scene.fog = this.world.fog;
