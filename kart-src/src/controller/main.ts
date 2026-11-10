@@ -6,6 +6,7 @@
 // Die Verbindung zum Bildschirm wird schon beim Laden aufgebaut.
 
 import '../styles/controller.css';
+import { BUILD_ID } from '../build';
 import { BTN_ITEM } from '../game/sim';
 import { SCREEN_ID_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { readDebugParams } from '../net/debugParams';
@@ -330,6 +331,10 @@ function renderConnection(): void {
   const slowHint =
     ' Das dauert ungewöhnlich lange: Sind Handy und Bildschirm im selben WLAN? Über Mobilfunk oder in Gäste-/Schulnetzen klappt die Kopplung oft nur mit TURN-Server.';
 
+  $('start-msg').textContent = conn.buildMismatch
+    ? 'Handy und Bildschirm nutzen unterschiedliche Fassungen der Seite. Bitte auf beiden Geräten die Seite neu laden.'
+    : '';
+
   const target = $('start-target');
   if (conn.connected) {
     const who = info && info.slot >= 0 ? `${info.name} (Platz ${info.slot + 1})` : 'deinem Bildschirm';
@@ -388,7 +393,9 @@ function frame(): void {
       $('mid-status').textContent = `verbunden · Ping ${ms(conn.link.rtt)}`;
     }
     const src = useTilt() ? `Neigung ${sensorHz} Hz` : 'Touch-Lenkung';
-    $('mid-rates').textContent = `${src} · sendet ${sendHz}/s`;
+    $('mid-rates').textContent = conn?.buildMismatch
+      ? 'Andere Version als der Bildschirm – bitte beide Seiten neu laden'
+      : `${src} · sendet ${sendHz}/s · ${BUILD_ID}`;
   }
 }
 

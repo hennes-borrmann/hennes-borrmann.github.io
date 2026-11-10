@@ -5,7 +5,7 @@
 // Synchronisation, Wiederverbindung). Er sagt NICHTS über echte Netze, Safari,
 // iOS-Berechtigungen oder echte Neigungssensoren.
 //
-// Voraussetzungen (drei Terminals im Ordner kart/):
+// Voraussetzungen (drei Terminals im Ordner kart-src/):
 //   npm run signal                         lokaler PeerJS-Server auf Port 9000
 //   npm run build && npm run preview -- --port 4173
 //   node tests/e2e/run.cjs                 braucht ein installiertes Playwright

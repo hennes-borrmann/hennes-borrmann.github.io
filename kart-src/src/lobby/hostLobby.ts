@@ -5,6 +5,7 @@
 // Verbindung aus, bleibt sein Platz reserviert; meldet sich dasselbe Token
 // wieder, bekommt er genau diesen Platz zurück.
 
+import { BUILD_ID } from '../build';
 import type { Link } from '../net/link';
 import {
   PROTOCOL_VERSION,
@@ -286,7 +287,7 @@ export class HostLobby {
       this.changed();
     };
 
-    this.sendTo(link, { t: 'welcome', slot: s.slot, state: this.state() });
+    this.sendTo(link, { t: 'welcome', slot: s.slot, state: this.state(), build: BUILD_ID });
     if (isNew) this.onSeatsChanged?.();
     this.onPlayerLink?.(s.slot);
     this.changed();

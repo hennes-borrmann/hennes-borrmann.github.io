@@ -4,33 +4,33 @@ Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad od
 
 **Stand: Phase 1 – Verbindung und Lobby.** Es gibt noch kein Rennen, nur eine Testfläche mit einem Würfel pro Spieler.
 
-## Lokal starten
+## Spielen
+
+**https://hennes-borrmann.github.io/kart/**
+
+Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen. Mehr ist nicht nötig.
+
+## Wie das Spiel auf die Website kommt
+
+Dieser Ordner (`kart-src/`) enthält den Quellcode. `npm run build` schreibt das fertige Spiel nach `../kart/`, und dieser Ordner ist mit eingecheckt. GitHub Pages liefert das Repository so aus, wie es auf `main` liegt – sobald ein neuer Build auf `main` ist, ist er nach etwa einer Minute online. Es gibt keinen Build-Schritt auf GitHub und nichts einzustellen.
+
+Nach jeder Änderung am Code gehört deshalb dazu: bauen und `kart/` mit einchecken.
+
+Unten auf der Startseite und in der Diagnose steht eine Versionskennung (Datum und Uhrzeit des Builds). Haben zwei Geräte unterschiedliche Fassungen im Zwischenspeicher, weist das Spiel darauf hin; dann hilft Neuladen der Seite.
+
+## Lokal entwickeln
 
 Voraussetzung: Node.js 22.
 
 ```bash
-cd kart
+cd kart-src
 npm install
 npm run dev          # http://localhost:5173  (Bildschirm), /c/ ist der Controller
 ```
 
 Am Desktop lässt sich ohne Handy fahren: Pfeiltasten oder WASD, Shift = Drift, Leertaste = Item. Zwei Bildschirme testest du mit zwei **Fenstern** nebeneinander (nicht zwei Tabs in einem Fenster – ein Tab im Hintergrund wird vom Browser angehalten).
 
-Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS. Dafür ist das Deployment unten da. (`npm run dev:https` startet zwar mit selbstsigniertem Zertifikat im WLAN, die Zertifikatswarnung auf iPhone und iPad macht das aber unbequem.)
-
-## Auf echten Geräten testen (GitHub Pages)
-
-Der Workflow `.github/workflows/pages.yml` baut das Spiel und veröffentlicht es zusammen mit der bestehenden Website. Das Spiel liegt dann unter
-
-**https://hennes-borrmann.github.io/kart/**
-
-Einmalig in den Repository-Einstellungen auf GitHub:
-
-1. **Settings → Pages → Build and deployment → Source: „GitHub Actions“** (statt „Deploy from a branch“).
-2. Damit auch der Entwicklungs-Branch veröffentlicht werden darf: **Settings → Environments → github-pages → Deployment branches and tags → Add deployment branch or tag rule →** `claude/*`.
-   Ohne Schritt 2 wird nur `main` veröffentlicht; dann muss der Branch erst per Pull Request nach `main`.
-
-Danach veröffentlicht jeder Push automatisch (Dauer rund eine Minute, Fortschritt unter „Actions“). Veröffentlicht wird immer der komplette Stand des Branches, der zuletzt gepusht hat – also Website **und** Spiel aus diesem Branch.
+Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS. Dafür ist die veröffentlichte Seite da.
 
 ## Was du prüfen solltest
 
@@ -50,7 +50,7 @@ WebRTC verbindet Geräte direkt. Das klappt im selben WLAN und zwischen den meis
 
 Dann braucht es einen TURN-Server, der die Daten weiterreicht. **Aktuell ist keiner eingetragen** – in solchen Netzen kommt die Verbindung also nicht zustande (Meldung „Keine Verbindung zum Host“ bzw. das Handy bleibt bei „Verbinde …“). Über TURN steigt die Latenz, weil alles einen Umweg nimmt.
 
-Eintragen in `public/net-config.json`, entweder mit festen Zugangsdaten:
+Eintragen in `public/net-config.json` (danach neu bauen), entweder mit festen Zugangsdaten:
 
 ```json
 {

@@ -1,6 +1,7 @@
 // Die Lobby aus Sicht eines beigetretenen Bildschirms: Verbindung zum Host
 // aufbauen, bei Abbruch von selbst wieder verbinden und den Zustand spiegeln.
 
+import { BUILD_ID } from '../build';
 import type { PeerEndpoint } from '../net/endpoint';
 import type { Link } from '../net/link';
 import {
@@ -39,6 +40,8 @@ export class ClientLobby {
   link: Link | null = null;
   /** Zeitpunkt, bis zu dem noch Wiederverbindungsversuche laufen (für die Anzeige). */
   deadline = 0;
+  /** Der Host läuft mit einer anderen Fassung der Seite. */
+  buildMismatch = false;
 
   onChange: (() => void) | null = null;
   onFast: ((view: DataView) => void) | null = null;
@@ -159,7 +162,7 @@ export class ClientLobby {
     }
     this.link = link;
     link.onOpen = () => {
-      const hello: ScreenToHost = { t: 'hello', v: PROTOCOL_VERSION, token: this.token, name: this.name };
+      const hello: ScreenToHost = { t: 'hello', v: PROTOCOL_VERSION, token: this.token, name: this.name, build: BUILD_ID };
       link.send(hello as unknown as Record<string, unknown>);
     };
     link.onMessage = (raw) => this.handleMessage(link, raw as HostToScreen);
@@ -188,6 +191,7 @@ export class ClientLobby {
       case 'welcome':
         this.slot = msg.slot;
         this.state = msg.state;
+        this.buildMismatch = typeof msg.build === 'string' && msg.build !== BUILD_ID;
         this.everJoined = true;
         this.status = 'joined';
         // Der Host kennt nach einem Wiedereinstieg unseren Stand nicht mehr.

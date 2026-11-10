@@ -21,7 +21,7 @@ export const PKT_SNAPSHOT = 0x21; // Host → Client-Bildschirm
 // --- Handy ↔ Bildschirm (zuverlässig) ---------------------------------------
 
 export type ControllerToScreen =
-  | { t: 'hello'; v: number; cid: string }
+  | { t: 'hello'; v: number; cid: string; build?: string }
   /** Item-Druck mit Zählerstand; sichert kurze Tipper ab, falls schnelle Pakete verloren gehen. */
   | { t: 'press'; n: number }
   | { t: 'info'; tilt: boolean; sensorHz: number; sendHz: number }
@@ -29,7 +29,7 @@ export type ControllerToScreen =
 
 export type ScreenToController =
   /** slot = -1, solange der Bildschirm noch in keiner Lobby ist. */
-  | { t: 'paired'; name: string; slot: number; room: string | null; phase: string }
+  | { t: 'paired'; name: string; slot: number; room: string | null; phase: string; build?: string }
   /** Ein anderes Handy hat diesen Bildschirm übernommen. */
   | { t: 'replaced' }
   | { t: 'reject'; reason: 'version' };
@@ -61,14 +61,14 @@ export interface LobbyState {
 export type RejectReason = 'full' | 'running' | 'version';
 
 export type ScreenToHost =
-  | { t: 'hello'; v: number; token: string; name: string }
+  | { t: 'hello'; v: number; token: string; name: string; build?: string }
   | { t: 'ready'; v: boolean }
   | { t: 'name'; v: string }
   | { t: 'status'; controller: boolean; ctrlRtt: number }
   | { t: 'leave' };
 
 export type HostToScreen =
-  | { t: 'welcome'; slot: number; state: LobbyState }
+  | { t: 'welcome'; slot: number; state: LobbyState; build?: string }
   | { t: 'lobby'; state: LobbyState }
   | { t: 'reject'; reason: RejectReason }
   /** Der Host hat die Lobby bewusst geschlossen. */

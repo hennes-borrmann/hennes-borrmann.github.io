@@ -4,6 +4,7 @@
 // Diese Datei verbindet die Bausteine: Signaling-Endpunkte, Lobby,
 // Controller-Kopplung, Simulation, Darstellung und Diagnose.
 
+import { BUILD_ID } from '../build';
 import { ClientGame, CLIENT_INTERP_DELAY } from '../game/clientGame';
 import { HostGame } from '../game/hostGame';
 import { KeyboardInput, mergeInput } from '../game/input';
@@ -181,6 +182,7 @@ export class App {
     const session = loadSession();
     const name = loadName();
     this.ui.setHome(name, isValidCode(urlCode, ROOM_CODE_LENGTH) ? urlCode : '');
+    this.ui.setVersion(BUILD_ID);
 
     requestAnimationFrame(this.frame);
     window.setInterval(() => this.everySecond(), 1000);
@@ -499,6 +501,7 @@ export class App {
       localReady: me?.ready ?? false,
       controllerConnected: this.pairing.connected,
       controllerState: this.pairing.input.fresh ? 'active' : this.pairing.input.lastPacketAt === 0 ? 'waiting' : 'silent',
+      controllerMismatch: this.pairing.buildMismatch,
       controllerRtt: this.pairing.rtt,
     };
     this.ui.renderLobby(model);
@@ -512,6 +515,10 @@ export class App {
     if (lobby && lobby.status === 'reconnecting') {
       const left = Math.max(0, Math.ceil((lobby.deadline - Date.now()) / 1000));
       this.ui.setBanner(`Verbindung zum Host unterbrochen – verbinde neu … (noch ${left} s)`, 'bad');
+      return;
+    }
+    if (lobby && lobby.status === 'joined' && lobby.buildMismatch) {
+      this.ui.setBanner('Dieser Bildschirm und der Host nutzen unterschiedliche Fassungen der Seite. Bitte auf beiden die Seite neu laden.');
       return;
     }
     if (this.role === 'host' && this.roomEp?.status === 'offline') {
@@ -690,6 +697,7 @@ export class App {
       turnTone = 'bad';
     }
     const general: DebugRow[] = [
+      { label: 'Version', value: BUILD_ID },
       { label: 'Rolle', value: this.role === 'host' ? 'Host' : this.role === 'client' ? 'Mitspieler' : '–' },
       { label: 'Signaling', ...signalText(this.screenEp.status) },
     ];

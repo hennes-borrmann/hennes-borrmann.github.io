@@ -26,6 +26,8 @@ export interface LobbyModel {
    * 'active': sendet Eingaben, 'silent': hat gesendet, jetzt kommt nichts mehr.
    */
   controllerState: 'waiting' | 'active' | 'silent';
+  /** Handy und Bildschirm laufen mit unterschiedlichen Fassungen der Seite. */
+  controllerMismatch: boolean;
   controllerRtt: number;
 }
 
@@ -140,6 +142,10 @@ export class ScreenUi {
     this.inCode.value = code;
   }
 
+  setVersion(build: string): void {
+    $('home-version').textContent = `Version ${build}`;
+  }
+
   setHomeBusy(busy: boolean): void {
     this.btnCreate.disabled = busy;
     this.btnJoin.disabled = busy;
@@ -167,9 +173,10 @@ export class ScreenUi {
       if (m.controllerState === 'active') text = `Handy verbunden · Ping ${ms(m.controllerRtt)}`;
       else if (m.controllerState === 'waiting') text = 'Handy verbunden – dort noch „Tippen zum Starten“';
       else text = 'Handy verbunden, sendet aber gerade nichts';
+      if (m.controllerMismatch) text = 'Handy hat eine ältere Fassung der Seite – dort bitte neu laden';
     }
     status.textContent = text;
-    status.dataset.on = String(m.controllerConnected && m.controllerState === 'active');
+    status.dataset.on = String(m.controllerConnected && m.controllerState === 'active' && !m.controllerMismatch);
 
     // Liste nur neu aufbauen, wenn sich etwas Sichtbares geändert hat.
     const json = JSON.stringify([m.players, m.localSlot]);

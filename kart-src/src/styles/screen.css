@@ -304,6 +304,13 @@ input[type="text"]::placeholder {
   color: var(--bad);
 }
 
+.home-version {
+  margin-top: auto;
+  padding-top: 24px;
+  font: 11px/1 var(--font-mono);
+  color: #565d66;
+}
+
 /* --- Lobby ----------------------------------------------------------------- */
 
 .lobby-head {

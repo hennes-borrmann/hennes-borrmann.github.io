@@ -5,6 +5,7 @@
 // zurückzuverbinden. Verbindet sich dasselbe Handy erneut (nach Funkloch oder
 // Bildschirmsperre), ersetzt es einfach seine alte Verbindung.
 
+import { BUILD_ID } from '../build';
 import { ControllerInput } from '../game/input';
 import type { Link, PathInfo } from '../net/link';
 import {
@@ -29,6 +30,8 @@ export class ControllerPairing {
   /** Was das Handy über sich meldet. */
   info = { tilt: false, sensorHz: 0, sendHz: 0 };
   path: PathInfo | null = null;
+  /** Das Handy läuft mit einer anderen Fassung der Seite (meist: alter Zwischenspeicher). */
+  buildMismatch = false;
   onChange: (() => void) | null = null;
 
   private cid: string | null = null;
@@ -57,6 +60,7 @@ export class ControllerPairing {
         window.setTimeout(() => link.close(), 400);
         return;
       }
+      this.buildMismatch = typeof msg.build === 'string' && msg.build !== BUILD_ID;
       this.adopt(link, String(msg.cid ?? ''));
     };
   }
@@ -68,7 +72,7 @@ export class ControllerPairing {
     const json = JSON.stringify(info);
     if (!force && json === this.lastInfoJson) return;
     this.lastInfoJson = json;
-    this.sendTo(this.link, { t: 'paired', ...info });
+    this.sendTo(this.link, { t: 'paired', ...info, build: BUILD_ID });
   }
 
   async refreshPath(): Promise<void> {

@@ -6,6 +6,7 @@
 // übernommen hat, hört es auf (sonst würden sich zwei Handys gegenseitig
 // verdrängen).
 
+import { BUILD_ID } from '../build';
 import { randomCode, randomToken } from '../net/codes';
 import { PeerEndpoint } from '../net/endpoint';
 import type { Link, LinkOptions } from '../net/link';
@@ -54,6 +55,8 @@ export class ScreenConnection {
   paired: PairedInfo | null = null;
   /** Zahl der bisherigen Verbindungsabbrüche (für die Anzeige). */
   drops = 0;
+  /** Der Bildschirm läuft mit einer anderen Fassung der Seite. */
+  buildMismatch = false;
   onChange: (() => void) | null = null;
 
   private readonly endpoint: PeerEndpoint;
@@ -119,7 +122,7 @@ export class ScreenConnection {
     }
     this.link = link;
     link.onOpen = () => {
-      const hello: ControllerToScreen = { t: 'hello', v: PROTOCOL_VERSION, cid: this.id.cid };
+      const hello: ControllerToScreen = { t: 'hello', v: PROTOCOL_VERSION, cid: this.id.cid, build: BUILD_ID };
       link.send(hello as unknown as Record<string, unknown>);
     };
     link.onMessage = (raw) => {
@@ -127,6 +130,7 @@ export class ScreenConnection {
       const msg = raw as ScreenToController;
       if (msg.t === 'paired') {
         this.paired = { name: msg.name, slot: msg.slot, room: msg.room, phase: msg.phase };
+        this.buildMismatch = typeof msg.build === 'string' && msg.build !== BUILD_ID;
         this.everConnected = true;
         this.status = 'connected';
         this.onChange?.();
