@@ -346,6 +346,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const offHere = mainOffset(s.seg);
     const offTarget = mainOffset(target);
     const range = Math.min((PATH.length - 2) * t.step, 16 + v * 1.7);
+    /** Bei Flut: die höhere, flachere Seite der Fahrbahn (−1 links, 1 rechts, 0 = keine Flut hier). */
+    let shallow = 0;
     // Im Verkehr nutzt die KI die Fahrbahn bis an den Rand.
     const room = t.vehicles.length > 0 && !openAhead ? Math.max(maxLat, t.rh[target] - 0.9) : maxLat;
     if (t.vehicles.length > 0) {
@@ -408,16 +410,20 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const dry = t.py[target] + 0.12;
       if (Math.abs(tilt) > 0.012) {
         // Die Wasserlinie quer zur Fahrbahn: auf der tiefen Seite steht es, auf der hohen ist es trocken.
+        // Steht es auf der Wunschlinie mehr als knöcheltief, wird ausgewichen – sonst nur, wenn es wenig kostet.
         const line = (level - dry) / tilt;
-        if (tilt > 0) block(-99, line + 0.9, level - dry > 0.35 ? 1 : 0.6);
-        else block(line - 0.9, 99, level - dry > 0.35 ? 1 : 0.6);
+        const weight = level - (t.py[target] + lat * tilt) > 0.15 ? 1 : 0.5;
+        if (tilt > 0) block(-99, line + 0.9, weight);
+        else block(line - 0.9, 99, weight);
+        shallow = tilt > 0 ? 1 : -1;
       }
     }
     if (blocks > 0) {
       const free = freeLat(lat, here, room);
-      // Alles dicht? Im Verkehr heißt das bremsen; steht nur überall Wasser, einfach durch.
-      if (Number.isNaN(free)) jam = t.vehicles.length > 0;
-      else lat = free;
+      // Alles dicht? Im Verkehr heißt das bremsen; steht nur überall Wasser, dann dort durch, wo es am flachsten ist.
+      if (!Number.isNaN(free)) lat = free;
+      else if (t.vehicles.length > 0) jam = true;
+      else if (shallow !== 0) lat = shallow * room;
     }
   }
   AI_TRACE.lat = lat;

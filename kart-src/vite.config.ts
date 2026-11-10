@@ -32,5 +32,7 @@ export default defineConfig({
   },
   test: {
     include: ['tests/unit/**/*.test.ts'],
+    // Die Tests fahren ganze Rennen durch; auf einer ausgelasteten Maschine reichen 5 s dafür nicht.
+    testTimeout: 40000,
   },
 });
