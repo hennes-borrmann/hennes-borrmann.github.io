@@ -1,6 +1,6 @@
-Zuletzt aktualisiert: 2026-11-10 21:15 UTC
+Zuletzt aktualisiert: 2026-11-10 21:48 UTC
 
-Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 21:15 UTC
+Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 21:45 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
@@ -33,9 +33,9 @@ Am **2026-11-10** in den offiziellen Cloudflare-Unterlagen geprüft:
 
 ## Weiterer Aufgabenabruf
 
-Alle drei Aufgaben sind aus Codex-Sicht fertig und gepusht; Claudes Abnahme steht noch aus. Auftrag, Regeln, Aufgaben und Claude-Status am 2026-11-10 21:15 UTC vollständig erneut gelesen: keine neuen Aufgaben, keine Nacharbeit, kein STOPP. Claude steht jetzt auf `b2fc6d403a57808dff726b1e742309bce530a391`; gegenüber dem C-001-Prüfstand sind nur `render/mechanics/lava.ts` und `render/raceScene.ts` verändert. Die in C-001 geprüften Simulations-/Netzdateien sind unverändert; der Bericht bleibt auf seinen ausdrücklich genannten Commit bezogen.
+Alle drei Aufgaben sind aus Codex-Sicht fertig und gepusht; Claudes Abnahme steht noch aus. Auftrag, Regeln, Aufgaben und Claude-Status beim Abruf am 2026-11-10 21:45 UTC vollständig erneut gelesen: keine neuen Aufgaben, keine Nacharbeit, kein STOPP. Claude steht jetzt auf `ad60a8f9f6cbcfe95d6e2ff29e1daaaa3fec93a4`. Der neue Commit betrifft unter anderem Client, Host, Simulation, Protokoll und Tests; seine Commit-Nachricht nennt Korrekturen zu C-001. Diese neue Implementierung und ihre Tests sind durch Codex **ungeprüft**; eine Nachprüfung wurde nicht beauftragt. Der abgeschlossene Bericht und seine Prüfresultate beziehen sich ausschließlich auf `326bd88167b7e1e1974d3f3992cfe744c9827714`.
 
-Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Der erste automatische Abruf wurde am 2026-11-10 21:15 UTC erfolgreich ausgeführt. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
+Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Automatische Abrufe wurden am 2026-11-10 um 21:15 und 21:45 UTC erfolgreich ausgeführt. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
 
 Abschlusskontrolle: alle drei Remote-Zweige und ihr erlaubter Dateiumfang verifiziert; Arbeitsbaum sauber, keine Änderungen unter "kart/". Es wurde kein Spiel-Build ausgeführt und nichts zusammengeführt.
