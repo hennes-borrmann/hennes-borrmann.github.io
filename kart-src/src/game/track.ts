@@ -173,6 +173,12 @@ export interface Track {
    * läuft der Wert auf wh zu.
    */
   free: Float64Array;
+  /**
+   * Wo zwei Fahrbahnen ineinander liegen: der Abschnitt des anderen Wegs
+   * gleich nebenan (sonst −1). Damit lässt sich "ich bin hier, will aber dort
+   * entlang" auflösen, solange beide Wege noch eins sind.
+   */
+  twin: Int32Array;
   /** EDGE_*-Bits je Abschnitt. */
   edge: Uint16Array;
   /** Abschnitt, an dem ein hier abgestürztes Kart wieder aufgesetzt wird. */
@@ -238,6 +244,8 @@ const SUB = 48;
 const SEARCH = 12;
 /** So weit wird an Gabelung und Einmündung nach dem Nachbarweg geschaut (Abschnitte). */
 const ZONE_SCAN = 110;
+/** Abstand der Hilfspunkte, über die eine Abzweigung die Hauptstrecke verlässt und wieder erreicht (Meter). */
+const GUIDE = 9;
 
 interface Sampled {
   count: number;
@@ -358,16 +366,21 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       const k = ((i % n) + n) % n;
       return [main.x[k], main.z[k], main.y[k]];
     };
-    // Die Punkte kurz davor und dahinter sorgen dafür, dass die Abzweigung in
-    // Fahrtrichtung der Hauptstrecke beginnt und endet.
-    const s = sample([P(from - 6), P(from), ...b.points.map(scaled), P(to), P(to + 6)], false, 0, false, step);
+    // Je ein Hilfspunkt auf der Hauptstrecke kurz hinter der Gabelung und kurz
+    // vor der Einmündung: so löst sich die Abzweigung ohne Knick und kommt
+    // ohne Knick zurück. (Die Punkte davor und dahinter geben nur die Richtung vor.)
+    const own = b.points.length;
+    const s = sample([P(from - GUIDE), P(from), P(from + GUIDE), ...b.points.map(scaled), P(to - GUIDE), P(to), P(to + GUIDE)], false, 0, false, step);
+    // Stützpunkt-Einheiten der Beschreibung (0 = Gabelung, 1 = erster eigener
+    // Punkt, own + 1 = Einmündung) → Einheiten der Kurve mit den Hilfspunkten.
+    const inner = (u: number): number => (u <= 1 ? 2 * Math.max(0, u) : u <= own ? u + 1 : own + 1 + 2 * Math.min(1, u - own));
     paths.push({
       off: total,
       count: s.count,
       closed: false,
       step: s.step,
       length: s.length,
-      meters: s.meters,
+      meters: (u) => s.meters(inner(u)),
       f: b,
       roadHalf: b.roadHalf ?? def.roadHalf,
       shoulder: b.shoulder ?? def.shoulder,
@@ -514,6 +527,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
   // beginnen die Banden – als Keil, der von der Mitte her zusammenläuft.
   const edge = new Uint16Array(total);
   const free = Float64Array.from(wh);
+  const twin = new Int32Array(total).fill(-1);
   const cross: [number, number][] = [];
   branches.forEach((b) => {
     let sideSum = 0;
@@ -558,6 +572,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         py[o.g] = plane + (py[o.g] - plane) * w;
         bank[o.g] = bank[o.m] + (bank[o.g] - bank[o.m]) * w;
         cross.push([o.g, o.m]);
+        twin[o.g] = o.m;
       }
       const ownZone = own.map((o) => o.g);
       for (const m of mainList) {
@@ -570,6 +585,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         edge[m] |= side > 0 ? EDGE_FREE_R : EDGE_FREE_L;
         free[m] = wh[m] + (limit - sep) / 2;
         cross.push([m, r.seg]);
+        twin[m] = r.seg;
       }
     }
     b.side = sideSum >= 0 ? 1 : -1;
@@ -685,6 +701,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     rh,
     wh,
     free,
+    twin,
     edge,
     respawn,
     next,
@@ -782,9 +799,23 @@ export function walk(t: Track, seg: number, steps: number, route = 0): number {
   return i;
 }
 
-/** Schreibt die nächsten out.length Abschnitte ab seg (einschließlich) nach out. */
+/**
+ * Der Abschnitt, von dem aus ein Fahrer mit dem Ziel route vorausschaut. An
+ * einer Gabelung liegen beide Wege anfangs ineinander, und die Zuordnung
+ * "nächste Mittellinie" kann auf dem falschen landen – dann zählt der
+ * Abschnitt gleich nebenan auf dem gewollten Weg.
+ */
+export function routeSeg(t: Track, seg: number, route: number): number {
+  const other = t.twin[seg];
+  if (other < 0) return seg;
+  const own = t.branchOf[seg];
+  if (own >= 0) return (route >> own) & 1 ? seg : other;
+  return (route >> t.branchOf[other]) & 1 ? other : seg;
+}
+
+/** Schreibt die nächsten out.length Abschnitte auf dem Weg route nach out, beginnend bei seg. */
 export function pathAhead(t: Track, seg: number, route: number, out: Int32Array): void {
-  let i = seg;
+  let i = routeSeg(t, seg, route);
   for (let k = 0; k < out.length; k++) {
     out[k] = i;
     const f = t.fork[i];

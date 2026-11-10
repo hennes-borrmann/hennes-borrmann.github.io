@@ -139,9 +139,11 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     texL.needsUpdate = true;
     const right: Placement[] = [];
     const left: Placement[] = [];
-    for (let i = 0; i < t.n; i += 5) {
+    for (let i = 0; i < t.total; i += 5) {
       const k = t.curv[i];
       if (Math.abs(k) < 1 / 30) continue;
+      // Wo zwei Fahrbahnen ineinander liegen, stünde die Tafel mitten auf der anderen.
+      if (t.twin[i] >= 0) continue;
       // Außenseite der Kurve; in Fahrtrichtung lesbar.
       const sgn = k > 0 ? -1 : 1;
       if (t.edge[i] & (sgn < 0 ? 1 : 2)) continue;
@@ -167,6 +169,61 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     place(board(), right, mR);
     place(board(), left, mL);
     disposables.push(texR, texL, mR, mL);
+  }
+
+  // --- Gemeinsam: Tafel im Keil jeder Gabelung – hier teilt sich die Strecke ----------
+  if (t.branches.length > 0) {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#ffd23f';
+    g.fillRect(0, 0, 256, 128);
+    g.strokeStyle = '#16131c';
+    g.lineWidth = 12;
+    g.strokeRect(6, 6, 244, 116);
+    g.lineWidth = 16;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (const dir of [-1, 1]) {
+      const x0 = 128 + dir * 22;
+      const x1 = 128 + dir * 84;
+      g.beginPath();
+      g.moveTo(x0, 100);
+      g.lineTo(x0, 70);
+      g.lineTo(x1, 34);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(x1 - dir * 34, 30);
+      g.lineTo(x1, 34);
+      g.lineTo(x1 - dir * 8, 66);
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+    if (th.stars) material.color.setScalar(0.85);
+    const signs: Placement[] = [];
+    for (const b of t.branches) {
+      // Letzter Abschnitt, auf dem beide Fahrbahnen noch ineinander liegen: dahinter beginnt der Keil.
+      let last = -1;
+      for (let k = 0; k < b.count && t.twin[b.first + k] >= 0; k++) last = b.first + k;
+      if (last < 0) continue;
+      const other = t.twin[last];
+      const ax = (t.tx[last] + t.tx[other]) / 2;
+      const az = (t.tz[last] + t.tz[other]) / 2;
+      signs.push({
+        x: (t.px[last] + t.px[other]) / 2 + ax * 5,
+        y: Math.max(t.py[last], t.py[other]) + 2.6,
+        z: (t.pz[last] + t.pz[other]) / 2 + az * 5,
+        rot: Math.atan2(-ax, -az),
+        sx: 1,
+        sy: 1,
+        sz: 1,
+      });
+    }
+    place(new THREE.PlaneGeometry(4.4, 2.2), signs, material);
+    disposables.push(tex, material);
   }
 
   // --- Ferne Kulisse: Ring am Horizont ---------------------------------------------

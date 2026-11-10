@@ -368,55 +368,97 @@ export class World {
   private buildTunnels(solid: MeshBuilder, glow: MeshBuilder): void {
     const t = this.track;
     const th = this.theme;
-    const cOut = rgb(th.ground[2]);
-    const cOutHi = rgb(th.ground[3]);
-    const cIn = shade(cOut, 0.42);
-    const cInDark = shade(cOut, 0.3);
-    const cFace = shade(cOut, 0.72);
-    const cGlow = rgb({ werkshof: 0xffd23f, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1 }[t.def.theme] ?? 0x7ef0ff);
+    const id = t.def.theme;
+    // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
+    // Wänden, die Naturstrecken eine Höhle im Fels.
+    const hall = id === 'werkshof' || id === 'nacht';
     const H = TUNNEL_H;
-    const R = TUNNEL_ROCK;
+    const R = hall ? 0.9 : TUNNEL_ROCK;
+    const cRock = rgb(th.ground[2]);
+    const cWall = id === 'nacht' ? rgb(0x2d3050) : rgb(0xd9c7a8);
+    const cBand = id === 'nacht' ? rgb(0xff5ad1) : rgb(0x6fd0e6);
+    const cRoof = id === 'nacht' ? rgb(0x23263f) : rgb(0xb5543c);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
-    // innen [Anteil der halben Breite, Höhe], außen zusätzlich [Anteil des Felsmantels].
-    const IN: [number, number][] = [
-      [-1, 0],
-      [-1, 0.45 * H],
-      [-0.74, 0.78 * H],
-      [-0.38, 0.95 * H],
-      [0, H],
-      [0.38, 0.95 * H],
-      [0.74, 0.78 * H],
-      [1, 0.45 * H],
-      [1, 0],
-    ];
-    const OUT: [number, number, number][] = [
-      [-1, 1, -1.4],
-      [-1, 0.86, 0.5 * H],
-      [-0.74, 0.74, 0.86 * H + 0.4 * R],
-      [-0.38, 0.4, H + 0.6 * R],
-      [0, 0, H + 0.72 * R],
-      [0.38, 0.4, H + 0.6 * R],
-      [0.74, 0.74, 0.86 * H + 0.4 * R],
-      [1, 0.86, 0.5 * H],
-      [1, 1, -1.4],
-    ];
+    // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
+    const IN: [number, number][] = hall
+      ? [
+          [-1, 0],
+          [-1, 0.52 * H],
+          [-1, 0.84 * H],
+          [-0.5, 0.97 * H],
+          [0, 1.04 * H],
+          [0.5, 0.97 * H],
+          [1, 0.84 * H],
+          [1, 0.52 * H],
+          [1, 0],
+        ]
+      : [
+          [-1, 0],
+          [-1, 0.45 * H],
+          [-0.74, 0.78 * H],
+          [-0.38, 0.95 * H],
+          [0, H],
+          [0.38, 0.95 * H],
+          [0.74, 0.78 * H],
+          [1, 0.45 * H],
+          [1, 0],
+        ];
+    const OUT: [number, number, number][] = hall
+      ? [
+          [-1, 1, -1.4],
+          [-1, 1, 0.52 * H],
+          [-1, 1.5, 0.84 * H + 0.45],
+          [-0.5, 0.6, 0.97 * H + 0.85],
+          [0, 0, 1.04 * H + 0.95],
+          [0.5, 0.6, 0.97 * H + 0.85],
+          [1, 1.5, 0.84 * H + 0.45],
+          [1, 1, 0.52 * H],
+          [1, 1, -1.4],
+        ]
+      : [
+          [-1, 1, -1.4],
+          [-1, 0.86, 0.5 * H],
+          [-0.74, 0.74, 0.86 * H + 0.4 * R],
+          [-0.38, 0.4, H + 0.6 * R],
+          [0, 0, H + 0.72 * R],
+          [0.38, 0.4, H + 0.6 * R],
+          [0.74, 0.74, 0.86 * H + 0.4 * R],
+          [1, 0.86, 0.5 * H],
+          [1, 1, -1.4],
+        ];
     const K = IN.length;
+    /** Farbe des Mantels außen bzw. der Wand innen für den Streifen k am Abschnitt i. */
+    const outer = (i: number, k: number): RGB => {
+      if (!hall) {
+        const c = k >= 2 && k <= 5 ? rgb(th.ground[3]) : cRock;
+        return (i + k) % 3 === 0 ? shade(c, 0.9) : c;
+      }
+      if (k === 0 || k === K - 2) return i % 6 < 3 ? cWall : shade(cWall, 0.93);
+      if (k === 1 || k === K - 3) return Math.floor(i / 3) % 2 === 0 ? cBand : cWall;
+      return i % 2 === 0 ? cRoof : shade(cRoof, 0.9);
+    };
+    const inner = (i: number, k: number): RGB => {
+      const c = hall ? (k === 0 || k === K - 2 ? shade(cWall, 0.62) : shade(k === 1 || k === K - 3 ? cWall : cRoof, 0.45)) : shade(cRock, 0.42);
+      return (i + k) % 2 === 0 ? c : shade(c, 0.82);
+    };
+    const cFace = hall ? shade(cWall, 0.85) : shade(cRock, 0.72);
     const rings = new Map<number, { inner: V3[]; outer: V3[] }>();
     const ring = (i: number): { inner: V3[]; outer: V3[] } => {
       let r = rings.get(i);
       if (r) return r;
       const W = t.wh[i] + WALL_T + 0.25;
-      const inner: V3[] = [];
-      const outer: V3[] = [];
+      const pin: V3[] = [];
+      const pout: V3[] = [];
       for (let k = 0; k < K; k++) {
-        inner.push(this.P(i, 0, IN[k][0] * W, IN[k][1]));
-        // Zerklüftet: jeder Punkt des Mantels sitzt etwas anders – entlang der Röhre zusammenhängend.
-        const n = noise(t.px[i] * 0.16 + k * 7.3, t.pz[i] * 0.16 - k * 3.1);
+        pin.push(this.P(i, 0, IN[k][0] * W, IN[k][1]));
+        // Fels: jeder Punkt des Mantels sitzt etwas anders – entlang der Röhre zusammenhängend.
+        const n = hall ? 0.5 : noise(t.px[i] * 0.16 + k * 7.3, t.pz[i] * 0.16 - k * 3.1);
         const bulge = 1 + 0.5 * (n - 0.5);
         const side = OUT[k][0] < 0 ? -1 : OUT[k][0] > 0 ? 1 : 0;
-        outer.push(this.P(i, 0, OUT[k][0] * W + side * OUT[k][1] * R * bulge, k === 0 || k === K - 1 ? OUT[k][2] : OUT[k][2] * (0.9 + 0.2 * n)));
+        pout.push(this.P(i, 0, OUT[k][0] * W + side * OUT[k][1] * R * bulge, k === 0 || k === K - 1 ? OUT[k][2] : OUT[k][2] * (0.9 + 0.2 * n)));
       }
-      r = { inner, outer };
+      r = { inner: pin, outer: pout };
       rings.set(i, r);
       return r;
     };
@@ -435,13 +477,18 @@ export class World {
       if (last) continue;
       const b = ring(j);
       for (let k = 0; k < K - 1; k++) {
-        const high = k >= 2 && k <= 5;
-        solid.quad(a.outer[k], a.outer[k + 1], b.outer[k + 1], b.outer[k], (i + k) % 3 === 0 ? shade(high ? cOutHi : cOut, 0.9) : high ? cOutHi : cOut);
-        solid.quad(a.inner[k + 1], a.inner[k], b.inner[k], b.inner[k + 1], (i + k) % 2 === 0 ? cIn : cInDark);
+        solid.quad(a.outer[k], a.outer[k + 1], b.outer[k + 1], b.outer[k], outer(i, k));
+        solid.quad(a.inner[k + 1], a.inner[k], b.inner[k], b.inner[k + 1], inner(i, k));
       }
-      // Kristalle: abwechselnd links und rechts an der Wand
-      if (i % 7 === 3) {
-        const sgn = lamp++ % 2 === 0 ? -1 : 1;
+      if (i % 7 !== 3) continue;
+      lamp++;
+      if (hall) {
+        // Leuchtband unter dem First
+        const p = this.P(i, 0, 0, 1.04 * H - 0.35);
+        glow.box(p[0], p[1], p[2], 2.6, 0.22, 0.9, cGlow, Math.atan2(t.tx[i], t.tz[i]));
+      } else {
+        // Kristalle: abwechselnd links und rechts an der Wand
+        const sgn = lamp % 2 === 0 ? -1 : 1;
         const W = t.wh[i] + WALL_T;
         for (let c = 0; c < 3; c++) {
           const p = this.P(i, 0.2 * c, sgn * (W - 0.25 * c), 1.3 + 0.9 * c + (lamp % 3) * 0.5);

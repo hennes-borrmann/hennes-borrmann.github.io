@@ -67,6 +67,8 @@ export interface BotBrain {
   line: number;
   /** Gewählter Weg: Bit k gesetzt = Abzweigung k nehmen. */
   route: number;
+  /** true = route bleibt, wie sie ist (für Tests); sonst wird vor jeder Gabelung neu gewürfelt. */
+  routeLock: boolean;
   /** Ticks, die das Kart praktisch steht. */
   stuck: number;
   /** Verbleibende Ticks Rückwärtsfahrt zum Freikommen. */
@@ -108,6 +110,7 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     driftFrom: DRIFT_FROM[l][slot % 4],
     line: [-1.6, 1.4, 0.2, -0.6][slot % 4],
     route: 0,
+    routeLock: false,
     stuck: 0,
     reverse: 0,
     holding: 0,
@@ -204,7 +207,9 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // --- Welcher Weg? Rechtzeitig vor jeder Gabelung wird gewürfelt. ---
   const on = t.branchOf[s.seg];
   for (let k = 0; k < t.branches.length; k++) {
-    if (on === k) b.route |= 1 << k;
+    if (b.routeLock) break;
+    // Wer schon mitten auf einer Abzweigung fährt (etwa nach einem Rempler), bleibt dabei.
+    if (on === k && t.twin[s.seg] < 0) b.route |= 1 << k;
     else if (on < 0) {
       const d = segDelta(t, s.seg, t.branches[k].from);
       if (d > DECIDE_AT && d <= DECIDE_AT + 2) b.route = random(b) < 0.5 ? b.route | (1 << k) : b.route & ~(1 << k);

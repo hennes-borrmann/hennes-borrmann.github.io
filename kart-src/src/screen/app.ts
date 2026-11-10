@@ -1160,7 +1160,7 @@ export class App {
       },
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
       audio: () => this.sound.debug(),
-      place: (slot: number, meters: number, lat = 0) => this.hostGame?.debugPlace(slot, meters, lat),
+      place: (slot: number, meters: number, lat = 0, branch = -1) => this.hostGame?.debugPlace(slot, meters, lat, branch),
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
       debugHit: (slot: number) => this.hostGame?.debugHit(slot),
