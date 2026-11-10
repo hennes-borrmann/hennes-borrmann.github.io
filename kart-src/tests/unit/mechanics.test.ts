@@ -268,6 +268,20 @@ describe('Verkehr (Nachtschicht)', () => {
     expect(forwardSpeed(s)).toBeLessThan(5);
   });
 
+  it('wer im Ziel steht oder auf die Ampel wartet, wird vom Verkehr in Ruhe gelassen', () => {
+    setTrack(3);
+    const { v: bus, time: T0 } = scene(VEH_BUS);
+    // Steht mitten in der Busspur, der Bus kommt von hinten.
+    const s = behind(bus, T0, -(bus.half + 8), 0, 0);
+    const x = s.x;
+    const z = s.z;
+    let ev = 0;
+    for (let i = 0; i < 180; i++) ev |= stepKart(s, { steer: 0, buttons: 0 }, { canDrive: false, speedFactor: 1, time: T0 + i });
+    expect(ev & EV_HIT).toBe(0);
+    expect(s.spin).toBe(0);
+    expect(Math.hypot(s.x - x, s.z - z)).toBeLessThan(0.5);
+  });
+
   it('die Straßenbahn folgt mit allen Wagen der Kurve', () => {
     const t = setTrack(3);
     const tram = t.vehicles.find((v) => v.kind === VEH_TRAM)!;

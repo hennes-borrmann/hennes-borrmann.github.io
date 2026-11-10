@@ -912,7 +912,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
 
   // --- Verkehr: fahrende Wände, in die man besser nicht hineinrauscht ---
-  if (t.vehicles.length > 0) {
+  // (Wer im Ziel ausgerollt ist oder noch an der Ampel steht, wird in Ruhe gelassen.)
+  if (t.vehicles.length > 0 && env.canDrive) {
     const tev = stepTraffic(t, s, env.time);
     if (tev !== 0) {
       ev |= tev & ~TRAFFIC_MOVED;
@@ -986,8 +987,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   if (!air && Math.abs(lat) > t.rh[s.seg] + 0.3) flags |= FLAG_OFFROAD;
 
-  // --- Geysire und Lavabomben ---
+  // --- Geysire, Lavabomben, Stampfpressen ---
   for (const p of t.pulses) {
+    if (!env.canDrive) break;
     const dy = s.y - p.y;
     if (dy < -1.5 || dy > 2.5) continue;
     const dx = s.x - p.x;
