@@ -8,7 +8,8 @@
 // kommt ein Aufruf für die Aufkleber (Augen, Ziffer der Startnummer) und – nur
 // solange sichtbar – je einer für die Flammen sowie zwei für die Effekte
 // (Schutzring, Blitze, Qualm samt Kontur). Macht 3 Aufrufe im Normalfall,
-// höchstens 6.
+// höchstens 6. Items kommen nur bei Bedarf dazu: der Gegenstand in der Hand
+// (2 Aufrufe samt Kontur) und im Drachenzug Drache (2) und Leine (1).
 //
 // Die Kontur ist eine umgestülpte Hülle (siehe toon.ts). Ihr Netz enthält nur
 // die Teile, die eine Linie bekommen sollen; die Dicke steckt je Ecke in der
@@ -18,7 +19,7 @@
 // „Links“ ist +x, „rechts“ −x.
 
 import * as THREE from 'three';
-import { INK, rgb, toonMaterial, withSkinnedOutline } from './toon';
+import { INK, outlineMaterial, rgb, toonMaterial, withSkinnedOutline } from './toon';
 
 export interface KartPose {
   /** Vorwärtstempo in m/s (negativ = rückwärts); 26 = Höchsttempo, bis 34 mit Schub. */
@@ -42,6 +43,10 @@ export interface KartPose {
   offroad: boolean;
   /** Im Ziel: jubeln bzw. Kopf hängen lassen. */
   emote: 'none' | 'win' | 'lose';
+  /** Item in der Hand: 0 = keins, sonst 1..9 (Nummern wie in game/sim.ts). */
+  held: number;
+  /** Der Abschleppdrache zieht gerade. */
+  tow: boolean;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -2403,6 +2408,577 @@ function buildFlames(b: Builder): void {
   }
 }
 
+// ───────────────────────────── Items ─────────────────────────────
+//
+// Gegenstände in der Hand und der Abschleppdrache. Sie hängen nicht im
+// Netz der Figur: jeder Gegenstand ist ein eigenes kleines Netz (+ Kontur),
+// dessen Geometrie sich alle Karts teilen. Gebaut wird mit demselben Builder
+// wie die Karts, nur mit einem einzigen (ruhenden) Knochen.
+//
+// Gegenstand: Ursprung = Griff (dort sitzt die Faust), +y oben, +z vorn,
+// −x außen – gehalten wird immer rechts.
+
+// Item-Nummern wie in game/sim.ts (3 Ölfleck und 7 Nebelkerze brauchen hier keinen Namen)
+const I_BOOST = 1;
+const I_TIRE = 2;
+const I_TOP = 4;
+const I_GUARD = 5;
+const I_EMP = 6;
+const I_SPRING = 8;
+const I_KITE = 9;
+const I_COUNT = 10;
+
+// Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
+const I_RED = 0xff5a4e;
+const I_YEL = 0xffd23f;
+const I_TURQ = 0x1fc8b6;
+const I_INK = 0x2d2a36;
+
+interface ItemGeo {
+  main: THREE.BufferGeometry;
+  line: THREE.BufferGeometry | null;
+}
+
+const ONE_BONE = [new THREE.Matrix4()];
+
+function finishItem(b: Builder): ItemGeo {
+  const { main, outline } = b.finish();
+  // Kein Skelett: Knochen-Attribute weg, echte Hülle fürs Culling.
+  main.deleteAttribute('skinIndex');
+  main.deleteAttribute('skinWeight');
+  main.computeBoundingSphere();
+  if (outline) {
+    outline.deleteAttribute('skinIndex');
+    outline.deleteAttribute('skinWeight');
+    outline.computeBoundingSphere();
+  }
+  return { main, line: outline };
+}
+
+/** Zisch: Sprudelflasche mit Blitz auf dem Etikett und Korken. */
+function buildBottle(b: Builder): void {
+  const GLASS = 0x3fd08c;
+  b.put(
+    lathe(
+      [
+        [0, -0.07, GLASS],
+        [0.1, -0.07],
+        [0.124, -0.04],
+        [0.126, 0.0, I_RED, true],
+        [0.126, 0.15, GLASS, true],
+        [0.118, 0.19],
+        [0.078, 0.255],
+        [0.047, 0.3],
+        [0.045, 0.335],
+        [0, 0.335],
+      ],
+      14,
+    ),
+    { bone: 0 },
+  );
+  b.put(
+    lathe(
+      [
+        [0, 0.32, 0xc98a4b],
+        [0.042, 0.32],
+        [0.058, 0.37],
+        [0.056, 0.415],
+        [0, 0.42],
+      ],
+      10,
+    ),
+    { bone: 0 },
+  );
+  for (const s of [1, -1])
+    b.put(prism(BOLT, 0.02), {
+      bone: 0,
+      color: I_YEL,
+      pos: [0, 0.075, s * 0.128],
+      rot: [0, s > 0 ? 0 : Math.PI, 0],
+      scale: [0.2, 0.17, 1],
+      outline: 0.45,
+    });
+  // Glanzlicht
+  b.put(box(0.022, 0.1, 0.01), { bone: 0, color: 0xdffbea, pos: [0.055, 0.21, -0.1], rot: [-0.45, 0, -0.5], outline: 0 });
+}
+
+/** Rollreifen: Gummi mit Profilstollen, gelbe Nabe; Achse entlang z (Ring zeigt zur Kamera). */
+function buildTire(b: Builder): void {
+  const C: V3 = [-0.07, 0.21, 0];
+  b.put(new THREE.TorusGeometry(0.165, 0.08, 8, 18), { bone: 0, color: 0x3a3745, pos: C });
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * TAU;
+    b.put(box(0.06, 0.05, 0.15), {
+      bone: 0,
+      color: 0x2a2733,
+      pos: [C[0] + Math.sin(a) * 0.236, C[1] + Math.cos(a) * 0.236, 0],
+      rot: [0, 0, -a],
+      outline: 0.55,
+    });
+  }
+  b.put(cyl(0.095, 0.095, 0.11, 12), { bone: 0, color: I_YEL, pos: C, rot: [HALF_PI, 0, 0], outline: 0.6 });
+  b.put(cyl(0.035, 0.035, 0.13, 8), { bone: 0, color: WHITE, pos: C, rot: [HALF_PI, 0, 0], outline: 0.4 });
+}
+
+/** Ölfleck: Ölkanne mit langer Tülle, der Tropfen hängt schon dran. Griff innen, Tülle nach außen. */
+function buildOilCan(b: Builder): void {
+  const X = -0.2;
+  b.put(
+    lathe(
+      [
+        [0, -0.06, 0xe8473d],
+        [0.13, -0.06],
+        [0.136, -0.035],
+        [0.136, 0.0, I_YEL, true],
+        [0.136, 0.045, 0xe8473d, true],
+        [0.136, 0.1],
+        [0.124, 0.122, 0xc9d2de, true],
+        [0.05, 0.2],
+        [0.036, 0.222],
+        [0, 0.224],
+      ],
+      14,
+    ),
+    { bone: 0, pos: [X, 0, 0] },
+  );
+  b.put(
+    sweep(
+      [
+        [X, 0.19, 0],
+        [X - 0.05, 0.25, 0],
+        [X - 0.14, 0.3, 0],
+        [X - 0.24, 0.33, 0],
+      ],
+      (t) => 0.026 - 0.013 * t,
+      6,
+      8,
+    ),
+    { bone: 0, color: 0xb7c2d2, outline: 0.7 },
+  );
+  b.put(sphere(0.032, 0.045, 0.032, 8, 6), { bone: 0, color: 0x2c2440, pos: [X - 0.255, 0.285, 0], outline: 0.7 });
+  b.put(sphere(0.01, 0.014, 0.01, 5, 4), { bone: 0, color: 0xcfc6ee, pos: [X - 0.265, 0.295, -0.026], outline: 0 });
+  // Henkel: Halbring auf der Innenseite
+  b.put(new THREE.TorusGeometry(0.072, 0.02, 5, 10, Math.PI), {
+    bone: 0,
+    color: I_INK,
+    pos: [X + 0.128, 0.03, 0],
+    rot: [0, 0, -HALF_PI],
+    outline: 0.7,
+  });
+}
+
+/** Brummkreisel: wie auf der Strecke, nur klein; steht auf seiner Spitze in der Hand. */
+function buildTop(b: Builder): void {
+  const k = 0.27;
+  const prof: LP[] = [
+    [0, 0, I_RED],
+    [0.5 * k, 0.45 * k],
+    [0.78 * k, 0.72 * k, I_YEL],
+    [0.8 * k, 0.86 * k],
+    [0.6 * k, 1.02 * k, I_TURQ],
+    [0.14 * k, 1.1 * k],
+    [0.11 * k, 1.5 * k],
+    [0.2 * k, 1.56 * k],
+    [0, 1.62 * k],
+  ];
+  // Streifen auf dem roten Bauch – damit man das Drehen sieht.
+  b.put(
+    lathe(prof, 16, (band, j) => (band < 2 && j % 4 === 1 ? WHITE : band === 2 && j % 4 === 3 ? I_RED : undefined)),
+    { bone: 0, pos: [0, 0.03, 0] },
+  );
+}
+
+/** Stoßfänger: Wappenschild mit Chromrand und Gummi-Stoßleiste quer darüber. */
+function buildShield(b: Builder): void {
+  const SHIELD = [0, 1, 0.85, 0.74, 0.85, 0.05, 0.72, -0.38, 0.42, -0.74, 0, -1, -0.42, -0.74, -0.72, -0.38, -0.85, 0.05, -0.85, 0.74];
+  const C: V3 = [0, 0.23, 0];
+  b.put(prism(SHIELD, 0.06), { bone: 0, color: 0xdfe6f2, pos: C, scale: [0.21, 0.21, 1] });
+  b.put(prism(SHIELD, 0.085), { bone: 0, color: 0x4aa6ff, pos: C, scale: [0.16, 0.16, 1], outline: 0.4 });
+  b.put(prism(BOLT, 0.1), { bone: 0, color: WHITE, pos: [0, C[1] - 0.06, 0], scale: [0.16, 0.13, 1], outline: 0 });
+  b.put(b.soft(0.44, 0.07, 0.12, 0.025, 10), { bone: 0, color: I_INK, pos: [0, C[1] + 0.05, 0], outline: 0.75 });
+}
+
+/** Kurzschluss: Stecker mit zwei Stiften und abgerissenem Kabel. */
+function buildPlug(b: Builder): void {
+  const BODY = 0x9b87ff;
+  b.put(b.soft(0.25, 0.21, 0.17, 0.045, 12), { bone: 0, color: BODY, pos: [0, 0.15, 0] });
+  b.put(cyl(0.06, 0.08, 0.08, 10), { bone: 0, color: 0x6b5bd6, pos: [0, 0.02, 0], outline: 0.7 });
+  b.put(box(0.036, 0.13, 0.016), { bone: 0, color: CHROME, pos: [0.058, 0.31, 0], outline: 0.6, mirror: 0 });
+  for (const s of [1, -1])
+    b.put(prism(BOLT, 0.012), {
+      bone: 0,
+      color: I_YEL,
+      pos: [0, 0.15, s * 0.088],
+      rot: [0, s > 0 ? 0 : Math.PI, 0],
+      scale: [0.16, 0.14, 1],
+      outline: 0.4,
+    });
+  b.put(
+    sweep(
+      [
+        [0, 0.0, 0],
+        [0, -0.06, -0.01],
+        [-0.04, -0.11, -0.03],
+        [-0.1, -0.13, -0.06],
+      ],
+      0.022,
+      6,
+      10,
+    ),
+    { bone: 0, color: I_INK, outline: 0.7 },
+  );
+  // Kupferlitzen am Kabelende
+  b.put(cone(0.024, 0.06, 5), { bone: 0, color: 0xe08a3c, pos: [-0.1, -0.13, -0.06], aim: [-0.8, -0.3, -0.5], outline: 0.5 });
+}
+
+/** Nebelkerze: Dose mit Streifen, Lunte und Funken. */
+function buildSmokeCan(b: Builder): void {
+  const GREY = 0xe4e0ec;
+  b.put(
+    lathe(
+      [
+        [0, -0.05, GREY],
+        [0.1, -0.05],
+        [0.106, -0.03],
+        [0.106, 0.05, 0xff8a3c, true],
+        [0.106, 0.12, GREY, true],
+        [0.106, 0.21],
+        [0.096, 0.232, 0x8f8898, true],
+        [0.058, 0.25],
+        [0, 0.252],
+      ],
+      14,
+    ),
+    { bone: 0 },
+  );
+  // Wölkchen auf dem Etikett, vorn und hinten
+  for (const s of [1, -1])
+    for (let i = 0; i < 3; i++)
+      b.put(sphere(0.032 + (i === 1 ? 0.012 : 0), 0.026 + (i === 1 ? 0.01 : 0), 0.012, 6, 4), {
+        bone: 0,
+        color: WHITE,
+        pos: [(i - 1) * 0.04, 0.085 + (i === 1 ? 0.008 : 0), s * 0.104],
+        outline: 0.3,
+      });
+  b.put(
+    sweep(
+      [
+        [0, 0.24, 0],
+        [0.018, 0.29, 0],
+        [-0.02, 0.34, 0.01],
+        [-0.006, 0.39, 0],
+      ],
+      0.012,
+      5,
+      10,
+    ),
+    { bone: 0, color: 0x6b4a2e, outline: 0.5 },
+  );
+  // Funke: Stern aus zwei gekreuzten Scheiben
+  const star: number[] = [];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * TAU;
+    const r = i % 2 === 0 ? 1 : 0.42;
+    star.push(Math.sin(a) * r, Math.cos(a) * r);
+  }
+  for (const ry of [0, HALF_PI])
+    b.put(prism(star, 0.02), { bone: 0, color: 0xffe04a, pos: [-0.006, 0.405, 0], rot: [0, ry, 0], scale: [0.075, 0.075, 1], outline: 0.45 });
+  b.put(sphere(0.026, 0.026, 0.026, 6, 4), { bone: 0, color: 0xff8a1c, pos: [-0.006, 0.405, 0], outline: 0 });
+}
+
+/** Sprungfeder: gelbe Spirale zwischen zwei roten Tellern. */
+function buildSpring(b: Builder): void {
+  const path: V3[] = [];
+  const N = 64;
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * 4.5 * TAU;
+    path.push([Math.cos(a) * 0.1, 0.03 + (i / N) * 0.31, Math.sin(a) * 0.1]);
+  }
+  b.put(sweep(path, 0.022, 6), { bone: 0, color: I_YEL, outline: 0.7 });
+  b.put(cyl(0.135, 0.135, 0.04, 14), { bone: 0, color: I_RED, pos: [0, 0.01, 0] });
+  b.put(cyl(0.135, 0.135, 0.04, 14), { bone: 0, color: I_RED, pos: [0, 0.36, 0] });
+}
+
+/** Abschleppdrache, zusammengefaltet: schmale Raute mit Augen, Schwanz aufgerollt. */
+function buildKiteFolded(b: Builder): void {
+  const RHOMB = [0, 0.46, 0.13, 0.22, 0, 0.04, -0.13, 0.22];
+  b.put(prism(RHOMB, 0.035), { bone: 0, color: I_YEL, pos: [0, -0.022, 0], scale: [1.18, 1.1, 1] });
+  b.put(prism(RHOMB, 0.05), { bone: 0, color: I_RED, outline: 0.5 });
+  for (const s of [1, -1]) {
+    b.put(sphere(0.032, 0.036, 0.012, 6, 4), { bone: 0, color: WHITE, pos: [0.046, 0.26, s * 0.026], mirror: 0, outline: 0.5 });
+    b.put(sphere(0.014, 0.02, 0.008, 5, 3), { bone: 0, color: I_INK, pos: [0.04, 0.255, s * 0.035], mirror: 0, outline: 0 });
+  }
+  b.put(cone(0.022, 0.08, 6), { bone: 0, color: I_TURQ, pos: [0.04, 0.39, 0], aim: [0.5, 1, 0], mirror: 0, outline: 0.5 });
+  b.put(cyl(0.011, 0.011, 0.5, 5), { bone: 0, color: 0x6b4a2e, pos: [0, 0.23, 0.032], outline: 0.4 });
+  b.put(
+    sweep(
+      [
+        [0, 0.04, 0],
+        [-0.04, 0.0, 0],
+        [-0.08, -0.05, 0],
+        [-0.07, -0.11, 0],
+      ],
+      0.01,
+      5,
+      8,
+    ),
+    { bone: 0, color: I_INK, outline: 0.4 },
+  );
+  b.put(prism([0, 0, -0.06, 0.035, -0.06, -0.035], 0.02), { bone: 0, color: I_YEL, pos: [-0.07, -0.11, 0], mirror: 0, outline: 0.5 });
+}
+
+let itemGeos: ItemGeo[] | null = null;
+
+/** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
+function getItemGeos(): ItemGeo[] {
+  if (itemGeos) return itemGeos;
+  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded];
+  const out: ItemGeo[] = [];
+  for (let i = 0; i < I_COUNT; i++) {
+    const b = new Builder(ONE_BONE, 2, true);
+    if (i > 0) fns[i - 1](b);
+    else b.put(box(0.001, 0.001, 0.001), { bone: 0, outline: 0 });
+    out.push(finishItem(b));
+  }
+  itemGeos = out;
+  return out;
+}
+
+// Der fliegende Drache: eigenes kleines Skelett – Knochen 0 der Drache,
+// 1..6 der Schwanz (Kette von der unteren Spitze abwärts).
+const KITE_BONES = 7;
+const KITE_TIP = 1.0;
+const KITE_STEP = 0.3;
+/** Wo die Leine angeknotet ist (Knochen 0, Vorderseite). */
+const KITE_BRIDLE: V3 = [0, -0.14, -0.045];
+const KITE_REST: THREE.Matrix4[] = [];
+for (let i = 0; i < KITE_BONES; i++)
+  KITE_REST.push(new THREE.Matrix4().makeTranslation(0, i === 0 ? 0 : -KITE_TIP - (i - 1) * KITE_STEP, 0));
+/** Großzügige Hülle (im Raum von root) für Start, Flug und Abflug. */
+const KITE_BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 3, 4), 7);
+
+let kiteGeo: { main: THREE.BufferGeometry; outline: THREE.BufferGeometry | null } | null = null;
+
+/**
+ * Großer Comic-Drachen, Gesicht nach −z (zum Kart hin): Raute mit gelbem
+ * Rand, Drachenaugen, Hörner, Zacken, Barteln und Maul; dahinter das Kreuz.
+ */
+function getKiteGeo(): { main: THREE.BufferGeometry; outline: THREE.BufferGeometry | null } {
+  if (kiteGeo) return kiteGeo;
+  const b = new Builder(KITE_REST, 2, true);
+  const DIAMOND = [0, 0.6, 0.64, 0, 0, -KITE_TIP, -0.64, 0];
+  const F = -0.03; // Vorderseite
+  b.put(prism(DIAMOND, 0.03), { bone: 0, color: I_YEL, pos: [0, -0.02, 0.008], scale: [1.09, 1.06, 1] });
+  b.put(prism(DIAMOND, 0.05), { bone: 0, color: I_RED, outline: 0.6 });
+  // heller Bauch unten
+  b.put(prism([0, -0.3, 0.3, -0.53, 0, -0.9, -0.3, -0.53], 0.054), { bone: 0, color: 0xff8a6a, outline: 0 });
+  // Augen: weiß, gelbe Iris, Schlitzpupille, böse Brauen
+  b.put(sphere(0.17, 0.15, 0.05, 12, 8), { bone: 0, color: WHITE, pos: [0.22, 0.06, F], mirror: 0, outline: 0.9 });
+  b.put(sphere(0.105, 0.105, 0.03, 10, 6), { bone: 0, color: I_YEL, pos: [0.2, 0.04, F - 0.035], mirror: 0, outline: 0 });
+  b.put(sphere(0.026, 0.085, 0.02, 6, 6), { bone: 0, color: I_INK, pos: [0.2, 0.04, F - 0.058], mirror: 0, outline: 0 });
+  b.put(sphere(0.022, 0.022, 0.01, 5, 4), { bone: 0, color: WHITE, pos: [0.24, 0.09, F - 0.07], mirror: 0, outline: 0 });
+  b.put(box(0.3, 0.065, 0.04), { bone: 0, color: I_INK, pos: [0.21, 0.25, F - 0.02], rot: [0, 0, 0.38], mirror: 0, outline: 0.5 });
+  // Nüstern
+  b.put(sphere(0.035, 0.025, 0.02, 6, 4), { bone: 0, color: 0x8a2028, pos: [0.075, -0.2, F - 0.02], mirror: 0, outline: 0 });
+  // Maul mit Zähnen
+  b.put(prism([-0.3, -0.33, 0.3, -0.33, 0.2, -0.47, 0, -0.53, -0.2, -0.47], 0.02), {
+    bone: 0,
+    color: 0x6b1f2a,
+    pos: [0, 0, F - 0.005],
+    outline: 0.5,
+  });
+  b.put(prism([-0.045, 0, 0.045, 0, 0, -0.1], 0.02), { bone: 0, color: WHITE, pos: [0.14, -0.335, F - 0.016], mirror: 0, outline: 0.35 });
+  b.put(prism([-0.03, 0, 0.03, 0, 0, -0.06], 0.02), { bone: 0, color: WHITE, pos: [0.04, -0.335, F - 0.016], mirror: 0, outline: 0.35 });
+  // Hörner auf den oberen Kanten, Zacken an den unteren, eine Spitze oben
+  b.put(cone(0.075, 0.3, 8), { bone: 0, color: I_TURQ, pos: [0.22, 0.38, 0], aim: [0.55, 1, 0], mirror: 0 });
+  b.put(cone(0.06, 0.2, 4), { bone: 0, color: I_TURQ, pos: [0, 0.58, 0], scale: [1, 1, 0.45] });
+  const ex = 0.64;
+  const ey = KITE_TIP;
+  const nl = Math.hypot(ey, ex);
+  for (let i = 1; i <= 3; i++) {
+    const t = i / 4;
+    b.put(cone(0.075, 0.17, 4), {
+      bone: 0,
+      color: I_TURQ,
+      pos: [ex * (1 - t), -ey * t, 0],
+      aim: [ey / nl, -ex / nl, 0],
+      scale: [1, 1, 0.45],
+      mirror: 0,
+    });
+  }
+  // Barteln aus den Mundwinkeln
+  b.put(
+    sweep(
+      [
+        [0.29, -0.36, F],
+        [0.44, -0.42, F],
+        [0.52, -0.56, F],
+        [0.45, -0.68, F],
+      ],
+      (t) => 0.022 - 0.01 * t,
+      5,
+      10,
+    ),
+    { bone: 0, color: I_YEL, mirror: 0, outline: 0.6 },
+  );
+  // Kreuz hinten
+  b.put(cyl(0.02, 0.02, 1.58, 5), { bone: 0, color: 0x6b4a2e, pos: [0, -0.2, 0.045], outline: 0.5 });
+  b.put(cyl(0.02, 0.02, 1.26, 5), { bone: 0, color: 0x6b4a2e, pos: [0, 0, 0.045], rot: [0, 0, HALF_PI], outline: 0.5 });
+  // Schwanz: Schnur je Knochen, an jedem Gelenk eine Schleife
+  for (let i = 1; i < KITE_BONES; i++) {
+    b.put(cyl(0.012, 0.012, KITE_STEP, 4), { bone: i, color: I_INK, pos: [0, -KITE_STEP / 2, 0], outline: 0.35 });
+    const k = 1 - (i - 1) * 0.07;
+    const color = i % 2 === 0 ? I_YEL : I_TURQ;
+    const at = i === KITE_BONES - 1 ? -KITE_STEP : 0;
+    if (i > 1 || at !== 0) {
+      b.put(prism([0, 0, 0.15, 0.08, 0.15, -0.08], 0.025), { bone: i, color, pos: [0, at, 0], scale: k, mirror: i, outline: 0.6 });
+      b.put(sphere(0.035, 0.035, 0.025, 6, 4), { bone: i, color, pos: [0, at, 0], scale: k, outline: 0.5 });
+    }
+    if (i === KITE_BONES - 1)
+      b.put(prism([0, 0, 0.15, 0.08, 0.15, -0.08], 0.025), { bone: i, color: I_YEL, scale: k, mirror: i, outline: 0.6 });
+  }
+  kiteGeo = b.finish();
+  return kiteGeo;
+}
+
+let leashGeo: THREE.BufferGeometry | null = null;
+let leashMat: THREE.MeshBasicMaterial | null = null;
+
+/** Gesten beim Einsetzen. Schlüsselbilder je Zeile: Anteil der Dauer, dann
+ *  rechte Hand relativ zur Schulter (raus in Metern; hoch, vor in Metern für
+ *  einen Arm von 0,5 m), Oberkörper (vorbeugen, eindrehen = rechte Schulter vor,
+ *  nach rechts kippen) und Kopf (nicken). */
+interface Gesture {
+  dur: number;
+  keys: readonly number[];
+  /** Loslassen (Anteil der Dauer); −1: bleibt in der Hand und verpufft. */
+  release: number;
+  /** Flug nach dem Loslassen: raus, hoch, vor in m/s, Schwerkraft, Dauer. */
+  fly?: readonly [number, number, number, number, number];
+  /** Verpuffen in der Hand: von, bis (Anteil). */
+  vanish?: readonly [number, number];
+}
+
+const KEY = 8;
+/** Grundhaltung: Item neben dem Kopf (raus in Metern, hoch/vor für einen Arm von 0,5 m). */
+const HOLD: V3 = [0.3, 0.3, 0.06];
+/** Grundhaltung im Drachenzug: Hand an der Leine, vorn oben. */
+const LEASH: V3 = [0.2, 0.16, 0.34];
+
+const G_THROW: Gesture = {
+  dur: 0.5,
+  // prettier-ignore
+  keys: [
+    0, ...HOLD, 0, 0, 0, 0,
+    0.3, 0.28, 0.32, -0.26, -0.12, -0.5, 0.06, -0.15,
+    0.44, 0.1, 0.2, 0.34, 0.2, 0.4, -0.02, 0.15,
+    0.62, 0.04, 0.04, 0.4, 0.24, 0.45, 0, 0.18,
+    1, 0.14, 0.1, 0.24, 0, 0, 0, 0,
+  ],
+  release: 0.44,
+  fly: [-1.6, 1.6, 9, 0, 0.15],
+};
+const G_BACK: Gesture = {
+  dur: 0.55,
+  // prettier-ignore
+  keys: [
+    0, ...HOLD, 0, 0, 0, 0,
+    0.22, 0.12, 0.18, 0.3, 0.16, 0.3, 0, 0.12,
+    0.46, 0.2, 0.44, -0.16, -0.16, -0.4, 0.06, -0.22,
+    0.66, 0.26, 0.3, -0.3, -0.1, -0.45, 0.06, -0.1,
+    1, 0.16, 0.1, 0.06, 0, 0, 0, 0,
+  ],
+  release: 0.46,
+  fly: [0.6, 2.4, -5.5, 14, 0.2],
+};
+const GESTURES: (Gesture | null)[] = [
+  null,
+  // Zisch: Flasche hochreißen, Korken knallt, dann ducken in den Schub
+  {
+    dur: 0.6,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.18, 0.2, 0.5, 0.06, -0.14, 0, -0.06, -0.3,
+      0.36, 0.2, 0.48, 0.06, -0.1, 0, -0.04, -0.25,
+      0.6, 0.1, 0.12, 0.26, 0.32, 0, 0, 0.3,
+      1, 0.12, 0.06, 0.22, 0, 0, 0, 0,
+    ],
+    release: -1,
+    vanish: [0.3, 0.42],
+  },
+  G_THROW, // Rollreifen
+  G_BACK, // Ölfleck
+  G_THROW, // Brummkreisel
+  // Stoßfänger: in die Knie, dann nach oben stoßen
+  {
+    dur: 0.5,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.2, 0.28, 0.1, 0.1, 0.06, 0, 0.1, 0.06,
+      0.38, 0.2, 0.54, 0.06, -0.16, 0, -0.06, -0.28,
+      0.6, 0.2, 0.46, 0.05, -0.08, 0, 0, -0.14,
+      1, 0.16, 0.1, 0.1, 0, 0, 0, 0,
+    ],
+    release: 0.38,
+    fly: [0, 6, 0.5, 0, 0.15],
+  },
+  // Kurzschluss: Stecker in den Himmel recken
+  {
+    dur: 0.6,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.18, 0.18, 0.56, 0.1, -0.2, 0, -0.08, -0.36,
+      0.7, 0.18, 0.56, 0.1, -0.2, 0, -0.08, -0.36,
+      1, 0.16, 0.1, 0.1, 0, 0, 0, 0,
+    ],
+    release: -1,
+    vanish: [0.7, 0.86],
+  },
+  G_BACK, // Nebelkerze
+  // Sprungfeder: hoch und kräftig nach unten drücken
+  {
+    dur: 0.5,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.18, 0.2, 0.46, 0.06, -0.1, 0, -0.06, -0.16,
+      0.42, 0.34, -0.08, 0.04, 0.24, 0, 0.24, 0.24,
+      0.62, 0.32, -0.04, 0.04, 0.18, 0, 0.18, 0.18,
+      1, 0.18, 0.08, 0.08, 0, 0, 0, 0,
+    ],
+    release: -1,
+    vanish: [0.46, 0.58],
+  },
+  // Abschleppdrache: ausholen, nach vorn-oben werfen, dann an die Leine
+  {
+    dur: 0.5,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.16, 0.22, 0.16, -0.18, -0.08, -0.3, 0, -0.05,
+      0.3, 0.12, 0.5, 0.26, 0.14, 0.25, -0.04, -0.28,
+      0.55, 0.18, 0.3, 0.32, -0.12, 0.1, 0, -0.2,
+      1, ...LEASH, -0.2, 0, 0, -0.14,
+    ],
+    release: 0.3,
+    fly: [-0.5, 5, 6, 0, 0.15],
+  },
+];
+
+function smooth01(x: number): number {
+  const c = clamp(x, 0, 1);
+  return c * c * (3 - 2 * c);
+}
+
+/** Schießt etwas über 1 hinaus und federt zurück. */
+function easeOutBack(x: number): number {
+  const c = clamp(x, 0, 1) - 1;
+  return 1 + 2.70158 * c * c * c + 1.70158 * c * c;
+}
+
 // ───────────────────────────── KartVisual ─────────────────────────────
 
 // Zwischenspeicher für update() – dort wird nichts neu angelegt.
@@ -2412,6 +2988,11 @@ const _el = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _t = new THREE.Vector3();
+const _iv = new THREE.Vector3();
+const _iw = new THREE.Vector3();
+const _iq = new THREE.Quaternion();
+const _ie = new THREE.Euler();
+const _ik = new Float32Array(KEY);
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -2515,6 +3096,57 @@ export class KartVisual {
   private fHop = 0;
   private fIdle = 1;
   private fCough = 0;
+  private fHeld = 0;
+  private fTow = false;
+
+  // Item in der Hand: eigenes Netz am Karosserie-Knochen, Geometrie wird getauscht
+  private readonly prop: THREE.Mesh;
+  private readonly propLine: THREE.Mesh;
+  /** Welcher Gegenstand gerade im Netz steckt (0 = keiner). */
+  private propItem = 0;
+  /** Aufploppen mit Überschwinger. */
+  private propS = 0;
+  private propV = 0;
+  private propSpin = 0;
+  /** Rechte Hand: 0 am Lenkrad … 1 beim Item. */
+  private holdW = 0;
+  /** Gewicht der Leinen-Haltung im Drachenzug. */
+  private towW = 0;
+  // Ziel der rechten Hand (relativ zur Schulter, geglättet) und Zusätze für Oberkörper/Kopf
+  private hOut = HOLD[0];
+  private hUp = HOLD[1];
+  private hFwd = HOLD[2];
+  private gTx = 0;
+  private gTy = 0;
+  private gTz = 0;
+  private gHx = 0;
+  /** Ziel und tatsächliche Lage der rechten Hand im Raum der Karosserie. */
+  private readonly handT = new THREE.Vector3();
+  private readonly handP = new THREE.Vector3();
+  // Laufende Geste
+  private gItem = 0;
+  private gT = -1;
+  /** Gegenstand ist losgelassen oder verpufft. */
+  private gDone = false;
+  /** Flugzeit nach dem Loslassen (−1 = nicht im Flug). */
+  private gFly = -1;
+  private readonly flyP = new THREE.Vector3();
+  private readonly flyV = new THREE.Vector3();
+  private flyG = 0;
+  private flyDur = 0;
+
+  // Abschleppdrache: eigenes Netz mit kleinem Skelett (Drache + Schwanz) und Leine
+  private readonly kite: THREE.SkinnedMesh;
+  private readonly kiteOutline: THREE.SkinnedMesh | null;
+  private readonly kiteBones: THREE.Bone[] = [];
+  private readonly kiteSkeleton: THREE.Skeleton;
+  private readonly leash: THREE.Mesh;
+  /** Zeit seit dem Aufsteigen (−1 = nicht in der Luft). */
+  private kiteT = -1;
+  /** Zeit seit dem Ende des Zugs (−1 = kein Abflug). */
+  private kiteEnd = -1;
+  /** Start- bzw. Abflugpunkt im Raum von root. */
+  private readonly kiteFrom = new THREE.Vector3();
 
   /**
    * character wählt Figur und Kart, slot den Platz: Lackfarbe und Startnummer.
@@ -2565,6 +3197,52 @@ export class KartVisual {
     this.flames.renderOrder = 2;
     empty.dispose();
 
+    // Item in der Hand: hängt an der Karosserie, macht so Drift und Schleudern mit.
+    const items = getItemGeos();
+    this.prop = new THREE.Mesh(items[0].main, this.toon);
+    this.prop.name = 'item';
+    this.prop.visible = false;
+    this.propLine = new THREE.Mesh(items[0].line ?? items[0].main, outlineMaterial());
+    this.propLine.name = 'outline';
+    this.propLine.matrixAutoUpdate = false;
+    this.prop.add(this.propLine);
+    this.bones[B.chassis].add(this.prop);
+
+    // Abschleppdrache samt Schwanz-Kette
+    const kg = getKiteGeo();
+    for (let i = 0; i < KITE_BONES; i++) {
+      const bone = new THREE.Bone();
+      if (i === 0) this.root.add(bone);
+      else {
+        bone.position.set(0, i === 1 ? -KITE_TIP : -KITE_STEP, 0);
+        this.kiteBones[i - 1].add(bone);
+      }
+      this.kiteBones.push(bone);
+    }
+    this.kiteSkeleton = new THREE.Skeleton(
+      this.kiteBones,
+      KITE_REST.map((m) => m.clone().invert()),
+    );
+    this.kite = new THREE.SkinnedMesh(kg.main, this.toon);
+    this.kite.name = 'kite';
+    this.kite.matrixAutoUpdate = false;
+    this.kite.boundingSphere = KITE_BOUNDS.clone();
+    this.kite.bind(this.kiteSkeleton, bind);
+    this.kite.visible = false;
+    this.root.add(this.kite);
+    this.kiteOutline = kg.outline ? withSkinnedOutline(this.kite, kg.outline) : null;
+    if (this.kiteOutline) this.kiteOutline.boundingSphere = KITE_BOUNDS.clone();
+    if (!leashGeo) {
+      leashGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
+      leashGeo.translate(0, 0.5, 0);
+      leashMat = new THREE.MeshBasicMaterial({ color: INK });
+    }
+    this.leash = new THREE.Mesh(leashGeo, leashMat!);
+    this.leash.name = 'leash';
+    this.leash.visible = false;
+    this.leash.frustumCulled = false;
+    this.root.add(this.leash);
+
     this.rebuild();
     this.placeAnchors();
   }
@@ -2574,6 +3252,23 @@ export class KartVisual {
     if (amount !== amount) return;
     this.sq = clamp(amount, -1, 1);
     this.sqV = 0;
+  }
+
+  /**
+   * Das Item wurde in diesem Moment eingesetzt: passende Bewegung abspielen.
+   * Das Spiel ruft das auf, wenn die Hand laut pose.held schon leer ist –
+   * welcher Gegenstand fliegt, kommt deshalb von hier.
+   */
+  useItem(item: number): void {
+    if (!(item >= 1 && item < I_COUNT)) return;
+    this.gItem = Math.floor(item);
+    this.gT = 0;
+    this.gDone = false;
+    // Ein noch fliegender Gegenstand der vorigen Geste ist damit weg.
+    if (this.gFly >= 0) {
+      this.gFly = -1;
+      this.propS = 0;
+    }
   }
 
   setDetail(detail: KartDetail): void {
@@ -2590,8 +3285,10 @@ export class KartVisual {
     this.decalMat.dispose();
     this.atlas?.dispose();
     this.skeleton.dispose();
+    this.kiteSkeleton.dispose();
     this.root.removeFromParent();
-    // Die Kontur-Materialien gehören toon.ts (dort geteilt) und bleiben bestehen.
+    // Die Kontur-Materialien gehören toon.ts (dort geteilt) und bleiben bestehen,
+    // ebenso die Netze der Items, des Drachens und der Leine (alle Karts teilen sie).
   }
 
   // ── Aufbau ──
@@ -2689,6 +3386,8 @@ export class KartVisual {
     this.decals.geometry = decalGeo;
     this.flames.geometry = flameGeo;
     this.decals.visible = this.atlas !== null;
+    this.propLine.visible = lines;
+    if (this.kiteOutline) this.kiteOutline.visible = lines;
 
     this.bodyOutline = this.swapOutline(this.body, this.bodyOutline, mainGeo.outline);
     this.fxOutline = this.swapOutline(this.fx, this.fxOutline, fxGeo.outline);
@@ -2768,6 +3467,10 @@ export class KartVisual {
     this.fV = v;
     this.fV1 = v1;
     this.fWind = v1 * v1 * (3 - 2 * v1);
+    // Ältere Aufrufer kennen held/tow nicht (undefined → 0/false, NaN → 0).
+    const held = pose.held;
+    this.fHeld = held >= 1 && held < I_COUNT ? Math.floor(held) : 0;
+    this.fTow = pose.tow === true;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -2800,9 +3503,11 @@ export class KartVisual {
     // Fließkommazahlen als Argumente durch die Aufrufe.
     this.moveWheels();
     this.moveBody();
+    this.planItem();
     this.moveDriver();
     this.moveExtras();
     this.moveEffects(pose.guard);
+    this.moveItem();
     this.pickEyes(pose);
     this.placeAnchors();
   }
@@ -2900,7 +3605,11 @@ export class KartVisual {
     const steer = this.fSteer;
 
     const torso = bn[B.torso];
-    torso.rotation.set(-boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06, 0, lean);
+    torso.rotation.set(
+      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.gTx,
+      this.gTy,
+      lean + this.gTz,
+    );
     torso.position.y = rp[B.torso * 3 + 1] + this.fHop * 0.04;
     torso.updateMatrix();
 
@@ -2912,7 +3621,8 @@ export class KartVisual {
       airS * 0.14 +
       clamp(-acc * 0.006, -0.12, 0.15) +
       stallS * 0.08 +
-      Math.sin(t * 2.1) * 0.02;
+      Math.sin(t * 2.1) * 0.02 +
+      this.gHx;
     const hzT = lean * 0.7 + stallS * 0.1 * Math.sin(t * 7) + spinS * 0.22 * Math.sin(t * 14);
     this.headXV += ((hxT - this.headX) * 110 - this.headXV * 9) * dt;
     this.headX += this.headXV * dt;
@@ -2934,8 +3644,15 @@ export class KartVisual {
     const st = bn[B.steer];
     st.rotation.set(this.restRot[B.steer * 3], 0, -steer * 1.15 + driftS * 0.35);
     st.updateMatrix();
+    // Rechte Hand: Item halten, Geste, Leine – Ziel relativ zur Schulter, mitgedreht mit dem Oberkörper.
+    // Seitlich nicht mit der Armlänge skaliert: auch zierliche Figuren halten den Gegenstand neben den Kopf.
+    const reach = (sp.upper + sp.fore) / 0.5;
+    this.handT
+      .set(-(sp.shoulder[0] + this.hOut), sp.shoulder[1] + this.hUp * reach, sp.shoulder[2] + this.hFwd * reach)
+      .applyMatrix4(torso.matrix);
     this.solveArm(1);
     this.solveArm(-1);
+    this.handP.copy(bn[B.handR].position);
   }
 
   /** Figur-eigenes Zubehör: Motor und Kiefer, Schal, Schnauzbart, Schwanz und Antennen. */
@@ -3068,6 +3785,279 @@ export class KartVisual {
     this.fx.visible = gs > 0 || stallS > 0.02;
   }
 
+  /**
+   * Item, erster Teil (vor dem Fahrer): Geste weiterzählen, Ziel der rechten
+   * Hand und die Zusätze für Oberkörper und Kopf bestimmen.
+   */
+  private planItem(): void {
+    const dt = this.fDt;
+    const t = this.time;
+    let g: Gesture | null = null;
+    let p = 0;
+    if (this.gT >= 0) {
+      g = GESTURES[this.gItem];
+      if (g) {
+        const p0 = this.gT / g.dur;
+        this.gT += dt;
+        p = this.gT / g.dur;
+        if (!this.gDone && g.release >= 0 && p0 < g.release && p >= g.release) this.release(g);
+        if (!this.gDone && g.vanish && p >= g.vanish[1]) {
+          this.gDone = true;
+          this.propS = 0;
+          this.propV = 0;
+        }
+        if (p >= 1) g = null;
+      }
+      if (!g) this.gT = -1;
+    }
+
+    // Grundhaltung: Item neben dem Kopf – im Drachenzug die Hand an der Leine.
+    const towing = this.kiteT >= 0;
+    const tw = (this.towW = damp(this.towW, towing ? 1 : 0, 6, dt));
+    // Die Leine ruckt: Hand nach vorn, die Figur stemmt sich dagegen.
+    const tug = tw * (Math.sin(t * 13) * 0.012 + Math.sin(t * 7.7) * 0.01);
+    let out = HOLD[0] + (LEASH[0] - HOLD[0]) * tw;
+    let up = HOLD[1] + (LEASH[1] - HOLD[1]) * tw + Math.sin(t * 5.2) * 0.012;
+    let fwd = HOLD[2] + (LEASH[2] - HOLD[2]) * tw + tug;
+    let tx = -0.2 * tw - tug * 2;
+    let ty = 0;
+    let tz = 0;
+    let hx = -0.14 * tw;
+    let rate = 14;
+    let want = (this.fHeld > 0 && !this.fTow) || towing ? 1 : 0;
+    if (g) {
+      const keys = g.keys;
+      const n = keys.length / KEY;
+      let i = 0;
+      while (i < n - 2 && keys[(i + 1) * KEY] <= p) i++;
+      const a = i * KEY;
+      const b = a + KEY;
+      const f = smooth01((p - keys[a]) / Math.max(keys[b] - keys[a], 1e-6));
+      for (let k = 1; k < KEY; k++) _ik[k] = keys[a + k] + (keys[b + k] - keys[a + k]) * f;
+      out = _ik[1];
+      up = _ik[2];
+      fwd = _ik[3];
+      tx = _ik[4];
+      ty = _ik[5];
+      tz = _ik[6];
+      hx = _ik[7];
+      if (this.gItem === I_EMP && p > 0.18 && p < 0.7) {
+        // Der Stecker zittert vor Spannung
+        out += Math.sin(t * 71) * 0.015;
+        up += Math.sin(t * 53) * 0.015;
+      }
+      rate = 30;
+      want = 1;
+    }
+    this.hOut = damp(this.hOut, out, rate, dt);
+    this.hUp = damp(this.hUp, up, rate, dt);
+    this.hFwd = damp(this.hFwd, fwd, rate, dt);
+    this.gTx = damp(this.gTx, tx, rate * 0.6, dt);
+    this.gTy = damp(this.gTy, ty, rate * 0.6, dt);
+    this.gTz = damp(this.gTz, tz, rate * 0.6, dt);
+    this.gHx = damp(this.gHx, hx, rate * 0.6, dt);
+    this.holdW = damp(this.holdW, want, g ? 30 : 9, dt);
+  }
+
+  /** Der Gegenstand verlässt die Hand: Flug starten – beim Drachen steigt stattdessen der große auf. */
+  private release(g: Gesture): void {
+    this.gDone = true;
+    if (this.propItem === 0 || this.propS < 0.02) return;
+    if (this.gItem === I_KITE && this.fTow) {
+      this.kiteFrom.copy(this.prop.position);
+      this.toRoot(this.kiteFrom);
+      this.kiteT = 0;
+      this.kiteEnd = -1;
+      this.propS = 0;
+      this.propV = 0;
+      return;
+    }
+    const f = g.fly;
+    if (!f) return;
+    this.flyP.copy(this.prop.position);
+    this.flyV.set(-f[0], f[1], f[2]);
+    this.flyG = f[3];
+    this.flyDur = f[4];
+    this.gFly = 0;
+  }
+
+  /** Punkt aus dem Raum der Karosserie in den von root (Drift und Schleudern eingerechnet). */
+  private toRoot(v: THREE.Vector3): void {
+    const bn = this.bones;
+    bn[B.chassis].updateMatrix();
+    bn[B.drift].updateMatrix();
+    bn[B.spin].updateMatrix();
+    v.applyMatrix4(bn[B.chassis].matrix).applyMatrix4(bn[B.drift].matrix).applyMatrix4(bn[B.spin].matrix);
+  }
+
+  /** Item, zweiter Teil (nach dem Fahrer): Gegenstand an die Hand oder in den Flug, Drache und Leine. */
+  private moveItem(): void {
+    const sp = this.spec;
+    const bn = this.bones;
+    const t = this.time;
+    const dt = this.fDt;
+    const prop = this.prop;
+    const g = this.gT >= 0 ? GESTURES[this.gItem] : null;
+    const p = g ? this.gT / g.dur : 0;
+
+    // — Gegenstand: welcher, wie groß —
+    if (this.gFly >= 0) {
+      this.gFly += dt;
+      if (this.gFly >= this.flyDur) {
+        this.gFly = -1;
+        this.propS = 0;
+        this.propV = 0;
+      }
+    }
+    if (this.gFly < 0) {
+      let want = this.fTow || this.kiteT >= 0 ? 0 : this.fHeld;
+      if (g && !this.gDone) want = this.gItem;
+      if (want !== this.propItem) {
+        if (this.propItem !== 0 && this.propS > 0.02) {
+          // erst schnell verschwinden, dann tauschen
+          this.propS = damp(this.propS, 0, 28, dt);
+          this.propV = 0;
+        } else {
+          this.propItem = want;
+          this.propS = 0;
+          this.propV = 0;
+          if (want > 0) {
+            const ig = getItemGeos()[want];
+            prop.geometry = ig.main;
+            this.propLine.geometry = ig.line ?? ig.main;
+          }
+        }
+      } else if (want > 0) {
+        // Aufploppen mit Überschwinger
+        this.propV += ((1 - this.propS) * 320 - this.propV * 14) * dt;
+        this.propS += this.propV * dt;
+      }
+    }
+    const item = this.propItem;
+    const spinRate = item === I_TOP ? (this.gFly >= 0 ? 48 : g ? 26 : 13) : 0;
+    this.propSpin = (this.propSpin + spinRate * dt) % TAU;
+
+    // — Gegenstand: Lage —
+    let mul = 1;
+    let sy = 1;
+    let rx = (this.hFwd - HOLD[2]) * 1.3;
+    let rz = 0.18 + Math.sin(t * 4.3) * 0.06;
+    if (this.gFly >= 0) {
+      const tf = this.gFly;
+      prop.position.copy(this.flyP).addScaledVector(this.flyV, tf);
+      prop.position.y -= 0.5 * this.flyG * tf * tf;
+      const u = tf / this.flyDur;
+      mul = u < 0.6 ? 1 : 1 - smooth01((u - 0.6) / 0.4);
+      if (item === I_GUARD) mul *= 1 + u * 0.7;
+      if (item === I_TIRE) rx += tf * 30;
+      else if (item !== I_TOP) rx += this.flyV.z < 0 ? -tf * 16 : tf * 10;
+    } else {
+      // Griff knapp über der Faust (die Hand sitzt am Ende des Unterarms)
+      _iv.set(0, 1, 0).applyQuaternion(bn[B.handR].quaternion);
+      prop.position.copy(this.handP).addScaledVector(_iv, sp.hand * 0.6);
+      if (g && g.vanish) {
+        const a = g.vanish[0];
+        const u = clamp((p - a) / (g.vanish[1] - a), 0, 1);
+        if (this.gItem === I_BOOST) {
+          // Druck baut sich auf (Flasche zittert und bläht sich), dann knallt der Korken
+          rz += Math.sin(t * 80) * 0.14 * smooth01((p - 0.14) / 0.16) * (1 - u);
+          mul = u < 0.4 ? 1 + 0.35 * smooth01(u / 0.4) : 1.35 * (1 - smooth01((u - 0.4) / 0.6));
+        } else if (this.gItem === I_SPRING) {
+          // zusammendrücken, beim Loslassen schnalzt sie nach oben weg
+          sy = 1 - 0.5 * smooth01((p - 0.28) / 0.14) + 1.1 * smooth01(u / 0.6);
+          mul = 1 - smooth01(u);
+        } else {
+          mul = (1 - smooth01(u)) * (u > 0 ? 0.8 + 0.2 * Math.sin(t * 90) : 1);
+        }
+      }
+    }
+    _iq.setFromEuler(_ie.set(rx, this.propSpin, rz, 'XZY'));
+    prop.quaternion.multiplyQuaternions(bn[B.torso].quaternion, _iq);
+    const s = Math.max(this.propS, 0) * mul;
+    prop.scale.set(s, s * sy, s);
+    prop.visible = item > 0 && s > 0.01;
+
+    // — Abschleppdrache —
+    const kb = this.kiteBones;
+    const k0 = kb[0];
+    if (this.fTow) {
+      if (this.kiteT < 0) {
+        // Steigt aus der Wurfbewegung auf; ohne Geste direkt aus der Hand.
+        const waiting = g !== null && this.gItem === I_KITE && !this.gDone;
+        if (!waiting) {
+          this.kiteFrom.copy(this.handP);
+          this.toRoot(this.kiteFrom);
+          this.kiteT = 0;
+          this.kiteEnd = -1;
+        }
+      } else this.kiteT += dt;
+    } else if (this.kiteT >= 0) {
+      // Zug vorbei: Leine weg, der Drache flattert davon
+      this.kiteFrom.copy(k0.position);
+      this.kiteT = -1;
+      this.kiteEnd = 0;
+    } else if (this.kiteEnd >= 0) {
+      this.kiteEnd += dt;
+      if (this.kiteEnd > 0.4) this.kiteEnd = -1;
+    }
+    const flying = this.kiteT >= 0 || this.kiteEnd >= 0;
+    this.kite.visible = flying;
+    this.leash.visible = this.kiteT >= 0;
+    if (!flying) return;
+
+    // Flugbahn: schwankt lebendig hin und her, legt sich dabei in die Kurve
+    const ph = t * 1.25 + this.slot;
+    const fx = 0.75 * Math.sin(ph) + 0.22 * Math.sin(t * 3.3 + 1);
+    const fy = 3.25 + 0.22 * Math.sin(t * 1.9) + 0.07 * Math.sin(t * 5.3);
+    const fz = 5.6 + 0.25 * Math.sin(t * 1.1);
+    let roll = -0.32 * Math.cos(ph) + 0.08 * Math.sin(t * 4.1);
+    let pitch = -0.08 + 0.06 * Math.sin(t * 2.3);
+    let ks = 1;
+    if (this.kiteT >= 0) {
+      const l = this.kiteT / 0.32;
+      if (l < 1) {
+        const e = easeOutBack(l);
+        _iv.set(fx, fy, fz);
+        k0.position.lerpVectors(this.kiteFrom, _iv, e);
+        ks = 0.16 + 0.84 * e;
+        roll += (1 - l) * (1 - l) * 4.5;
+      } else k0.position.set(fx, fy, fz);
+    } else {
+      const u = this.kiteEnd;
+      k0.position.set(
+        this.kiteFrom.x + Math.sin(u * 14) * 0.35,
+        this.kiteFrom.y + u * 6 + u * u * 6,
+        this.kiteFrom.z + u * 2.5,
+      );
+      ks = 1 - smooth01(u / 0.4);
+      roll += Math.sin(u * 28) * 0.6;
+      pitch -= u * 2;
+    }
+    k0.rotation.set(pitch, 0.12 * Math.sin(ph), roll);
+    k0.scale.setScalar(Math.max(ks, 0.001));
+    // Schwanz: weht zum Kart hin und schlägt Wellen
+    for (let i = 1; i < KITE_BONES; i++) {
+      kb[i].rotation.set(
+        i === 1 ? 0.75 + 0.12 * Math.sin(t * 6) : 0.1 + 0.24 * Math.sin(t * 7.5 - i * 0.9),
+        0,
+        0.3 * Math.sin(t * 5.2 - i * 0.8) + (i === 1 ? -roll * 0.6 : 0),
+      );
+    }
+    if (this.kiteT < 0) return;
+
+    // Leine: straff von der Faust zum Knoten am Drachen
+    _iv.set(0, 1, 0).applyQuaternion(bn[B.handR].quaternion).multiplyScalar(sp.hand * 0.3).add(this.handP);
+    this.toRoot(_iv);
+    k0.updateMatrix();
+    _iw.set(KITE_BRIDLE[0], KITE_BRIDLE[1], KITE_BRIDLE[2]).applyMatrix4(k0.matrix).sub(_iv);
+    const len = _iw.length();
+    if (len > 1e-4) {
+      this.leash.position.copy(_iv);
+      this.leash.quaternion.setFromUnitVectors(Y_AXIS, _iw.multiplyScalar(1 / len));
+      this.leash.scale.set(0.016, len, 0.016);
+    } else this.leash.visible = false;
+  }
+
   /** Augen: Kringel beim Schleudern, verdattert bei Kurzschluss, sonst je nach Lage – und ab und zu blinzeln. */
   private pickEyes(pose: KartPose): void {
     let eye: number = EYE.OPEN;
@@ -3115,6 +4105,8 @@ export class KartVisual {
       ).applyMatrix4(torso.matrix);
       _hd.lerp(_t, up);
     }
+    // … oder (nur rechts) beim Item. Hochgerissene Arme haben Vorrang, außer während einer Geste.
+    if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 ? 1 : 1 - up));
     _u.subVectors(_hd, _sh);
     let d = _u.length();
     if (d < 1e-4) {
