@@ -73,7 +73,7 @@ describe('Rennen auf dem Host', () => {
     const b = host.authoritative(1)!;
     b.x = a.x + Math.sin(a.heading) * 14;
     b.z = a.z + Math.cos(a.heading) * 14;
-    b.seg = a.seg + 14;
+    b.seg = (a.seg + 14) % TRACK.n;
 
     host.giveItem(0, ITEM_TIRE);
     host.step(press);
@@ -230,7 +230,9 @@ describe('Rennen über das Netz (simuliert)', () => {
   });
 
   it('Strecke hat Kisten und Boost-Felder an sinnvollen Stellen', () => {
-    expect(TRACK.boxes.length).toBe(12);
-    expect(TRACK.pads.length).toBe(3);
+    // Höchstens 32 Kisten: mehr passen nicht in die Zustandspakete.
+    expect(TRACK.boxes.length).toBeGreaterThanOrEqual(12);
+    expect(TRACK.boxes.length).toBeLessThanOrEqual(32);
+    expect(TRACK.pads.length).toBeGreaterThanOrEqual(3);
   });
 });

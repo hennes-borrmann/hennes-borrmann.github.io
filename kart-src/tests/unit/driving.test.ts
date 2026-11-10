@@ -137,7 +137,8 @@ describe('KI-Fahrer auf der Strecke', () => {
       expect(r.lapTimes.length).toBe(3);
       for (const lap of r.lapTimes) {
         expect(lap).toBeGreaterThan(20);
-        expect(lap).toBeLessThan(45);
+        // Auch der langsamste Fahrer schafft im Schnitt gut 20 m/s.
+        expect(lap).toBeLessThan(TRACK.length / 20);
       }
       expect(r.wallHits).toBeLessThanOrEqual(2);
       // Nur Fahrer 1 driftet in jeder engeren Kurve; die anderen seltener oder nie.

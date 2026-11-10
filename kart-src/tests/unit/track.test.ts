@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TRACK, gridPosition, projectOnTrack, segDelta, trackHeading } from '../../src/game/track';
+import { TRACK, gridPosition, projectOnTrack, segDelta, trackHeading, wrapSeg } from '../../src/game/track';
 
 describe('Strecke Werkshof', () => {
   const t = TRACK;
@@ -43,7 +43,7 @@ describe('Strecke Werkshof', () => {
     for (const seg of [0, 100, 333, t.n - 1]) {
       const rx = -t.tz[seg];
       const rz = t.tx[seg];
-      const p = projectOnTrack(t, t.px[seg] + rx * 3, t.pz[seg] + rz * 3, seg + 5);
+      const p = projectOnTrack(t, t.px[seg] + rx * 3, t.pz[seg] + rz * 3, wrapSeg(t, seg + 5));
       expect(Math.abs(segDelta(t, seg, p.seg))).toBeLessThanOrEqual(1);
       expect(p.lat).toBeCloseTo(3, 0);
     }

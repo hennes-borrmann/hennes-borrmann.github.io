@@ -530,7 +530,6 @@ export function buildTrack(def: TrackDef, index = 0): Track {
   const twin = new Int32Array(total).fill(-1);
   const cross: [number, number][] = [];
   branches.forEach((b) => {
-    let sideSum = 0;
     for (const atFork of [true, false]) {
       const mainList: number[] = [];
       let i = atFork ? b.from : b.to;
@@ -562,12 +561,18 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       }
       if (own.length === 0) continue;
       const side = own[own.length - 1].lat >= 0 ? 1 : -1;
-      sideSum += side;
+      if (atFork) b.side = side;
       for (const o of own) {
         const sep = Math.abs(o.lat);
         edge[o.g] |= side > 0 ? EDGE_FREE_L : EDGE_FREE_R;
-        free[o.g] = wh[o.g] + (o.limit - sep) / 2;
         const w = smoothStep((sep - 0.25 * o.limit) / (0.75 * o.limit));
+        // Eine schmalere (oder breitere) Abzweigung übernimmt an der Gabelung
+        // die Breite der Hauptstrecke und findet erst im Auseinanderlaufen zu ihrer eigenen.
+        rh[o.g] = rh[o.m] + (rh[o.g] - rh[o.m]) * w;
+        wh[o.g] = wh[o.m] + (wh[o.g] - wh[o.m]) * w;
+        // Platz zur Nachbarin hin: bis zu deren äußerer Bande – und gegen Ende
+        // der Zone als Keil auf die eigene Bande zulaufend.
+        free[o.g] = Math.min(sep + wh[o.m], wh[o.g] + (o.limit - sep) / 2);
         const plane = py[o.m] + o.lat * bank[o.m];
         py[o.g] = plane + (py[o.g] - plane) * w;
         bank[o.g] = bank[o.m] + (bank[o.g] - bank[o.m]) * w;
@@ -583,12 +588,11 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         const along = Math.abs((px[r.seg] - px[m]) * tx[m] + (pz[r.seg] - pz[m]) * tz[m]);
         if (sep >= limit || along > 3) continue;
         edge[m] |= side > 0 ? EDGE_FREE_R : EDGE_FREE_L;
-        free[m] = wh[m] + (limit - sep) / 2;
+        free[m] = Math.min(sep + wh[r.seg], wh[m] + (limit - sep) / 2);
         cross.push([m, r.seg]);
         twin[m] = r.seg;
       }
     }
-    b.side = sideSum >= 0 ? 1 : -1;
   });
 
   // 7. Kanten, Brücken, Tunnel

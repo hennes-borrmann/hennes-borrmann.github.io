@@ -70,7 +70,8 @@ export const WERKSHOF: TrackDef = {
   startAt: 0,
   laps: 3,
   bank: 1.2,
-  banks: [[15.7, 19.7, -0.36]],
+  // Linkskurve: Innenseite (links) liegt tiefer, also steigt die Fahrbahn nach rechts an.
+  banks: [[15.7, 19.7, 0.36]],
   decks: [[9.6, 13.4]],
   pads: [
     { at: 1.4, lat: 0 },
