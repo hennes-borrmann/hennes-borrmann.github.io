@@ -1,0 +1,29 @@
+{
+  "name": "schraeglage-kart",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "dev:https": "HTTPS=1 vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "signal": "peerjs --port 9000 --path / --host 0.0.0.0"
+  },
+  "dependencies": {
+    "nosleep.js": "^0.12.0",
+    "peerjs": "^1.5.5",
+    "qrcode-generator": "^2.0.4",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "peer": "^1.0.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  }
+}
