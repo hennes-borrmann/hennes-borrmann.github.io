@@ -1,8 +1,9 @@
 // 1 · Werkshof – Einsteigerstrecke. Breite Fahrbahn, überall Bande, sanfte
 // Höhen. Nach der Nordgeraden teilt sich die Strecke: oben über die
 // Verladebrücke oder unten durch die Lagerhalle – beide Wege kreuzen sich.
-// Danach die Steilkurve am Ostende, die Laderampe zum Springen und im Süden die
-// Wahl zwischen Schikane und Sprung über die Containergrube.
+// Danach die Steilkurve am Ostende, die Laderampe zum Springen, die rutschige
+// Kehre über den Schotterplatz und im Süden die Wahl zwischen Schikane und
+// Sprung über die Containergrube (auf Stahlplatten).
 
 import type { TrackDef } from '../track';
 
@@ -73,6 +74,11 @@ export const WERKSHOF: TrackDef = {
   // Linkskurve: Innenseite (links) liegt tiefer, also steigt die Fahrbahn nach rechts an.
   banks: [[15.7, 19.7, 0.36]],
   decks: [[9.6, 13.4]],
+  // Asphalt, dazu Stahlplatten auf der Verladebrücke und der Schotterplatz in der Südost-Kehre.
+  surfaces: [
+    [9.4, 13.6, 'metal'],
+    [29.6, 34.3, 'gravel'],
+  ],
   pads: [
     { at: 1.4, lat: 0 },
     { at: 10.6, lat: 0 },
@@ -111,6 +117,7 @@ export const WERKSHOF: TrackDef = {
       ],
       roadHalf: 5,
       shoulder: 1.4,
+      surface: 'metal',
       ramps: [{ at: 1.3, length: 9, height: 1.2, gap: 8 }],
       boxRows: [0.8],
     },

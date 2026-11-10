@@ -32,6 +32,7 @@ import {
   type Cmd,
   type KartState,
 } from './sim';
+import { SURFACES } from './surface';
 import {
   EDGE_GAP,
   EDGE_OPEN_L,
@@ -167,7 +168,8 @@ function maxCurvatureAhead(toM: number): number {
   for (let d = 0; d <= toM; d += 2) {
     const i = aheadSeg(d);
     const c = t.curv[i];
-    max = Math.max(max, Math.abs(c) / bankGrip(t, i, c > 0 ? 1 : -1));
+    // … und loser Untergrund entsprechend enger.
+    max = Math.max(max, Math.abs(c) / (bankGrip(t, i, c > 0 ? 1 : -1) * (SURFACES[t.surf[i]] ?? SURFACES[0]).grip));
   }
   return max;
 }
@@ -278,7 +280,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   else if (v > limit + 5) buttons |= BTN_BRAKE;
 
   // --- Lenken und Driften ---
-  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, A_LAT / v);
+  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (SURFACES[t.surf[s.seg]] ?? SURFACES[0]).grip) / v);
   let steer: number;
   if (air) {
     // In der Luft nur sanft ausrichten.

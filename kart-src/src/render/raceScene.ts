@@ -22,6 +22,7 @@ import {
   V_MAX,
   turboStage,
 } from '../game/sim';
+import { SURFACES } from '../game/surface';
 import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
@@ -134,6 +135,9 @@ const LEVELS: { ratio: number; kart: KartDetail; world: number; particles: numbe
 ];
 
 const SPARK_COLORS = [0xcfd3e6, 0x3ff2e2, 0xffe04a, 0xff5ad2];
+
+/** Farbe der Staubfahne je Untergrund (0 = fester Boden, kein Staub); Reihenfolge wie SURFACES. */
+const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gravel: 0xb5aea4, grass: 0x8cc463 } as Record<string, number>)[s.id] ?? 0);
 
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= 2 * Math.PI;
@@ -674,7 +678,8 @@ export class RaceScene {
       k.audio.throttle = !e.finished && race.phase !== RACE_COUNTDOWN && e.spin === 0;
       k.audio.boost = e.boost > 0 || e.tow > 0;
       k.audio.drift = e.driftDir !== 0 ? Math.max(0.5, pose.driftStage) : 0;
-      k.audio.offroad = pose.offroad;
+      // Loser Untergrund klingt wie der Grünstreifen: es prasselt unter den Rädern.
+      k.audio.offroad = pose.offroad || DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]] !== 0;
       k.audio.air = air;
       k.audio.stall = e.stall > 0;
       k.audio.distance = dist;
@@ -780,6 +785,7 @@ export class RaceScene {
     const rl = this.v1.copy(A.wheelRearL).applyMatrix4(root.matrixWorld);
     const rr = this.v2.copy(A.wheelRearR).applyMatrix4(root.matrixWorld);
     const drifting = e.driftDir !== 0 && !air;
+    const dust = DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]];
     const lv = LEVELS[this.level];
     const budget = lv.particles / LEVELS[2].particles;
 
@@ -805,7 +811,7 @@ export class RaceScene {
           );
         }
       }
-      if (lv.skid && k.hasTrail) {
+      if (lv.skid && k.hasTrail && dust === 0) {
         this.skids.add(k.rl.x, k.rl.y, k.rl.z, rl.x, rl.y, rl.z, 0.3);
         this.skids.add(k.rr.x, k.rr.y, k.rr.z, rr.x, rr.y, rr.z, 0.3);
       }
@@ -819,6 +825,12 @@ export class RaceScene {
     k.rr.copy(rr);
     k.hasTrail = drifting;
 
+    // Sand, Erde, Schotter, Wiese: eine Staubfahne in der Farbe des Bodens
+    if (!air && dust !== 0 && speed > 8 && Math.random() < (8 + speed * 0.7) * budget * dt) {
+      this.color.set(dust);
+      const w = Math.random() < 0.5 ? rl : rr;
+      this.puffs.emit(w.x, w.y + 0.12, w.z, e.vx * 0.35 + (Math.random() - 0.5) * 2.5, 1 + Math.random() * 1.8, e.vz * 0.35 + (Math.random() - 0.5) * 2.5, 0.42, 0.28, this.color, 1.1, 3, 2, 0.9);
+    }
     if (!air && e.flags & FLAG_OFFROAD && speed > 6 && Math.random() < 26 * budget * dt) {
       this.color.set(this.world!.theme.shoulder).multiplyScalar(0.9);
       const w = Math.random() < 0.5 ? rl : rr;

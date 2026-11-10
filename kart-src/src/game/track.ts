@@ -19,6 +19,7 @@
 // wenn eine Kurve nachträglich etwas anders gelegt wird. In einer Abzweigung
 // ist 0 die Gabelung, 1 ihr erster eigener Stützpunkt, und so weiter.
 
+import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
 export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht';
@@ -52,6 +53,13 @@ export interface PathFeatures {
   banks?: [number, number, number][];
   /** Hindernisse, die quer über die Fahrbahn pendeln: Ausschlag in Metern, Periode in Sekunden. */
   hazards?: { at: number; amp: number; period: number; phase: number }[];
+  /**
+   * Untergrund abschnittsweise: [von, bis, sorte] (siehe surface.ts). Wo nichts
+   * steht, gilt der Grund-Untergrund des Wegs (surface).
+   */
+  surfaces?: [number, number, SurfaceId][];
+  /** Grund-Untergrund dieses Wegs; ohne Angabe Asphalt (bei Abzweigungen: wie die Hauptstrecke). */
+  surface?: SurfaceId;
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -181,6 +189,8 @@ export interface Track {
   twin: Int32Array;
   /** EDGE_*-Bits je Abschnitt. */
   edge: Uint16Array;
+  /** Untergrund je Abschnitt: Nummer in SURFACES (surface.ts). */
+  surf: Uint8Array;
   /** Abschnitt, an dem ein hier abgestürztes Kart wieder aufgesetzt wird. */
   respawn: Int32Array;
   /** Nachfolger und Vorgänger in Fahrtrichtung. */
@@ -607,6 +617,14 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const [from, to] of p.f.tunnels ?? []) spanU(p, from, to, (seg) => (edge[seg] |= EDGE_TUNNEL));
   }
 
+  // Untergrund
+  const surf = new Uint8Array(total);
+  for (const p of paths) {
+    const base = SURFACE_INDEX[p.f.surface ?? def.surface ?? 'asphalt'] ?? 0;
+    for (let k = 0; k < p.count; k++) surf[p.off + k] = base;
+    for (const [from, to, kind] of p.f.surfaces ?? []) spanU(p, from, to, (seg) => (surf[seg] = SURFACE_INDEX[kind] ?? base));
+  }
+
   // 8. Schanzen, Lücken, Kuppen
   const base = Float64Array.from(py);
   const respawn = new Int32Array(total);
@@ -707,6 +725,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     free,
     twin,
     edge,
+    surf,
     respawn,
     next,
     prev,

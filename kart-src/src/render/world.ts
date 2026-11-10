@@ -3,6 +3,7 @@
 // Streckenbeschreibung erzeugt und zu wenigen großen Netzen zusammengefasst.
 
 import * as THREE from 'three';
+import { SURFACES } from '../game/surface';
 import {
   EDGE_DECK,
   EDGE_FREE_L,
@@ -27,6 +28,32 @@ import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './too
 const WALL_H = 0.95;
 const WALL_T = 0.5;
 const DECK_D = 1.1;
+/** So wird ein Untergrund gezeichnet. */
+interface SurfaceLook {
+  /** Zwei Töne der Fahrbahn im Wechsel alle band Abschnitte, c = Farbe der Einzelheiten. */
+  a: RGB;
+  b: RGB;
+  c: RGB;
+  band: number;
+  /** Glatte Straße: Mittelstrich, auf Brücken mit der Brückenfarbe gemischt. */
+  plain: boolean;
+  lines: boolean;
+  line?: RGB;
+  center?: RGB;
+  kerbs: boolean;
+  kerbA?: RGB;
+  kerbB?: RGB;
+  /** Seitenstreifen; null = wie das Thema der Welt. */
+  shoulder: RGB | null;
+  detail: 'none' | 'planks' | 'ruts' | 'plates' | 'cracks' | 'cobble';
+  /** Begrenzung: gestreifte Bande, Mauer, Felswall, Holzzaun, Seil an Pfosten, Leitplanke. */
+  barrier: 'block' | 'stone' | 'rock' | 'fence' | 'rope' | 'rail';
+  wallA?: RGB;
+  wallB?: RGB;
+  glow?: RGB;
+  glowB?: RGB;
+}
+
 /** Tunnel und Höhlen: lichte Höhe über der Fahrbahn und Dicke des Felsmantels. */
 const TUNNEL_H = 7.4;
 const TUNNEL_ROCK = 5;
@@ -239,6 +266,36 @@ export class World {
       else solid.quad(a, b, cc, d, c);
     };
 
+    // Aussehen der Untergründe (Reihenfolge wie SURFACES in game/surface.ts).
+    const dark = th.stars ? 0.72 : 1;
+    const col = (hex: number): RGB => shade(rgb(hex), dark);
+    const crack = t.def.theme === 'glut' ? rgb(0xff8a2a) : t.def.theme === 'nacht' ? rgb(0x4ef0ff) : rgb(0x9a8fa3);
+    const wood: [RGB, RGB] = [col(0xa8794a), col(0x7a5a3c)];
+    const looks: SurfaceLook[] = SURFACES.map((sf): SurfaceLook => {
+      switch (sf.id) {
+        case 'wood':
+          return { a: col(0xb98150), b: col(0xa56f3f), c: col(0x5e4226), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x8f6a40), detail: 'planks', barrier: 'rope', wallA: wood[1], wallB: col(0xf2e6c8) };
+        case 'sand':
+          return { a: col(0xecd9a0), b: col(0xe4cd8c), c: col(0xd3ba78), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdcc486), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'dirt':
+          return { a: col(0x9c7650), b: col(0x916b47), c: col(0x775638), band: 5, plain: false, lines: false, kerbs: false, shoulder: null, detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'gravel':
+          return { a: col(0xaaa49b), b: col(0x9b948a), c: col(0x857e75), band: 2, plain: false, lines: false, kerbs: false, shoulder: null, detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'grass':
+          return { a: col(0x86c45c), b: col(0x77b650), c: col(0x6aa646), band: 4, plain: false, lines: true, line: col(0xf7f4e8), kerbs: false, shoulder: null, detail: 'none', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'rock':
+          return { a: col(0x57495a), b: col(0x4b3f50), c: crack, band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0x3c3242), detail: 'cracks', barrier: 'rock', wallA: col(0x6b5565), wallB: col(0x54445a) };
+        case 'metal':
+          return { a: col(0x8792a0), b: col(0x77828f), c: col(0x4d5560), band: 3, plain: false, lines: true, line: col(0xffd23f), kerbs: false, shoulder: col(0x5c6570), detail: 'plates', barrier: 'rail', wallA: col(0x3a4049), wallB: col(0xc9d2dc) };
+        case 'cobble':
+          return { a: col(0x9a9186), b: col(0x857d73), c: col(0x6f685f), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x7a7268), detail: 'cobble', barrier: 'stone', wallA: col(0xa59c90), wallB: col(0x8d857a) };
+        case 'neon':
+          return { a: rgb(0x23263f), b: rgb(0x1c1f36), c: rgb(0x4ef0ff), band: 4, plain: true, lines: true, line: rgb(0x4ef0ff), center: rgb(0xff5ad1), kerbs: true, kerbA: rgb(0xff5ad1), kerbB: rgb(0x23263f), shoulder: rgb(0x15172b), detail: 'none', barrier: 'rail', wallA: rgb(0x2d3050), wallB: rgb(0x8f97b8), glow: rgb(0xff5ad1), glowB: rgb(0x4ef0ff) };
+        default:
+          return { a: cRoad, b: cRoadAlt, c: cInk, band: 4, plain: true, lines: true, kerbs: true, shoulder: null, detail: 'none', barrier: 'block' };
+      }
+    });
+
     for (let i = 0; i < t.total; i++) {
       const j = t.next[i];
       const gapI = (t.edge[i] & EDGE_GAP) !== 0;
@@ -262,43 +319,126 @@ export class World {
       const freeR = ((e | t.edge[j]) & EDGE_FREE_R) !== 0;
       const lower = (freeL || freeR) && t.branchOf[i] >= 0 ? -0.012 : 0;
 
-      // Asphalt in zwei leicht verschiedenen Tönen – das Wechselmuster macht Tempo sichtbar.
-      const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : Math.floor(i / 4) % 2 === 0 ? cRoad : cRoadAlt;
-      top(solid, i, f0, f1, -rh, rh, lower, deck && !ramp ? mixRgb(road, cDeck, 0.35) : road);
-      const sh = deck ? cDeckDark : cShoulder;
+      const look = looks[t.surf[q]] ?? looks[0];
+
+      // Fahrbahn in zwei leicht verschiedenen Tönen – das Wechselmuster macht Tempo sichtbar.
+      const tone = Math.floor(i / look.band) % 2 === 0;
+      const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : tone ? look.a : look.b;
+      const surface = deck && !ramp && look.plain ? mixRgb(road, cDeck, 0.35) : road;
+      if (look.detail === 'cobble' && !ramp) {
+        // Pflaster: vier Bahnen im Schachbrett
+        for (let c = 0; c < 4; c++) {
+          top(solid, i, f0, f1, -rh + (c * rh) / 2, -rh + ((c + 1) * rh) / 2, lower, (i + c) % 2 === 0 ? look.a : look.b);
+        }
+      } else top(solid, i, f0, f1, -rh, rh, lower, surface);
+      const sh = look.shoulder ?? (deck ? cDeckDark : cShoulder);
       top(solid, i, f0, f1, -wh, -rh, freeL ? -0.025 : 0, sh);
       top(solid, i, f0, f1, rh, wh, freeR ? -0.025 : 0, sh);
 
-      // Markierungen
-      if (!ramp) {
-        if (!freeL) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cLine);
-        if (!freeR) top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cLine);
-        if (i % 8 < 3 && lower === 0) top(paint, i, f0, f1, -0.14, 0.14, 0.03, cLine);
-        if (Math.abs(t.curv[q]) > 1 / 46) {
-          const kerb = Math.floor(i / 2) % 2 === 0 ? cKerbA : cKerbB;
-          if (!freeL) top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
-          if (!freeR) top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
+      // Was den Untergrund ausmacht: Fugen, Fahrrinnen, Nähte, Risse
+      if (!ramp && lower === 0 && f0 === 0 && f1 === 1) {
+        const d = look.detail;
+        if (d === 'planks') top(solid, i, 0, 0.14, -rh, rh, 0.012, look.c);
+        else if (d === 'ruts') {
+          top(solid, i, 0, 1, -2.3, -1.3, 0.012, look.c);
+          top(solid, i, 0, 1, 1.3, 2.3, 0.012, look.c);
+        } else if (d === 'plates') {
+          top(solid, i, 0, 1, -0.09, 0.09, 0.012, look.c);
+          if (i % 3 === 0) top(solid, i, 0, 0.08, -rh, rh, 0.012, look.c);
+        } else if (d === 'cracks' && i % 2 === 0) {
+          // Risse: kurze, schräg versetzte Striche, die glühen bzw. hell schimmern
+          const l0 = (noise(i * 0.37, t.index * 5.1) - 0.5) * 1.5 * rh;
+          const l1 = l0 + (noise(i * 0.61, 9.3) - 0.5) * 2.4;
+          paint.quad(this.P(i, 0, l0 - 0.1, 0.03), this.P(i, 0, l0 + 0.1, 0.03), this.P(i, 1, l1 + 0.1, 0.03), this.P(i, 1, l1 - 0.1, 0.03), look.c);
         }
       }
 
-      // Bande bzw. offene Kante
-      const panel = Math.floor(i / 3) % 2 === 0 ? cWallA : cWallB;
+      // Markierungen
+      if (!ramp && look.lines) {
+        const cl = look.line ?? cLine;
+        if (!freeL) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cl);
+        if (!freeR) top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cl);
+        if (i % 8 < 3 && lower === 0 && look.plain) top(paint, i, f0, f1, -0.14, 0.14, 0.03, look.center ?? cl);
+      }
+      if (!ramp && look.kerbs && Math.abs(t.curv[q]) > 1 / 46) {
+        const kerb = Math.floor(i / 2) % 2 === 0 ? (look.kerbA ?? cKerbA) : (look.kerbB ?? cKerbB);
+        if (!freeL) top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
+        if (!freeR) top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
+      }
+
+      // Begrenzung bzw. offene Kante
+      const panel = Math.floor(i / 3) % 2 === 0;
+      const whole = f0 === 0 && f1 === 1;
       for (const sgn of [-1, 1]) {
         if (sgn < 0 ? freeL : freeR) continue;
         const open = sgn < 0 ? openL : openR;
         const inner = sgn * wh;
         const outer = sgn * (wh + WALL_T);
-        if (!open) {
-          side(i, f0, f1, inner, 0, WALL_H, sgn < 0, panel);
-          // Außen reicht die Bande bis ins Gelände hinunter – auch dort, wo eine Schanze oder Kuppe die Fahrbahn anhebt.
-          side(i, f0, f1, outer, deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]), WALL_H, sgn > 0, shade(panel, 0.8));
-          if (sgn < 0) top(solid, i, f0, f1, outer, inner, WALL_H, cCap);
-          else top(solid, i, f0, f1, inner, outer, WALL_H, cCap);
-        } else {
+        if (open) {
           // Warnstreifen an der Kante, darunter die Stirnseite des Stegs.
           const l0 = sgn < 0 ? inner : inner - 0.45;
           top(paint, i, f0, f1, l0, l0 + 0.45, 0.04, i % 2 === 0 ? cWarn : cInk);
           side(i, f0, f1, inner, -DECK_D, 0, sgn > 0, cDeckDark);
+          continue;
+        }
+        const skirt = deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]);
+        const style = look.barrier;
+        if (style === 'block' || style === 'stone') {
+          const cA = style === 'stone' ? look.wallA! : cWallA;
+          const cB = style === 'stone' ? look.wallB! : cWallB;
+          const c = panel ? cA : cB;
+          side(i, f0, f1, inner, 0, WALL_H, sgn < 0, c);
+          // Außen reicht die Bande bis ins Gelände hinunter – auch dort, wo eine Schanze oder Kuppe die Fahrbahn anhebt.
+          side(i, f0, f1, outer, skirt, WALL_H, sgn > 0, shade(c, 0.8));
+          const cap = style === 'stone' ? shade(cA, 1.12) : cCap;
+          if (sgn < 0) top(solid, i, f0, f1, outer, inner, WALL_H, cap);
+          else top(solid, i, f0, f1, inner, outer, WALL_H, cap);
+        } else if (style === 'rock') {
+          // Wall aus Felsbrocken: jede Kante anders hoch
+          const h0 = 0.55 + 0.9 * noise(i * 0.83 + sgn * 11, t.index * 3.7);
+          const h1 = 0.55 + 0.9 * noise(j * 0.83 + sgn * 11, t.index * 3.7);
+          const c = (i + (sgn > 0 ? 1 : 0)) % 2 === 0 ? look.wallA! : look.wallB!;
+          const out2 = sgn * (wh + WALL_T * 2);
+          const a0 = this.P(i, f0, inner, 0);
+          const a1 = this.P(i, f1, inner, 0);
+          const b0 = this.P(i, f0, sgn * (wh + WALL_T * 0.8), f0 === 0 ? h0 : (h0 + h1) / 2);
+          const b1 = this.P(i, f1, sgn * (wh + WALL_T * 0.8), f1 === 1 ? h1 : (h0 + h1) / 2);
+          const c0 = this.P(i, f0, out2, skirt);
+          const c1 = this.P(i, f1, out2, skirt);
+          if (sgn < 0) {
+            solid.quad(a1, a0, b0, b1, c);
+            solid.quad(b1, b0, c0, c1, shade(c, 0.8));
+          } else {
+            solid.quad(a0, a1, b1, b0, c);
+            solid.quad(b0, b1, c1, c0, shade(c, 0.8));
+          }
+        } else {
+          // Zaun, Seil oder Leitplanke: Pfosten in festem Abstand, dazwischen Holme
+          const mid = sgn * (wh + WALL_T * 0.5);
+          const rails: [number, number, RGB][] =
+            style === 'fence'
+              ? [
+                  [0.36, 0.52, look.wallA!],
+                  [0.78, 0.94, look.wallA!],
+                ]
+              : style === 'rope'
+                ? [[0.74, 0.86, look.wallB!]]
+                : [[0.4, 0.8, panel ? look.wallB! : shade(look.wallB!, 0.9)]];
+          for (const [y0, y1, c] of rails) {
+            side(i, f0, f1, mid - sgn * 0.06, y0, y1, sgn < 0, c);
+            side(i, f0, f1, mid + sgn * 0.06, y0, y1, sgn > 0, shade(c, 0.8));
+            top(solid, i, f0, f1, Math.min(mid - 0.06, mid + 0.06), Math.max(mid - 0.06, mid + 0.06), y1, shade(c, 1.1));
+          }
+          if (whole && i % (style === 'rail' ? 4 : 3) === 0) {
+            const p = this.P(i, 0, mid);
+            const ph = style === 'rail' ? 0.86 : 1.12;
+            solid.box(p[0], p[1] + ph / 2 - 0.05, p[2], 0.26, ph + 0.1, 0.26, look.wallA!, Math.atan2(t.tx[i], t.tz[i]));
+          }
+          // Leuchtband auf der Leitplanke
+          if (style === 'rail' && look.glow) top(paint, i, f0, f1, Math.min(mid - 0.07, mid + 0.07), Math.max(mid - 0.07, mid + 0.07), 0.83, Math.floor(i / 6) % 2 === 0 ? look.glow : (look.glowB ?? look.glow));
+          // Wo die Fahrbahn frei steht oder angehoben ist, braucht sie darunter eine Kante.
+          if (deck || t.py[q] - t.base[q] > 0.05) side(i, f0, f1, outer, skirt, 0, sgn > 0, deck ? cDeckDark : shade(sh, 0.75));
+          else side(i, f0, f1, outer, skirt, 0, sgn > 0, shade(sh, 0.75));
         }
       }
       if (deck) {

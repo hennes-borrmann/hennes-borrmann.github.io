@@ -33,6 +33,7 @@ import {
   walk,
   type Track,
 } from './track';
+import { SURFACES } from './surface';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -553,8 +554,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Lenken ---
   // Langsam: fester kleinster Wendekreis. Schnell: begrenzt durch die Haftung.
   const v = Math.abs(vf);
+  // Untergrund: Sand, Schotter und Co. halten weniger, Fels und Stadtasphalt mehr.
+  const ground = SURFACES[t.surf[seg0]] ?? SURFACES[0];
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
-  const hold = A_LAT * ch.grip * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
+  const hold = A_LAT * ch.grip * ground.grip * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
   const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
@@ -580,13 +583,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // umgelenkt. So kostet Kurvenfahren kein Tempo ("griffig"), und im Drift
     // (geringe Haftung) rutscht das Heck sichtbar nach außen.
     const speed = Math.hypot(vf, vl);
-    const grip = s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP;
+    // Auf losem Grund rutscht das Kart länger quer, bevor es wieder spurt.
+    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip;
     vl *= Math.exp(-grip * DT);
     vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
 
     // --- Beschleunigen und Bremsen ---
     const boosting = s.boost > 0;
-    let vmax = V_MAX * env.speedFactor * ch.vmax;
+    let vmax = V_MAX * env.speedFactor * ch.vmax * ground.speed;
     if (boosting) vmax = V_BOOST * env.speedFactor;
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
@@ -607,7 +611,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
-      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
       if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
