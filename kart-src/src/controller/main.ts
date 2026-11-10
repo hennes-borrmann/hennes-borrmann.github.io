@@ -406,6 +406,12 @@ const VIBRATION: Record<FxKind, number | number[]> = {
   item: [0, 25, 40, 25],
   go: 70,
   finish: [0, 70, 60, 70, 60, 150],
+  block: [0, 40, 30, 40],
+  stall: [0, 30, 40, 30, 40, 30, 40, 30],
+  land: 40,
+  fall: [0, 160],
+  lap: 30,
+  finallap: [0, 40, 50, 40, 50, 90],
 };
 
 const FLASH_TONE: Record<FxKind, string> = {
@@ -417,6 +423,12 @@ const FLASH_TONE: Record<FxKind, string> = {
   item: 'item',
   go: 'go',
   finish: 'go',
+  block: 'item',
+  stall: 'bad',
+  land: 'plain',
+  fall: 'bad',
+  lap: 'go',
+  finallap: 'go',
 };
 
 function feedback(kind: FxKind): void {

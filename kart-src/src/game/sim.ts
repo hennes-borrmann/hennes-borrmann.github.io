@@ -4,14 +4,31 @@
 // Zustand mit festem Zeitschritt. Der Host und die Vorhersage auf den
 // Mitspieler-Bildschirmen rufen exakt denselben Code auf – deshalb steckt
 // alles, was das Kart allein betrifft, hier drin: Beschleunigen, Lenken,
-// Drift mit Mini-Turbo, Untergrund, Bande, Boost-Felder und das Auslösen von
-// Items. Was mehrere Fahrzeuge betrifft (Rempler, Treffer, Kisten), entscheidet
-// nur der Host (world.ts).
+// Drift mit Mini-Turbo, Untergrund, Bande, Höhen, Sprünge, Abstürze,
+// Boost-Felder und das Auslösen von Items. Was mehrere Fahrzeuge betrifft
+// (Rempler, Treffer, Kisten), entscheidet nur der Host (hostGame.ts).
+//
+// Die Strecke ist für die Physik eine Fläche mit Höhe: gelenkt und beschleunigt
+// wird in der Ebene, die Höhe folgt dem Boden – außer das Kart hebt ab.
 //
 // Alle Zeiten im Zustand sind ganze Simulationsschritte ("Ticks", 60 pro
-// Sekunde): das rechnet auf jedem Gerät identisch und passt in ein Byte.
+// Sekunde): das rechnet auf jedem Gerät identisch.
 
-import { TRACK, proj, projectOnTrack, rightX, rightZ, segDelta, trackHeading, gridPosition } from './track';
+import {
+  EDGE_OPEN_L,
+  EDGE_OPEN_R,
+  NO_GROUND,
+  TRACK,
+  centerHeight,
+  gridPosition,
+  groundAt,
+  proj,
+  projectOnTrack,
+  rightX,
+  rightZ,
+  segDelta,
+  trackHeading,
+} from './track';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -29,6 +46,17 @@ export const ITEM_BOOST = 1;
 export const ITEM_TIRE = 2;
 /** "Ölfleck": bleibt hinter dem Kart liegen. */
 export const ITEM_OIL = 3;
+/** "Brummkreisel": folgt der Strecke und sucht das Kart vor dir. */
+export const ITEM_TOP = 4;
+/** "Stoßfänger": fängt den nächsten Treffer ab. */
+export const ITEM_GUARD = 5;
+/** "Kurzschluss": bremst alle, die vor dir liegen, kurz aus. */
+export const ITEM_EMP = 6;
+/** "Nebelkerze": Rauchwolke hinter dem Kart, die die Sicht nimmt. */
+export const ITEM_SMOKE = 7;
+/** "Sprungfeder": Hüpfer aus dem Stand – über Hindernisse, Öl und Abkürzungen. */
+export const ITEM_SPRING = 8;
+export const ITEM_COUNT = 9;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -49,13 +77,19 @@ export interface StepEnv {
 export const FLAG_ITEM_HELD = 1;
 export const FLAG_OFFROAD = 2;
 export const FLAG_WALL = 4;
+/** Das Kart ist in der Luft (Sprung, Absturz oder gerade am Kran). */
+export const FLAG_AIR = 8;
 
 export interface KartState {
   x: number;
+  /** Höhe. */
+  y: number;
   z: number;
   /** Blickrichtung in Radiant; 0 = +Z, vorwärts = (sin, cos). Rechts lenken verkleinert den Wert. */
   heading: number;
   vx: number;
+  /** Steig- bzw. Fallgeschwindigkeit. */
+  vy: number;
   vz: number;
   /** Streckenabschnitt, in dem sich das Kart befindet. */
   seg: number;
@@ -69,6 +103,12 @@ export interface KartState {
   spin: number;
   /** Verbleibende Ticks, in denen kein weiterer Treffer wirkt. */
   shield: number;
+  /** Verbleibende Ticks Stoßfänger. */
+  guard: number;
+  /** Verbleibende Ticks Kurzschluss (gedrosselter Motor). */
+  stall: number;
+  /** Verbleibende Ticks, bis das Kart nach einem Absturz wieder aufgesetzt ist. */
+  respawn: number;
   item: number;
   /** Das Item, das nach der Auslosung erscheint. */
   nextItem: number;
@@ -79,14 +119,29 @@ export interface KartState {
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
 
-export const EV_USE_BOOST = 1;
-export const EV_USE_TIRE = 2;
-export const EV_USE_OIL = 4;
-export const EV_TURBO = 8;
-export const EV_WALL = 16;
-export const EV_PAD = 32;
-export const EV_DRIFT_START = 64;
-export const EV_ITEM_READY = 128;
+export const EV_USE_BOOST = 1 << 0;
+export const EV_USE_TIRE = 1 << 1;
+export const EV_USE_OIL = 1 << 2;
+export const EV_TURBO = 1 << 3;
+export const EV_WALL = 1 << 4;
+export const EV_PAD = 1 << 5;
+export const EV_DRIFT_START = 1 << 6;
+export const EV_ITEM_READY = 1 << 7;
+export const EV_USE_TOP = 1 << 8;
+export const EV_USE_GUARD = 1 << 9;
+export const EV_USE_EMP = 1 << 10;
+export const EV_USE_SMOKE = 1 << 11;
+export const EV_USE_SPRING = 1 << 12;
+/** Nach einem Sprung hart gelandet. */
+export const EV_LAND = 1 << 13;
+/** Abgestürzt – das Kart wird zurückgesetzt. */
+export const EV_FALL = 1 << 14;
+/** Wieder auf der Strecke. */
+export const EV_RESPAWNED = 1 << 15;
+/** Vom Boden abgehoben. */
+export const EV_TAKEOFF = 1 << 16;
+export const EV_USE_ANY =
+  EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING;
 
 // --- Abstimmung --------------------------------------------------------------
 // Diese Werte bestimmen das Fahrgefühl. Geschwindigkeiten in m/s.
@@ -120,14 +175,33 @@ export const SPIN_TICKS = 75;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
+/** Fallbeschleunigung – kräftiger als in echt, damit Sprünge knackig bleiben. */
+export const GRAVITY = 30;
+/** Höchste Stufe, die ein Kart ohne Weiteres hinaufkommt; alles darüber ist eine Wand. */
+const STEP_MAX = 0.9;
+/** Ab dieser Höhe über dem Boden gilt das Kart als "in der Luft". */
+const AIR_EPS = 0.15;
+/** Lenkwirkung in der Luft. */
+const AIR_STEER = 0.35;
+/** Bergab schneller, bergauf langsamer: Anteil der Steigung, der auf die Höchstgeschwindigkeit wirkt. */
+const SLOPE_EFFECT = 0.6;
+const SPRING_SPEED = 10.5;
+export const RESPAWN_TICKS = 55;
+const RESPAWN_HEIGHT = 2.4;
+export const GUARD_TICKS = 12 * 60;
+export const STALL_TICKS = 150;
+const STALL_FACTOR = 0.55;
+
 export const NEUTRAL: Cmd = { steer: 0, buttons: 0 };
 
 export function newState(): KartState {
   return {
     x: 0,
+    y: 0,
     z: 0,
     heading: 0,
     vx: 0,
+    vy: 0,
     vz: 0,
     seg: 0,
     boost: 0,
@@ -135,6 +209,9 @@ export function newState(): KartState {
     driftCharge: 0,
     spin: 0,
     shield: 0,
+    guard: 0,
+    stall: 0,
+    respawn: 0,
     item: ITEM_NONE,
     nextItem: ITEM_NONE,
     roulette: 0,
@@ -144,9 +221,11 @@ export function newState(): KartState {
 
 export function copyState(dst: KartState, src: KartState): KartState {
   dst.x = src.x;
+  dst.y = src.y;
   dst.z = src.z;
   dst.heading = src.heading;
   dst.vx = src.vx;
+  dst.vy = src.vy;
   dst.vz = src.vz;
   dst.seg = src.seg;
   dst.boost = src.boost;
@@ -154,6 +233,9 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.driftCharge = src.driftCharge;
   dst.spin = src.spin;
   dst.shield = src.shield;
+  dst.guard = src.guard;
+  dst.stall = src.stall;
+  dst.respawn = src.respawn;
   dst.item = src.item;
   dst.nextItem = src.nextItem;
   dst.roulette = src.roulette;
@@ -166,6 +248,7 @@ export function gridState(slot: number): KartState {
   const g = gridPosition(TRACK, slot);
   const s = newState();
   s.x = g.x;
+  s.y = g.y;
   s.z = g.z;
   s.heading = g.heading;
   s.seg = g.seg;
@@ -185,9 +268,21 @@ export function forwardSpeed(s: KartState): number {
   return s.vx * Math.sin(s.heading) + s.vz * Math.cos(s.heading);
 }
 
-/** Treffer durch Rollreifen oder Ölfleck. Liefert false, wenn das Kart gerade geschützt ist. */
-export function hitKart(s: KartState): boolean {
-  if (s.shield > 0 || s.spin > 0) return false;
+export const HIT_NONE = 0;
+export const HIT_SPIN = 1;
+export const HIT_BLOCKED = 2;
+
+/**
+ * Treffer durch Rollreifen, Ölfleck, Brummkreisel oder Hindernis.
+ * HIT_NONE = gerade unverwundbar, HIT_BLOCKED = der Stoßfänger hat ihn abgefangen.
+ */
+export function hitKart(s: KartState): number {
+  if (s.shield > 0 || s.spin > 0 || s.respawn > 0) return HIT_NONE;
+  if (s.guard > 0) {
+    s.guard = 0;
+    s.shield = 50;
+    return HIT_BLOCKED;
+  }
   s.spin = SPIN_TICKS;
   s.shield = SPIN_TICKS + SHIELD_TICKS;
   s.driftDir = 0;
@@ -195,7 +290,22 @@ export function hitKart(s: KartState): boolean {
   s.boost = 0;
   s.vx *= 0.45;
   s.vz *= 0.45;
-  return true;
+  return HIT_SPIN;
+}
+
+/** Kurzschluss: der Motor läuft kurz nur gedrosselt. Rückgabe wie hitKart. */
+export function stallKart(s: KartState): number {
+  if (s.respawn > 0 || s.stall > 0) return HIT_NONE;
+  if (s.guard > 0) {
+    s.guard = 0;
+    s.shield = 50;
+    return HIT_BLOCKED;
+  }
+  s.stall = STALL_TICKS;
+  s.boost = 0;
+  s.driftDir = 0;
+  s.driftCharge = 0;
+  return HIT_SPIN;
 }
 
 function wrapAngle(a: number): number {
@@ -211,6 +321,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Zeitgeber ---
   if (s.boost > 0) s.boost--;
   if (s.shield > 0) s.shield--;
+  if (s.guard > 0) s.guard--;
+  if (s.stall > 0) s.stall--;
   const spinning = s.spin > 0;
   if (spinning) s.spin--;
   if (s.roulette > 0) {
@@ -221,14 +333,36 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       ev |= EV_ITEM_READY;
     }
   }
+  const itemBtn = (cmd.buttons & BTN_ITEM) !== 0;
 
+  // --- Nach einem Absturz: das Kart wird über der Strecke abgesetzt ---
+  if (s.respawn > 0) {
+    s.respawn--;
+    s.vx = 0;
+    s.vy = 0;
+    s.vz = 0;
+    s.y = t.py[s.seg] + (s.respawn / RESPAWN_TICKS) * RESPAWN_HEIGHT;
+    s.flags = (itemBtn ? FLAG_ITEM_HELD : 0) | (s.respawn > 0 ? FLAG_AIR : 0);
+    if (s.respawn === 0) ev |= EV_RESPAWNED;
+    return ev;
+  }
+
+  const wasAir = (s.flags & FLAG_AIR) !== 0;
   const drive = env.canDrive && !spinning;
   const steer = drive ? Math.max(-1, Math.min(1, cmd.steer / 127)) : 0;
   const gas = drive && (cmd.buttons & BTN_GAS) !== 0;
   const brake = drive && (cmd.buttons & BTN_BRAKE) !== 0;
   const driftBtn = drive && (cmd.buttons & BTN_DRIFT) !== 0;
-  const itemBtn = (cmd.buttons & BTN_ITEM) !== 0;
   const wasOffroad = (s.flags & FLAG_OFFROAD) !== 0;
+
+  // Boden an der alten Stelle: Bezug für Steigung und für Stufen.
+  const x0 = s.x;
+  const z0 = s.z;
+  const y0 = s.y;
+  projectOnTrack(t, x0, z0, s.seg);
+  const seg0 = proj.seg;
+  const lat0 = proj.lat;
+  const g0 = groundAt(t, seg0, proj.along, lat0);
 
   let fx = Math.sin(s.heading);
   let fz = Math.cos(s.heading);
@@ -246,7 +380,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       s.driftDir = 0;
       s.driftCharge = 0;
     }
-  } else if (driftBtn && vf > DRIFT_MIN_SPEED && Math.abs(steer) > 0.2) {
+  } else if (driftBtn && !wasAir && vf > DRIFT_MIN_SPEED && Math.abs(steer) > 0.2) {
     s.driftDir = steer > 0 ? 1 : -1;
     s.driftCharge = 0;
     ev |= EV_DRIFT_START;
@@ -255,14 +389,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Lenken ---
   // Langsam: fester kleinster Wendekreis. Schnell: begrenzt durch die Haftung.
   const v = Math.abs(vf);
-  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, A_LAT / v);
+  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, A_LAT / v)) * (wasAir ? AIR_STEER : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
     // zwischen weitem und engem Bogen. Eng hineinlenken lädt schneller.
     const into = steer * s.driftDir;
     yaw = s.driftDir * yawMax * (DRIFT_WIDE + ((DRIFT_TIGHT - DRIFT_WIDE) * (into + 1)) / 2);
-    s.driftCharge = Math.min(255, s.driftCharge + (into > 0.35 ? 2 : 1));
+    if (!wasAir) s.driftCharge = Math.min(255, s.driftCharge + (into > 0.35 ? 2 : 1));
   } else {
     yaw = steer * yawMax * (vf < 0 ? -1 : 1);
   }
@@ -272,43 +406,50 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const rx = -fz;
   const rz = fx;
 
-  // --- Haftung: die Fahrtrichtung folgt der Blickrichtung ---
-  // Der seitliche Anteil wird nicht weggebremst, sondern in Fahrtrichtung
-  // umgelenkt. So kostet Kurvenfahren kein Tempo ("griffig"), und im Drift
-  // (geringe Haftung) rutscht das Heck sichtbar nach außen.
   vf = s.vx * fx + s.vz * fz;
   let vl = s.vx * rx + s.vz * rz;
-  const speed = Math.hypot(vf, vl);
-  const grip = s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP;
-  vl *= Math.exp(-grip * DT);
-  vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
+  if (!wasAir) {
+    // --- Haftung: die Fahrtrichtung folgt der Blickrichtung ---
+    // Der seitliche Anteil wird nicht weggebremst, sondern in Fahrtrichtung
+    // umgelenkt. So kostet Kurvenfahren kein Tempo ("griffig"), und im Drift
+    // (geringe Haftung) rutscht das Heck sichtbar nach außen.
+    const speed = Math.hypot(vf, vl);
+    const grip = s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP;
+    vl *= Math.exp(-grip * DT);
+    vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
 
-  // --- Beschleunigen und Bremsen ---
-  const boosting = s.boost > 0;
-  let vmax = V_MAX * env.speedFactor;
-  if (boosting) vmax = V_BOOST * env.speedFactor;
-  else if (wasOffroad) vmax *= OFFROAD_FACTOR;
+    // --- Beschleunigen und Bremsen ---
+    const boosting = s.boost > 0;
+    let vmax = V_MAX * env.speedFactor;
+    if (boosting) vmax = V_BOOST * env.speedFactor;
+    else if (wasOffroad) vmax *= OFFROAD_FACTOR;
+    if (s.stall > 0) vmax *= STALL_FACTOR;
+    // Steigung in Fahrtrichtung: s.vy ist am Boden die Geschwindigkeit, mit der das Kart dem Hang folgt.
+    const slope = Math.max(-0.3, Math.min(0.3, s.vy / Math.max(6, v)));
+    vmax *= 1 - slope * SLOPE_EFFECT * (vf < 0 ? -1 : 1);
 
-  if (!env.canDrive) {
-    // Countdown oder Ziel: zügig zum Stehen kommen.
-    const d = BRAKE * 0.5 * DT;
-    vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
-    vl *= 0.9;
-  } else if (spinning) {
-    const d = 16 * DT;
-    vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
-  } else if (boosting) {
-    // Schub wirkt auch ohne Gas.
-    if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
-  } else if (gas && !brake) {
-    if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
-    else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
-  } else if (brake) {
-    if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
-    else vf = Math.max(-V_REVERSE, vf - 16 * DT);
-  } else {
-    const d = (wasOffroad ? COAST + 12 : COAST) * DT;
-    vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
+    if (!env.canDrive) {
+      // Countdown oder Ziel: zügig zum Stehen kommen.
+      const d = BRAKE * 0.5 * DT;
+      vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
+      vl *= 0.9;
+    } else if (spinning) {
+      const d = 16 * DT;
+      vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
+    } else if (boosting) {
+      // Schub wirkt auch ohne Gas.
+      if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
+      else vf = Math.max(vmax, vf - 10 * DT);
+    } else if (gas && !brake) {
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
+    } else if (brake) {
+      if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
+      else vf = Math.max(-V_REVERSE, vf - 16 * DT);
+    } else {
+      const d = (wasOffroad ? COAST + 12 : COAST) * DT;
+      vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
+    }
   }
 
   s.vx = fx * vf + rx * vl;
@@ -316,45 +457,109 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.x += s.vx * DT;
   s.z += s.vz * DT;
 
-  // --- Strecke: Abschnitt, Bande, Untergrund ---
+  // --- Strecke: Abschnitt, Bande ---
   projectOnTrack(t, s.x, s.z, s.seg);
   s.seg = proj.seg;
   let lat = proj.lat;
+  let along = proj.along;
   let flags = itemBtn ? FLAG_ITEM_HELD : 0;
-  const limit = t.wallHalf - KART_RADIUS;
-  if (Math.abs(lat) > limit) {
+  // Wer schon unter die Fahrbahn gefallen ist, stößt nirgends mehr an.
+  const sunk = y0 < centerHeight(t, s.seg, along) + lat * t.bank[s.seg] - STEP_MAX;
+  const limit = t.wh[s.seg] - KART_RADIUS;
+  if (!sunk && Math.abs(lat) > limit) {
     const side = lat > 0 ? 1 : -1;
-    const nx = rightX(t, s.seg) * side;
-    const nz = rightZ(t, s.seg) * side;
-    const over = Math.abs(lat) - limit;
-    s.x -= nx * over;
-    s.z -= nz * over;
-    lat = side * limit;
-    flags |= FLAG_WALL;
-    const vn = s.vx * nx + s.vz * nz;
-    if (vn > 0) {
-      // Den Anteil in die Bande hinein umkehren (leichtes Abprallen), den Rest
-      // entlangrutschen lassen. Streifen kostet wenig, ein Frontalaufprall viel.
-      s.vx -= nx * vn * 1.3;
-      s.vz -= nz * vn * 1.3;
-      const loss = Math.min(0.55, 0.008 + vn * 0.03);
-      s.vx *= 1 - loss;
-      s.vz *= 1 - loss;
-      if (vn > 5) {
-        ev |= EV_WALL;
-        s.driftDir = 0;
-        s.driftCharge = 0;
+    const open = (t.edge[s.seg] & (side > 0 ? EDGE_OPEN_R : EDGE_OPEN_L)) !== 0;
+    if (!open) {
+      const nx = rightX(t, s.seg) * side;
+      const nz = rightZ(t, s.seg) * side;
+      const over = Math.abs(lat) - limit;
+      s.x -= nx * over;
+      s.z -= nz * over;
+      lat = side * limit;
+      flags |= FLAG_WALL;
+      const vn = s.vx * nx + s.vz * nz;
+      if (vn > 0) {
+        // Den Anteil in die Bande hinein umkehren (leichtes Abprallen), den Rest
+        // entlangrutschen lassen. Streifen kostet wenig, ein Frontalaufprall viel.
+        s.vx -= nx * vn * 1.3;
+        s.vz -= nz * vn * 1.3;
+        const loss = Math.min(0.55, 0.008 + vn * 0.03);
+        s.vx *= 1 - loss;
+        s.vz *= 1 - loss;
+        if (vn > 5) {
+          ev |= EV_WALL;
+          s.driftDir = 0;
+          s.driftCharge = 0;
+        }
+        // Hilfe: das Kart dreht sich an der Bande von selbst ein Stück in
+        // Fahrtrichtung der Strecke, damit man nicht frontal hängen bleibt.
+        const turn = wrapAngle(trackHeading(t, s.seg) - s.heading);
+        if (Math.abs(turn) < Math.PI / 2) s.heading = wrapAngle(s.heading + turn * 0.08);
       }
-      // Hilfe: das Kart dreht sich an der Bande von selbst ein Stück in
-      // Fahrtrichtung der Strecke, damit man nicht frontal hängen bleibt.
-      const along = wrapAngle(trackHeading(t, s.seg) - s.heading);
-      if (Math.abs(along) < Math.PI / 2) s.heading = wrapAngle(s.heading + along * 0.08);
     }
   }
-  if (Math.abs(lat) > t.roadHalf + 0.3) flags |= FLAG_OFFROAD;
+
+  // --- Boden: Stufen, Schwerkraft, Abheben und Landen ---
+  let g = sunk ? NO_GROUND : groundAt(t, s.seg, along, lat);
+  if (g > y0 + STEP_MAX) {
+    if (g0 > y0 + STEP_MAX) {
+      // Schon an der alten Stelle unter der Fahrbahn: weiter fallen.
+      g = NO_GROUND;
+    } else {
+      // Eine Kante höher als eine Stufe (Rückseite einer Schanze, Wand einer
+      // Lücke): zurück an die alte Stelle und abprallen.
+      s.x = x0;
+      s.z = z0;
+      s.seg = seg0;
+      lat = lat0;
+      along = 0;
+      if (Math.hypot(s.vx, s.vz) > 5) ev |= EV_WALL;
+      s.vx *= -0.25;
+      s.vz *= -0.25;
+      g = g0;
+    }
+  }
+  s.vy -= GRAVITY * DT;
+  s.y += s.vy * DT;
+  if (s.y <= g) {
+    if (wasAir && s.vy < -7) ev |= EV_LAND;
+    s.y = g;
+    // Am Boden ist die Steiggeschwindigkeit die des Hangs. Endet der Hang
+    // (Kuppe, Schanze), nimmt das Kart sie mit und hebt ab.
+    s.vy = g0 > NO_GROUND / 2 ? Math.max(-14, Math.min(14, (g - g0) / DT)) : 0;
+  }
+  const air = s.y > g + AIR_EPS;
+  if (air) {
+    flags |= FLAG_AIR;
+    if (!wasAir) ev |= EV_TAKEOFF;
+  }
+
+  // --- Absturz ---
+  if (s.y < t.py[s.seg] - t.fallDepth) {
+    const r = t.respawn[s.seg];
+    s.seg = r;
+    s.x = t.px[r];
+    s.z = t.pz[r];
+    s.y = t.py[r] + RESPAWN_HEIGHT;
+    s.heading = trackHeading(t, r);
+    s.vx = 0;
+    s.vy = 0;
+    s.vz = 0;
+    s.respawn = RESPAWN_TICKS;
+    s.boost = 0;
+    s.driftDir = 0;
+    s.driftCharge = 0;
+    s.spin = 0;
+    s.stall = 0;
+    s.shield = RESPAWN_TICKS + 70;
+    s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
+    return ev | EV_FALL;
+  }
+
+  if (!air && Math.abs(lat) > t.rh[s.seg] + 0.3) flags |= FLAG_OFFROAD;
 
   // --- Boost-Felder ---
-  if (vf > 6 && s.boost < PAD_TICKS - 8) {
+  if (!air && vf > 6 && s.boost < PAD_TICKS - 8) {
     for (const pad of t.pads) {
       const d = segDelta(t, pad.seg, s.seg);
       if (d >= 0 && d <= pad.length && Math.abs(lat - pad.lat) < pad.halfWidth + 0.5) {
@@ -366,12 +571,45 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   // --- Item auslösen (bei Tastendruck, nicht beim Halten) ---
   if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && drive && s.item !== ITEM_NONE) {
-    if (s.item === ITEM_BOOST) {
-      s.boost = Math.max(s.boost, ITEM_BOOST_TICKS);
-      ev |= EV_USE_BOOST;
-    } else if (s.item === ITEM_TIRE) ev |= EV_USE_TIRE;
-    else ev |= EV_USE_OIL;
-    s.item = ITEM_NONE;
+    let used = true;
+    switch (s.item) {
+      case ITEM_BOOST:
+        s.boost = Math.max(s.boost, ITEM_BOOST_TICKS);
+        ev |= EV_USE_BOOST;
+        break;
+      case ITEM_TIRE:
+        ev |= EV_USE_TIRE;
+        break;
+      case ITEM_OIL:
+        ev |= EV_USE_OIL;
+        break;
+      case ITEM_TOP:
+        ev |= EV_USE_TOP;
+        break;
+      case ITEM_GUARD:
+        s.guard = GUARD_TICKS;
+        ev |= EV_USE_GUARD;
+        break;
+      case ITEM_EMP:
+        ev |= EV_USE_EMP;
+        break;
+      case ITEM_SMOKE:
+        ev |= EV_USE_SMOKE;
+        break;
+      case ITEM_SPRING:
+        // Aus der Luft heraus geht kein zweiter Sprung – das Item bleibt.
+        if (air) used = false;
+        else {
+          s.vy = SPRING_SPEED;
+          s.y += AIR_EPS + 0.05;
+          flags |= FLAG_AIR;
+          ev |= EV_USE_SPRING | EV_TAKEOFF;
+        }
+        break;
+      default:
+        used = false;
+    }
+    if (used) s.item = ITEM_NONE;
   }
 
   s.flags = flags;

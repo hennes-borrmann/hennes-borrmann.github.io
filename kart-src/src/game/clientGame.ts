@@ -8,7 +8,7 @@
 // Host kennt –, wird der Unterschied nicht als Sprung gezeigt, sondern über
 // kurze Zeit ausgeblendet.
 //
-// Alles andere (fremde Karts, Kisten, Reifen, Ölflecken, Rennstand) kommt vom
+// Alles andere (fremde Karts, Kisten, Reifen, Ölflecken, Kreisel, Rauch, Rennstand) kommt vom
 // Host und wird nur dargestellt; fremde Karts leicht in der Vergangenheit
 // interpoliert (interp.ts).
 
@@ -20,13 +20,14 @@ import {
   type FxKind,
   type Snapshot,
   type SnapshotKart,
-  type SnapshotOil,
-  type SnapshotTire,
+  type SnapshotThing,
 } from '../net/protocol';
 import { EntityInterp, lerpState } from './interp';
 import {
   DT,
+  EV_FALL,
   EV_ITEM_READY,
+  EV_LAND,
   EV_PAD,
   EV_TURBO,
   EV_USE_BOOST,
@@ -39,6 +40,7 @@ import {
   type KartState,
   type StepEnv,
 } from './sim';
+import { TRACK } from './track';
 import type { GameView, RaceView, RenderEntity, Standing } from './view';
 
 /** Abspielverzögerung fremder Fahrzeuge (Sekunden). */
@@ -89,7 +91,7 @@ export class ClientGame implements GameView {
   private readonly replay = newState();
   private readonly scratch = newState();
   private readonly env: StepEnv = { canDrive: false, speedFactor: 1 };
-  private readonly err = { x: 0, z: 0, h: 0 };
+  private readonly err = { x: 0, y: 0, z: 0, h: 0 };
   private readonly remotes = new Map<number, Remote>();
   private own: SnapshotKart | null = null;
   private lastSnapTick = -1;
@@ -100,9 +102,10 @@ export class ClientGame implements GameView {
   private goTick = 0;
   private laps = 0;
   private boxes = 0;
-  private tireList: SnapshotTire[] = [];
-  private oilList: SnapshotOil[] = [];
-  private tiresAt = 0;
+  private thingList: SnapshotThing[] = [];
+  private thingsAt = 0;
+  /** Der Host fährt auf einer anderen Strecke als hier geladen (Index) – sonst -1. */
+  wrongTrack = -1;
   /** Abbildung eigene Zeit → Host-Tick, bestimmt vom am wenigsten verspäteten Snapshot. */
   private clockOffset = Number.NaN;
   private couldDrive = false;
@@ -162,6 +165,8 @@ export class ClientGame implements GameView {
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD)) this.onFx?.('boost');
     if (ev & EV_WALL) this.onFx?.('wall');
     if (ev & EV_ITEM_READY) this.onFx?.('item');
+    if (ev & EV_LAND) this.onFx?.('land');
+    if (ev & EV_FALL) this.onFx?.('fall');
 
     this.stats.pending = this.pending.length;
     const recent = this.pending.slice(-CMD_REDUNDANCY).map((p) => p.cmd);
@@ -171,6 +176,12 @@ export class ClientGame implements GameView {
   onSnapshot(snap: Snapshot, nowSec: number): void {
     // Der Kanal ist ungeordnet: ältere Snapshots einfach ignorieren.
     if (snap.tick <= this.lastSnapTick) return;
+    if (snap.track !== TRACK.index) {
+      // Erst die richtige Strecke laden (macht die App), dann weiter.
+      this.wrongTrack = snap.track;
+      return;
+    }
+    this.wrongTrack = -1;
     this.lastSnapTick = snap.tick;
     this.stats.snapshots++;
 
@@ -188,9 +199,8 @@ export class ClientGame implements GameView {
     this.goTick = snap.goTick;
     this.laps = snap.laps;
     this.boxes = snap.boxes;
-    this.tireList = snap.tires;
-    this.oilList = snap.oils;
-    this.tiresAt = nowSec;
+    this.thingList = snap.things;
+    this.thingsAt = nowSec;
 
     const seen = new Set<number>();
     for (const k of snap.karts) {
@@ -215,12 +225,14 @@ export class ClientGame implements GameView {
     if (this.ready && this.own) {
       const fade = Math.exp(-dtSec / ERROR_FADE);
       this.err.x *= fade;
+      this.err.y *= fade;
       this.err.z *= fade;
       this.err.h *= fade;
       const s = lerpState(this.scratch, this.prev, this.predicted, alpha);
       out.push({
         ...s,
         x: s.x + this.err.x,
+        y: s.y + this.err.y,
         z: s.z + this.err.z,
         heading: s.heading + this.err.h,
         slot: this.localSlot,
@@ -248,6 +260,7 @@ export class ClientGame implements GameView {
       laps: this.laps,
       untilGo: Number.isNaN(this.clockOffset) ? 99 : (this.goTick - tick) / TICK_RATE,
       boxes: this.boxes,
+      hostTick: tick,
     };
   }
 
@@ -261,14 +274,10 @@ export class ClientGame implements GameView {
     return list.sort((a, b) => a.place - b.place);
   }
 
-  /** Reifen zwischen zwei Snapshots mit ihrer Geschwindigkeit weiterbewegen. */
-  tires(nowSec: number): SnapshotTire[] {
-    const age = Math.min(0.12, Math.max(0, nowSec - this.tiresAt));
-    return this.tireList.map((t) => ({ ...t, x: t.x + t.vx * age, z: t.z + t.vz * age }));
-  }
-
-  oils(): SnapshotOil[] {
-    return this.oilList;
+  /** Bewegte Dinge zwischen zwei Snapshots mit ihrer Geschwindigkeit weiterrechnen. */
+  things(nowSec: number): SnapshotThing[] {
+    const age = Math.min(0.12, Math.max(0, nowSec - this.thingsAt));
+    return this.thingList.map((t) => (t.vx === 0 && t.vz === 0 ? t : { ...t, x: t.x + t.vx * age, z: t.z + t.vz * age }));
   }
 
   /** Vorhergesagter eigener Zustand. */
@@ -283,7 +292,7 @@ export class ClientGame implements GameView {
       copyState(this.predicted, auth);
       copyState(this.prev, auth);
       this.pending = [];
-      this.err.x = this.err.z = this.err.h = 0;
+      this.err.x = this.err.y = this.err.z = this.err.h = 0;
       return;
     }
     while (this.pending.length > 0 && this.pending[0].seq <= ack) this.pending.shift();
@@ -295,6 +304,7 @@ export class ClientGame implements GameView {
     }
 
     const dx = this.predicted.x - r.x;
+    const dy = this.predicted.y - r.y;
     const dz = this.predicted.z - r.z;
     const dh = wrapAngle(this.predicted.heading - r.heading);
     const dist = Math.hypot(dx, dz);
@@ -304,15 +314,17 @@ export class ClientGame implements GameView {
     // Die Darstellung bleibt, wo sie war (alter Stand = neuer Stand + Fehler),
     // und der Fehler klingt danach ab.
     this.err.x += dx;
+    this.err.y += dy;
     this.err.z += dz;
     this.err.h += dh;
     this.prev.x -= dx;
+    this.prev.y -= dy;
     this.prev.z -= dz;
     this.prev.heading -= dh;
     copyState(this.predicted, r);
 
     if (Math.hypot(this.err.x, this.err.z) > SNAP_DISTANCE) {
-      this.err.x = this.err.z = this.err.h = 0;
+      this.err.x = this.err.y = this.err.z = this.err.h = 0;
       copyState(this.prev, this.predicted);
     }
   }

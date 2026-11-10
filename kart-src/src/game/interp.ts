@@ -10,7 +10,7 @@
 // Host die Eingaben eines Spielers mal zwei auf einmal und mal gar keine
 // verarbeitet.
 
-import { DT, copyState, newState, type KartState } from './sim';
+import { DT, FLAG_AIR, copyState, newState, type KartState } from './sim';
 
 interface Sample {
   t: number;
@@ -29,10 +29,14 @@ export function lerpAngle(a: number, b: number, k: number): number {
 export function lerpState(out: KartState, a: KartState, b: KartState, k: number): KartState {
   // Alles, was keine Position oder Geschwindigkeit ist, kommt vom näheren Stand.
   copyState(out, k < 0.5 ? a : b);
+  // Ein Sprung über viele Meter ist kein Fahren, sondern ein Versetzen (Zurücksetzen nach Absturz).
+  if (Math.abs(b.x - a.x) + Math.abs(b.z - a.z) > 8) return copyState(out, b);
   out.x = a.x + (b.x - a.x) * k;
+  out.y = a.y + (b.y - a.y) * k;
   out.z = a.z + (b.z - a.z) * k;
   out.heading = lerpAngle(a.heading, b.heading, k);
   out.vx = a.vx + (b.vx - a.vx) * k;
+  out.vy = a.vy + (b.vy - a.vy) * k;
   out.vz = a.vz + (b.vz - a.vz) * k;
   return out;
 }
@@ -94,6 +98,8 @@ export class EntityInterp {
       copyState(out, newest.s);
       out.x += out.vx * ext;
       out.z += out.vz * ext;
+      // Nur im Flug auch die Höhe weiterrechnen – am Boden würde das Kart sonst einsinken.
+      if (out.flags & FLAG_AIR && out.respawn === 0) out.y += out.vy * ext;
       if (this.clock - newest.t > DT) this.underruns++;
       return true;
     }

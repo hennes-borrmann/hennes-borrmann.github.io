@@ -12,6 +12,10 @@
 //   ?peerlog=3    ausführliches PeerJS-Protokoll in der Browser-Konsole (0–3)
 //   ?laps=1       Rundenzahl überschreiben (gilt für den Host)
 //   ?auto=1       das eigene Kart fährt von selbst (zum Testen ohne Controller)
+//   ?track=2      Strecke vorwählen (0–3, gilt für den Host)
+//   ?ai=0         Stärke der KI vorwählen (0 leicht, 1 mittel, 2 schwer)
+//   ?q=low        Grafikqualität: low, medium, high oder auto
+//   ?mute=1       ohne Ton starten
 
 export type TurnMode = 'auto' | 'force' | 'off';
 
@@ -29,9 +33,15 @@ export interface DebugParams {
   /** Rundenzahl, 0 = Vorgabe der Strecke. */
   laps: number;
   autopilot: boolean;
+  /** Vorgewählte Strecke, -1 = keine Vorgabe. */
+  track: number;
+  /** Vorgewählte KI-Stärke, -1 = keine Vorgabe. */
+  ai: number;
+  quality: 'auto' | 'low' | 'medium' | 'high' | null;
+  mute: boolean;
 }
 
-const FORWARDED = ['turn', 'lag', 'jitter', 'loss', 'signal', 'debug', 'peerlog', 'laps', 'auto'];
+const FORWARDED = ['turn', 'lag', 'jitter', 'loss', 'signal', 'debug', 'peerlog', 'laps', 'auto', 'q', 'mute'];
 
 function num(params: URLSearchParams, key: string, max: number): number {
   const v = Number(params.get(key));
@@ -41,6 +51,7 @@ function num(params: URLSearchParams, key: string, max: number): number {
 export function readDebugParams(search: string = location.search): DebugParams {
   const p = new URLSearchParams(search);
   const turn = p.get('turn');
+  const q = p.get('q');
   return {
     turn: turn === 'force' || turn === 'off' ? turn : 'auto',
     lag: num(p, 'lag', 2000),
@@ -52,6 +63,10 @@ export function readDebugParams(search: string = location.search): DebugParams {
     peerLog: p.has('peerlog') ? Math.max(0, Math.min(3, Number(p.get('peerlog')) || 0)) : 1,
     laps: Math.round(num(p, 'laps', 9)),
     autopilot: p.get('auto') === '1',
+    track: p.has('track') ? Math.max(0, Math.round(Number(p.get('track')) || 0)) : -1,
+    ai: p.has('ai') ? Math.max(0, Math.min(2, Math.round(Number(p.get('ai')) || 0))) : -1,
+    quality: ['auto', 'low', 'medium', 'high'].includes(q ?? '') ? (q as 'auto' | 'low' | 'medium' | 'high') : null,
+    mute: p.get('mute') === '1',
   };
 }
 

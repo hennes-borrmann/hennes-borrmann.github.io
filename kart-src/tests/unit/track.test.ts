@@ -19,7 +19,7 @@ describe('Strecke Werkshof', () => {
     const minRadius = 1 / maxCurv;
     console.log(`Länge ${t.length.toFixed(0)} m, engster Radius ${minRadius.toFixed(1)} m`);
     // Innenkante der Bande braucht noch Platz: Radius deutlich über wallHalf.
-    expect(minRadius).toBeGreaterThan(t.wallHalf + 3);
+    expect(minRadius).toBeGreaterThan(Math.max(...t.wh) + 3);
   });
 
   it('kommt sich selbst nirgends zu nahe (Banden überlappen nicht)', () => {
@@ -36,7 +36,7 @@ describe('Strecke Werkshof', () => {
       }
     }
     console.log(`geringster Abstand zweier Streckenteile: ${min.toFixed(1)} m (Abschnitte ${at[0]} und ${at[1]})`);
-    expect(min).toBeGreaterThan(2 * t.wallHalf + 3);
+    expect(min).toBeGreaterThan(2 * Math.max(...t.wh) + 3);
   });
 
   it('ordnet Punkte dem richtigen Abschnitt und der richtigen Seite zu', () => {

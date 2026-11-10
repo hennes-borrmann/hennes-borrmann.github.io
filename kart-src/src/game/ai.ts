@@ -4,26 +4,52 @@
 //
 // Fahrweise: ein Zielpunkt ein Stück voraus auf der Strecke, in Kurven zur
 // Innenseite versetzt. Vor engen Kurven wird gebremst, in engen Kurven
-// gedriftet und danach der Mini-Turbo mitgenommen.
+// gedriftet und danach der Mini-Turbo mitgenommen. Vor Sprüngen, auf Stegen
+// ohne Geländer und vor pendelnden Hindernissen fahren sie vorsichtiger.
 
 import {
   BTN_BRAKE,
   BTN_DRIFT,
   BTN_GAS,
   BTN_ITEM,
+  FLAG_AIR,
   ITEM_BOOST,
+  ITEM_EMP,
+  ITEM_GUARD,
   ITEM_NONE,
   ITEM_OIL,
+  ITEM_SMOKE,
+  ITEM_SPRING,
   ITEM_TIRE,
+  ITEM_TOP,
   forwardSpeed,
   type Cmd,
   type KartState,
 } from './sim';
-import { TRACK, proj, projectOnTrack, rightX, rightZ, segDelta, wrapSeg } from './track';
+import {
+  EDGE_GAP,
+  EDGE_OPEN_L,
+  EDGE_OPEN_R,
+  TRACK,
+  hazardLat,
+  proj,
+  projectOnTrack,
+  rightX,
+  rightZ,
+  segDelta,
+  wrapSeg,
+} from './track';
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
 
+/** Stärke der KI-Gegner. */
+export const AI_EASY = 0;
+export const AI_MEDIUM = 1;
+export const AI_HARD = 2;
+export const AI_LEVEL_NAMES = ['Leicht', 'Mittel', 'Schwer'];
+
 export interface BotBrain {
+  level: number;
   /** Grundtempo als Anteil der Höchstgeschwindigkeit – nicht jeder Gegner ist gleich schnell. */
   skill: number;
   /**
@@ -47,10 +73,31 @@ export interface BotBrain {
   rand: number;
 }
 
-export function newBrain(slot: number): BotBrain {
+/** Was die KI außer den Kart-Zuständen über das Rennen wissen muss. */
+export interface BotContext {
+  /** Host-Tick (für pendelnde Hindernisse). */
+  tick: number;
+  /** Aktueller Platz dieses Fahrers. */
+  place: number;
+  /** Fährt gerade durch eine Rauchwolke. */
+  smoke: boolean;
+}
+
+const SKILL = [0.95, 0.91, 0.93, 0.89];
+const SKILL_SHIFT = [-0.09, 0, 0.055];
+const DRIFT_FROM = [
+  [1, 1, 1, 1],
+  [1 / 30, 1 / 19, 1 / 22, 1],
+  [1 / 36, 1 / 26, 1 / 30, 1 / 22],
+];
+const PATIENCE_FACTOR = [1.6, 1, 0.7];
+
+export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
+  const l = Math.max(0, Math.min(2, level | 0));
   return {
-    skill: [0.95, 0.91, 0.93, 0.89][slot % 4],
-    driftFrom: [1 / 30, 1 / 19, 1 / 22, 1][slot % 4],
+    level: l,
+    skill: SKILL[slot % 4] + SKILL_SHIFT[l],
+    driftFrom: DRIFT_FROM[l][slot % 4],
     line: [-1.6, 1.4, 0.2, -0.6][slot % 4],
     stuck: 0,
     reverse: 0,
@@ -100,14 +147,22 @@ function maxCurvatureAhead(seg: number, toM: number): number {
   return max;
 }
 
+/** Bits aller Kanten-Eigenschaften der nächsten Meter (Lücke, fehlende Bande). */
+function edgesAhead(seg: number, toM: number): number {
+  const t = TRACK;
+  let bits = 0;
+  for (let d = 0; d <= toM; d += 3) bits |= t.edge[wrapSeg(t, seg + Math.round(d / t.step))];
+  return bits;
+}
+
 /**
  * Eingabe eines KI-Fahrers für diesen Schritt.
  * @param others Zustände der anderen Karts (für den Einsatz von Items)
  * @param racing false während Countdown und nach dem Ziel
  */
-export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: boolean): Cmd {
+export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: boolean, ctx: BotContext): Cmd {
   const t = TRACK;
-  if (!racing) {
+  if (!racing || s.respawn > 0) {
     b.stuck = 0;
     b.reverse = 0;
     b.drifting = 0;
@@ -115,13 +170,29 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   }
   const vf = forwardSpeed(s);
   const v = Math.abs(vf);
+  const air = (s.flags & FLAG_AIR) !== 0;
+
+  // --- Was liegt voraus? ---
+  const near = curvatureAhead(s.seg, 0, 14);
+  const edges = edgesAhead(s.seg, 46);
+  const gapAhead = (edges & EDGE_GAP) !== 0;
+  const openAhead = (edgesAhead(s.seg, 24) & (EDGE_OPEN_L | EDGE_OPEN_R)) !== 0;
 
   // --- Zielpunkt voraus, in Kurven zur Innenseite versetzt ---
   const look = Math.max(8, Math.min(24, 6 + v * 0.6));
   const target = wrapSeg(t, s.seg + Math.round(look / t.step));
   const bend = curvatureAhead(s.seg, 0, 34);
-  const inside = Math.max(-4.2, Math.min(4.2, bend * 110));
-  const lat = Math.max(-5, Math.min(5, b.line * 0.6 + inside));
+  // Ohne Bande hält die KI Abstand zur Kante; vor einer Lücke fährt sie gerade auf die Mitte zu.
+  const maxLat = Math.max(0.5, t.rh[target] - (openAhead ? 3.2 : 2.2));
+  let lat = gapAhead ? 0 : (b.line * 0.6 * t.rh[target]) / 6.5 + bend * 110;
+  for (const h of t.hazards) {
+    const d = segDelta(t, s.seg, h.seg) * t.step;
+    if (d < 2 || d > 42) continue;
+    // Wo ist das Hindernis, wenn ich dort ankomme? Auf der anderen Seite vorbei.
+    const hl = hazardLat(h, ctx.tick + (d / Math.max(v, 8)) * 60);
+    lat = hl > 0 ? Math.min(lat, hl - 4.6) : Math.max(lat, hl + 4.6);
+  }
+  lat = Math.max(-maxLat, Math.min(maxLat, lat));
   const txp = t.px[target] + rightX(t, target) * lat;
   const tzp = t.pz[target] + rightZ(t, target) * lat;
   const err = wrapAngle(Math.atan2(txp - s.x, tzp - s.z) - s.heading);
@@ -133,7 +204,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     b.reverse--;
     return { steer: Math.round(Math.max(-1, Math.min(1, err * 2)) * 127), buttons: BTN_BRAKE };
   }
-  if (v < 1.5 && s.spin === 0) {
+  if (v < 1.5 && s.spin === 0 && !air) {
     if (++b.stuck > 80) {
       b.stuck = 0;
       b.reverse = 45;
@@ -143,22 +214,26 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // --- Tempo: so schnell, wie die engste Stelle voraus es zulässt ---
   const brakeDist = (v * v) / 70 + 8;
   const tight = maxCurvatureAhead(s.seg, brakeDist);
+  const mayDrift = !openAhead && !gapAhead;
   // Wer driftet, kommt enger herum als mit normaler Lenkung und darf schneller hinein.
-  const cornering = tight > b.driftFrom ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * 0.92;
+  const cornering = tight > b.driftFrom && mayDrift ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * (openAhead ? 0.8 : 0.92);
   const limit = tight > 1e-4 ? Math.sqrt(cornering / tight) : 99;
   let buttons = 0;
-  if (v < limit + 0.5) buttons |= BTN_GAS;
+  // Vor einem Sprung zählt nur Anlauf.
+  if (gapAhead || v < limit + 0.5) buttons |= BTN_GAS;
   else if (v > limit + 5) buttons |= BTN_BRAKE;
 
-  // --- Drift: in engen, längeren Kurven ---
+  // --- Lenken und Driften ---
   const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, A_LAT / v);
-  const near = curvatureAhead(s.seg, 0, 14);
   let steer: number;
-  if (s.driftDir !== 0) {
+  if (air) {
+    // In der Luft nur sanft ausrichten.
+    steer = Math.max(-0.5, Math.min(0.5, -err * 2));
+  } else if (s.driftDir !== 0) {
     b.drifting++;
     const stillTurning = near * s.driftDir > 1 / 55;
     // Mindestens bis Stufe 1 halten, sofern die Kurve nicht schon vorbei ist.
-    if (stillTurning || (b.drifting < 40 && near * s.driftDir > 1 / 120)) buttons |= BTN_DRIFT;
+    if (mayDrift && (stillTurning || (b.drifting < 40 && near * s.driftDir > 1 / 120))) buttons |= BTN_DRIFT;
     const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
     const into = ((k - DRIFT_WIDE) / (DRIFT_TIGHT - DRIFT_WIDE)) * 2 - 1;
     steer = Math.max(-1, Math.min(1, into)) * s.driftDir;
@@ -167,32 +242,69 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     steer = yawMax > 0 ? Math.max(-1, Math.min(1, wantYaw / yawMax)) : 0;
     const dir = near > 0 ? 1 : -1;
     const turnAhead = Math.abs(curvatureAhead(s.seg, 0, 30)) * 30;
-    if (Math.abs(near) > b.driftFrom && turnAhead > 0.55 && vf > 14 && Math.sign(steer) === dir && Math.abs(err) < 0.6) {
+    if (
+      mayDrift &&
+      Math.abs(near) > b.driftFrom &&
+      turnAhead > 0.55 &&
+      vf > 14 &&
+      Math.sign(steer) === dir &&
+      Math.abs(err) < 0.6
+    ) {
       buttons |= BTN_DRIFT;
       steer = dir * Math.max(0.3, Math.abs(steer));
     }
   }
+  // In einer Rauchwolke sieht auch die KI schlecht: sie eiert.
+  if (ctx.smoke && !air) steer = Math.max(-1, Math.min(1, steer + Math.sin(ctx.tick * 0.23 + b.line) * 0.45));
 
   // --- Items ---
   let press = false;
   if (s.item === ITEM_NONE) {
     b.holding = 0;
   } else {
-    if (b.holding++ === 0) b.patience = 150 + Math.floor(random(b) * 330);
+    if (b.holding++ === 0) b.patience = Math.round((150 + Math.floor(random(b) * 330)) * PATIENCE_FACTOR[b.level]);
     const aligned = Math.abs(err) < 0.2;
+    const straight = maxCurvatureAhead(s.seg, 45) < 1 / 70;
+    const late = b.holding > b.patience;
     projectOnTrack(t, s.x, s.z, s.seg);
     const myLat = proj.lat;
-    if (s.item === ITEM_BOOST) {
-      // Auf geraden Stücken zünden, nicht vor einer Kurve.
-      press = s.boost === 0 && v > 12 && maxCurvatureAhead(s.seg, 45) < 1 / 70 && b.holding > 30;
-    } else {
-      for (const o of others) {
-        const d = segDelta(t, s.seg, o.seg) * t.step;
+    let ahead = Infinity;
+    let behind = Infinity;
+    let inLine = false;
+    for (const o of others) {
+      const d = segDelta(t, s.seg, o.seg) * t.step;
+      if (d > 0) ahead = Math.min(ahead, d);
+      else behind = Math.min(behind, -d);
+      if (d > 4 && d < 34 && Math.abs(o.y - s.y) < 2) {
         projectOnTrack(t, o.x, o.z, o.seg);
-        if (s.item === ITEM_TIRE && aligned && d > 4 && d < 34 && Math.abs(proj.lat - myLat) < 3.5) press = true;
-        if (s.item === ITEM_OIL && d < -2 && d > -14) press = true;
+        if (Math.abs(proj.lat - myLat) < 3.5) inLine = true;
       }
-      if (b.holding > b.patience && (s.item === ITEM_OIL || aligned)) press = true;
+    }
+    switch (s.item) {
+      case ITEM_BOOST:
+        // Auf geraden Stücken zünden, nicht vor einer Kurve.
+        press = s.boost === 0 && v > 12 && straight && b.holding > 30 && !openAhead;
+        break;
+      case ITEM_TIRE:
+        press = (aligned && inLine) || (late && aligned);
+        break;
+      case ITEM_OIL:
+      case ITEM_SMOKE:
+        press = (behind > 2 && behind < 16) || late;
+        break;
+      case ITEM_TOP:
+        press = b.holding > 40 && ((ahead > 6 && ahead < 110) || late);
+        break;
+      case ITEM_GUARD:
+        press = b.holding > 50;
+        break;
+      case ITEM_EMP:
+        press = b.holding > 50 && (ctx.place > 1 || late);
+        break;
+      case ITEM_SPRING:
+        // Nur wo nichts passieren kann: gerade, mit Bande, kein Sprung voraus.
+        press = late && straight && !air && (edgesAhead(s.seg, 70) & (EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R)) === 0;
+        break;
     }
   }
   // Die Taste braucht eine Flanke: nie zwei Schritte hintereinander drücken.
@@ -202,13 +314,17 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   return { steer: Math.round(steer * 127), buttons };
 }
 
+const BAND_AHEAD = [0.2, 0.14, 0.07];
+const BAND_BEHIND = [0.03, 0.06, 0.1];
+
 /**
  * Milder Tempo-Ausgleich: liegt ein KI-Fahrer weit vor den Menschen, wird er
  * etwas langsamer, liegt er weit zurück, etwas schneller. Der Faktor wirkt nur
  * auf die Höchstgeschwindigkeit und bleibt in engen Grenzen.
  * @param aheadMeters Vorsprung auf den besten Menschen (negativ = Rückstand)
  */
-export function rubberBand(aheadMeters: number): number {
+export function rubberBand(aheadMeters: number, level = AI_MEDIUM): number {
+  const l = Math.max(0, Math.min(2, level | 0));
   const k = Math.max(-1, Math.min(1, aheadMeters / 80));
-  return k > 0 ? 1 - k * 0.14 : 1 - k * 0.06;
+  return k > 0 ? 1 - k * BAND_AHEAD[l] : 1 - k * BAND_BEHIND[l];
 }

@@ -12,26 +12,41 @@ import {
   RACE_COUNTDOWN,
   RACE_RESULTS,
   RACE_RUNNING,
+  THING_OIL,
+  THING_SMOKE,
+  THING_TIRE,
+  THING_TOP,
   encodeSnapshot,
   type FxKind,
   type SnapshotKart,
-  type SnapshotOil,
-  type SnapshotTire,
+  type SnapshotThing,
 } from '../net/protocol';
-import { botCmd, newBrain, rubberBand, type BotBrain } from './ai';
+import { AI_MEDIUM, botCmd, newBrain, rubberBand, type BotBrain, type BotContext } from './ai';
 import { EntityInterp, lerpState } from './interp';
 import {
+  EV_FALL,
   EV_ITEM_READY,
+  EV_LAND,
   EV_PAD,
   EV_TURBO,
   EV_USE_BOOST,
+  EV_USE_EMP,
   EV_USE_OIL,
+  EV_USE_SMOKE,
   EV_USE_TIRE,
+  EV_USE_TOP,
   EV_WALL,
+  HIT_BLOCKED,
+  HIT_NONE,
   ITEM_BOOST,
+  ITEM_EMP,
+  ITEM_GUARD,
   ITEM_NONE,
   ITEM_OIL,
+  ITEM_SMOKE,
+  ITEM_SPRING,
   ITEM_TIRE,
+  ITEM_TOP,
   KART_RADIUS,
   MAX_PLAYERS,
   NEUTRAL,
@@ -40,12 +55,27 @@ import {
   gridState,
   hitKart,
   newState,
+  stallKart,
   stepKart,
   type Cmd,
   type KartState,
   type StepEnv,
 } from './sim';
-import { TRACK, proj, projectOnTrack, rightX, rightZ, segDelta } from './track';
+import {
+  EDGE_OPEN_L,
+  EDGE_OPEN_R,
+  NO_GROUND,
+  TRACK,
+  centerHeight,
+  groundAt,
+  hazardLat,
+  proj,
+  projectOnTrack,
+  rightX,
+  rightZ,
+  segDelta,
+  wrapSeg,
+} from './track';
 import type { GameView, RaceView, RenderEntity, Standing } from './view';
 
 /** Abspielverzögerung fremder Fahrzeuge auf dem Host-Bildschirm (Sekunden). */
@@ -59,8 +89,8 @@ const MAX_CMDS_PER_TICK = 3;
 const QUEUE_LIMIT = 30;
 const QUEUE_TRIM_TO = 8;
 
-/** Vom Rennstart bis "Los": kurze Pause, dann 3 – 2 – 1. */
-export const COUNTDOWN_TICKS = 210;
+/** Vom Rennstart bis "Los": Kamerafahrt über die Startaufstellung, dann 3 – 2 – 1. */
+export const COUNTDOWN_TICKS = 345;
 /** So lange nach dem letzten Menschen im Ziel erscheint die Ergebnisliste. */
 const RESULTS_DELAY_TICKS = 150;
 /** Spätestens so lange nach dem ersten Zieleinlauf ist Schluss. */
@@ -75,8 +105,15 @@ const TIRE_LIFE_TICKS = 6 * 60;
 const TIRE_BOUNCES = 4;
 const OIL_RADIUS = 1.6;
 const OIL_LIFE_TICKS = 50 * 60;
-const MAX_TIRES = 8;
-const MAX_OILS = 12;
+/** Brummkreisel: schneller als jedes Kart, damit er auch 100 m Vorsprung einholt. */
+const TOP_SPEED = 46;
+const TOP_RADIUS = 1.7;
+const TOP_LIFE_TICKS = 10 * 60;
+const SMOKE_RADIUS = 7.5;
+const SMOKE_LIFE_TICKS = 9 * 60;
+export const HAZARD_RADIUS = 1.5;
+/** Höchstzahl gleichzeitiger Dinge je Art – hält die Snapshots klein. */
+const MAX_PER_KIND = 6;
 
 interface HostKart {
   slot: number;
@@ -104,23 +141,26 @@ interface HostKart {
   bumpCooldown: number;
 }
 
-interface Tire extends SnapshotTire {
+/** Alles, was außer Karts auf der Strecke unterwegs ist. */
+interface Thing extends SnapshotThing {
   seg: number;
   owner: number;
-  /** Ticks, in denen der Reifen seinen Werfer noch nicht trifft. */
+  /** Ticks, in denen das Ding seinen Besitzer noch nicht trifft. */
   safe: number;
   life: number;
   bounces: number;
-}
-
-interface Oil extends SnapshotOil {
-  owner: number;
-  safe: number;
-  life: number;
+  /** Ticks ohne Boden unter sich (Rollreifen). */
+  floating: number;
+  /** Brummkreisel: Meter hinter der Startlinie, seitliche Lage, Ziel-Platz (-1 = keins). */
+  pos: number;
+  lat: number;
+  target: number;
 }
 
 export interface HostGameOptions {
   laps?: number;
+  /** Stärke der KI-Gegner (AI_EASY, AI_MEDIUM, AI_HARD). */
+  aiLevel?: number;
 }
 
 export class HostGame implements GameView {
@@ -129,6 +169,7 @@ export class HostGame implements GameView {
   phase = RACE_COUNTDOWN;
   goTick = 0;
   readonly laps: number;
+  readonly aiLevel: number;
   /** Rückmeldung an einen menschlichen Spieler (Vibration usw.). */
   onFx: ((slot: number, kind: FxKind) => void) | null = null;
 
@@ -136,8 +177,8 @@ export class HostGame implements GameView {
   private readonly scratch = newState();
   private readonly env: StepEnv = { canDrive: false, speedFactor: 1 };
   private readonly boxTimers: Uint16Array;
-  private tireList: Tire[] = [];
-  private oilList: Oil[] = [];
+  private thingList: Thing[] = [];
+  private readonly botCtx: BotContext = { tick: 0, place: 1, smoke: false };
   private nextId = 1;
   private firstFinishTick = -1;
   private resultsAtTick = -1;
@@ -149,6 +190,7 @@ export class HostGame implements GameView {
     options: HostGameOptions = {},
   ) {
     this.laps = options.laps ?? TRACK.laps;
+    this.aiLevel = options.aiLevel ?? AI_MEDIUM;
     this.boxTimers = new Uint16Array(TRACK.boxes.length);
   }
 
@@ -170,7 +212,7 @@ export class HostGame implements GameView {
         existing.bot = true;
         existing.local = false;
         existing.online = true;
-        existing.brain = newBrain(slot);
+        existing.brain = newBrain(slot, this.aiLevel);
         existing.queue = [];
         continue;
       }
@@ -187,8 +229,7 @@ export class HostGame implements GameView {
     this.goTick = this.tick + COUNTDOWN_TICKS;
     this.firstFinishTick = -1;
     this.resultsAtTick = -1;
-    this.tireList = [];
-    this.oilList = [];
+    this.thingList = [];
     this.boxTimers.fill(0);
     for (const k of this.karts.values()) {
       copyState(k.state, gridState(k.slot));
@@ -201,7 +242,7 @@ export class HostGame implements GameView {
       k.starved = 0;
       k.bumpCooldown = 0;
       k.interp.reset();
-      if (k.brain) k.brain = newBrain(k.slot);
+      if (k.brain) k.brain = newBrain(k.slot, this.aiLevel);
     }
     this.rank();
   }
@@ -265,13 +306,17 @@ export class HostGame implements GameView {
 
       if (k.bot || (!k.online && k.starved > TAKEOVER_TICKS)) {
         // KI-Gegner – oder ein getrennter Mitspieler, für den die KI einspringt.
-        if (!k.brain) k.brain = newBrain(k.slot);
+        if (!k.brain) k.brain = newBrain(k.slot, this.aiLevel);
         others.length = 0;
         for (const o of this.karts.values()) if (o !== k && !o.finished) others.push(o.state);
-        const band = k.bot && humanBest > Number.NEGATIVE_INFINITY ? rubberBand((k.progress - humanBest) * TRACK.step) : 1;
-        this.env.speedFactor = k.brain.skill * band;
+        const band =
+          k.bot && humanBest > Number.NEGATIVE_INFINITY ? rubberBand((k.progress - humanBest) * TRACK.step, this.aiLevel) : 1;
+        this.botCtx.tick = this.tick;
+        this.botCtx.place = k.place;
+        this.botCtx.smoke = this.inSmoke(k.state);
+        this.env.speedFactor = k.brain.skill * band * (this.botCtx.smoke ? 0.85 : 1);
         copyState(k.prev, k.state);
-        const cmd = botCmd(k.state, k.brain, others, canDrive);
+        const cmd = botCmd(k.state, k.brain, others, canDrive, this.botCtx);
         this.env.canDrive = canDrive;
         this.advance(k, cmd);
         if (!k.bot) {
@@ -332,9 +377,9 @@ export class HostGame implements GameView {
       goTick: this.goTick,
       laps: this.laps,
       boxes: this.boxMask(),
+      track: TRACK.index,
       karts,
-      tires: this.tireList,
-      oils: this.oilList,
+      things: this.thingList,
     });
   }
 
@@ -362,6 +407,7 @@ export class HostGame implements GameView {
       laps: this.laps,
       untilGo: (this.goTick - this.tick - frac) / 60,
       boxes: this.boxMask(),
+      hostTick: this.tick + frac,
     };
   }
 
@@ -373,12 +419,8 @@ export class HostGame implements GameView {
     return list.sort((a, b) => a.place - b.place);
   }
 
-  tires(): SnapshotTire[] {
-    return this.tireList;
-  }
-
-  oils(): SnapshotOil[] {
-    return this.oilList;
+  things(): SnapshotThing[] {
+    return this.thingList;
   }
 
   // --- Diagnose und Tests --------------------------------------------------
@@ -418,7 +460,24 @@ export class HostGame implements GameView {
   /** Nur für Tests: ein Kart so treffen, als wäre es in einen Ölfleck gefahren. */
   debugHit(slot: number): void {
     const k = this.karts.get(slot);
-    if (k && hitKart(k.state)) this.fx(k, 'hit');
+    if (k) this.applyHit(k);
+  }
+
+  /** Nur für Tests: ein Kart an eine Stelle der Strecke setzen (Meter hinter der Startlinie). */
+  debugPlace(slot: number, meters: number, lat = 0): void {
+    const k = this.karts.get(slot);
+    if (!k) return;
+    const t = TRACK;
+    const seg = wrapSeg(t, Math.round(meters / t.step));
+    const before = k.state.seg;
+    k.state.seg = seg;
+    k.state.x = t.px[seg] + rightX(t, seg) * lat;
+    k.state.z = t.pz[seg] + rightZ(t, seg) * lat;
+    k.state.y = t.py[seg] + lat * t.bank[seg];
+    k.state.heading = Math.atan2(t.tx[seg], t.tz[seg]);
+    k.state.vx = k.state.vy = k.state.vz = 0;
+    k.progress += segDelta(t, before, seg);
+    copyState(k.prev, k.state);
   }
 
   // -----------------------------------------------------------------------
@@ -430,7 +489,7 @@ export class HostGame implements GameView {
       local: slot === this.localSlot && !bot,
       bot,
       online: true,
-      brain: bot ? newBrain(slot) : null,
+      brain: bot ? newBrain(slot, this.aiLevel) : null,
       state,
       prev: copyState(newState(), state),
       ptick: 0,
@@ -462,10 +521,15 @@ export class HostGame implements GameView {
     k.progress += segDelta(TRACK, before, k.state.seg);
 
     if (ev & EV_USE_TIRE) this.spawnTire(k);
-    if (ev & EV_USE_OIL) this.spawnOil(k);
+    if (ev & EV_USE_OIL) this.spawnDrop(k, THING_OIL);
+    if (ev & EV_USE_SMOKE) this.spawnDrop(k, THING_SMOKE);
+    if (ev & EV_USE_TOP) this.spawnTop(k);
+    if (ev & EV_USE_EMP) this.shortCircuit(k);
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD)) this.fx(k, 'boost');
     if (ev & EV_ITEM_READY) this.fx(k, 'item');
     if (ev & EV_WALL) this.fx(k, 'wall');
+    if (ev & EV_LAND) this.fx(k, 'land');
+    if (ev & EV_FALL) this.fx(k, 'fall');
 
     if (!k.finished && this.phase === RACE_RUNNING && k.progress >= this.laps * TRACK.n) {
       k.finished = true;
@@ -473,7 +537,10 @@ export class HostGame implements GameView {
       if (this.firstFinishTick < 0) this.firstFinishTick = this.tick;
       this.fx(k, 'finish');
     }
-    k.lap = Math.max(1, Math.min(this.laps, Math.floor(k.progress / TRACK.n) + 1));
+    const lap = Math.max(1, Math.min(this.laps, Math.floor(k.progress / TRACK.n) + 1));
+    if (lap > k.lap && !k.finished) this.fx(k, lap === this.laps ? 'finallap' : 'lap');
+    // Die Runde zählt nie zurück, auch wenn jemand rückwärts über die Linie rollt.
+    if (lap > k.lap) k.lap = lap;
   }
 
   private random(): number {
@@ -483,42 +550,111 @@ export class HostGame implements GameView {
 
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number): number {
-    const r = this.random();
-    if (count > 1 && place === 1) return r < 0.5 ? ITEM_OIL : r < 0.78 ? ITEM_BOOST : ITEM_TIRE;
-    if (count > 2 && place === count) return r < 0.5 ? ITEM_BOOST : r < 0.9 ? ITEM_TIRE : ITEM_OIL;
-    return r < 0.4 ? ITEM_TIRE : r < 0.75 ? ITEM_BOOST : ITEM_OIL;
+    let table: number[];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder
+    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22];
+    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8];
+    else if (place === count) table = [26, 14, 0, 26, 6, 16, 0, 12];
+    else table = [18, 20, 10, 16, 10, 6, 10, 10];
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING];
+    let total = 0;
+    for (const w of table) total += w;
+    let r = this.random() * total;
+    for (let i = 0; i < table.length; i++) {
+      r -= table[i];
+      if (r < 0) return items[i];
+    }
+    return ITEM_BOOST;
+  }
+
+  private addThing(kind: number, k: HostKart, x: number, y: number, z: number, life: number): Thing {
+    // Zu viele derselben Art: das älteste verschwindet.
+    let same = 0;
+    for (const t of this.thingList) if (t.kind === kind) same++;
+    if (same >= MAX_PER_KIND) {
+      const i = this.thingList.findIndex((t) => t.kind === kind);
+      this.thingList.splice(i, 1);
+    }
+    const thing: Thing = {
+      id: this.newId(),
+      kind,
+      ttl: life / 60,
+      x,
+      y,
+      z,
+      vx: 0,
+      vz: 0,
+      seg: k.state.seg,
+      owner: k.slot,
+      safe: 0,
+      life,
+      bounces: 0,
+      floating: 0,
+      pos: 0,
+      lat: 0,
+      target: -1,
+    };
+    this.thingList.push(thing);
+    return thing;
   }
 
   private spawnTire(k: HostKart): void {
-    if (this.tireList.length >= MAX_TIRES) this.tireList.shift();
     const fx = Math.sin(k.state.heading);
     const fz = Math.cos(k.state.heading);
-    this.tireList.push({
-      id: this.newId(),
-      x: k.state.x + fx * 2.4,
-      z: k.state.z + fz * 2.4,
-      vx: fx * TIRE_SPEED,
-      vz: fz * TIRE_SPEED,
-      seg: k.state.seg,
-      owner: k.slot,
-      safe: 20,
-      life: TIRE_LIFE_TICKS,
-      bounces: 0,
-    });
+    const tire = this.addThing(THING_TIRE, k, k.state.x + fx * 2.4, k.state.y + TIRE_RADIUS, k.state.z + fz * 2.4, TIRE_LIFE_TICKS);
+    tire.vx = fx * TIRE_SPEED;
+    tire.vz = fz * TIRE_SPEED;
+    tire.safe = 20;
   }
 
-  private spawnOil(k: HostKart): void {
-    if (this.oilList.length >= MAX_OILS) this.oilList.shift();
-    const fx = Math.sin(k.state.heading);
-    const fz = Math.cos(k.state.heading);
-    this.oilList.push({
-      id: this.newId(),
-      x: k.state.x - fx * 2.8,
-      z: k.state.z - fz * 2.8,
-      owner: k.slot,
-      safe: 45,
-      life: OIL_LIFE_TICKS,
-    });
+  /** Ölfleck oder Rauchwolke: bleibt hinter dem Kart liegen. */
+  private spawnDrop(k: HostKart, kind: number): void {
+    const t = TRACK;
+    const back = kind === THING_OIL ? 2.8 : 4;
+    const x = k.state.x - Math.sin(k.state.heading) * back;
+    const z = k.state.z - Math.cos(k.state.heading) * back;
+    projectOnTrack(t, x, z, k.state.seg);
+    const g = groundAt(t, proj.seg, proj.along, proj.lat);
+    // Öl braucht Boden; Rauch hängt auch in der Luft.
+    if (g === NO_GROUND && kind === THING_OIL) return;
+    const drop = this.addThing(kind, k, x, g === NO_GROUND ? k.state.y : g, z, kind === THING_OIL ? OIL_LIFE_TICKS : SMOKE_LIFE_TICKS);
+    drop.seg = proj.seg;
+    drop.safe = 45;
+  }
+
+  /** Brummkreisel: saust die Strecke entlang und steuert auf das Kart vor dem Werfer zu. */
+  private spawnTop(k: HostKart): void {
+    const t = TRACK;
+    projectOnTrack(t, k.state.x, k.state.z, k.state.seg);
+    const top = this.addThing(THING_TOP, k, k.state.x, k.state.y + 0.6, k.state.z, TOP_LIFE_TICKS);
+    top.pos = wrapSeg(t, proj.seg) * t.step + 3;
+    top.lat = proj.lat;
+    top.safe = 30;
+    for (const o of this.karts.values()) if (o.place === k.place - 1 && !o.finished) top.target = o.slot;
+  }
+
+  /** Kurzschluss: trifft alle, die vor dem Auslöser liegen (als Führender: alle anderen). */
+  private shortCircuit(k: HostKart): void {
+    for (const o of this.karts.values()) {
+      if (o === k || o.finished) continue;
+      if (k.place > 1 && o.place > k.place) continue;
+      const r = stallKart(o.state);
+      if (r === HIT_BLOCKED) this.fx(o, 'block');
+      else if (r !== HIT_NONE) this.fx(o, 'stall');
+    }
+  }
+
+  private applyHit(k: HostKart): void {
+    const r = hitKart(k.state);
+    if (r === HIT_BLOCKED) this.fx(k, 'block');
+    else if (r !== HIT_NONE) this.fx(k, 'hit');
+  }
+
+  private inSmoke(s: KartState): boolean {
+    for (const t of this.thingList) {
+      if (t.kind === THING_SMOKE && Math.abs(t.y - s.y) < 4 && Math.hypot(t.x - s.x, t.z - s.z) < SMOKE_RADIUS) return true;
+    }
+    return false;
   }
 
   private newId(): number {
@@ -543,11 +679,11 @@ export class HostGame implements GameView {
       const count = this.karts.size;
       for (const k of this.karts.values()) {
         const s = k.state;
-        if (k.finished || s.item !== ITEM_NONE || s.roulette > 0) continue;
+        if (k.finished || s.item !== ITEM_NONE || s.roulette > 0 || s.respawn > 0) continue;
         for (let i = 0; i < t.boxes.length; i++) {
           if (this.boxTimers[i] > 0) continue;
           const b = t.boxes[i];
-          if (Math.abs(segDelta(t, b.seg, s.seg)) > 6) continue;
+          if (Math.abs(segDelta(t, b.seg, s.seg)) > 6 || Math.abs(s.y - b.y) > 2.5) continue;
           if (Math.hypot(s.x - b.x, s.z - b.z) < BOX_RADIUS) {
             this.boxTimers[i] = BOX_RESPAWN_TICKS;
             s.nextItem = this.pickItem(k.place, count);
@@ -557,61 +693,113 @@ export class HostGame implements GameView {
           }
         }
       }
-    }
-
-    // Rollreifen: geradeaus, an der Bande abprallen, Karts treffen
-    for (let i = this.tireList.length - 1; i >= 0; i--) {
-      const tire = this.tireList[i];
-      tire.x += tire.vx * dt;
-      tire.z += tire.vz * dt;
-      if (tire.safe > 0) tire.safe--;
-      projectOnTrack(t, tire.x, tire.z, tire.seg);
-      tire.seg = proj.seg;
-      const limit = t.wallHalf - TIRE_RADIUS;
-      if (Math.abs(proj.lat) > limit) {
-        const side = proj.lat > 0 ? 1 : -1;
-        const nx = rightX(t, tire.seg) * side;
-        const nz = rightZ(t, tire.seg) * side;
-        const over = Math.abs(proj.lat) - limit;
-        tire.x -= nx * over;
-        tire.z -= nz * over;
-        const vn = tire.vx * nx + tire.vz * nz;
-        if (vn > 0) {
-          tire.vx -= 2 * vn * nx;
-          tire.vz -= 2 * vn * nz;
-          tire.bounces++;
+      // Pendelnde Hindernisse
+      for (const h of t.hazards) {
+        const lat = hazardLat(h, this.tick);
+        const hx = t.px[h.seg] + rightX(t, h.seg) * lat;
+        const hz = t.pz[h.seg] + rightZ(t, h.seg) * lat;
+        const hy = t.py[h.seg] + lat * t.bank[h.seg];
+        for (const k of this.karts.values()) {
+          if (k.finished || Math.abs(k.state.y - hy) > 1.6) continue;
+          if (Math.hypot(k.state.x - hx, k.state.z - hz) < HAZARD_RADIUS + KART_RADIUS) this.applyHit(k);
         }
       }
-      let gone = --tire.life <= 0 || tire.bounces > TIRE_BOUNCES;
-      if (!gone) {
+    }
+
+    for (let i = this.thingList.length - 1; i >= 0; i--) {
+      const th = this.thingList[i];
+      if (th.safe > 0) th.safe--;
+      let gone = --th.life <= 0;
+      th.ttl = th.life / 60;
+      let radius = 0;
+      let reach = 1.5;
+
+      if (th.kind === THING_TIRE) {
+        // Rollreifen: geradeaus, an der Bande abprallen
+        th.x += th.vx * dt;
+        th.z += th.vz * dt;
+        projectOnTrack(t, th.x, th.z, th.seg);
+        th.seg = proj.seg;
+        const limit = t.wh[th.seg] - TIRE_RADIUS;
+        if (Math.abs(proj.lat) > limit) {
+          const side = proj.lat > 0 ? 1 : -1;
+          if ((t.edge[th.seg] & (side > 0 ? EDGE_OPEN_R : EDGE_OPEN_L)) === 0) {
+            const nx = rightX(t, th.seg) * side;
+            const nz = rightZ(t, th.seg) * side;
+            const over = Math.abs(proj.lat) - limit;
+            th.x -= nx * over;
+            th.z -= nz * over;
+            proj.lat = side * limit;
+            const vn = th.vx * nx + th.vz * nz;
+            if (vn > 0) {
+              th.vx -= 2 * vn * nx;
+              th.vz -= 2 * vn * nz;
+              th.bounces++;
+            }
+          }
+        }
+        const g = groundAt(t, th.seg, proj.along, proj.lat);
+        if (g === NO_GROUND) {
+          // Über eine Kante oder Lücke hinaus: kurz weiterfliegen, dann ist er weg.
+          th.y -= 0.12;
+          if (++th.floating > 14) gone = true;
+        } else {
+          th.floating = 0;
+          th.y = g + TIRE_RADIUS;
+        }
+        if (th.bounces > TIRE_BOUNCES) gone = true;
+        radius = KART_RADIUS + TIRE_RADIUS;
+      } else if (th.kind === THING_OIL) {
+        radius = OIL_RADIUS;
+        reach = 0.6;
+      } else if (th.kind === THING_TOP) {
+        // Brummkreisel: der Strecke folgen, seitlich auf das Ziel zuhalten
+        th.pos = (th.pos + TOP_SPEED * dt) % t.length;
+        th.seg = Math.floor(th.pos / t.step) % t.n;
+        let wantLat = 0;
+        let rate = 4;
+        const target = th.target >= 0 ? this.karts.get(th.target) : undefined;
+        if (target && !target.finished) {
+          const d = segDelta(t, th.seg, target.state.seg) * t.step;
+          if (d < -8) {
+            // Vorbei: noch ein Stück geradeaus, dann aus.
+            th.target = -1;
+            th.life = Math.min(th.life, 40);
+          } else if (d < 50) {
+            projectOnTrack(t, target.state.x, target.state.z, target.state.seg);
+            wantLat = proj.lat;
+            rate = 11;
+          }
+        }
+        const maxLat = t.wh[th.seg] - 1;
+        const dl = Math.max(-rate * dt, Math.min(rate * dt, wantLat - th.lat));
+        th.lat = Math.max(-maxLat, Math.min(maxLat, th.lat + dl));
+        const along = th.pos - th.seg * t.step;
+        th.x = t.px[th.seg] + t.tx[th.seg] * along + rightX(t, th.seg) * th.lat;
+        th.z = t.pz[th.seg] + t.tz[th.seg] * along + rightZ(t, th.seg) * th.lat;
+        th.y = centerHeight(t, th.seg, along) + th.lat * t.bank[th.seg] + 0.6;
+        th.vx = t.tx[th.seg] * TOP_SPEED;
+        th.vz = t.tz[th.seg] * TOP_SPEED;
+        radius = TOP_RADIUS;
+        reach = 2;
+      }
+
+      if (!gone && radius > 0) {
         for (const k of this.karts.values()) {
-          if (k.finished || (k.slot === tire.owner && tire.safe > 0)) continue;
-          if (Math.hypot(k.state.x - tire.x, k.state.z - tire.z) < KART_RADIUS + TIRE_RADIUS) {
-            if (hitKart(k.state)) this.fx(k, 'hit');
+          if (k.finished || (k.slot === th.owner && th.safe > 0)) continue;
+          // Der Brummkreisel verschont seinen Werfer ganz.
+          if (th.kind === THING_TOP && k.slot === th.owner) continue;
+          const dy = k.state.y - (th.kind === THING_OIL ? th.y : th.y - 0.6);
+          if (dy > reach || dy < -reach) continue;
+          if (Math.hypot(k.state.x - th.x, k.state.z - th.z) < radius) {
+            if (k.state.respawn > 0) continue;
+            this.applyHit(k);
             gone = true;
             break;
           }
         }
       }
-      if (gone) this.tireList.splice(i, 1);
-    }
-
-    // Ölflecken
-    for (let i = this.oilList.length - 1; i >= 0; i--) {
-      const oil = this.oilList[i];
-      if (oil.safe > 0) oil.safe--;
-      let gone = --oil.life <= 0;
-      if (!gone) {
-        for (const k of this.karts.values()) {
-          if (k.finished || (k.slot === oil.owner && oil.safe > 0)) continue;
-          if (Math.hypot(k.state.x - oil.x, k.state.z - oil.z) < OIL_RADIUS) {
-            if (hitKart(k.state)) this.fx(k, 'hit');
-            gone = true;
-            break;
-          }
-        }
-      }
-      if (gone) this.oilList.splice(i, 1);
+      if (gone) this.thingList.splice(i, 1);
     }
   }
 
@@ -622,7 +810,9 @@ export class HostGame implements GameView {
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i];
         const b = list[j];
-        if (a.finished || b.finished) continue;
+        if (a.finished || b.finished || a.state.respawn > 0 || b.state.respawn > 0) continue;
+        // Auf der Brücke und darunter begegnet man sich nicht.
+        if (Math.abs(a.state.y - b.state.y) > 1.6) continue;
         const dx = b.state.x - a.state.x;
         const dz = b.state.z - a.state.z;
         const d = Math.hypot(dx, dz);

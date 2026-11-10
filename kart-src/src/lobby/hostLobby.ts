@@ -40,6 +40,8 @@ export interface HostLobbySave {
   code: string;
   seats: { slot: number; token: string; name: string; isHost: boolean }[];
   bots?: boolean;
+  aiLevel?: number;
+  track?: number;
 }
 
 export function cleanName(raw: unknown, fallback: string): string {
@@ -54,6 +56,10 @@ export class HostLobby {
   phase: Phase = 'lobby';
   /** Freie Plätze im Rennen mit KI-Gegnern auffüllen. */
   bots = true;
+  /** Stärke der KI-Gegner: 0 leicht, 1 mittel, 2 schwer. */
+  aiLevel = 1;
+  /** Gewählte Strecke. */
+  track = 0;
   readonly localSlot: number;
 
   /** Irgendetwas an der Lobby hat sich geändert (für die Anzeige). */
@@ -78,6 +84,8 @@ export class HostLobby {
   ) {
     if (saved && saved.code === code) {
       if (typeof saved.bots === 'boolean') this.bots = saved.bots;
+      if (typeof saved.aiLevel === 'number') this.aiLevel = Math.max(0, Math.min(2, saved.aiLevel | 0));
+      if (typeof saved.track === 'number') this.track = Math.max(0, saved.track | 0);
       // Nach einem Neuladen des Host-Bildschirms: Plätze wiederherstellen,
       // damit die anderen beim automatischen Wiederverbinden ihren Platz finden.
       for (const s of saved.seats) {
@@ -136,12 +144,25 @@ export class HostLobby {
         ping: s.isHost ? 0 : s.link ? Math.round(s.link.rtt) : -1,
       });
     }
-    return { code: this.code, phase: this.phase, players, bots: this.bots };
+    return { code: this.code, phase: this.phase, players, bots: this.bots, aiLevel: this.aiLevel, track: this.track };
   }
 
   setBots(bots: boolean): void {
     if (this.bots === bots) return;
     this.bots = bots;
+    this.changed();
+  }
+
+  setAiLevel(level: number): void {
+    const l = Math.max(0, Math.min(2, level | 0));
+    if (this.aiLevel === l) return;
+    this.aiLevel = l;
+    this.changed();
+  }
+
+  setTrack(track: number): void {
+    if (this.track === track) return;
+    this.track = track;
     this.changed();
   }
 
@@ -225,6 +246,8 @@ export class HostLobby {
         .filter((s): s is Seat => s !== null)
         .map((s) => ({ slot: s.slot, token: s.token, name: s.name, isHost: s.isHost })),
       bots: this.bots,
+      aiLevel: this.aiLevel,
+      track: this.track,
     };
   }
 

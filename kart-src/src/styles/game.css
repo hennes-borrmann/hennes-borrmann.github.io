@@ -1,0 +1,982 @@
+/* Rennen und Rennvorbereitung im Stil "Comic-Tusche": Papierweiß, Signalgelb,
+   dicke Tuschekonturen, harte versetzte Schatten, Rasterpunkte. Alles sitzt am
+   Rand – die Bildmitte gehört der Strecke. */
+
+:root {
+  --ink: #16131c;
+  --paper: #fff8e7;
+  --pop: #ff5a4e;
+  --cool: #1fc8b6;
+  --ink-outline: -2px -2px 0 var(--ink), 2px -2px 0 var(--ink), -2px 2px 0 var(--ink), 2px 2px 0 var(--ink), 0 -3px 0 var(--ink),
+    0 3px 0 var(--ink), -3px 0 0 var(--ink), 3px 0 0 var(--ink);
+  --safe-t: max(14px, env(safe-area-inset-top));
+  --safe-r: max(16px, env(safe-area-inset-right));
+  --safe-b: max(14px, env(safe-area-inset-bottom));
+  --safe-l: max(16px, env(safe-area-inset-left));
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  background: #0b0c0e;
+}
+
+.stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Rauchwolke: Schleier über dem ganzen Bild */
+.smoke-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.55) 0 12%, transparent 30%),
+    radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.5) 0 14%, transparent 34%),
+    radial-gradient(ellipse at center, rgba(214, 210, 226, 0.86) 0%, rgba(201, 197, 216, 0.98) 60%, #c9c5d8 100%);
+}
+
+.race-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font-display);
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* --- Item: oben links -------------------------------------------------------- */
+
+.rh-item {
+  position: absolute;
+  top: var(--safe-t);
+  left: var(--safe-l);
+  width: 100px;
+  height: 100px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--accent);
+  border: 4px solid var(--ink);
+  border-radius: 20px;
+  box-shadow: 5px 5px 0 var(--ink);
+  transform: rotate(-4deg);
+}
+
+.rh-item-icon {
+  width: 62px;
+  height: 62px;
+}
+
+.rh-item-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.rh-item-name,
+.rh-item-hint {
+  position: absolute;
+  left: 2px;
+  white-space: nowrap;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-shadow: var(--ink-outline);
+}
+
+.rh-item-name {
+  top: 108px;
+  font-weight: 800;
+  font-size: 21px;
+  color: var(--accent);
+}
+
+.rh-item-hint {
+  top: 133px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  letter-spacing: 0.06em;
+}
+
+.rh-item[data-state='none'] {
+  background: rgba(22, 19, 28, 0.32);
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+}
+
+.rh-item[data-state='rolling'] {
+  background: var(--paper);
+}
+
+.rh-item[data-state='rolling'] .rh-item-icon {
+  animation: rh-roll 0.3s steps(3) infinite;
+}
+
+.rh-item[data-state='ready'] {
+  animation: rh-pop 0.4s cubic-bezier(0.3, 1.7, 0.5, 1);
+}
+
+@keyframes rh-roll {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes rh-pop {
+  0% {
+    transform: rotate(-4deg) scale(0.6);
+  }
+  100% {
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
+/* --- Runde und Zeit: oben Mitte ---------------------------------------------- */
+
+.rh-lap {
+  position: absolute;
+  top: var(--safe-t);
+  left: 50%;
+  transform: translateX(-50%) skewX(-10deg);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 20px 7px;
+  background: var(--ink);
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 rgba(22, 19, 28, 0.45);
+}
+
+.rh-lap > * {
+  transform: skewX(10deg);
+}
+
+.rh-lap-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b9b4c6;
+}
+
+.rh-lap strong {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.rh-time {
+  font: 600 17px/1 var(--font-mono);
+  color: #fff;
+  min-width: 68px;
+}
+
+/* --- Reihenfolge: links ------------------------------------------------------ */
+
+.rh-order {
+  position: absolute;
+  left: var(--safe-l);
+  top: 176px;
+  display: grid;
+  gap: 5px;
+}
+
+.rh-order li {
+  display: grid;
+  grid-template-columns: 20px auto;
+  align-items: center;
+  gap: 7px;
+  transition: transform 0.25s ease;
+}
+
+.rh-order .n {
+  font-weight: 800;
+  font-size: 17px;
+  font-style: italic;
+  text-shadow: var(--ink-outline);
+}
+
+.rh-order .who {
+  justify-self: start;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 9px 2px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+  background: var(--c, #fff);
+  border: 2px solid var(--ink);
+  transform: skewX(-10deg);
+}
+
+.rh-order li[data-me='true'] .who {
+  box-shadow: 3px 3px 0 var(--ink);
+  font-size: 15px;
+}
+
+.rh-order li[data-done='true'] .who {
+  opacity: 0.7;
+}
+
+/* --- Platz: unten links -------------------------------------------------------- */
+
+.rh-place {
+  position: absolute;
+  left: var(--safe-l);
+  bottom: var(--safe-b);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.rh-place strong {
+  font-size: clamp(88px, 15vw, 150px);
+  line-height: 0.82;
+  font-weight: 800;
+  font-style: italic;
+  color: var(--accent);
+  text-shadow:
+    var(--ink-outline),
+    7px 7px 0 var(--ink);
+}
+
+.rh-place[data-place='1'] strong {
+  color: #ffe45c;
+}
+
+.rh-place span {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: var(--ink-outline);
+}
+
+/* --- Tempo: unten rechts ---------------------------------------------------- */
+
+.rh-speed {
+  position: absolute;
+  right: var(--safe-r);
+  bottom: var(--safe-b);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  text-shadow: var(--ink-outline);
+}
+
+.rh-speed strong {
+  font-size: 46px;
+  line-height: 1;
+  font-weight: 800;
+  font-style: italic;
+  min-width: 2.2ch;
+  text-align: right;
+}
+
+.rh-speed span {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* --- Minikarte: oben rechts --------------------------------------------------- */
+
+.minimap {
+  position: absolute;
+  top: calc(var(--safe-t) + 46px);
+  right: var(--safe-r);
+  width: clamp(110px, 15vw, 164px);
+  height: clamp(110px, 15vw, 164px);
+}
+
+.hud-menu {
+  position: absolute;
+  top: var(--safe-t);
+  right: var(--safe-r);
+  z-index: 3;
+}
+
+.btn-menu {
+  height: 36px;
+  padding: 0 16px;
+  font: 800 14px/1 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--ink);
+  transform: skewX(-10deg);
+  cursor: pointer;
+}
+
+.btn-menu:active {
+  transform: skewX(-10deg) translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+/* --- Menü im Rennen -------------------------------------------------------- */
+
+.menu {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  background: rgba(22, 19, 28, 0.6);
+}
+
+.menu-card {
+  width: min(380px, calc(100% - 40px));
+  padding: 22px 22px 24px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 4px solid var(--ink);
+  box-shadow: 8px 8px 0 var(--ink);
+}
+
+.menu-card h2 {
+  font: 800 30px/1 var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.menu-room {
+  margin: 6px 0 16px;
+  font: 600 14px/1.3 var(--font-body);
+  color: #5a5566;
+}
+
+.menu-room strong {
+  font-family: var(--font-display);
+  letter-spacing: 0.12em;
+  color: var(--ink);
+}
+
+.menu-list {
+  display: grid;
+  gap: 9px;
+}
+
+.menu-list button {
+  height: 46px;
+  padding: 0 16px;
+  text-align: left;
+  font: 800 17px/1 var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink);
+  cursor: pointer;
+}
+
+.menu-list button:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.menu-list .menu-primary {
+  background: var(--accent);
+}
+
+.menu-list .menu-quiet {
+  background: transparent;
+  box-shadow: none;
+  border-style: dashed;
+}
+
+/* --- Streckentitel, Countdown, Hinweise in der Bildmitte ----------------------- */
+
+.race-title {
+  position: absolute;
+  left: 0;
+  bottom: 22%;
+  display: grid;
+  gap: 2px;
+  padding: 12px 54px 14px max(28px, env(safe-area-inset-left));
+  background: var(--ink);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 34px) 100%, 0 100%);
+  animation: title-in 0.45s cubic-bezier(0.2, 1.2, 0.4, 1) both;
+  pointer-events: none;
+}
+
+.race-title span {
+  font: 700 14px/1 var(--font-display);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #b9b4c6;
+}
+
+.race-title strong {
+  font: 800 clamp(34px, 6vw, 64px) / 1 var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+@keyframes title-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+.countdown {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  font: 800 clamp(120px, 26vw, 250px) / 1 var(--font-display);
+  font-style: italic;
+  color: var(--accent);
+  text-shadow:
+    -4px -4px 0 var(--ink),
+    4px -4px 0 var(--ink),
+    -4px 4px 0 var(--ink),
+    4px 4px 0 var(--ink),
+    0 -5px 0 var(--ink),
+    0 5px 0 var(--ink),
+    -5px 0 0 var(--ink),
+    5px 0 0 var(--ink),
+    11px 11px 0 var(--ink);
+  pointer-events: none;
+}
+
+.countdown[data-go='true'] {
+  color: var(--cool);
+  font-size: clamp(96px, 20vw, 200px);
+}
+
+.countdown.pop {
+  animation: count-pop 0.9s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes count-pop {
+  0% {
+    transform: translate(-50%, -50%) scale(2.1) rotate(-8deg);
+    opacity: 0;
+  }
+  22% {
+    transform: translate(-50%, -50%) scale(1) rotate(-4deg);
+    opacity: 1;
+  }
+  75% {
+    transform: translate(-50%, -50%) scale(0.96) rotate(-4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.8) rotate(-4deg);
+    opacity: 0.4;
+  }
+}
+
+.race-banner {
+  position: absolute;
+  left: 50%;
+  top: 23%;
+  transform: translateX(-50%) rotate(-3deg);
+  padding: 8px 26px 10px;
+  font: 800 clamp(26px, 5vw, 46px) / 1 var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--accent);
+  border: 4px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--ink);
+  pointer-events: none;
+  animation: banner-in 0.4s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.race-banner[data-tone='bad'] {
+  color: #fff;
+  background: var(--pop);
+  animation:
+    banner-in 0.4s cubic-bezier(0.2, 1.6, 0.4, 1) both,
+    banner-blink 0.6s steps(2) infinite;
+}
+
+@keyframes banner-in {
+  from {
+    transform: translateX(-50%) rotate(-3deg) scale(0.4);
+    opacity: 0;
+  }
+}
+
+@keyframes banner-blink {
+  50% {
+    filter: brightness(1.35);
+  }
+}
+
+.finish-flag {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%) rotate(-3deg);
+  padding: 12px 34px 14px;
+  font: 800 clamp(34px, 7vw, 70px) / 1 var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+  background:
+    radial-gradient(circle, rgba(22, 19, 28, 0.14) 1.6px, transparent 2px) 0 0 / 9px 9px,
+    var(--paper);
+  border: 5px solid var(--ink);
+  box-shadow: 9px 9px 0 var(--ink);
+  pointer-events: none;
+  animation: banner-in 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.hud-note {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 6px);
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100% - 420px));
+  padding: 8px 14px;
+  font: 500 13px/1.4 var(--font-body);
+  text-align: center;
+  color: #fff;
+  background: rgba(22, 19, 28, 0.78);
+  pointer-events: none;
+}
+
+.hud-note:empty {
+  display: none;
+}
+
+.fps {
+  position: absolute;
+  right: calc(var(--safe-r) + 96px);
+  top: calc(var(--safe-t) + 8px);
+  font: 600 12px/1 var(--font-mono);
+  color: #fff;
+  text-shadow: var(--ink-outline);
+  pointer-events: none;
+}
+
+/* --- Zieleinlauf --------------------------------------------------------------- */
+
+.results {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(22, 19, 28, 0.5);
+}
+
+.results-card {
+  width: min(560px, 100%);
+  padding: 22px 26px 24px;
+  color: var(--ink);
+  background:
+    radial-gradient(circle, rgba(22, 19, 28, 0.1) 1.6px, transparent 2px) 0 0 / 10px 10px,
+    var(--paper);
+  border: 5px solid var(--ink);
+  box-shadow: 10px 10px 0 var(--ink);
+  animation: results-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes results-in {
+  from {
+    transform: translateY(40px) rotate(2deg) scale(0.9);
+    opacity: 0;
+  }
+}
+
+.results-card .eyebrow {
+  color: #6a6478;
+}
+
+.results-card h2 {
+  margin: 2px 0 14px;
+  font: 800 46px/1 var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.results-list {
+  display: grid;
+  gap: 8px;
+}
+
+.result {
+  display: grid;
+  grid-template-columns: 54px 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 9px 8px;
+  background: #fff;
+  border: 3px solid var(--ink);
+}
+
+.result:first-child {
+  background: var(--accent);
+  box-shadow: 5px 5px 0 var(--ink);
+  transform: rotate(-1deg) scale(1.03);
+  margin-bottom: 4px;
+}
+
+.result-me {
+  outline: 3px solid var(--pop);
+  outline-offset: 2px;
+}
+
+.result-place {
+  font: 800 30px/1 var(--font-display);
+  font-style: italic;
+  text-align: center;
+}
+
+.result .chip {
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+  border: 3px solid var(--ink);
+}
+
+.result-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font: 700 21px/1.1 var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.result-name .tag,
+.result-name .you {
+  flex: none;
+  padding: 2px 7px;
+  font: 700 11px/1.2 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--ink);
+  border: 0;
+}
+
+.result-name .you {
+  background: var(--pop);
+}
+
+.result-time {
+  font: 600 17px/1 var(--font-mono);
+}
+
+.results-note {
+  margin-top: 14px;
+  font-size: 14px;
+  color: #5a5566;
+}
+
+.results-note:empty {
+  display: none;
+}
+
+.results-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.results-actions .btn {
+  color: var(--ink);
+  background: #fff;
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.results-actions .btn-primary {
+  background: var(--accent);
+}
+
+/* --- Lobby: Strecke und Gegner --------------------------------------------- */
+
+.setup {
+  margin-top: 26px;
+}
+
+.track-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 10px;
+}
+
+.track-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  align-items: start;
+  padding: 10px 12px 10px 10px;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: 0;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.track-card:disabled {
+  cursor: default;
+}
+
+.track-card:not(:disabled):hover {
+  border-color: var(--muted);
+}
+
+.track-card[data-on='true'] {
+  color: var(--ink);
+  background: var(--accent);
+  border-color: var(--ink);
+  box-shadow: 5px 5px 0 #000;
+  transform: translate(-2px, -2px) rotate(-1deg);
+}
+
+.track-map {
+  grid-row: 1 / 4;
+  display: block;
+  width: 92px;
+  height: 58px;
+  align-self: center;
+}
+
+.track-map path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.track-card[data-on='true'] .track-map path {
+  stroke: var(--ink);
+}
+
+.track-name {
+  font: 800 20px/1.05 var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.track-blurb {
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.track-card[data-on='true'] .track-blurb {
+  color: #3d3848;
+}
+
+.track-meta {
+  margin-top: 2px;
+  font: 600 11.5px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.track-card[data-on='true'] .track-meta {
+  color: var(--ink);
+}
+
+.setup-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin-top: 16px;
+}
+
+.seg {
+  display: inline-flex;
+  border: 2px solid var(--line);
+}
+
+.seg button {
+  height: 36px;
+  padding: 0 16px;
+  font: 700 14px/1 var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.seg button + button {
+  border-left: 2px solid var(--line);
+}
+
+.seg button[aria-pressed='true'] {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.seg button:disabled {
+  cursor: default;
+}
+
+.seg[data-off='true'] {
+  opacity: 0.4;
+}
+
+.setup-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.setup-label {
+  font: 700 12px/1 var(--font-display);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* --- Einstellungen (im Dialog) ---------------------------------------------- */
+
+.settings {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-row {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-row > span {
+  font: 700 12px/1 var(--font-display);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+}
+
+.settings-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.settings-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .track-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Die Knöpfe der Lobby bleiben immer erreichbar, auch wenn die Seite höher ist als der Bildschirm. */
+.lobby-foot {
+  position: sticky;
+  bottom: calc(-1 * max(28px, env(safe-area-inset-bottom)));
+  z-index: 2;
+  margin-top: 18px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, rgba(16, 18, 20, 0) 0, var(--bg) 16px);
+}
+
+@media (max-width: 760px), (max-height: 520px) {
+  .rh-item {
+    width: 78px;
+    height: 78px;
+    border-radius: 16px;
+  }
+
+  .rh-item-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .rh-item-name {
+    top: 84px;
+    font-size: 17px;
+  }
+
+  .rh-item-hint {
+    display: none;
+  }
+
+  .rh-order {
+    top: 118px;
+  }
+
+  .rh-order .who {
+    max-width: 96px;
+    font-size: 12px;
+  }
+
+  .rh-lap strong {
+    font-size: 24px;
+  }
+
+  .rh-speed strong {
+    font-size: 34px;
+  }
+
+  .hud-note {
+    max-width: calc(100% - 40px);
+    bottom: 32%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .countdown.pop,
+  .race-banner,
+  .finish-flag,
+  .results-card,
+  .race-title,
+  .rh-item[data-state='ready'] {
+    animation: none;
+  }
+}

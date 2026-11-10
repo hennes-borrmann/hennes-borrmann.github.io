@@ -109,7 +109,7 @@ function soloRun(slot: number, laps: number, cmdFilter?: (c: Cmd) => Cmd) {
   const limit = laps * 80 * 60;
   while (lapTimes.length < laps && tick < limit) {
     tick++;
-    let cmd = botCmd(s, brain, [], true);
+    let cmd = botCmd(s, brain, [], true, { tick, place: 1, smoke: false });
     if (cmdFilter) cmd = cmdFilter(cmd);
     const before = s.seg;
     const ev = stepKart(s, cmd, { canDrive: true, speedFactor: brain.skill });

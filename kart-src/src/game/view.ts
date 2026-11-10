@@ -1,6 +1,6 @@
 // Gemeinsame Sicht auf das Spiel für Darstellung und Anzeige – egal ob Host oder Client.
 
-import type { SnapshotOil, SnapshotTire } from '../net/protocol';
+import type { SnapshotThing } from '../net/protocol';
 import type { KartState } from './sim';
 
 /** Ein Kart, wie es in diesem Bild zu zeichnen ist. */
@@ -30,6 +30,8 @@ export interface RaceView {
   untilGo: number;
   /** Bit i gesetzt = Kiste i liegt bereit. */
   boxes: number;
+  /** Geschätzter Host-Tick von jetzt – Takt für alles, was auf allen Bildschirmen gleich laufen soll. */
+  hostTick: number;
 }
 
 export interface GameView {
@@ -43,6 +45,6 @@ export interface GameView {
   entities(alpha: number, nowSec: number, dtSec: number, out: RenderEntity[]): void;
   race(nowSec: number): RaceView;
   standings(): Standing[];
-  tires(nowSec: number): SnapshotTire[];
-  oils(): SnapshotOil[];
+  /** Rollreifen, Ölflecken, Brummkreisel, Rauchwolken – wie sie in diesem Bild zu zeichnen sind. */
+  things(nowSec: number): SnapshotThing[];
 }

@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -39,7 +39,23 @@ export type ScreenToController =
   | { t: 'reject'; reason: 'version' };
 
 /** Spürbare Ereignisse für den Controller. */
-export type FxKind = 'hit' | 'bump' | 'boost' | 'pickup' | 'item' | 'go' | 'finish' | 'wall';
+export type FxKind =
+  | 'hit'
+  | 'bump'
+  | 'boost'
+  | 'pickup'
+  | 'item'
+  | 'go'
+  | 'finish'
+  | 'wall'
+  /** Der Stoßfänger hat einen Treffer abgefangen. */
+  | 'block'
+  /** Vom Kurzschluss erwischt. */
+  | 'stall'
+  | 'land'
+  | 'fall'
+  | 'lap'
+  | 'finallap';
 
 // --- Bildschirm ↔ Host (zuverlässig) ----------------------------------------
 
@@ -65,6 +81,10 @@ export interface LobbyState {
   players: LobbyPlayer[];
   /** Freie Plätze im Rennen mit KI-Gegnern auffüllen. */
   bots: boolean;
+  /** Stärke der KI-Gegner: 0 leicht, 1 mittel, 2 schwer. */
+  aiLevel: number;
+  /** Gewählte Strecke (Index in TRACK_DEFS). */
+  track: number;
 }
 
 export type RejectReason = 'full' | 'running' | 'version';
@@ -152,24 +172,29 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[] } |
 // verloren, ist nichts kaputt – der nächste bringt wieder alles mit.
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
-//        [u32 kisten-bitfeld][u8 anzahl karts][u8 anzahl reifen][u8 anzahl ölflecken]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 30 Byte]
+//        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 42 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)
 //   ack   = letzte vom Host verarbeitete Eingabe-Nummer dieses Spielers
-// Reifen:   [u8 id][f32 x][f32 z][f32 vx][f32 vz]
-// Ölfleck:  [u8 id][f32 x][f32 z]
+// Ding:  [u8 id][u8 art][u8 restzeit in 1/4 s][f32 x][f32 y][f32 z][f32 vx][f32 vz]
+//   "Dinge" sind alles, was außer Karts auf der Strecke unterwegs ist:
+//   Rollreifen, Ölflecken, Brummkreisel, Rauchwolken.
 
 export const RACE_COUNTDOWN = 0;
 export const RACE_RUNNING = 1;
 export const RACE_RESULTS = 2;
 
-const STATE_SIZE = 30;
+export const THING_TIRE = 1;
+export const THING_OIL = 2;
+export const THING_TOP = 3;
+export const THING_SMOKE = 4;
+
+const STATE_SIZE = 42;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
-const SNAP_TIRE_SIZE = 17;
-const SNAP_OIL_SIZE = 9;
+const SNAP_THING_SIZE = 23;
 
 export interface SnapshotKart {
   slot: number;
@@ -184,18 +209,17 @@ export interface SnapshotKart {
   finishTicks: number;
 }
 
-export interface SnapshotTire {
+export interface SnapshotThing {
   id: number;
+  /** THING_* */
+  kind: number;
+  /** Verbleibende Lebenszeit in Sekunden (höchstens 63). */
+  ttl: number;
   x: number;
+  y: number;
   z: number;
   vx: number;
   vz: number;
-}
-
-export interface SnapshotOil {
-  id: number;
-  x: number;
-  z: number;
 }
 
 export interface Snapshot {
@@ -208,52 +232,62 @@ export interface Snapshot {
   laps: number;
   /** Bit i gesetzt = Kiste i liegt bereit. */
   boxes: number;
+  /** Index der Strecke, auf der dieses Rennen läuft. */
+  track: number;
   karts: SnapshotKart[];
-  tires: SnapshotTire[];
-  oils: SnapshotOil[];
+  things: SnapshotThing[];
 }
 
 function writeState(v: DataView, o: number, s: KartState): void {
   v.setFloat32(o, s.x);
-  v.setFloat32(o + 4, s.z);
-  v.setFloat32(o + 8, s.heading);
-  v.setFloat32(o + 12, s.vx);
-  v.setFloat32(o + 16, s.vz);
-  v.setUint16(o + 20, s.seg);
-  v.setUint8(o + 22, s.boost);
-  v.setInt8(o + 23, s.driftDir);
-  v.setUint8(o + 24, s.driftCharge);
-  v.setUint8(o + 25, s.spin);
-  v.setUint8(o + 26, s.shield);
-  v.setUint8(o + 27, (s.item & 15) | ((s.nextItem & 15) << 4));
-  v.setUint8(o + 28, s.roulette);
-  v.setUint8(o + 29, s.flags);
+  v.setFloat32(o + 4, s.y);
+  v.setFloat32(o + 8, s.z);
+  v.setFloat32(o + 12, s.heading);
+  v.setFloat32(o + 16, s.vx);
+  v.setFloat32(o + 20, s.vy);
+  v.setFloat32(o + 24, s.vz);
+  v.setUint16(o + 28, s.seg);
+  v.setUint16(o + 30, s.guard);
+  v.setUint8(o + 32, s.boost);
+  v.setInt8(o + 33, s.driftDir);
+  v.setUint8(o + 34, s.driftCharge);
+  v.setUint8(o + 35, s.spin);
+  v.setUint8(o + 36, s.shield);
+  v.setUint8(o + 37, s.stall);
+  v.setUint8(o + 38, s.respawn);
+  v.setUint8(o + 39, (s.item & 15) | ((s.nextItem & 15) << 4));
+  v.setUint8(o + 40, s.roulette);
+  v.setUint8(o + 41, s.flags);
 }
 
 function readState(v: DataView, o: number): KartState {
-  const items = v.getUint8(o + 27);
+  const items = v.getUint8(o + 39);
   return {
     x: v.getFloat32(o),
-    z: v.getFloat32(o + 4),
-    heading: v.getFloat32(o + 8),
-    vx: v.getFloat32(o + 12),
-    vz: v.getFloat32(o + 16),
-    seg: v.getUint16(o + 20),
-    boost: v.getUint8(o + 22),
-    driftDir: v.getInt8(o + 23),
-    driftCharge: v.getUint8(o + 24),
-    spin: v.getUint8(o + 25),
-    shield: v.getUint8(o + 26),
+    y: v.getFloat32(o + 4),
+    z: v.getFloat32(o + 8),
+    heading: v.getFloat32(o + 12),
+    vx: v.getFloat32(o + 16),
+    vy: v.getFloat32(o + 20),
+    vz: v.getFloat32(o + 24),
+    seg: v.getUint16(o + 28),
+    guard: v.getUint16(o + 30),
+    boost: v.getUint8(o + 32),
+    driftDir: v.getInt8(o + 33),
+    driftCharge: v.getUint8(o + 34),
+    spin: v.getUint8(o + 35),
+    shield: v.getUint8(o + 36),
+    stall: v.getUint8(o + 37),
+    respawn: v.getUint8(o + 38),
     item: items & 15,
     nextItem: items >> 4,
-    roulette: v.getUint8(o + 28),
-    flags: v.getUint8(o + 29),
+    roulette: v.getUint8(o + 40),
+    flags: v.getUint8(o + 41),
   };
 }
 
 export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
-  const size =
-    SNAP_HEADER + snap.karts.length * SNAP_KART_SIZE + snap.tires.length * SNAP_TIRE_SIZE + snap.oils.length * SNAP_OIL_SIZE;
+  const size = SNAP_HEADER + snap.karts.length * SNAP_KART_SIZE + snap.things.length * SNAP_THING_SIZE;
   const buf = new ArrayBuffer(size);
   const v = new DataView(buf);
   v.setUint8(0, PKT_SNAPSHOT);
@@ -263,9 +297,9 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
   v.setUint32(7, snap.goTick);
   v.setUint8(11, snap.laps);
   v.setUint32(12, snap.boxes >>> 0);
-  v.setUint8(16, snap.karts.length);
-  v.setUint8(17, snap.tires.length);
-  v.setUint8(18, snap.oils.length);
+  v.setUint8(16, snap.track);
+  v.setUint8(17, snap.karts.length);
+  v.setUint8(18, snap.things.length);
   let o = SNAP_HEADER;
   for (const k of snap.karts) {
     v.setUint8(o, (k.slot & 0x7f) | (k.bot ? 0x80 : 0));
@@ -279,29 +313,25 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
     v.setUint32(r + 3, k.finishTicks);
     o += SNAP_KART_SIZE;
   }
-  for (const t of snap.tires) {
+  for (const t of snap.things) {
     v.setUint8(o, t.id);
-    v.setFloat32(o + 1, t.x);
-    v.setFloat32(o + 5, t.z);
-    v.setFloat32(o + 9, t.vx);
-    v.setFloat32(o + 13, t.vz);
-    o += SNAP_TIRE_SIZE;
-  }
-  for (const t of snap.oils) {
-    v.setUint8(o, t.id);
-    v.setFloat32(o + 1, t.x);
-    v.setFloat32(o + 5, t.z);
-    o += SNAP_OIL_SIZE;
+    v.setUint8(o + 1, t.kind);
+    v.setUint8(o + 2, Math.max(0, Math.min(255, Math.round(t.ttl * 4))));
+    v.setFloat32(o + 3, t.x);
+    v.setFloat32(o + 7, t.y);
+    v.setFloat32(o + 11, t.z);
+    v.setFloat32(o + 15, t.vx);
+    v.setFloat32(o + 19, t.vz);
+    o += SNAP_THING_SIZE;
   }
   return buf;
 }
 
 export function decodeSnapshot(view: DataView): Snapshot | null {
   if (view.byteLength < SNAP_HEADER) return null;
-  const nKarts = view.getUint8(16);
-  const nTires = view.getUint8(17);
-  const nOils = view.getUint8(18);
-  if (view.byteLength < SNAP_HEADER + nKarts * SNAP_KART_SIZE + nTires * SNAP_TIRE_SIZE + nOils * SNAP_OIL_SIZE) return null;
+  const nKarts = view.getUint8(17);
+  const nThings = view.getUint8(18);
+  if (view.byteLength < SNAP_HEADER + nKarts * SNAP_KART_SIZE + nThings * SNAP_THING_SIZE) return null;
   const snap: Snapshot = {
     tick: view.getUint32(1),
     raceId: view.getUint8(5),
@@ -309,9 +339,9 @@ export function decodeSnapshot(view: DataView): Snapshot | null {
     goTick: view.getUint32(7),
     laps: view.getUint8(11),
     boxes: view.getUint32(12),
+    track: view.getUint8(16),
     karts: [],
-    tires: [],
-    oils: [],
+    things: [],
   };
   let o = SNAP_HEADER;
   for (let i = 0; i < nKarts; i++) {
@@ -330,19 +360,18 @@ export function decodeSnapshot(view: DataView): Snapshot | null {
     });
     o += SNAP_KART_SIZE;
   }
-  for (let i = 0; i < nTires; i++) {
-    snap.tires.push({
+  for (let i = 0; i < nThings; i++) {
+    snap.things.push({
       id: view.getUint8(o),
-      x: view.getFloat32(o + 1),
-      z: view.getFloat32(o + 5),
-      vx: view.getFloat32(o + 9),
-      vz: view.getFloat32(o + 13),
+      kind: view.getUint8(o + 1),
+      ttl: view.getUint8(o + 2) / 4,
+      x: view.getFloat32(o + 3),
+      y: view.getFloat32(o + 7),
+      z: view.getFloat32(o + 11),
+      vx: view.getFloat32(o + 15),
+      vz: view.getFloat32(o + 19),
     });
-    o += SNAP_TIRE_SIZE;
-  }
-  for (let i = 0; i < nOils; i++) {
-    snap.oils.push({ id: view.getUint8(o), x: view.getFloat32(o + 1), z: view.getFloat32(o + 5) });
-    o += SNAP_OIL_SIZE;
+    o += SNAP_THING_SIZE;
   }
   return snap;
 }

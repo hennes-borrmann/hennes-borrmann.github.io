@@ -1,624 +1,889 @@
-// Darstellung des Rennens: Strecke, Karts, Items und einfache Effekte.
-// Bewusst schlicht gehalten – der eigentliche Look kommt in Phase 3. Die
-// Schnittstelle (Spielerliste setzen, pro Bild den Spielstand übergeben)
-// bleibt dabei dieselbe.
+// Die 3D-Szene des Rennens.
+//
+// Sie bekommt pro Bild nur den Spielstand (Karts, Dinge, Rennphase) und macht
+// daraus alles Sichtbare. Was passiert ist – Treffer, Schub, Landung, Absturz –
+// liest sie aus den Veränderungen der Kart-Zustände ab. Dadurch sehen Host und
+// Mitspieler dieselben Effekte, egal über welchen Weg der Zustand ankam.
 
 import * as THREE from 'three';
-import { FLAG_OFFROAD, SPIN_TICKS, turboStage } from '../game/sim';
-import { PAD_HALF_WIDTH, PAD_LENGTH, TRACK, rightX, rightZ, trackHeading, wrapSeg } from '../game/track';
+import {
+  FLAG_AIR,
+  FLAG_OFFROAD,
+  FLAG_WALL,
+  ITEM_EMP,
+  ITEM_NONE,
+  ITEM_OIL,
+  ITEM_SMOKE,
+  ITEM_SPRING,
+  ITEM_TIRE,
+  ITEM_TOP,
+  SPIN_TICKS,
+  V_MAX,
+  turboStage,
+} from '../game/sim';
+import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
-import type { SnapshotOil, SnapshotTire } from '../net/protocol';
-import { playerColor } from '../util/players';
+import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
+import { PLAYER_COLORS } from '../util/players';
+import { BlobShadows, ComicPops, Particles, SkidMarks, SpeedLines } from './effects';
+import { KartVisual, type KartDetail, type KartPose } from './kartModel';
+import { ThingVisuals } from './things';
+import { setOutlinesVisible } from './toon';
+import { World } from './world';
 
-export type CameraMode = 'chase' | 'top';
+export interface SceneDriver {
+  slot: number;
+  name: string;
+  bot: boolean;
+}
 
-/** Funkenfarbe je Stufe des Mini-Turbos (0 = noch nicht geladen). */
-const SPARK_COLORS: [number, number, number][] = [
-  [0.16, 0.16, 0.17],
-  [0.25, 0.9, 1.0],
-  [1.0, 0.8, 0.2],
-  [1.0, 0.3, 0.85],
+export type Quality = 'auto' | 'low' | 'medium' | 'high';
+
+/** Etwas ist passiert, das man auch hören soll. */
+export interface SceneEvent {
+  kind:
+    | 'boost'
+    | 'turbo1'
+    | 'turbo2'
+    | 'turbo3'
+    | 'drift-start'
+    | 'hit'
+    | 'guard-block'
+    | 'stall'
+    | 'bump'
+    | 'wall'
+    | 'land'
+    | 'fall'
+    | 'respawn'
+    | 'pickup'
+    | 'item-ready'
+    | 'use-tire'
+    | 'use-oil'
+    | 'use-top'
+    | 'use-guard'
+    | 'use-emp'
+    | 'use-smoke'
+    | 'use-spring'
+    | 'finish';
+  slot: number;
+  local: boolean;
+  /** -1 links … 1 rechts, aus Sicht der Kamera */
+  pan: number;
+  /** 0..1 nach Entfernung */
+  gain: number;
+}
+
+/** Was der Ton pro Kart wissen muss. */
+export interface KartAudio {
+  slot: number;
+  local: boolean;
+  speed: number;
+  throttle: boolean;
+  boost: boolean;
+  drift: number;
+  offroad: boolean;
+  air: boolean;
+  stall: boolean;
+  distance: number;
+  pan: number;
+}
+
+interface KartView {
+  slot: number;
+  visual: KartVisual;
+  label: THREE.Sprite | null;
+  pose: KartPose;
+  seen: boolean;
+  fresh: boolean;
+  // geglättete Darstellung
+  steer: number;
+  pitch: number;
+  roll: number;
+  lastHeading: number;
+  airTime: number;
+  // letzter Zustand, um Ereignisse zu erkennen
+  spin: number;
+  boost: number;
+  stall: number;
+  guard: number;
+  respawn: number;
+  roulette: number;
+  item: number;
+  flags: number;
+  driftDir: number;
+  driftStage: number;
+  finished: boolean;
+  wallCooldown: number;
+  bumpCooldown: number;
+  // Hinterräder im letzten Bild (für Bremsspuren)
+  rl: THREE.Vector3;
+  rr: THREE.Vector3;
+  hasTrail: boolean;
+  audio: KartAudio;
+}
+
+const LEVELS: { ratio: number; kart: KartDetail; world: number; particles: number; skid: boolean }[] = [
+  { ratio: 1, kart: 0, world: 0, particles: 220, skid: false },
+  { ratio: 1.5, kart: 1, world: 1, particles: 420, skid: true },
+  { ratio: 2, kart: 2, world: 2, particles: 640, skid: true },
 ];
 
-interface Car {
-  group: THREE.Group;
-  body: THREE.Group;
-  shadow: THREE.Mesh;
-  label: THREE.Sprite;
-  labelText: string;
-  lean: number;
-  hop: number;
-  wasDrifting: boolean;
-  sparkCarry: number;
+const SPARK_COLORS = [0xcfd3e6, 0x3ff2e2, 0xffe04a, 0xff5ad2];
+
+function wrapAngle(a: number): number {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
 }
 
-function canvasTexture(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
+function labelSprite(name: string, color: string): THREE.Sprite {
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  draw(c.getContext('2d')!);
+  c.width = 256;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.font = '900 34px "Arial Narrow", "Helvetica Neue", Arial, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineJoin = 'round';
+  g.lineWidth = 9;
+  g.strokeStyle = '#16131c';
+  const text = name.length > 13 ? `${name.slice(0, 12)}…` : name;
+  g.strokeText(text, 128, 34);
+  g.fillStyle = color;
+  g.fillText(text, 128, 34);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
-
-function labelTexture(text: string, color: string): THREE.CanvasTexture {
-  return canvasTexture(512, 128, (g) => {
-    g.font = '600 60px system-ui, -apple-system, "Segoe UI", sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.lineWidth = 10;
-    g.strokeStyle = 'rgba(12,14,16,0.85)';
-    g.strokeText(text, 256, 66);
-    g.fillStyle = color;
-    g.fillText(text, 256, 66);
-  });
-}
-
-/** Band entlang der Strecke zwischen zwei seitlichen Abständen. */
-function ribbon(latA: number, latB: number, yA: number, yB: number): THREE.BufferGeometry {
-  const t = TRACK;
-  const pos = new Float32Array((t.n + 1) * 6);
-  const idx: number[] = [];
-  for (let i = 0; i <= t.n; i++) {
-    const s = i % t.n;
-    const rx = rightX(t, s);
-    const rz = rightZ(t, s);
-    pos.set([t.px[s] + rx * latA, yA, t.pz[s] + rz * latA, t.px[s] + rx * latB, yB, t.pz[s] + rz * latB], i * 6);
-    if (i < t.n) {
-      const a = i * 2;
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-/** Viele kleine Rechtecke auf der Fahrbahn (Mittelstriche) als ein Netz. */
-function dashes(every: number, length: number, halfWidth: number, y: number): THREE.BufferGeometry {
-  const t = TRACK;
-  const pos: number[] = [];
-  const idx: number[] = [];
-  for (let i = 0; i < t.n; i += every) {
-    const a = i;
-    const b = wrapSeg(t, i + length);
-    const base = pos.length / 3;
-    for (const s of [a, b]) {
-      const rx = rightX(t, s);
-      const rz = rightZ(t, s);
-      pos.push(t.px[s] - rx * halfWidth, y, t.pz[s] - rz * halfWidth, t.px[s] + rx * halfWidth, y, t.pz[s] + rz * halfWidth);
-    }
-    idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-/** Einfache Teilchen für Funken, Flammen und Staub. */
-class Particles {
-  readonly points: THREE.Points;
-  private readonly max = 700;
-  private readonly pos = new Float32Array(this.max * 3);
-  private readonly col = new Float32Array(this.max * 3);
-  private readonly base = new Float32Array(this.max * 3);
-  private readonly vel = new Float32Array(this.max * 3);
-  private readonly life = new Float32Array(this.max);
-  private readonly span = new Float32Array(this.max);
-  private next = 0;
-
-  constructor() {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
-    this.pos.fill(-9999);
-    // Runde, weich auslaufende Punkte statt harter Quadrate.
-    const dot = canvasTexture(64, 64, (g) => {
-      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      grad.addColorStop(0, 'rgba(255,255,255,1)');
-      grad.addColorStop(0.35, 'rgba(255,255,255,0.75)');
-      grad.addColorStop(1, 'rgba(255,255,255,0)');
-      g.fillStyle = grad;
-      g.fillRect(0, 0, 64, 64);
-    });
-    this.points = new THREE.Points(
-      geo,
-      new THREE.PointsMaterial({
-        size: 0.55,
-        map: dot,
-        vertexColors: true,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
-    this.points.frustumCulled = false;
-  }
-
-  emit(x: number, y: number, z: number, vx: number, vy: number, vz: number, c: [number, number, number], life: number): void {
-    const i = this.next;
-    this.next = (this.next + 1) % this.max;
-    this.pos.set([x, y, z], i * 3);
-    this.vel.set([vx, vy, vz], i * 3);
-    this.base.set(c, i * 3);
-    this.life[i] = life;
-    this.span[i] = life;
-  }
-
-  update(dt: number): void {
-    for (let i = 0; i < this.max; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      const o = i * 3;
-      if (this.life[i] <= 0) {
-        this.pos[o + 1] = -9999;
-        continue;
-      }
-      this.vel[o + 1] -= 9 * dt;
-      this.pos[o] += this.vel[o] * dt;
-      this.pos[o + 1] = Math.max(0.05, this.pos[o + 1] + this.vel[o + 1] * dt);
-      this.pos[o + 2] += this.vel[o + 2] * dt;
-      const k = this.life[i] / this.span[i];
-      this.col[o] = this.base[o] * k;
-      this.col[o + 1] = this.base[o + 1] * k;
-      this.col[o + 2] = this.base[o + 2] * k;
-    }
-    this.points.geometry.attributes.position.needsUpdate = true;
-    this.points.geometry.attributes.color.needsUpdate = true;
-  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+  sprite.scale.set(3.6, 0.9, 1);
+  sprite.renderOrder = 15;
+  return sprite;
 }
 
 export class RaceScene {
-  cameraMode: CameraMode = 'chase';
+  cameraMode: 'chase' | 'top' = 'chase';
+  /** Wie tief das eigene Kart in einer Rauchwolke steckt (0..1) – die Oberfläche legt einen Schleier darüber. */
+  smoke = 0;
+  onEvent: ((e: SceneEvent) => void) | null = null;
+  readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1 };
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(62, 1, 0.2, 700);
-  private readonly cars = new Map<number, Car>();
-  private readonly observer: ResizeObserver;
-  private readonly boxes: THREE.Mesh[] = [];
-  private readonly tireMeshes = new Map<number, THREE.Mesh>();
-  private readonly oilMeshes = new Map<number, THREE.Mesh>();
-  private readonly tireGeo = new THREE.TorusGeometry(0.55, 0.26, 8, 16);
-  private readonly tireMat = new THREE.MeshLambertMaterial({ color: '#17191c' });
-  private readonly oilGeo = new THREE.CircleGeometry(1.5, 18);
-  private readonly oilMat = new THREE.MeshStandardMaterial({ color: '#08090c', roughness: 0.15, metalness: 0.7 });
-  private readonly particles = new Particles();
-  private camHeading = 0;
-  private camReady = false;
-  private fov = 62;
+  private readonly camera = new THREE.PerspectiveCamera(62, 1.6, 0.3, 4200);
+  private world: World | null = null;
+  private things: ThingVisuals | null = null;
+  private track: Track = TRACK;
+  private readonly karts = new Map<number, KartView>();
+  private drivers: SceneDriver[] = [];
+  private readonly puffs: Particles;
+  private readonly sparks: Particles;
+  private readonly skids: SkidMarks;
+  private readonly pops = new ComicPops();
+  private readonly speedLines = new SpeedLines();
+  private readonly shadows = new BlobShadows(24);
+
+  private quality: Quality;
+  private level = 1;
+  private scale = 1;
+  private frameTimes = 0;
+  private frameCount = 0;
+  private lastDrop = 0;
   private time = 0;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.scene.background = new THREE.Color('#5d7f9c');
-    this.scene.fog = new THREE.Fog('#5d7f9c', 160, 520);
+  // Kamera
+  private camYaw = 0;
+  private readonly camPos = new THREE.Vector3();
+  private readonly camLook = new THREE.Vector3();
+  private camFov = 62;
+  private camReady = false;
+  private shake = 0;
+  private hitstop = 0;
+  private orbit = 0;
+  private raceId = -1;
 
-    this.scene.add(new THREE.HemisphereLight('#f2f6fb', '#3b4a3a', 1.5));
-    const sun = new THREE.DirectionalLight('#fff1d8', 1.9);
-    sun.position.set(-60, 120, 40);
-    this.scene.add(sun);
+  private readonly color = new THREE.Color();
+  private readonly v1 = new THREE.Vector3();
+  private readonly v2 = new THREE.Vector3();
+  private readonly q1 = new THREE.Quaternion();
+  private readonly e1 = new THREE.Euler(0, 0, 0, 'YXZ');
+  private readonly flat = new THREE.Quaternion();
 
-    this.buildTrack();
-    this.buildScenery();
-    this.scene.add(this.particles.points);
-
-    this.observer = new ResizeObserver(() => this.resize());
-    this.observer.observe(canvas.parentElement ?? canvas);
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    quality: Quality = 'auto',
+  ) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: window.devicePixelRatio < 1.5, powerPreference: 'high-performance' });
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.quality = quality;
+    this.level = quality === 'low' ? 0 : quality === 'high' ? 2 : 1;
+    const cap = LEVELS[2].particles;
+    this.puffs = new Particles(cap, false);
+    this.sparks = new Particles(Math.round(cap * 0.7), true);
+    this.skids = new SkidMarks(520);
+    this.scene.add(this.camera, this.puffs.points, this.sparks.points, this.skids.mesh, this.pops.group, this.shadows.mesh);
+    this.camera.add(this.speedLines.mesh);
+    window.addEventListener('resize', () => this.resize());
     this.resize();
   }
 
-  /** Legt Karts für die aktuellen Fahrer an und entfernt die der gegangenen. */
-  setRoster(drivers: { slot: number; name: string }[]): void {
-    const seen = new Set<number>();
-    for (const d of drivers) {
-      seen.add(d.slot);
-      let car = this.cars.get(d.slot);
-      if (!car) {
-        car = this.createCar(d.slot);
-        this.cars.set(d.slot, car);
+  // --- Aufbau ----------------------------------------------------------------
+
+  /** Baut die Welt der aktiven Strecke (TRACK) auf, falls sie nicht schon steht. */
+  setTrack(): void {
+    if (this.world && this.track === TRACK) return;
+    this.disposeWorld();
+    this.track = TRACK;
+    const lv = LEVELS[this.level];
+    this.world = new World(TRACK, lv.world);
+    this.things = new ThingVisuals(TRACK, this.level > 0);
+    this.scene.add(this.world.group, this.things.group);
+    this.scene.fog = this.world.fog;
+    this.scene.background = new THREE.Color(this.world.theme.sky[2]);
+    this.camReady = false;
+    this.applyLevel();
+  }
+
+  private disposeWorld(): void {
+    if (this.world) {
+      this.scene.remove(this.world.group);
+      this.world.dispose();
+      this.world = null;
+    }
+    if (this.things) {
+      this.scene.remove(this.things.group);
+      this.things.dispose();
+      this.things = null;
+    }
+    this.skids.clear();
+    this.puffs.clear();
+    this.sparks.clear();
+    this.pops.clear();
+  }
+
+  setRoster(drivers: SceneDriver[]): void {
+    this.drivers = drivers;
+    for (const [slot, k] of this.karts) {
+      const d = drivers.find((x) => x.slot === slot);
+      if (!d) {
+        this.scene.remove(k.visual.root);
+        if (k.label) this.scene.remove(k.label);
+        k.visual.dispose();
+        this.karts.delete(slot);
+      } else if (k.label && k.label.name !== d.name) {
+        this.scene.remove(k.label);
+        k.label.material.map?.dispose();
+        k.label.material.dispose();
+        k.label = null;
       }
-      if (car.labelText !== d.name) this.setLabel(car, d.slot, d.name);
-    }
-    for (const [slot, car] of this.cars) {
-      if (seen.has(slot)) continue;
-      this.scene.remove(car.group, car.shadow);
-      this.cars.delete(slot);
     }
   }
 
-  frame(entities: RenderEntity[], localSlot: number, dtSec: number, race: RaceView, tires: SnapshotTire[], oils: SnapshotOil[]): void {
-    this.time += dtSec;
-    const shown = new Set<number>();
-    let local: RenderEntity | null = null;
-    for (const e of entities) {
-      const car = this.cars.get(e.slot);
-      if (!car) continue;
-      shown.add(e.slot);
-      this.updateCar(car, e, dtSec);
-      // Das eigene Kart braucht kein Namensschild.
-      car.label.visible = e.slot !== localSlot;
-      if (e.slot === localSlot) local = e;
+  setQuality(q: Quality): void {
+    this.quality = q;
+    if (q !== 'auto') {
+      this.level = q === 'low' ? 0 : q === 'high' ? 2 : 1;
+      this.scale = 1;
     }
-    for (const [slot, car] of this.cars) {
-      if (shown.has(slot)) continue;
-      car.group.visible = false;
-      car.shadow.visible = false;
-    }
-
-    // Kisten: drehen und schweben; eingesammelte sind unsichtbar.
-    for (let i = 0; i < this.boxes.length; i++) {
-      const box = this.boxes[i];
-      box.visible = (race.boxes & (1 << i)) !== 0;
-      box.rotation.y = this.time * 1.6 + i;
-      box.position.y = 1.15 + Math.sin(this.time * 2.4 + i) * 0.14;
-    }
-    this.syncPool(this.tireMeshes, tires, (m, t) => {
-      m.position.set(t.x, 0.8, t.z);
-      m.rotation.y = Math.atan2(t.vx, t.vz) + Math.PI / 2;
-      m.rotation.z = -this.time * 22;
-    }, () => new THREE.Mesh(this.tireGeo, this.tireMat));
-    this.syncPool(this.oilMeshes, oils, (m, o) => m.position.set(o.x, 0.04, o.z), () => {
-      const m = new THREE.Mesh(this.oilGeo, this.oilMat);
-      m.rotation.x = -Math.PI / 2;
-      return m;
-    });
-
-    this.particles.update(dtSec);
-    this.updateCamera(local, dtSec);
-    this.renderer.render(this.scene, this.camera);
+    this.applyLevel();
   }
 
-  dispose(): void {
-    this.observer.disconnect();
-    this.renderer.dispose();
+  private applyLevel(): void {
+    const lv = LEVELS[this.level];
+    this.stats.level = this.level;
+    for (const k of this.karts.values()) k.visual.setDetail(lv.kart);
+    if (this.things) setOutlinesVisible(this.things.group, this.level > 0);
+    this.skids.mesh.visible = lv.skid;
+    this.resize();
   }
 
-  // ---------------------------------------------------------------------
-
-  private resize(): void {
-    const parent = this.canvas.parentElement;
-    const w = Math.max(1, parent?.clientWidth ?? window.innerWidth);
-    const h = Math.max(1, parent?.clientHeight ?? window.innerHeight);
+  resize(): void {
+    const w = this.canvas.clientWidth || window.innerWidth;
+    const h = this.canvas.clientHeight || window.innerHeight;
+    const ratio = Math.min(window.devicePixelRatio || 1, LEVELS[this.level].ratio) * this.scale;
+    this.stats.ratio = ratio;
+    this.stats.scale = this.scale;
+    this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
+    this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    this.puffs.setViewport(h * ratio, this.camera.fov);
+    this.sparks.setViewport(h * ratio, this.camera.fov);
   }
 
-  private buildTrack(): void {
-    const t = TRACK;
-    const flat = (color: string): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
+  private kartView(slot: number): KartView {
+    let k = this.karts.get(slot);
+    if (k) return k;
+    const visual = new KartVisual(slot, LEVELS[this.level].kart);
+    visual.root.rotation.order = 'YXZ';
+    this.scene.add(visual.root);
+    k = {
+      slot,
+      visual,
+      label: null,
+      pose: { speed: 0, steer: 0, driftDir: 0, driftStage: 0, boost: false, air: false, spin: 0, guard: false, stall: false, offroad: false, emote: 'none' },
+      seen: true,
+      fresh: true,
+      steer: 0,
+      pitch: 0,
+      roll: 0,
+      lastHeading: 0,
+      airTime: 0,
+      spin: 0,
+      boost: 0,
+      stall: 0,
+      guard: 0,
+      respawn: 0,
+      roulette: 0,
+      item: ITEM_NONE,
+      flags: 0,
+      driftDir: 0,
+      driftStage: 0,
+      finished: false,
+      wallCooldown: 0,
+      bumpCooldown: 0,
+      rl: new THREE.Vector3(),
+      rr: new THREE.Vector3(),
+      hasTrail: false,
+      audio: { slot, local: false, speed: 0, throttle: false, boost: false, drift: 0, offroad: false, air: false, stall: false, distance: 0, pan: 0 },
+    };
+    this.karts.set(slot, k);
+    return k;
+  }
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), new THREE.MeshLambertMaterial({ color: '#3d5a45' }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.05;
-    this.scene.add(ground);
+  // --- Ereignisse --------------------------------------------------------------
 
-    this.scene.add(new THREE.Mesh(ribbon(-t.wallHalf, t.wallHalf, 0, 0), flat('#4f7a59')));
-    this.scene.add(new THREE.Mesh(ribbon(-t.roadHalf, t.roadHalf, 0.01, 0.01), flat('#3a3f47')));
-    for (const side of [-1, 1]) {
-      const edge = side * (t.roadHalf - 0.45);
-      this.scene.add(new THREE.Mesh(ribbon(edge - 0.16, edge + 0.16, 0.02, 0.02), flat('#e9e6dc')));
-      const wall = side * t.wallHalf;
-      this.scene.add(new THREE.Mesh(ribbon(wall, wall, 0, 0.95), flat('#dedad0')));
-      this.scene.add(new THREE.Mesh(ribbon(wall - 0.2, wall + 0.2, 0.96, 0.96), flat('#ffd23f')));
+  private emit(kind: SceneEvent['kind'], k: KartView, local: boolean): void {
+    if (!this.onEvent) return;
+    const gain = local ? 1 : Math.max(0, 1 - k.audio.distance / 70);
+    if (gain <= 0.02) return;
+    this.onEvent({ kind, slot: k.slot, local, pan: local ? 0 : k.audio.pan, gain });
+  }
+
+  private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
+    this.pops.show(word, e.x, e.y + 2.6, e.z, style, size);
+  }
+
+  private burst(x: number, y: number, z: number, count: number, speed: number, hex: number, glow: boolean, size = 0.5, life = 0.6, up = 3): void {
+    this.color.set(hex);
+    const pool = glow ? this.sparks : this.puffs;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.4 + Math.random() * 0.6);
+      pool.emit(x, y, z, Math.cos(a) * s, up * (0.3 + Math.random()), Math.sin(a) * s, life * (0.6 + Math.random() * 0.6), size * (0.7 + Math.random() * 0.6), this.color, glow ? -size : size * 1.2, glow ? 9 : 4, 1.5);
     }
-    this.scene.add(new THREE.Mesh(dashes(9, 4, 0.13, 0.02), flat('#a9adb3')));
+  }
 
-    // Startlinie
-    const checker = canvasTexture(256, 32, (g) => {
-      for (let x = 0; x < 16; x++) {
-        for (let y = 0; y < 2; y++) {
-          g.fillStyle = (x + y) % 2 === 0 ? '#f2efe6' : '#15171a';
-          g.fillRect(x * 16, y * 16, 16, 16);
+  /** Vergleicht den Zustand eines Karts mit dem letzten Bild und löst Effekte aus. */
+  private detect(k: KartView, e: RenderEntity, local: boolean, dt: number): void {
+    const air = (e.flags & FLAG_AIR) !== 0;
+    const wasAir = (k.flags & FLAG_AIR) !== 0;
+    const stage = e.driftDir !== 0 ? turboStage(e.driftCharge) : 0;
+    if (!k.fresh) {
+      if (e.spin > 0 && k.spin === 0) {
+        this.pop('KRACH!', e, 'hot', 4.2);
+        this.burst(e.x, e.y + 1, e.z, 16, 9, 0xffd23f, true, 0.7, 0.7, 6);
+        this.burst(e.x, e.y + 0.6, e.z, 8, 5, 0xe9e6f2, false, 0.9, 0.7);
+        k.visual.squash(1);
+        this.emit('hit', k, local);
+        if (local) {
+          this.hitstop = 0.085;
+          this.shake = Math.max(this.shake, 0.6);
         }
       }
-    });
-    this.addDecal(0, 0, t.roadHalf * 2, 2.2, new THREE.MeshBasicMaterial({ map: checker, side: THREE.DoubleSide }));
-
-    // Boost-Felder: Pfeile in Fahrtrichtung
-    const chevrons = canvasTexture(128, 256, (g) => {
-      g.fillStyle = '#ff7a1a';
-      g.fillRect(0, 0, 128, 256);
-      g.strokeStyle = '#fff3c4';
-      g.lineWidth = 16;
-      g.lineJoin = 'miter';
-      for (let y = 250; y > -40; y -= 62) {
-        g.beginPath();
-        g.moveTo(14, y);
-        g.lineTo(64, y - 46);
-        g.lineTo(114, y);
-        g.stroke();
+      if (e.boost > 0 && e.boost > k.boost + 20) {
+        const turbo = k.driftDir !== 0 ? Math.max(1, k.driftStage) : 0;
+        this.pop(turbo ? 'WUSCH!' : 'ZISCH!', e, turbo === 3 ? 'violet' : turbo ? 'cool' : 'warm', 2.6 + turbo * 0.35);
+        k.visual.squash(-0.8);
+        this.emit(turbo === 3 ? 'turbo3' : turbo === 2 ? 'turbo2' : turbo === 1 ? 'turbo1' : 'boost', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.18);
       }
-    });
-    const padMat = new THREE.MeshBasicMaterial({ map: chevrons, side: THREE.DoubleSide });
-    for (const pad of t.pads) {
-      this.addDecal(wrapSeg(t, pad.seg + Math.round(pad.length / 2)), pad.lat, PAD_HALF_WIDTH * 2, PAD_LENGTH, padMat);
-    }
-
-    // Kisten
-    const boxGeo = new THREE.BoxGeometry(1.25, 1.25, 1.25);
-    const boxMat = new THREE.MeshLambertMaterial({ color: '#ffd23f', emissive: '#5a4300' });
-    const band = new THREE.MeshLambertMaterial({ color: '#15171a' });
-    for (const b of t.boxes) {
-      const box = new THREE.Mesh(boxGeo, boxMat);
-      box.add(new THREE.Mesh(new THREE.BoxGeometry(1.29, 0.3, 1.29), band));
-      box.position.set(b.x, 1.15, b.z);
-      this.boxes.push(box);
-      this.scene.add(box);
-    }
-  }
-
-  /** Flaches, texturiertes Rechteck auf der Fahrbahn, ausgerichtet an der Strecke. */
-  private addDecal(seg: number, lat: number, width: number, length: number, material: THREE.Material): void {
-    const t = TRACK;
-    const holder = new THREE.Group();
-    holder.position.set(t.px[seg] + rightX(t, seg) * lat, 0.03, t.pz[seg] + rightZ(t, seg) * lat);
-    holder.rotation.y = trackHeading(t, seg);
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, length), material);
-    // +90° um X: die Oberkante der Textur zeigt in Fahrtrichtung.
-    plane.rotation.x = Math.PI / 2;
-    holder.add(plane);
-    this.scene.add(holder);
-  }
-
-  /** Ein paar Hallen und Masten neben der Strecke als Orientierungspunkte. */
-  private buildScenery(): void {
-    const t = TRACK;
-    const colors = ['#8a97a3', '#a3867c', '#7c9aa3', '#a89a72', '#8d87a8'];
-    let placed = 0;
-    for (let gx = -150; gx <= 160 && placed < 26; gx += 26) {
-      for (let gz = -120; gz <= 130 && placed < 26; gz += 26) {
-        // Deterministische "Zufallswerte" aus der Rasterposition.
-        const h = Math.abs(Math.sin(gx * 12.9898 + gz * 78.233) * 43758.5453) % 1;
-        const x = gx + (h - 0.5) * 12;
-        const z = gz + (((h * 7) % 1) - 0.5) * 12;
-        let near = Infinity;
-        for (let i = 0; i < t.n; i += 3) near = Math.min(near, Math.hypot(t.px[i] - x, t.pz[i] - z));
-        const size = 7 + h * 9;
-        if (near < t.wallHalf + size * 0.75 + 3) continue;
-        const height = 4 + ((h * 13) % 1) * 11;
-        const hall = new THREE.Mesh(
-          new THREE.BoxGeometry(size, height, size * (0.7 + ((h * 3) % 1) * 0.8)),
-          new THREE.MeshLambertMaterial({ color: colors[placed % colors.length] }),
-        );
-        hall.position.set(x, height / 2, z);
-        hall.rotation.y = h * Math.PI;
-        this.scene.add(hall);
-        placed++;
+      if (e.driftDir !== 0 && k.driftDir === 0) this.emit('drift-start', k, local);
+      if (!air && wasAir && e.respawn === 0 && k.respawn === 0) {
+        if (k.airTime > 0.28) {
+          this.burst(e.x, e.y + 0.2, e.z, 10, 6, 0xd9cfc0, false, 0.8, 0.5, 1.5);
+          k.visual.squash(Math.min(1.2, 0.4 + k.airTime));
+          this.emit('land', k, local);
+          if (local) this.shake = Math.max(this.shake, Math.min(0.45, k.airTime * 0.4));
+        }
+        if (k.airTime > 0.75) this.pop('PLUMPS!', e, 'white', 3);
       }
-    }
-  }
-
-  private createCar(slot: number): Car {
-    const color = playerColor(slot);
-    const group = new THREE.Group();
-    const body = new THREE.Group();
-    group.add(body);
-    const paint = new THREE.MeshLambertMaterial({ color });
-    const dark = new THREE.MeshLambertMaterial({ color: '#16181b' });
-    const light = new THREE.MeshLambertMaterial({ color: '#f2efe6' });
-
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.42, 2.05), paint);
-    chassis.position.y = 0.48;
-    body.add(chassis);
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.3, 0.55), light);
-    nose.position.set(0, 0.45, 1.2);
-    body.add(nose);
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.55, 0.3), dark);
-    seat.position.set(0, 0.9, -0.62);
-    body.add(seat);
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.1, 0.38), paint);
-    wing.position.set(0, 1.12, -0.98);
-    body.add(wing);
-    // Fahrer: Rumpf und Helm
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.55, 0.42), dark);
-    torso.position.set(0, 0.98, -0.2);
-    body.add(torso);
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.31, 14, 10), light);
-    helmet.position.set(0, 1.5, -0.2);
-    body.add(helmet);
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.14, 0.2), paint);
-    visor.position.set(0, 1.5, 0.05);
-    body.add(visor);
-
-    const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.32, 12);
-    for (const [x, z] of [
-      [-0.74, 0.74],
-      [0.74, 0.74],
-      [-0.78, -0.72],
-      [0.78, -0.72],
-    ]) {
-      const wheel = new THREE.Mesh(wheelGeo, dark);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 0.34, z);
-      body.add(wheel);
-    }
-
-    const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(1.35, 18),
-      new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.4, depthWrite: false }),
-    );
-    shadow.rotation.x = -Math.PI / 2;
-
-    const label = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false }));
-    label.scale.set(4.2, 1.05, 1);
-    label.position.y = 2.7;
-    group.add(label);
-
-    group.visible = false;
-    shadow.visible = false;
-    this.scene.add(group, shadow);
-    return { group, body, shadow, label, labelText: '', lean: 0, hop: 0, wasDrifting: false, sparkCarry: 0 };
-  }
-
-  private setLabel(car: Car, slot: number, name: string): void {
-    const mat = car.label.material;
-    mat.map?.dispose();
-    mat.map = labelTexture(name, playerColor(slot));
-    mat.needsUpdate = true;
-    car.labelText = name;
-  }
-
-  private updateCar(car: Car, e: RenderEntity, dt: number): void {
-    const drifting = e.driftDir !== 0;
-    // Kleiner Hüpfer beim Einleiten des Drifts.
-    if (drifting && !car.wasDrifting) car.hop = 0.24;
-    car.wasDrifting = drifting;
-    if (car.hop > 0) car.hop = Math.max(0, car.hop - dt);
-    const hopY = car.hop > 0 ? Math.sin((car.hop / 0.24) * Math.PI) * 0.32 : 0;
-
-    car.group.visible = true;
-    car.shadow.visible = true;
-    car.group.position.set(e.x, hopY, e.z);
-    car.group.rotation.y = e.heading;
-    car.shadow.position.set(e.x, 0.03, e.z);
-
-    // Schräglage in der Kurve, stärker im Drift.
-    const fx = Math.sin(e.heading);
-    const fz = Math.cos(e.heading);
-    const lateral = e.vx * -fz + e.vz * fx;
-    const targetLean = drifting ? e.driftDir * 0.16 : Math.max(-0.1, Math.min(0.1, lateral * 0.02));
-    car.lean += (targetLean - car.lean) * Math.min(1, dt * 10);
-    car.body.rotation.z = car.lean;
-    // Nach einem Treffer dreht sich das Kart zweimal um sich selbst.
-    car.body.rotation.y = e.spin > 0 ? (1 - e.spin / SPIN_TICKS) * Math.PI * 4 : 0;
-    // Kurz nach einem Treffer unverwundbar: blinken.
-    car.body.visible = !(e.shield > 0 && e.spin === 0 && Math.floor(this.time * 12) % 2 === 0);
-
-    // Effekte an den Hinterrädern
-    const rx = -fz;
-    const rz = fx;
-    const speed = Math.hypot(e.vx, e.vz);
-    car.sparkCarry += dt * 60;
-    const bursts = Math.floor(car.sparkCarry);
-    car.sparkCarry -= bursts;
-    for (let b = 0; b < bursts; b++) {
-      if (drifting) {
-        const stage = turboStage(e.driftCharge);
-        const c = SPARK_COLORS[stage];
-        const n = stage === 0 ? 1 : 2;
-        for (const side of [-1, 1]) {
-          for (let k = 0; k < n; k++) {
-            const px = e.x - fx * 0.9 + rx * side * 0.78;
-            const pz = e.z - fz * 0.9 + rz * side * 0.78;
-            this.particles.emit(
-              px,
-              0.15,
-              pz,
-              -fx * 3 + (Math.random() - 0.5) * 4 - rx * e.driftDir * 2,
-              1.5 + Math.random() * (stage === 0 ? 1 : 3.5),
-              -fz * 3 + (Math.random() - 0.5) * 4 - rz * e.driftDir * 2,
-              c,
-              stage === 0 ? 0.22 : 0.35,
-            );
-          }
+      if (e.respawn > 0 && k.respawn === 0) {
+        // Der Effekt gehört dorthin, wo das Kart verschwunden ist – nicht an den neuen Platz.
+        const th = this.track.def.theme;
+        const p = k.visual.root.position;
+        this.pops.show(th === 'klippe' ? 'PLATSCH!' : th === 'glut' ? 'ZSSSCH!' : 'HUCH!', p.x, p.y + 5, p.z, th === 'glut' ? 'hot' : 'cool', 4.4);
+        this.burst(p.x, p.y + 1.5, p.z, 18, 7, th === 'glut' ? 0xff9a1f : 0xc9f4ff, th === 'glut', 0.9, 0.9, 9);
+        this.emit('fall', k, local);
+        k.hasTrail = false;
+      }
+      if (e.respawn === 0 && k.respawn > 0) this.emit('respawn', k, local);
+      if (e.stall > 0 && k.stall === 0) {
+        this.pop('BZZZT!', e, 'violet', 3.6);
+        this.burst(e.x, e.y + 1, e.z, 12, 6, 0xb9a8ff, true, 0.5, 0.5, 4);
+        this.emit('stall', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.3);
+      }
+      if (e.guard === 0 && k.guard > 30) {
+        this.pop('KLONK!', e, 'white', 3.6);
+        this.burst(e.x, e.y + 1, e.z, 10, 8, 0xdfe6f2, true, 0.6, 0.5, 4);
+        this.emit('guard-block', k, local);
+      }
+      if (e.guard > k.guard + 60) this.emit('use-guard', k, local);
+      if (e.roulette > 0 && k.roulette === 0) {
+        this.burst(e.x, e.y + 1.2, e.z, 10, 7, 0xffd23f, false, 0.26, 0.5, 6);
+        this.emit('pickup', k, local);
+      }
+      if (e.roulette === 0 && k.roulette > 0 && e.item !== ITEM_NONE) this.emit('item-ready', k, local);
+      if (e.item === ITEM_NONE && k.item !== ITEM_NONE && k.roulette === 0) {
+        if (k.item === ITEM_TIRE) {
+          this.pop('HUI!', e, 'white', 2.6);
+          this.emit('use-tire', k, local);
+        } else if (k.item === ITEM_OIL) {
+          this.pop('PLATSCH!', e, 'violet', 2.8);
+          this.emit('use-oil', k, local);
+        } else if (k.item === ITEM_TOP) {
+          this.pop('BRRRM!', e, 'hot', 2.8);
+          this.emit('use-top', k, local);
+        } else if (k.item === ITEM_SMOKE) {
+          this.pop('PUFF!', e, 'white', 3);
+          this.emit('use-smoke', k, local);
+        } else if (k.item === ITEM_EMP) {
+          this.pop('KLACK!', e, 'violet', 2.6);
+          this.emit('use-emp', k, local);
+        } else if (k.item === ITEM_SPRING) {
+          this.pop('BOING!', e, 'cool', 3.2);
+          k.visual.squash(-1);
+          this.emit('use-spring', k, local);
         }
       }
-      if (e.boost > 0) {
-        for (let k = 0; k < 3; k++) {
-          this.particles.emit(
-            e.x - fx * 1.25 + rx * (Math.random() - 0.5) * 0.6,
-            0.5 + Math.random() * 0.2,
-            e.z - fz * 1.25 + rz * (Math.random() - 0.5) * 0.6,
-            -fx * 9 + (Math.random() - 0.5) * 2,
-            1.2 + Math.random(),
-            -fz * 9 + (Math.random() - 0.5) * 2,
-            Math.random() < 0.5 ? [1, 0.55, 0.12] : [1, 0.85, 0.3],
-            0.28,
+      if (e.flags & FLAG_WALL && !(k.flags & FLAG_WALL) && k.wallCooldown <= 0 && Math.hypot(e.vx, e.vz) > 9) {
+        k.wallCooldown = 0.5;
+        this.burst(e.x, e.y + 0.6, e.z, 6, 5, 0xffe9a8, true, 0.4, 0.3, 2);
+        this.emit('wall', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.2);
+      }
+      if (e.finished && !k.finished) {
+        this.pop('ZIEL!', e, 'warm', 4.6);
+        for (const c of PLAYER_COLORS) this.burst(e.x, e.y + 2, e.z, 9, 8, parseInt(c.slice(1), 16), false, 0.4, 1.4, 9);
+        this.emit('finish', k, local);
+      }
+    }
+    k.airTime = air ? k.airTime + dt : 0;
+    k.spin = e.spin;
+    k.boost = e.boost;
+    k.stall = e.stall;
+    k.guard = e.guard;
+    k.respawn = e.respawn;
+    k.roulette = e.roulette;
+    k.item = e.item;
+    k.flags = e.flags;
+    k.driftDir = e.driftDir;
+    k.driftStage = stage;
+    k.finished = e.finished;
+    k.fresh = false;
+    if (k.wallCooldown > 0) k.wallCooldown -= dt;
+    if (k.bumpCooldown > 0) k.bumpCooldown -= dt;
+  }
+
+  // --- Pro Bild ----------------------------------------------------------------
+
+  frame(entities: RenderEntity[], localSlot: number, dt: number, race: RaceView, things: SnapshotThing[]): void {
+    if (!this.world || !this.things) return;
+    const t = this.track;
+    this.measure(dt);
+
+    // Treffer-Stopp: für einen Wimpernschlag steht das Bild, nur die Kamera wackelt.
+    if (this.hitstop > 0) {
+      this.hitstop -= dt;
+      this.applyShake(dt);
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    this.time += dt;
+    if (race.raceId !== this.raceId) {
+      this.raceId = race.raceId;
+      this.skids.clear();
+      this.pops.clear();
+      this.camReady = false;
+      for (const k of this.karts.values()) k.fresh = true;
+    }
+
+    for (const k of this.karts.values()) k.seen = false;
+    this.shadows.begin();
+    let me: RenderEntity | null = null;
+    let meView: KartView | null = null;
+
+    for (const e of entities) {
+      const local = e.slot === localSlot;
+      const k = this.kartView(e.slot);
+      k.seen = true;
+      const speed = Math.hypot(e.vx, e.vz);
+      const fx = Math.sin(e.heading);
+      const fz = Math.cos(e.heading);
+      const vf = e.vx * fx + e.vz * fz;
+      const air = (e.flags & FLAG_AIR) !== 0;
+
+      // Boden unter dem Kart und dessen Neigung
+      projectOnTrack(t, e.x, e.z, e.seg);
+      const seg = proj.seg;
+      const ground = groundAt(t, seg, proj.along, proj.lat);
+      const a = (seg - 1 + t.n) % t.n;
+      const b = (seg + 1) % t.n;
+      const slope = (t.py[b] - t.py[a]) / (2 * t.step);
+      const gx = slope * t.tx[seg] + t.bank[seg] * rightX(t, seg);
+      const gz = slope * t.tz[seg] + t.bank[seg] * rightZ(t, seg);
+      const groundPitch = -Math.atan(gx * fx + gz * fz);
+      const groundRoll = -Math.atan(gx * -fz + gz * fx);
+      let wantPitch = groundPitch;
+      let wantRoll = groundRoll;
+      if (air) {
+        wantPitch = e.respawn > 0 ? 0 : -Math.atan2(e.vy, Math.max(8, speed)) * 0.55;
+        wantRoll = 0;
+      }
+      const rate = Math.min(1, dt * (air ? 5 : 14));
+      if (k.fresh) {
+        k.pitch = wantPitch;
+        k.roll = wantRoll;
+        k.lastHeading = e.heading;
+      }
+      k.pitch += (wantPitch - k.pitch) * rate;
+      k.roll += (wantRoll - k.roll) * rate;
+
+      // Lenkeinschlag aus der Drehung ablesen (fremde Karts liefern keine Eingaben mit)
+      const yawRate = dt > 0 ? wrapAngle(e.heading - k.lastHeading) / dt : 0;
+      k.lastHeading = e.heading;
+      const steerNow = Math.max(-1, Math.min(1, (-yawRate / 1.6) * (vf < 0 ? -1 : 1)));
+      k.steer += (steerNow - k.steer) * Math.min(1, dt * 12);
+
+      const pose = k.pose;
+      pose.speed = vf;
+      pose.steer = k.steer;
+      pose.driftDir = e.driftDir;
+      pose.driftStage = e.driftDir !== 0 ? turboStage(e.driftCharge) : 0;
+      pose.boost = e.boost > 0;
+      pose.air = air;
+      pose.spin = e.spin > 0 ? 1 - e.spin / SPIN_TICKS : 0;
+      // Kurz bevor der Stoßfänger abläuft, blinkt er.
+      pose.guard = e.guard > 0 && (e.guard > 90 || Math.floor(this.time * 10) % 2 === 0);
+      pose.stall = e.stall > 0;
+      pose.offroad = (e.flags & FLAG_OFFROAD) !== 0;
+      pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
+
+      // Hören: Entfernung und Richtung zur Kamera
+      this.v1.set(e.x, e.y, e.z).sub(this.camera.position);
+      const dist = this.v1.length();
+      this.v2.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      k.audio.local = local;
+      k.audio.speed = Math.abs(vf) / V_MAX;
+      k.audio.throttle = !e.finished && race.phase !== RACE_COUNTDOWN && e.spin === 0;
+      k.audio.boost = e.boost > 0;
+      k.audio.drift = e.driftDir !== 0 ? Math.max(0.5, pose.driftStage) : 0;
+      k.audio.offroad = pose.offroad;
+      k.audio.air = air;
+      k.audio.stall = e.stall > 0;
+      k.audio.distance = dist;
+      k.audio.pan = dist > 0.5 ? Math.max(-1, Math.min(1, this.v1.dot(this.v2) / dist)) : 0;
+
+      this.detect(k, e, local, dt);
+
+      const root = k.visual.root;
+      root.position.set(e.x, e.y, e.z);
+      root.rotation.set(k.pitch, e.heading, k.roll);
+      // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist.
+      root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && Math.floor(this.time * 14) % 2 === 0);
+      k.visual.update(dt, pose);
+
+      if (ground !== NO_GROUND && e.respawn === 0) {
+        this.e1.set(groundPitch, e.heading, groundRoll);
+        this.q1.setFromEuler(this.e1);
+        this.shadows.add(e.x, ground, e.z, this.q1, 2.5, e.y - ground);
+      }
+
+      this.trail(k, e, speed, vf, air, pose.driftStage, dt);
+
+      if (local) {
+        me = e;
+        meView = k;
+      } else {
+        if (!k.label) {
+          const d = this.drivers.find((x) => x.slot === e.slot);
+          k.label = labelSprite(d?.name ?? `Fahrer ${e.slot + 1}`, PLAYER_COLORS[e.slot % PLAYER_COLORS.length]);
+          k.label.name = d?.name ?? '';
+          this.scene.add(k.label);
+        }
+        k.label.position.set(e.x, e.y + 2.75, e.z);
+        k.label.visible = dist < 80 && dist > 4;
+      }
+    }
+    for (const k of this.karts.values()) {
+      if (k.seen) continue;
+      k.visual.root.visible = false;
+      if (k.label) k.label.visible = false;
+      k.fresh = true;
+    }
+    this.bumps(entities, localSlot);
+
+    // Dinge und Hindernisse
+    this.things.update(things, dt, this.time);
+    this.things.updateHazards(race.hostTick, this.time);
+    let smoke = 0;
+    this.flat.identity();
+    for (const th of things) {
+      if (th.kind === THING_TIRE || th.kind === THING_TOP) {
+        this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
+        if (th.kind === THING_TOP && Math.random() < dt * 40) {
+          this.color.set(0xffe04a);
+          this.sparks.emit(th.x, th.y, th.z, (Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.35, 0.35, this.color, -0.6, 2, 1);
+        }
+      } else if (th.kind === THING_SMOKE && me) {
+        const d = Math.hypot(th.x - me.x, th.z - me.z);
+        if (Math.abs(th.y - me.y) < 5) smoke = Math.max(smoke, Math.min(1, (9.5 - d) / 3.5) * Math.min(1, th.ttl));
+      }
+    }
+    for (const h of this.things.hazards) this.shadows.add(h.position.x, h.position.y, h.position.z, this.flat, 3.4, 0);
+    this.shadows.end();
+    this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
+
+    this.puffs.update(dt);
+    this.sparks.update(dt);
+    this.pops.update(dt);
+
+    this.updateCamera(me, meView, race, dt);
+    const fast = me ? (me.boost > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
+    this.speedLines.update(dt, this.time, fast, this.camera.aspect);
+    this.world.update(this.time, dt, this.camera.position, race.boxes);
+    this.renderer.render(this.scene, this.camera);
+    this.stats.calls = this.renderer.info.render.calls;
+    this.stats.triangles = this.renderer.info.render.triangles;
+  }
+
+  /** Funken, Staub, Flammen und Bremsspuren eines Karts. */
+  private trail(k: KartView, e: RenderEntity, speed: number, vf: number, air: boolean, stage: number, dt: number): void {
+    const root = k.visual.root;
+    root.updateMatrixWorld();
+    const A = k.visual.anchors;
+    const rl = this.v1.copy(A.wheelRearL).applyMatrix4(root.matrixWorld);
+    const rr = this.v2.copy(A.wheelRearR).applyMatrix4(root.matrixWorld);
+    const drifting = e.driftDir !== 0 && !air;
+    const lv = LEVELS[this.level];
+    const budget = lv.particles / LEVELS[2].particles;
+
+    if (drifting) {
+      // Funken an den Hinterrädern in der Farbe der Turbo-Stufe
+      const n = (stage === 0 ? 30 : 55 + stage * 25) * budget * dt;
+      this.color.set(SPARK_COLORS[stage]);
+      for (const w of [rl, rr]) {
+        if (Math.random() < n) {
+          this.sparks.emit(
+            w.x,
+            w.y + 0.05,
+            w.z,
+            -e.vx * 0.25 + (Math.random() - 0.5) * 4,
+            1.5 + Math.random() * 3.5,
+            -e.vz * 0.25 + (Math.random() - 0.5) * 4,
+            0.22 + Math.random() * 0.2,
+            0.28 + stage * 0.07,
+            this.color,
+            -0.5,
+            12,
+            1,
           );
         }
-      } else if ((e.flags & FLAG_OFFROAD) !== 0 && speed > 6 && Math.random() < 0.6) {
-        this.particles.emit(e.x - fx * 0.9, 0.2, e.z - fz * 0.9, (Math.random() - 0.5) * 3, 1.6, (Math.random() - 0.5) * 3, [0.3, 0.36, 0.2], 0.45);
+      }
+      if (lv.skid && k.hasTrail) {
+        this.skids.add(k.rl.x, k.rl.y, k.rl.z, rl.x, rl.y, rl.z, 0.3);
+        this.skids.add(k.rr.x, k.rr.y, k.rr.z, rr.x, rr.y, rr.z, 0.3);
+      }
+      if (Math.random() < 22 * budget * dt) {
+        this.color.set(0xe9e6f2);
+        const w = Math.random() < 0.5 ? rl : rr;
+        this.puffs.emit(w.x, w.y + 0.2, w.z, (Math.random() - 0.5) * 2, 1 + Math.random(), (Math.random() - 0.5) * 2, 0.45, 0.5, this.color, 1.8, -0.5, 2, 0.8);
+      }
+    }
+    k.rl.copy(rl);
+    k.rr.copy(rr);
+    k.hasTrail = drifting;
+
+    if (!air && e.flags & FLAG_OFFROAD && speed > 6 && Math.random() < 26 * budget * dt) {
+      this.color.set(this.world!.theme.shoulder).multiplyScalar(0.9);
+      const w = Math.random() < 0.5 ? rl : rr;
+      this.puffs.emit(w.x, w.y + 0.15, w.z, (Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.5, 0.45, this.color, 1.6, 3, 1.5, 0.9);
+    }
+    if (e.boost > 0 && Math.random() < 90 * budget * dt) {
+      const ex = (Math.random() < 0.5 ? this.v1.copy(A.exhaustL) : this.v1.copy(A.exhaustR)).applyMatrix4(root.matrixWorld);
+      this.color.set(Math.random() < 0.5 ? 0xff8a2a : 0xffd23f);
+      this.sparks.emit(ex.x, ex.y, ex.z, e.vx * 0.55 + (Math.random() - 0.5) * 1.5, Math.random() * 1.2, e.vz * 0.55 + (Math.random() - 0.5) * 1.5, 0.16, 0.3, this.color, -1.2, 0, 1);
+    }
+    if (e.stall > 0 && Math.random() < 14 * dt) {
+      this.color.set(0x4a4654);
+      this.puffs.emit(e.x, e.y + 1.1, e.z, (Math.random() - 0.5) * 1.5, 2.2, (Math.random() - 0.5) * 1.5, 0.8, 0.4, this.color, 1.2, -1, 1, 0.85);
+    }
+    if (vf > V_MAX * 0.9 && !air && !drifting && e.boost === 0 && Math.random() < 5 * budget * dt) {
+      this.color.set(0xdedbe8);
+      const w = Math.random() < 0.5 ? rl : rr;
+      this.puffs.emit(w.x, w.y + 0.1, w.z, 0, 0.6, 0, 0.3, 0.25, this.color, 1.2, 0, 2, 0.5);
+    }
+  }
+
+  /** Rempler zwischen Karts: Funken zwischen beiden. */
+  private bumps(entities: RenderEntity[], localSlot: number): void {
+    for (let i = 0; i < entities.length; i++) {
+      for (let j = i + 1; j < entities.length; j++) {
+        const a = entities[i];
+        const b = entities[j];
+        if (Math.abs(a.y - b.y) > 1.6 || a.respawn > 0 || b.respawn > 0) continue;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 2.2 || d < 1e-3) continue;
+        const closing = ((a.vx - b.vx) * dx + (a.vz - b.vz) * dz) / d;
+        const ka = this.karts.get(a.slot);
+        const kb = this.karts.get(b.slot);
+        if (!ka || !kb || closing < 2.2 || ka.bumpCooldown > 0 || kb.bumpCooldown > 0) continue;
+        ka.bumpCooldown = kb.bumpCooldown = 0.45;
+        const local = a.slot === localSlot || b.slot === localSlot;
+        this.burst((a.x + b.x) / 2, (a.y + b.y) / 2 + 0.7, (a.z + b.z) / 2, 9, 6, 0xffe9a8, true, 0.45, 0.35, 3);
+        if (closing > 6) this.pops.show('RUMMS!', (a.x + b.x) / 2, a.y + 2.4, (a.z + b.z) / 2, 'white', 2.8);
+        ka.visual.squash(0.4);
+        kb.visual.squash(0.4);
+        this.emit('bump', a.slot === localSlot ? ka : kb, local);
+        if (local) this.shake = Math.max(this.shake, 0.25);
       }
     }
   }
 
-  private syncPool<T extends { id: number }>(
-    pool: Map<number, THREE.Mesh>,
-    items: T[],
-    place: (mesh: THREE.Mesh, item: T) => void,
-    create: () => THREE.Mesh,
-  ): void {
-    const seen = new Set<number>();
-    for (const item of items) {
-      seen.add(item.id);
-      let mesh = pool.get(item.id);
-      if (!mesh) {
-        mesh = create();
-        pool.set(item.id, mesh);
-        this.scene.add(mesh);
-      }
-      place(mesh, item);
-    }
-    for (const [id, mesh] of pool) {
-      if (seen.has(id)) continue;
-      this.scene.remove(mesh);
-      pool.delete(id);
-    }
-  }
+  // --- Kamera --------------------------------------------------------------------
 
-  private updateCamera(local: RenderEntity | null, dtSec: number): void {
-    const t = TRACK;
-    if (this.cameraMode === 'top' || !local) {
-      // Übersicht: so hoch, dass die ganze Strecke ins Bild passt.
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (let i = 0; i < t.n; i += 4) {
-        minX = Math.min(minX, t.px[i]);
-        maxX = Math.max(maxX, t.px[i]);
-        minZ = Math.min(minZ, t.pz[i]);
-        maxZ = Math.max(maxZ, t.pz[i]);
-      }
-      const pad = t.wallHalf + 6;
-      const fov = (62 * Math.PI) / 180;
-      const halfX = (maxX - minX) / 2 + pad;
-      const halfZ = (maxZ - minZ) / 2 + pad;
-      const height = Math.max(halfZ / Math.tan(fov / 2), halfX / (Math.tan(fov / 2) * this.camera.aspect));
-      if (this.camera.fov !== 62) {
-        this.camera.fov = 62;
-        this.camera.updateProjectionMatrix();
-      }
-      this.camera.position.set((minX + maxX) / 2, height, (minZ + maxZ) / 2 + 0.01);
-      this.camera.up.set(0, 0, 1);
-      this.camera.lookAt((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+  private updateCamera(me: RenderEntity | null, k: KartView | null, race: RaceView, dt: number): void {
+    const cam = this.camera;
+    const w = this.world!;
+    const t = this.track;
+    if (this.cameraMode === 'top' || !me || !k) {
+      const h = w.radius * 1.5;
+      cam.position.set(w.center.x, h, w.center.z - h * 0.55);
+      cam.lookAt(w.center.x, 0, w.center.z);
+      cam.fov = 55;
+      cam.updateProjectionMatrix();
       this.camReady = false;
       return;
     }
+    const speed = Math.hypot(me.vx, me.vz);
+    const frac = Math.min(1.4, speed / V_MAX);
 
-    this.camera.up.set(0, 1, 0);
-    // Die Kamera folgt der Fahrtrichtung, nicht der Nase: so sieht man im
-    // Drift das schräg gestellte Kart.
-    const speed = Math.hypot(local.vx, local.vz);
-    const forward = local.vx * Math.sin(local.heading) + local.vz * Math.cos(local.heading);
-    const travel = speed > 4 && forward > 0 ? Math.atan2(local.vx, local.vz) : local.heading;
+    // Blickrichtung: folgt der Fahrtrichtung, nicht der Nase – im Drift sieht man das Kart schräg.
+    let wantYaw = speed > 4 ? Math.atan2(me.vx, me.vz) : me.heading;
+    if (me.spin > 0 || me.respawn > 0) wantYaw = this.camYaw;
+    if (!this.camReady) this.camYaw = me.heading;
+    this.camYaw += wrapAngle(wantYaw - this.camYaw) * Math.min(1, dt * (me.driftDir !== 0 ? 3.2 : 5.5));
+
+    const intro = race.phase === RACE_COUNTDOWN ? Math.max(0, Math.min(1, (race.untilGo - 3.1) / 2.3)) : 0;
+    const done = me.finished || race.phase === RACE_RESULTS;
+    let yaw = this.camYaw;
+    let dist = 5.3 + frac * 1.1;
+    let height = 2.45 + frac * 0.25;
+    let lookAhead = 3.2;
+    if (intro > 0) {
+      // Kamerafahrt: von schräg vorn über die Startaufstellung nach hinten ins Heck.
+      const s = intro * intro * (3 - 2 * intro);
+      // Zur Streckenmitte hin schwenken, nicht in die Bande.
+      projectOnTrack(t, me.x, me.z, me.seg);
+      yaw += s * 2.5 * (proj.lat < 0 ? 1 : -1);
+      dist += s * 5;
+      height += s * 2.2;
+      lookAhead *= 1 - s;
+    } else if (done) {
+      this.orbit += dt * 0.5;
+      yaw = me.heading + Math.PI + Math.sin(this.orbit) * 1.1;
+      dist = 6.2;
+      height = 2.1;
+      lookAhead = 0;
+    } else this.orbit = 0;
+
+    const dx = Math.sin(yaw);
+    const dz = Math.cos(yaw);
+    // Hang voraus: am Berg schaut die Kamera hinauf, im Gefälle hinunter.
+    const seg = me.seg % t.n;
+    const ahead = (seg + 6) % t.n;
+    const rise = Math.max(-2.5, Math.min(2.5, t.py[ahead] - t.py[seg]));
+    const air = (me.flags & FLAG_AIR) !== 0;
+
+    const px = me.x - dx * dist;
+    const pz = me.z - dz * dist;
+    let py = me.y + height - rise * 0.25;
+    // Nie unter die Fahrbahn rutschen.
+    projectOnTrack(t, px, pz, me.seg);
+    const g = groundAt(t, proj.seg, proj.along, proj.lat);
+    if (g !== NO_GROUND && py < g + 1.3) py = g + 1.3;
+
     if (!this.camReady) {
-      this.camHeading = travel;
-    } else {
-      let d = travel - this.camHeading;
-      if (d > Math.PI) d -= 2 * Math.PI;
-      else if (d < -Math.PI) d += 2 * Math.PI;
-      this.camHeading += d * Math.min(1, dtSec * 6);
+      this.camPos.set(px, py, pz);
+      this.camLook.set(me.x, me.y + 1.1, me.z);
+      this.camReady = true;
     }
-    const targetFov = local.boost > 0 ? 72 : 62 + Math.min(4, speed * 0.12);
-    this.fov += (targetFov - this.fov) * Math.min(1, dtSec * 5);
-    if (Math.abs(this.camera.fov - this.fov) > 0.05) {
-      this.camera.fov = this.fov;
-      this.camera.updateProjectionMatrix();
+    const follow = Math.min(1, dt * (intro > 0 || done ? 4 : 13));
+    this.camPos.x += (px - this.camPos.x) * follow;
+    this.camPos.z += (pz - this.camPos.z) * follow;
+    // In der Höhe träger: Sprünge und Kuppen spürt man, weil das Kart im Bild steigt und fällt.
+    this.camPos.y += (py - this.camPos.y) * Math.min(1, dt * (air ? 3.2 : 7));
+    this.camLook.x += (me.x + dx * lookAhead - this.camLook.x) * Math.min(1, dt * 14);
+    this.camLook.z += (me.z + dz * lookAhead - this.camLook.z) * Math.min(1, dt * 14);
+    this.camLook.y += (me.y + 1.15 + rise * 0.4 - this.camLook.y) * Math.min(1, dt * 9);
+
+    cam.position.copy(this.camPos);
+    cam.lookAt(this.camLook);
+    // Leichte Schräglage in Kurven
+    cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
+    this.applyShake(dt);
+
+    const wantFov = 60 + frac * 7 + (me.boost > 0 ? 9 : 0);
+    this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 5);
+    if (Math.abs(cam.fov - this.camFov) > 0.05) {
+      cam.fov = this.camFov;
+      cam.updateProjectionMatrix();
     }
-    const fx = Math.sin(this.camHeading);
-    const fz = Math.cos(this.camHeading);
-    this.camera.position.set(local.x - fx * 7.4, 3.5, local.z - fz * 7.4);
-    this.camera.lookAt(local.x + fx * 6, 1.1, local.z + fz * 6);
-    this.camReady = true;
+  }
+
+  private applyShake(dt: number): void {
+    if (this.shake <= 0.002) return;
+    const s = this.shake;
+    this.camera.position.x += (Math.random() - 0.5) * s;
+    this.camera.position.y += (Math.random() - 0.5) * s * 0.8;
+    this.camera.rotateZ((Math.random() - 0.5) * s * 0.06);
+    this.shake *= Math.exp(-dt * 9);
+  }
+
+  // --- Qualität --------------------------------------------------------------------
+
+  /** Misst die Bildrate und passt bei „Automatisch“ die Auflösung an. */
+  private measure(dt: number): void {
+    this.frameTimes += dt;
+    this.frameCount++;
+    if (this.frameTimes < 1) return;
+    const fps = this.frameCount / this.frameTimes;
+    this.stats.fps = fps;
+    this.frameTimes = 0;
+    this.frameCount = 0;
+    if (this.quality !== 'auto') return;
+    const now = this.time;
+    if (fps < 50) {
+      // Erst die Auflösung senken, dann eine Stufe herunter.
+      if (this.scale > 0.62) this.scale = Math.max(0.6, this.scale - (fps < 38 ? 0.2 : 0.1));
+      else if (this.level > 0) {
+        this.level--;
+        this.scale = 0.85;
+        this.applyLevel();
+      }
+      this.lastDrop = now;
+      this.resize();
+    } else if (fps > 57.5 && now - this.lastDrop > 8 && this.scale < 1) {
+      this.scale = Math.min(1, this.scale + 0.05);
+      this.resize();
+    }
+  }
+
+  /** Zustand aller sichtbaren Karts für die Dauergeräusche. */
+  kartAudio(out: KartAudio[]): KartAudio[] {
+    out.length = 0;
+    for (const k of this.karts.values()) if (k.seen) out.push(k.audio);
+    return out;
   }
 }

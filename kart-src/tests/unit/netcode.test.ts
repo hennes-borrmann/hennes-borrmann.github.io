@@ -30,6 +30,8 @@ function drive(i: number): Cmd {
   return { steer: Math.round(Math.sin(i / 37) * 40), buttons: BTN_GAS };
 }
 
+const CTX = { tick: 0, place: 1, smoke: false };
+
 describe('Protokoll', () => {
   it('Eingabepakete überstehen Kodieren/Dekodieren', () => {
     const cmds: Cmd[] = [
@@ -52,6 +54,10 @@ describe('Protokoll', () => {
     s.item = ITEM_OIL;
     s.nextItem = 2;
     s.roulette = 9;
+    s.vy = 4.5;
+    s.guard = 700;
+    s.stall = 99;
+    s.respawn = 12;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -61,9 +67,12 @@ describe('Protokoll', () => {
           goTick: 1234,
           laps: 3,
           boxes: 0b101101,
+          track: 2,
           karts: [{ slot: 2, bot: true, ptick: 5, ack: 7, state: s, lap: 2, place: 3, finished: true, finishTicks: 4321 }],
-          tires: [{ id: 9, x: 1.5, z: -2.5, vx: 40, vz: 0 }],
-          oils: [{ id: 4, x: 7, z: 8 }],
+          things: [
+            { id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0 },
+            { id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0 },
+          ],
         }),
       ),
     )!;
@@ -78,8 +87,10 @@ describe('Protokoll', () => {
     expect(k.state.vz).toBeCloseTo(-17.5, 5);
     expect([k.state.seg, k.state.boost, k.state.driftDir, k.state.driftCharge]).toEqual([s.seg, 42, -1, 130]);
     expect([k.state.item, k.state.nextItem, k.state.roulette]).toEqual([ITEM_OIL, 2, 9]);
-    expect(snap.tires[0]).toEqual({ id: 9, x: 1.5, z: -2.5, vx: 40, vz: 0 });
-    expect(snap.oils[0]).toEqual({ id: 4, x: 7, z: 8 });
+    expect(snap.track).toBe(2);
+    expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([s.y, 4.5, 700, 99, 12]);
+    expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0 });
+    expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0 });
   });
 
   it('16-Bit-Zähler erkennt "neuer" auch über den Überlauf', () => {
@@ -177,7 +188,7 @@ describe('Interpolation fremder Fahrzeuge', () => {
           carry = 1;
         }
         for (let i = 0; i < n; i++) {
-          stepKart(s, botCmd(s, brain, [], true), ENV);
+          stepKart(s, botCmd(s, brain, [], true, CTX), ENV);
           ptick++;
         }
         // Jeder zweite Tick geht als Snapshot raus und ist 30–60 ms unterwegs.
@@ -217,8 +228,8 @@ describe('Simulation', () => {
     const brainA = newBrain(0);
     const brainB = newBrain(0);
     for (let i = 0; i < 2000; i++) {
-      stepKart(a, botCmd(a, brainA, [], true), ENV);
-      stepKart(b, botCmd(b, brainB, [], true), ENV);
+      stepKart(a, botCmd(a, brainA, [], true, CTX), ENV);
+      stepKart(b, botCmd(b, brainB, [], true, CTX), ENV);
     }
     expect(a).toEqual(b);
     expect(Math.hypot(a.vx, a.vz)).toBeGreaterThan(15);
