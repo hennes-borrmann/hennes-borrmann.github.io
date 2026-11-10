@@ -47,6 +47,8 @@ export interface KartPose {
   held: number;
   /** Der Abschleppdrache zieht gerade. */
   tow: boolean;
+  /** Gleitflug über einer Flugstrecke: die Flügel sind ausgeklappt. */
+  glide: boolean;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */

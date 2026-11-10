@@ -1,5 +1,5 @@
-// Vier neue Eigenkompositionen im Datenformat von songs.ts.
-// Die Einbindung in MusicId und den Sequenzer übernimmt die Hauptentwicklung.
+// Vier neue Eigenkompositionen im Datenformat von songs.ts (von Codex, Aufgabe C-002).
+// Eingebunden wird jedes Stück mit seiner Welt: songs.ts trägt es dann in SONGS ein.
 import type { SongDef } from './songs';
 
 /** Wolkenwerft: G-lydisch, 132 BPM. Aufwärts springende Rufe und federnde Basspausen;

@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import {
   FLAG_AIR,
+  FLAG_GLIDE,
   FLAG_OFFROAD,
   FLAG_WALL,
   ITEM_EMP,
@@ -23,7 +24,7 @@ import {
   turboStage,
   lavaAt,
 } from '../game/sim';
-import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, PULSE_PRESS, PULSE_VENT, WATER_FROM, pulseCycle, tideLevel, vehicleAt } from '../game/mechanics';
+import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, GLIDE_CEILING, GLIDE_FALL, PULSE_PRESS, PULSE_VENT, WATER_FROM, pulseCycle, tideLevel, vehicleAt } from '../game/mechanics';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
@@ -86,7 +87,12 @@ export interface SceneEvent {
     /** Eine Stampfpresse schlägt herunter (slot −1). */
     | 'press'
     /** Das eigene Kart fährt durch Wasser (Flut). */
-    | 'splash';
+    | 'splash'
+    /** Fliegen: Flügel klappen aus, durch einen Schubring, in einen Aufwind, Fahrtwind im Gleitflug (nur das eigene Kart, wiederholt). */
+    | 'wings'
+    | 'ring'
+    | 'lift'
+    | 'wind';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -135,6 +141,10 @@ interface KartView {
   flat: number;
   /** Wie platt das Kart gerade dargestellt wird (0 … 1, geglättet). */
   flatK: number;
+  /** Gleitflug im letzten Bild, im Aufwind im letzten Bild, Pause bis zum nächsten Windgeräusch. */
+  glide: boolean;
+  lift: boolean;
+  windWait: number;
   roulette: number;
   item: number;
   flags: number;
@@ -210,6 +220,8 @@ export class RaceScene {
   private mechTime = 0;
   private honkWait = 0;
   private burnWait = 0;
+  /** Kamera: Anteil Gleitflug (0 … 1, geglättet). */
+  private camGlide = 0;
   /** Wasserspiegel der Gezeit in diesem Bild (ohne Gezeit: unendlich tief). */
   private waterLevel = -Infinity;
   /** Je Fahrzeug: lag das eigene Kart zuletzt dahinter (−1) oder davor (1)? */
@@ -448,6 +460,7 @@ export class RaceScene {
         emote: 'none',
         held: 0,
         tow: false,
+        glide: false,
       },
       seen: true,
       fresh: true,
@@ -465,6 +478,9 @@ export class RaceScene {
       draft: 0,
       flat: 0,
       flatK: 0,
+      glide: false,
+      lift: false,
+      windWait: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -628,8 +644,28 @@ export class RaceScene {
   private detect(k: KartView, e: RenderEntity, local: boolean, dt: number): void {
     const air = (e.flags & FLAG_AIR) !== 0;
     const wasAir = (k.flags & FLAG_AIR) !== 0;
+    const glide = (e.flags & FLAG_GLIDE) !== 0 && e.respawn === 0;
     const stage = e.driftDir !== 0 ? turboStage(e.driftCharge, e.char) : 0;
+    // Im Aufwind? (Säule um die Ideallinie, wie in sim.ts)
+    let lift = false;
+    if (glide) {
+      for (const th of this.track.thermals) {
+        const dx = e.x - th.x;
+        const dz = e.z - th.z;
+        if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(e.y - th.y) < GLIDE_FALL + GLIDE_CEILING) lift = true;
+      }
+    }
     if (!k.fresh) {
+      if (glide && !k.glide) {
+        this.pop('ABFLUG!', e, 'cool', 3.4);
+        k.visual.squash(-0.6);
+        this.emit('wings', k, local);
+        k.windWait = 0.25;
+      }
+      if (lift && !k.lift) {
+        this.pop('AUFWIND!', e, 'white', 3);
+        this.emit('lift', k, local);
+      }
       if (e.spin > 0 && k.spin === 0) {
         this.pop('KRACH!', e, 'hot', 4.2);
         this.burst(e.x, e.y + 1, e.z, 16, 9, 0xffd23f, true, 0.7, 0.7, 6);
@@ -641,7 +677,14 @@ export class RaceScene {
           this.shake = Math.max(this.shake, 0.6);
         }
       }
-      if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0) {
+      if (glide && e.boost > 0 && e.boost > k.boost + 20) {
+        // Durch einen Schubring geflogen
+        this.pop('RING!', e, 'warm', 3);
+        this.burst(e.x, e.y + 0.6, e.z, 12, 9, 0xffd23f, true, 0.5, 0.5, 4);
+        k.visual.squash(-0.8);
+        this.emit('ring', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.14);
+      } else if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0) {
         const turbo = k.driftDir !== 0 ? Math.max(1, k.driftStage) : 0;
         this.pop(turbo ? 'WUSCH!' : 'ZISCH!', e, turbo === 3 ? 'violet' : turbo ? 'cool' : 'warm', 2.6 + turbo * 0.35);
         k.visual.squash(-0.8);
@@ -656,7 +699,8 @@ export class RaceScene {
           this.emit('land', k, local);
           if (local) this.shake = Math.max(this.shake, Math.min(0.45, k.airTime * 0.4));
         }
-        if (k.airTime > 0.75) this.pop('PLUMPS!', e, 'white', 3);
+        // Nach einem Gleitflug setzt das Kart sanft auf – kein "PLUMPS!".
+        if (k.airTime > 0.75 && !k.glide) this.pop('PLUMPS!', e, 'white', 3);
       }
       if (e.respawn > 0 && k.respawn === 0) {
         // Der Effekt gehört dorthin, wo das Kart verschwunden ist – nicht an den neuen Platz.
@@ -746,6 +790,16 @@ export class RaceScene {
         this.emit('finish', k, local);
       }
     }
+    // Fahrtwind im Gleitflug: nur das eigene Kart, als dichte Folge kurzer Böen.
+    if (glide && local) {
+      k.windWait -= dt;
+      if (k.windWait <= 0) {
+        k.windWait = 0.42;
+        this.emit('wind', k, true);
+      }
+    }
+    k.glide = glide;
+    k.lift = lift;
     k.airTime = air ? k.airTime + dt : 0;
     k.spin = e.spin;
     k.boost = e.boost;
@@ -851,6 +905,7 @@ export class RaceScene {
       // Während der Auslosung ist die Hand noch leer; danach hält die Figur das Item hoch.
       pose.held = e.roulette > 0 ? 0 : e.item;
       pose.tow = e.tow > 0;
+      pose.glide = (e.flags & FLAG_GLIDE) !== 0 && e.respawn === 0;
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
 
       // Hören: Entfernung und Richtung zur Kamera
@@ -1095,9 +1150,11 @@ export class RaceScene {
     const intro = race.phase === RACE_COUNTDOWN ? Math.max(0, Math.min(1, (race.untilGo - 3.1) / 2.3)) : 0;
     const done = me.finished || race.phase === RACE_RESULTS;
     let yaw = this.camYaw;
-    let dist = 5.3 + frac * 1.1;
-    let height = 2.45 + frac * 0.25;
-    let lookAhead = 3.2;
+    // Im Gleitflug rückt die Kamera ab und höher: man sieht Ringe, Aufwinde und die Landebahn kommen.
+    this.camGlide += (((me.flags & FLAG_GLIDE) !== 0 && me.respawn === 0 ? 1 : 0) - this.camGlide) * Math.min(1, dt * 2.6);
+    let dist = 5.3 + frac * 1.1 + this.camGlide * 2.6;
+    let height = 2.45 + frac * 0.25 + this.camGlide * 1.5;
+    let lookAhead = 3.2 + this.camGlide * 5;
     if (intro > 0) {
       // Kamerafahrt: von schräg vorn über die Startaufstellung nach hinten ins Heck.
       const s = intro * intro * (3 - 2 * intro);
@@ -1151,7 +1208,7 @@ export class RaceScene {
     cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
     this.applyShake(dt);
 
-    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : 0);
+    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : 0) + this.camGlide * 5;
     this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 5);
     if (Math.abs(cam.fov - this.camFov) > 0.05) {
       cam.fov = this.camFov;

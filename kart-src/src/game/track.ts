@@ -37,7 +37,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {

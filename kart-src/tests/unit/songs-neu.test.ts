@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { SONGS, compileSong, type Song } from '../../src/audio/songs';
 import { NEUE_STUECKE } from '../../src/audio/songs-neu';
 
+// Vergleichsmaßstab sind die vier ursprünglichen Rennstücke – nicht die neuen, die inzwischen selbst in SONGS stehen.
+const neueDefinitionen = new Set(Object.values(NEUE_STUECKE));
 const rennstuecke = Object.entries(SONGS)
-  .filter(([, stueck]) => stueck.race)
+  .filter(([, stueck]) => stueck.race && !neueDefinitionen.has(stueck))
   .map(([name, stueck]) => compileSong(stueck, name));
 const kuerzestes = Math.min(...rennstuecke.map((stueck) => stueck.steps));
 const pegel = rennstuecke.map((stueck) => stueck.def.level);

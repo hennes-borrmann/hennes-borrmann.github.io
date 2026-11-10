@@ -43,6 +43,7 @@ const REST: KartPose = {
   emote: 'none',
   held: 0,
   tow: false,
+  glide: false,
 };
 
 interface Stage {

@@ -12,7 +12,7 @@ import type { TrackDef } from '../track';
 export const WOLKEN: TrackDef = {
   id: 'wolken',
   name: 'Wolkenwerft',
-  theme: 'klippe',
+  theme: 'wolken',
   blurb: 'Luftschiffwerft über den Wolken: Wendelrampe, Ballonhafen, Hangar – und dazwischen nur Luft.',
   twist: 'Fliegen: über den Lücken gleitet das Kart. Aufwinde heben, Ringe geben Schub.',
   grade: 2,

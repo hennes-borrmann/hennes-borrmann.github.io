@@ -286,7 +286,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
         }
       } else {
         // Berge und Inseln: gezackte Umrisse
-        const peak = t.def.theme === 'glut' ? 120 + n1 * 300 : 20 + n1 * 90 * (n2 > 0.45 ? 1 : 0.1);
+        // Über den Wolken stehen am Horizont Wolkentürme statt Bergen.
+        const peak = t.def.theme === 'glut' ? 120 + n1 * 300 : t.def.theme === 'wolken' ? 60 + n1 * 260 * (n2 > 0.35 ? 1 : 0.25) : 20 + n1 * 90 * (n2 > 0.45 ? 1 : 0.1);
         b.quad(p(a1, y0), p(a0, y0), p(a0, peak * 0.45), p(a1, peak * 0.55), col);
         b.tri(p(a1, peak * 0.55), p(a0, peak * 0.45), p(am, peak), col);
       }

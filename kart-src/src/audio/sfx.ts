@@ -70,6 +70,10 @@ const LEVEL: Record<SfxName, number> = {
   burn: 1.1,
   press: 2.6,
   splash: 1.8,
+  wings: 2,
+  ring: 2.4,
+  lift: 1.8,
+  wind: 1,
 };
 
 interface ToneOpts {
@@ -435,6 +439,19 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Fliegen (vorläufig, wird ausgearbeitet) ---
+      case 'wings':
+        v.noise(2400, 900, 0.22, 0.2, { q: 0.8, attack: 0.01 });
+        break;
+      case 'ring':
+        v.tone('triangle', 660, 1320, 0.22, 0.2).tone('sine', 990, 1980, 0.2, 0.1, { at: 0.04 });
+        break;
+      case 'lift':
+        v.noise(700, 1900, 0.6, 0.14, { q: 0.8, attack: 0.2 });
+        break;
+      case 'wind':
+        v.noise(900, 700, 0.75, 0.07, { q: 0.6, attack: 0.25 });
+        break;
       // --- Maschinen und Wasser ---
       case 'press':
         // Stampfpresse: ganz kurz zischt die Hydraulik, dann (ab 0,06 s) der Schlag –

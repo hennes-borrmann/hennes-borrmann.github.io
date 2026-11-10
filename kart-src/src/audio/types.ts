@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -45,6 +45,10 @@ export type SfxName =
   | 'burn' // das Kart fährt durch Lava: Zischen (wird etwa 3×/s aufgerufen)
   | 'press' // eine Stampfpresse schlägt herunter: schwerer metallischer Schlag
   | 'splash' // das Kart fährt durch Wasser: Platschen (wird etwa 3–4×/s aufgerufen)
+  | 'wings' // die Gleitflügel klappen aus (Abflug von der Rampe): Schnappen von Stoff, kurzes Aufrauschen
+  | 'ring' // durch einen Schubring geflogen: heller, aufsteigender Klang mit Schub
+  | 'lift' // in einen Aufwind geraten: weiches Aufrauschen, das nach oben zieht
+  | 'wind' // Fahrtwind im Gleitflug (wird etwa alle 0,42 s aufgerufen und soll zu einem Rauschen verschmelzen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten
 
