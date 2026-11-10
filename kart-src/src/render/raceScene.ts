@@ -22,7 +22,8 @@ import {
   V_MAX,
   turboStage,
 } from '../game/sim';
-import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, type Track } from '../game/track';
+import { SURFACES } from '../game/surface';
+import { NO_GROUND, TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -135,6 +136,9 @@ const LEVELS: { ratio: number; kart: KartDetail; world: number; particles: numbe
 
 const SPARK_COLORS = [0xcfd3e6, 0x3ff2e2, 0xffe04a, 0xff5ad2];
 
+/** Farbe der Staubfahne je Untergrund (0 = fester Boden, kein Staub); Reihenfolge wie SURFACES. */
+const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gravel: 0xb5aea4, grass: 0x8cc463 } as Record<string, number>)[s.id] ?? 0);
+
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= 2 * Math.PI;
   while (a < -Math.PI) a += 2 * Math.PI;
@@ -171,7 +175,8 @@ export class RaceScene {
   /** Wie nah ein Brummkreisel ist, der das eigene Kart sucht (0 = keiner, 1 = gleich da). */
   threat = 0;
   onEvent: ((e: SceneEvent) => void) | null = null;
-  readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1 };
+  /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
+  readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -256,7 +261,9 @@ export class RaceScene {
     this.disposeWorld();
     this.track = TRACK;
     const lv = LEVELS[this.level];
+    const started = performance.now();
     this.world = new World(TRACK, lv.world);
+    this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
     this.scene.add(this.world.group, this.things.group);
     this.scene.fog = this.world.fog;
@@ -622,9 +629,7 @@ export class RaceScene {
       projectOnTrack(t, e.x, e.z, e.seg);
       const seg = proj.seg;
       const ground = groundAt(t, seg, proj.along, proj.lat);
-      const a = (seg - 1 + t.n) % t.n;
-      const b = (seg + 1) % t.n;
-      const slope = (t.py[b] - t.py[a]) / (2 * t.step);
+      const slope = (t.py[t.next[seg]] - t.py[t.prev[seg]]) / (2 * t.step);
       const gx = slope * t.tx[seg] + t.bank[seg] * rightX(t, seg);
       const gz = slope * t.tz[seg] + t.bank[seg] * rightZ(t, seg);
       const groundPitch = -Math.atan(gx * fx + gz * fz);
@@ -676,7 +681,8 @@ export class RaceScene {
       k.audio.throttle = !e.finished && race.phase !== RACE_COUNTDOWN && e.spin === 0;
       k.audio.boost = e.boost > 0 || e.tow > 0;
       k.audio.drift = e.driftDir !== 0 ? Math.max(0.5, pose.driftStage) : 0;
-      k.audio.offroad = pose.offroad;
+      // Loser Untergrund klingt wie der Grünstreifen: es prasselt unter den Rädern.
+      k.audio.offroad = pose.offroad || DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]] !== 0;
       k.audio.air = air;
       k.audio.stall = e.stall > 0;
       k.audio.distance = dist;
@@ -762,7 +768,7 @@ export class RaceScene {
     this.updateCamera(me, meView, race, dt);
     const fast = me ? (me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
-    this.world.update(this.time, dt, this.camera.position, race.boxes);
+    this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx);
     if (this.needsCompile) {
       // Alle Shader jetzt übersetzen – auch die der noch unsichtbaren Effekte (Flammen,
       // Schutzring, Tempostriche). Sonst ruckelt es beim ersten Schub oder Treffer.
@@ -782,6 +788,7 @@ export class RaceScene {
     const rl = this.v1.copy(A.wheelRearL).applyMatrix4(root.matrixWorld);
     const rr = this.v2.copy(A.wheelRearR).applyMatrix4(root.matrixWorld);
     const drifting = e.driftDir !== 0 && !air;
+    const dust = DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]];
     const lv = LEVELS[this.level];
     const budget = lv.particles / LEVELS[2].particles;
 
@@ -807,7 +814,7 @@ export class RaceScene {
           );
         }
       }
-      if (lv.skid && k.hasTrail) {
+      if (lv.skid && k.hasTrail && dust === 0) {
         this.skids.add(k.rl.x, k.rl.y, k.rl.z, rl.x, rl.y, rl.z, 0.3);
         this.skids.add(k.rr.x, k.rr.y, k.rr.z, rr.x, rr.y, rr.z, 0.3);
       }
@@ -821,6 +828,12 @@ export class RaceScene {
     k.rr.copy(rr);
     k.hasTrail = drifting;
 
+    // Sand, Erde, Schotter, Wiese: eine Staubfahne in der Farbe des Bodens
+    if (!air && dust !== 0 && speed > 8 && Math.random() < (8 + speed * 0.7) * budget * dt) {
+      this.color.set(dust);
+      const w = Math.random() < 0.5 ? rl : rr;
+      this.puffs.emit(w.x, w.y + 0.12, w.z, e.vx * 0.35 + (Math.random() - 0.5) * 2.5, 1 + Math.random() * 1.8, e.vz * 0.35 + (Math.random() - 0.5) * 2.5, 0.42, 0.28, this.color, 1.1, 3, 2, 0.9);
+    }
     if (!air && e.flags & FLAG_OFFROAD && speed > 6 && Math.random() < 26 * budget * dt) {
       this.color.set(this.world!.theme.shoulder).multiplyScalar(0.9);
       const w = Math.random() < 0.5 ? rl : rr;
@@ -914,8 +927,8 @@ export class RaceScene {
     const dx = Math.sin(yaw);
     const dz = Math.cos(yaw);
     // Hang voraus: am Berg schaut die Kamera hinauf, im Gefälle hinunter.
-    const seg = me.seg % t.n;
-    const ahead = (seg + 6) % t.n;
+    const seg = me.seg < t.total ? me.seg : 0;
+    const ahead = walk(t, seg, 6);
     const rise = Math.max(-2.5, Math.min(2.5, t.py[ahead] - t.py[seg]));
     const air = (me.flags & FLAG_AIR) !== 0;
 
@@ -1003,6 +1016,33 @@ export class RaceScene {
   }
 
   /** Zustand aller sichtbaren Karts für die Dauergeräusche. */
+  /** Nur für Messungen: Aufbauzeiten der Welt in ms (Fahrbahn, Gelände/Himmel, Kulisse, Leben). */
+  buildTimes(): number[] {
+    return this.world?.buildTimes ?? [];
+  }
+
+  /** Nur für Tests und Messungen: Dreiecke je Bauteil der Szene. */
+  debugTree(): { name: string; triangles: number }[] {
+    const count = (o: THREE.Object3D): number => {
+      let n = 0;
+      o.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (!m.isMesh || !m.visible) return;
+        const g = m.geometry;
+        const tris = (g.index ? g.index.count : (g.attributes.position?.count ?? 0)) / 3;
+        n += tris * ((m as unknown as THREE.InstancedMesh).isInstancedMesh ? (m as unknown as THREE.InstancedMesh).count : 1);
+      });
+      return Math.round(n);
+    };
+    const out: { name: string; triangles: number }[] = [];
+    const label = (o: THREE.Object3D, i: number): string => `${i}:${o.name || o.type}${(o as THREE.Mesh).isMesh ? '/' + ((o as THREE.Mesh).material as THREE.Material).type : ''}`;
+    this.world?.group.children.forEach((o, i) => out.push({ name: 'Welt ' + label(o, i), triangles: count(o) }));
+    this.scene.children.forEach((o, i) => {
+      if (o !== this.world?.group) out.push({ name: label(o, i), triangles: count(o) });
+    });
+    return out.filter((x) => x.triangles > 0);
+  }
+
   kartAudio(out: KartAudio[]): KartAudio[] {
     out.length = 0;
     for (const k of this.karts.values()) if (k.seen) out.push(k.audio);

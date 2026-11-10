@@ -3,18 +3,24 @@
 // Streckenbeschreibung erzeugt und zu wenigen großen Netzen zusammengefasst.
 
 import * as THREE from 'three';
+import { SURFACES } from '../game/surface';
 import {
   EDGE_DECK,
+  EDGE_FREE_L,
+  EDGE_FREE_R,
   EDGE_GAP,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   EDGE_RAMP,
+  EDGE_TUNNEL,
   rightX,
   rightZ,
   segDelta,
   type Track,
 } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RGB, type V3 } from './build';
+import type { FxSink } from './fxApi';
+import { buildLife, type Life } from './life';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
@@ -22,6 +28,35 @@ import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './too
 const WALL_H = 0.95;
 const WALL_T = 0.5;
 const DECK_D = 1.1;
+/** So wird ein Untergrund gezeichnet. */
+interface SurfaceLook {
+  /** Zwei Töne der Fahrbahn im Wechsel alle band Abschnitte, c = Farbe der Einzelheiten. */
+  a: RGB;
+  b: RGB;
+  c: RGB;
+  band: number;
+  /** Glatte Straße: Mittelstrich, auf Brücken mit der Brückenfarbe gemischt. */
+  plain: boolean;
+  lines: boolean;
+  line?: RGB;
+  center?: RGB;
+  kerbs: boolean;
+  kerbA?: RGB;
+  kerbB?: RGB;
+  /** Seitenstreifen; null = wie das Thema der Welt. */
+  shoulder: RGB | null;
+  detail: 'none' | 'planks' | 'ruts' | 'plates' | 'cracks' | 'cobble';
+  /** Begrenzung: gestreifte Bande, Mauer, Felswall, Holzzaun, Seil an Pfosten, Leitplanke. */
+  barrier: 'block' | 'stone' | 'rock' | 'fence' | 'rope' | 'rail';
+  wallA?: RGB;
+  wallB?: RGB;
+  glow?: RGB;
+  glowB?: RGB;
+}
+
+/** Tunnel und Höhlen: lichte Höhe über der Fahrbahn und Dicke des Felsmantels. */
+const TUNNEL_H = 7.4;
+const TUNNEL_ROCK = 5;
 
 const FOG_VERT = /* glsl */ `
 #include <common>
@@ -106,7 +141,10 @@ export class World {
   /** Sichtbare Größe jeder Kiste (0..1) – wächst nach dem Einsammeln wieder an. */
   private boxScale: Float32Array;
   private nonDeck: number[] = [];
+  private deckSegs: number[] = [];
   private idwSegs: number[] = [];
+  private life: Life | null = null;
+  buildTimes: number[] = [];
 
   constructor(
     readonly track: Track,
@@ -122,7 +160,7 @@ export class World {
     let maxX = -Infinity;
     let minZ = Infinity;
     let maxZ = -Infinity;
-    for (let i = 0; i < t.n; i++) {
+    for (let i = 0; i < t.total; i++) {
       minX = Math.min(minX, t.px[i]);
       maxX = Math.max(maxX, t.px[i]);
       minZ = Math.min(minZ, t.pz[i]);
@@ -130,7 +168,7 @@ export class World {
       if ((t.edge[i] & EDGE_DECK) === 0) {
         this.nonDeck.push(i);
         if (i % 8 === 0) this.idwSegs.push(i);
-      }
+      } else if (i % 2 === 0) this.deckSegs.push(i);
     }
     this.center.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     this.radius = Math.hypot(maxX - minX, maxZ - minZ) / 2;
@@ -141,13 +179,39 @@ export class World {
     this.hemi = new THREE.HemisphereLight(th.hemiSky, th.hemiGround, th.hemiIntensity);
     this.group.add(this.sun, this.hemi);
 
+    const t0 = performance.now();
     this.buildRoad();
+    const t1 = performance.now();
     this.buildTerrain(minX, maxX, minZ, maxZ);
     this.buildSky();
     this.buildBoxes();
+    const t2 = performance.now();
     const scenery = buildScenery(this);
     this.group.add(scenery.group);
     this.disposables.push(scenery);
+    const t3 = performance.now();
+    this.life = buildLife(this);
+    /** Aufbauzeiten in ms: Fahrbahn, Gelände und Himmel, Kulisse, Leben. */
+    this.buildTimes = [t1 - t0, t2 - t1, t3 - t2, performance.now() - t3].map(Math.round);
+    if (this.life) {
+      this.group.add(this.life.group);
+      this.disposables.push(this.life);
+    }
+  }
+
+  /**
+   * Abstand eines Punkts zur nächsten Bande in Metern (negativ = auf der
+   * Strecke). Kulissen halten damit Abstand zur Fahrbahn.
+   */
+  clearance(x: number, z: number): number {
+    const t = this.track;
+    let best = Infinity;
+    for (let k = 0; k < t.total; k += 2) {
+      // Um einen Tunnel liegt Fels: dort beginnt der freie Platz erst weiter draußen.
+      const d = Math.hypot(x - t.px[k], z - t.pz[k]) - t.wh[k] - (t.edge[k] & EDGE_TUNNEL ? TUNNEL_ROCK + 2 : 0);
+      if (d < best) best = d;
+    }
+    return best;
   }
 
   // --- Fahrbahn --------------------------------------------------------------
@@ -155,12 +219,12 @@ export class World {
   /** Punkt auf der Fahrbahn: Abschnitt i, Anteil f zum nächsten, seitlich lat, um dy angehoben. */
   private P(i: number, f: number, lat: number, dy = 0): V3 {
     const t = this.track;
-    const a = ((i % t.n) + t.n) % t.n;
+    const a = i;
     const x = t.px[a] + rightX(t, a) * lat;
     const y = t.py[a] + lat * t.bank[a] + dy;
     const z = t.pz[a] + rightZ(t, a) * lat;
     if (f === 0) return [x, y, z];
-    const b = (a + 1) % t.n;
+    const b = t.next[a];
     const x2 = t.px[b] + rightX(t, b) * lat;
     const y2 = t.py[b] + lat * t.bank[b] + dy;
     const z2 = t.pz[b] + rightZ(t, b) * lat;
@@ -210,8 +274,42 @@ export class World {
       else solid.quad(a, b, cc, d, c);
     };
 
-    for (let i = 0; i < t.n; i++) {
-      const j = (i + 1) % t.n;
+    // Aussehen der Untergründe (Reihenfolge wie SURFACES in game/surface.ts).
+    const dark = th.stars ? 0.72 : 1;
+    const col = (hex: number): RGB => shade(rgb(hex), dark);
+    const crack = t.def.theme === 'glut' ? rgb(0xff8a2a) : t.def.theme === 'nacht' ? rgb(0x4ef0ff) : rgb(0x9a8fa3);
+    const wood: [RGB, RGB] = [col(0xa8794a), col(0x7a5a3c)];
+    const looks: SurfaceLook[] = SURFACES.map((sf): SurfaceLook => {
+      switch (sf.id) {
+        case 'wood':
+          return { a: col(0xb98150), b: col(0xa56f3f), c: col(0x5e4226), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x8f6a40), detail: 'planks', barrier: 'rope', wallA: wood[1], wallB: col(0xf2e6c8) };
+        case 'sand':
+          return { a: col(0xecd9a0), b: col(0xe4cd8c), c: col(0xd3ba78), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdcc486), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'dirt':
+          return { a: col(0x9c7650), b: col(0x916b47), c: col(0x775638), band: 5, plain: false, lines: false, kerbs: false, shoulder: null, detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'gravel':
+          return { a: col(0xaaa49b), b: col(0x9b948a), c: col(0x857e75), band: 2, plain: false, lines: false, kerbs: false, shoulder: null, detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'grass':
+          return { a: col(0x86c45c), b: col(0x77b650), c: col(0x6aa646), band: 4, plain: false, lines: true, line: col(0xf7f4e8), kerbs: false, shoulder: null, detail: 'none', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'rock':
+          return { a: col(0x57495a), b: col(0x4b3f50), c: crack, band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0x3c3242), detail: 'cracks', barrier: 'rock', wallA: col(0x6b5565), wallB: col(0x54445a) };
+        case 'metal':
+          return { a: col(0x8792a0), b: col(0x77828f), c: col(0x4d5560), band: 3, plain: false, lines: true, line: col(0xffd23f), kerbs: false, shoulder: col(0x5c6570), detail: 'plates', barrier: 'rail', wallA: col(0x3a4049), wallB: col(0xc9d2dc) };
+        case 'cobble':
+          return { a: col(0x9a9186), b: col(0x857d73), c: col(0x6f685f), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x7a7268), detail: 'cobble', barrier: 'stone', wallA: col(0xa59c90), wallB: col(0x8d857a) };
+        case 'neon':
+          return { a: rgb(0x23263f), b: rgb(0x1c1f36), c: rgb(0x4ef0ff), band: 4, plain: true, lines: true, line: rgb(0x4ef0ff), center: rgb(0xff5ad1), kerbs: true, kerbA: rgb(0xff5ad1), kerbB: rgb(0x23263f), shoulder: rgb(0x15172b), detail: 'none', barrier: 'rail', wallA: rgb(0x2d3050), wallB: rgb(0x8f97b8), glow: rgb(0xff5ad1), glowB: rgb(0x4ef0ff) };
+        default:
+          return { a: cRoad, b: cRoadAlt, c: cInk, band: 4, plain: true, lines: true, kerbs: true, shoulder: null, detail: 'none', barrier: 'block' };
+      }
+    });
+
+    /** Abschnitte, deren Zaun bzw. Leitplanke schon von einem längeren Stück abgedeckt ist (links, rechts). */
+    const railL = new Uint8Array(t.total);
+    const railR = new Uint8Array(t.total);
+
+    for (let i = 0; i < t.total; i++) {
+      const j = t.next[i];
       const gapI = (t.edge[i] & EDGE_GAP) !== 0;
       const gapJ = (t.edge[j] & EDGE_GAP) !== 0;
       if (gapI && gapJ) continue;
@@ -226,43 +324,184 @@ export class World {
       const openR = (e & EDGE_OPEN_R) !== 0;
       const deck = (e & EDGE_DECK) !== 0;
       const ramp = (e & EDGE_RAMP) !== 0;
+      // An Gabelung und Einmündung liegen zwei Fahrbahnen ineinander: zur
+      // Nachbarin hin gibt es weder Bande noch Randlinie, und die Flächen
+      // liegen hauchdünn gestaffelt, damit sie nicht flimmern.
+      const freeL = ((e | t.edge[j]) & EDGE_FREE_L) !== 0;
+      const freeR = ((e | t.edge[j]) & EDGE_FREE_R) !== 0;
+      const lower = (freeL || freeR) && t.branchOf[i] >= 0 ? -0.012 : 0;
 
-      // Asphalt in zwei leicht verschiedenen Tönen – das Wechselmuster macht Tempo sichtbar.
-      const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : Math.floor(i / 4) % 2 === 0 ? cRoad : cRoadAlt;
-      top(solid, i, f0, f1, -rh, rh, 0, deck && !ramp ? mixRgb(road, cDeck, 0.35) : road);
-      const sh = deck ? cDeckDark : cShoulder;
-      top(solid, i, f0, f1, -wh, -rh, 0, sh);
-      top(solid, i, f0, f1, rh, wh, 0, sh);
+      const look = looks[t.surf[q]] ?? looks[0];
 
-      // Markierungen
-      if (!ramp) {
-        top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cLine);
-        top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cLine);
-        if (i % 8 < 3) top(paint, i, f0, f1, -0.14, 0.14, 0.03, cLine);
-        if (Math.abs(t.curv[q]) > 1 / 46) {
-          const kerb = Math.floor(i / 2) % 2 === 0 ? cKerbA : cKerbB;
-          top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
-          top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
+      // Fahrbahn in zwei leicht verschiedenen Tönen – das Wechselmuster macht Tempo sichtbar.
+      const tone = Math.floor(i / look.band) % 2 === 0;
+      const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : tone ? look.a : look.b;
+      const surface = deck && !ramp && look.plain ? mixRgb(road, cDeck, 0.35) : road;
+      if (look.detail === 'cobble' && !ramp) {
+        // Pflaster: vier Bahnen im Schachbrett
+        for (let c = 0; c < 4; c++) {
+          top(solid, i, f0, f1, -rh + (c * rh) / 2, -rh + ((c + 1) * rh) / 2, lower, (i + c) % 2 === 0 ? look.a : look.b);
+        }
+      } else top(solid, i, f0, f1, -rh, rh, lower, surface);
+      const sh = look.shoulder ?? (deck ? cDeckDark : cShoulder);
+      top(solid, i, f0, f1, -wh, -rh, freeL ? -0.025 : 0, sh);
+      top(solid, i, f0, f1, rh, wh, freeR ? -0.025 : 0, sh);
+
+      // Was den Untergrund ausmacht: Fugen, Fahrrinnen, Nähte, Risse
+      if (!ramp && lower === 0 && f0 === 0 && f1 === 1) {
+        const d = look.detail;
+        if (d === 'planks') top(solid, i, 0, 0.14, -rh, rh, 0.012, look.c);
+        else if (d === 'ruts') {
+          top(solid, i, 0, 1, -2.3, -1.3, 0.012, look.c);
+          top(solid, i, 0, 1, 1.3, 2.3, 0.012, look.c);
+        } else if (d === 'plates') {
+          top(solid, i, 0, 1, -0.09, 0.09, 0.012, look.c);
+          if (i % 3 === 0) top(solid, i, 0, 0.08, -rh, rh, 0.012, look.c);
+        } else if (d === 'cracks' && i % 2 === 0) {
+          // Risse: kurze, schräg versetzte Striche, die glühen bzw. hell schimmern
+          const l0 = (noise(i * 0.37, t.index * 5.1) - 0.5) * 1.5 * rh;
+          const l1 = l0 + (noise(i * 0.61, 9.3) - 0.5) * 2.4;
+          paint.quad(this.P(i, 0, l0 - 0.1, 0.03), this.P(i, 0, l0 + 0.1, 0.03), this.P(i, 1, l1 + 0.1, 0.03), this.P(i, 1, l1 - 0.1, 0.03), look.c);
         }
       }
 
-      // Bande bzw. offene Kante
-      const panel = Math.floor(i / 3) % 2 === 0 ? cWallA : cWallB;
+      // Markierungen
+      if (!ramp && look.lines) {
+        const cl = look.line ?? cLine;
+        if (!freeL) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cl);
+        if (!freeR) top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cl);
+        if (i % 8 < 3 && lower === 0 && look.plain) top(paint, i, f0, f1, -0.14, 0.14, 0.03, look.center ?? cl);
+      }
+      if (!ramp && look.kerbs && Math.abs(t.curv[q]) > 1 / 46) {
+        const kerb = Math.floor(i / 2) % 2 === 0 ? (look.kerbA ?? cKerbA) : (look.kerbB ?? cKerbB);
+        if (!freeL) top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
+        if (!freeR) top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
+      }
+
+      // Begrenzung bzw. offene Kante
+      const panel = Math.floor(i / 3) % 2 === 0;
+      const whole = f0 === 0 && f1 === 1;
       for (const sgn of [-1, 1]) {
+        if (sgn < 0 ? freeL : freeR) continue;
         const open = sgn < 0 ? openL : openR;
         const inner = sgn * wh;
         const outer = sgn * (wh + WALL_T);
-        if (!open) {
-          side(i, f0, f1, inner, 0, WALL_H, sgn < 0, panel);
-          // Außen reicht die Bande bis ins Gelände hinunter – auch dort, wo eine Schanze oder Kuppe die Fahrbahn anhebt.
-          side(i, f0, f1, outer, deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]), WALL_H, sgn > 0, shade(panel, 0.8));
-          if (sgn < 0) top(solid, i, f0, f1, outer, inner, WALL_H, cCap);
-          else top(solid, i, f0, f1, inner, outer, WALL_H, cCap);
-        } else {
+        if (open) {
           // Warnstreifen an der Kante, darunter die Stirnseite des Stegs.
           const l0 = sgn < 0 ? inner : inner - 0.45;
           top(paint, i, f0, f1, l0, l0 + 0.45, 0.04, i % 2 === 0 ? cWarn : cInk);
           side(i, f0, f1, inner, -DECK_D, 0, sgn > 0, cDeckDark);
+          continue;
+        }
+        const skirt = deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]);
+        const style = look.barrier;
+        if (style === 'block' || style === 'stone') {
+          const cA = style === 'stone' ? look.wallA! : cWallA;
+          const cB = style === 'stone' ? look.wallB! : cWallB;
+          const c = panel ? cA : cB;
+          side(i, f0, f1, inner, 0, WALL_H, sgn < 0, c);
+          // Außen reicht die Bande bis ins Gelände hinunter – auch dort, wo eine Schanze oder Kuppe die Fahrbahn anhebt.
+          side(i, f0, f1, outer, skirt, WALL_H, sgn > 0, shade(c, 0.8));
+          const cap = style === 'stone' ? shade(cA, 1.12) : cCap;
+          if (sgn < 0) top(solid, i, f0, f1, outer, inner, WALL_H, cap);
+          else top(solid, i, f0, f1, inner, outer, WALL_H, cap);
+        } else if (style === 'rock') {
+          // Wall aus Felsbrocken: jede Kante anders hoch
+          const h0 = 0.55 + 0.9 * noise(i * 0.83 + sgn * 11, t.index * 3.7);
+          const h1 = 0.55 + 0.9 * noise(j * 0.83 + sgn * 11, t.index * 3.7);
+          const c = (i + (sgn > 0 ? 1 : 0)) % 2 === 0 ? look.wallA! : look.wallB!;
+          const out2 = sgn * (wh + WALL_T * 2);
+          const a0 = this.P(i, f0, inner, 0);
+          const a1 = this.P(i, f1, inner, 0);
+          const b0 = this.P(i, f0, sgn * (wh + WALL_T * 0.8), f0 === 0 ? h0 : (h0 + h1) / 2);
+          const b1 = this.P(i, f1, sgn * (wh + WALL_T * 0.8), f1 === 1 ? h1 : (h0 + h1) / 2);
+          const c0 = this.P(i, f0, out2, skirt);
+          const c1 = this.P(i, f1, out2, skirt);
+          if (sgn < 0) {
+            solid.quad(a1, a0, b0, b1, c);
+            solid.quad(b1, b0, c0, c1, shade(c, 0.8));
+          } else {
+            solid.quad(a0, a1, b1, b0, c);
+            solid.quad(b0, b1, c1, c0, shade(c, 0.8));
+          }
+        } else {
+          // Zaun, Seil oder Leitplanke: Pfosten in festem Abstand, dazwischen
+          // Holme, die gerade von Pfosten zu Pfosten laufen (das spart zwei
+          // Drittel der Flächen gegenüber einem Stück je Abschnitt).
+          const mid = sgn * (wh + WALL_T * 0.5);
+          const POST = style === 'rail' ? 4 : 3;
+          const done = sgn < 0 ? railL : railR;
+          if (!done[i]) {
+            // So weit reicht der Zaun ab hier ungestört (höchstens bis zum nächsten Pfosten).
+            let end = i;
+            let count = 0;
+            const reach = whole && i % POST === 0 ? POST : 1;
+            while (count < reach) {
+              const nx = t.next[end];
+              const fine =
+                count === 0 ||
+                ((looks[t.surf[end]] ?? looks[0]).barrier === style &&
+                  t.wh[end] === wh &&
+                  (t.edge[end] & (EDGE_GAP | (sgn < 0 ? EDGE_OPEN_L | EDGE_FREE_L : EDGE_OPEN_R | EDGE_FREE_R))) === 0 &&
+                  (t.edge[nx] & (EDGE_GAP | (sgn < 0 ? EDGE_FREE_L : EDGE_FREE_R))) === 0 &&
+                  nx > end);
+              if (!fine) break;
+              done[end] = 1;
+              end = nx;
+              count++;
+            }
+            const fa = count === 1 ? f0 : 0;
+            const fb = count === 1 ? f1 : 0;
+            const from = i;
+            const to = count === 1 ? i : end;
+            const rails: [number, number, RGB][] =
+              style === 'fence'
+                ? [
+                    [0.36, 0.52, look.wallA!],
+                    [0.78, 0.94, look.wallA!],
+                  ]
+                : style === 'rope'
+                  ? [[0.74, 0.86, look.wallB!]]
+                  : [[0.4, 0.8, panel ? look.wallB! : shade(look.wallB!, 0.9)]];
+            const li = mid - sgn * 0.06;
+            const lo = mid + sgn * 0.06;
+            for (const [y0, y1, c] of rails) {
+              const a0 = this.P(from, fa, li, y0);
+              const a1 = this.P(to, fb, li, y0);
+              const a2 = this.P(to, fb, li, y1);
+              const a3 = this.P(from, fa, li, y1);
+              const b0 = this.P(from, fa, lo, y0);
+              const b1 = this.P(to, fb, lo, y0);
+              const b2 = this.P(to, fb, lo, y1);
+              const b3 = this.P(from, fa, lo, y1);
+              // innen (zur Fahrbahn), außen, oben
+              if (sgn < 0) {
+                solid.quad(a0, a1, a2, a3, c);
+                solid.quad(b1, b0, b3, b2, shade(c, 0.8));
+                solid.quad(b3, a3, a2, b2, shade(c, 1.1));
+              } else {
+                solid.quad(a1, a0, a3, a2, c);
+                solid.quad(b0, b1, b2, b3, shade(c, 0.8));
+                solid.quad(a3, b3, b2, a2, shade(c, 1.1));
+              }
+            }
+            // Leuchtband auf der Leitplanke
+            if (style === 'rail' && look.glow) {
+              const g = Math.floor(i / 8) % 2 === 0 ? look.glow : (look.glowB ?? look.glow);
+              const g0 = this.P(from, fa, Math.min(li, lo) - 0.01, 0.83);
+              const g1 = this.P(from, fa, Math.max(li, lo) + 0.01, 0.83);
+              const g2 = this.P(to, fb, Math.max(li, lo) + 0.01, 0.83);
+              const g3 = this.P(to, fb, Math.min(li, lo) - 0.01, 0.83);
+              paint.quad(g0, g1, g2, g3, g);
+            }
+            if (whole && i % POST === 0) {
+              const p = this.P(i, 0, mid);
+              const ph = style === 'rail' ? 0.86 : 1.12;
+              solid.box(p[0], p[1] + ph / 2 - 0.05, p[2], 0.26, ph + 0.1, 0.26, look.wallA!, Math.atan2(t.tx[i], t.tz[i]));
+            }
+          }
+          // Wo die Fahrbahn frei steht oder angehoben ist, braucht sie darunter eine Kante.
+          side(i, f0, f1, outer, skirt, 0, sgn > 0, deck ? cDeckDark : shade(sh, 0.75));
         }
       }
       if (deck) {
@@ -283,8 +522,8 @@ export class World {
         for (const sgn of [-1, 1]) {
           const p = this.P(i, 0, sgn * lat);
           posts.push(p);
-          for (let k = 0; k < t.n; k += 2) {
-            if (Math.abs(segDelta(t, i, k)) < 24) continue;
+          for (let k = 0; k < t.total; k += 2) {
+            if (Math.abs(segDelta(t, i, k)) < 24 && t.branchOf[i] === t.branchOf[k]) continue;
             if (t.py[k] < p[1] - 2 && Math.hypot(t.px[k] - p[0], t.pz[k] - p[2]) < t.wh[k] + 1) free = false;
           }
         }
@@ -300,6 +539,8 @@ export class World {
         }
       }
     }
+
+    this.buildTunnels(solid, paint);
 
     // Start- und Ziellinie: Schachbrett
     const cols = 10;
@@ -322,14 +563,157 @@ export class World {
     this.buildGantry();
   }
 
+  /**
+   * Tunnel und Höhlen: ein Felsmantel um die Fahrbahn – außen zerklüftet, innen
+   * dunkel, mit leuchtenden Kristallen an den Wänden. Der Fels steht als eigener
+   * Rücken auf dem Gelände; eine zweite Fahrbahn kann darüber hinwegführen.
+   */
+  private buildTunnels(solid: MeshBuilder, glow: MeshBuilder): void {
+    const t = this.track;
+    const th = this.theme;
+    const id = t.def.theme;
+    // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
+    // Wänden, die Naturstrecken eine Höhle im Fels.
+    const hall = id === 'werkshof' || id === 'nacht';
+    const H = TUNNEL_H;
+    const R = hall ? 0.9 : TUNNEL_ROCK;
+    const cRock = rgb(th.ground[2]);
+    const cWall = id === 'nacht' ? rgb(0x2d3050) : rgb(0xd9c7a8);
+    const cBand = id === 'nacht' ? rgb(0xff5ad1) : rgb(0x6fd0e6);
+    const cRoof = id === 'nacht' ? rgb(0x23263f) : rgb(0xb5543c);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1 }[id] ?? 0x7ef0ff);
+    // Querschnitt von links unten über den Scheitel nach rechts unten:
+    // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
+    const IN: [number, number][] = hall
+      ? [
+          [-1, 0],
+          [-1, 0.52 * H],
+          [-1, 0.84 * H],
+          [-0.5, 0.97 * H],
+          [0, 1.04 * H],
+          [0.5, 0.97 * H],
+          [1, 0.84 * H],
+          [1, 0.52 * H],
+          [1, 0],
+        ]
+      : [
+          [-1, 0],
+          [-1, 0.45 * H],
+          [-0.74, 0.78 * H],
+          [-0.38, 0.95 * H],
+          [0, H],
+          [0.38, 0.95 * H],
+          [0.74, 0.78 * H],
+          [1, 0.45 * H],
+          [1, 0],
+        ];
+    const OUT: [number, number, number][] = hall
+      ? [
+          [-1, 1, -1.4],
+          [-1, 1, 0.52 * H],
+          [-1, 1.5, 0.84 * H + 0.45],
+          [-0.5, 0.6, 0.97 * H + 0.85],
+          [0, 0, 1.04 * H + 0.95],
+          [0.5, 0.6, 0.97 * H + 0.85],
+          [1, 1.5, 0.84 * H + 0.45],
+          [1, 1, 0.52 * H],
+          [1, 1, -1.4],
+        ]
+      : [
+          [-1, 1, -1.4],
+          [-1, 0.86, 0.5 * H],
+          [-0.74, 0.74, 0.86 * H + 0.4 * R],
+          [-0.38, 0.4, H + 0.6 * R],
+          [0, 0, H + 0.72 * R],
+          [0.38, 0.4, H + 0.6 * R],
+          [0.74, 0.74, 0.86 * H + 0.4 * R],
+          [1, 0.86, 0.5 * H],
+          [1, 1, -1.4],
+        ];
+    const K = IN.length;
+    /** Farbe des Mantels außen bzw. der Wand innen für den Streifen k am Abschnitt i. */
+    const outer = (i: number, k: number): RGB => {
+      if (!hall) {
+        const c = k >= 2 && k <= 5 ? rgb(th.ground[3]) : cRock;
+        return (i + k) % 3 === 0 ? shade(c, 0.9) : c;
+      }
+      if (k === 0 || k === K - 2) return i % 6 < 3 ? cWall : shade(cWall, 0.93);
+      if (k === 1 || k === K - 3) return Math.floor(i / 3) % 2 === 0 ? cBand : cWall;
+      return i % 2 === 0 ? cRoof : shade(cRoof, 0.9);
+    };
+    const inner = (i: number, k: number): RGB => {
+      const c = hall ? (k === 0 || k === K - 2 ? shade(cWall, 0.62) : shade(k === 1 || k === K - 3 ? cWall : cRoof, 0.45)) : shade(cRock, 0.42);
+      return (i + k) % 2 === 0 ? c : shade(c, 0.82);
+    };
+    const cFace = hall ? shade(cWall, 0.85) : shade(cRock, 0.72);
+    const rings = new Map<number, { inner: V3[]; outer: V3[] }>();
+    const ring = (i: number): { inner: V3[]; outer: V3[] } => {
+      let r = rings.get(i);
+      if (r) return r;
+      const W = t.wh[i] + WALL_T + 0.25;
+      const pin: V3[] = [];
+      const pout: V3[] = [];
+      for (let k = 0; k < K; k++) {
+        pin.push(this.P(i, 0, IN[k][0] * W, IN[k][1]));
+        // Fels: jeder Punkt des Mantels sitzt etwas anders – entlang der Röhre zusammenhängend.
+        const n = hall ? 0.5 : noise(t.px[i] * 0.16 + k * 7.3, t.pz[i] * 0.16 - k * 3.1);
+        const bulge = 1 + 0.5 * (n - 0.5);
+        const side = OUT[k][0] < 0 ? -1 : OUT[k][0] > 0 ? 1 : 0;
+        pout.push(this.P(i, 0, OUT[k][0] * W + side * OUT[k][1] * R * bulge, k === 0 || k === K - 1 ? OUT[k][2] : OUT[k][2] * (0.9 + 0.2 * n)));
+      }
+      r = { inner: pin, outer: pout };
+      rings.set(i, r);
+      return r;
+    };
+    let lamp = 0;
+    for (let i = 0; i < t.total; i++) {
+      if ((t.edge[i] & EDGE_TUNNEL) === 0) continue;
+      const a = ring(i);
+      const j = t.next[i];
+      const first = (t.edge[t.prev[i]] & EDGE_TUNNEL) === 0;
+      const last = (t.edge[j] & EDGE_TUNNEL) === 0;
+      // Stirnflächen am Ein- und Ausgang
+      for (let k = 0; k < K - 1; k++) {
+        if (first) solid.quad(a.inner[k], a.inner[k + 1], a.outer[k + 1], a.outer[k], cFace);
+        if (last) solid.quad(a.inner[k + 1], a.inner[k], a.outer[k], a.outer[k + 1], cFace);
+      }
+      if (last) continue;
+      const b = ring(j);
+      for (let k = 0; k < K - 1; k++) {
+        solid.quad(a.outer[k], a.outer[k + 1], b.outer[k + 1], b.outer[k], outer(i, k));
+        solid.quad(a.inner[k + 1], a.inner[k], b.inner[k], b.inner[k + 1], inner(i, k));
+      }
+      if (i % 7 !== 3) continue;
+      lamp++;
+      if (hall) {
+        // Leuchtband unter dem First
+        const p = this.P(i, 0, 0, 1.04 * H - 0.35);
+        glow.box(p[0], p[1], p[2], 2.6, 0.22, 0.9, cGlow, Math.atan2(t.tx[i], t.tz[i]));
+      } else {
+        // Kristalle: abwechselnd links und rechts an der Wand
+        const sgn = lamp % 2 === 0 ? -1 : 1;
+        const W = t.wh[i] + WALL_T;
+        for (let c = 0; c < 3; c++) {
+          const p = this.P(i, 0.2 * c, sgn * (W - 0.25 * c), 1.3 + 0.9 * c + (lamp % 3) * 0.5);
+          const geo = new THREE.OctahedronGeometry(0.34 + 0.16 * ((lamp + c) % 3), 0);
+          this.euler.set(0.5 * c, lamp, 0.4 * sgn);
+          this.q.setFromEuler(this.euler);
+          this.m4.compose(this.v.set(p[0], p[1], p[2]), this.q, this.s.set(0.7, 1.6, 0.7));
+          glow.add(geo, c === 1 ? shade(cGlow, 1.25) : cGlow, this.m4);
+          geo.dispose();
+        }
+      }
+    }
+  }
+
   private buildPads(): void {
     const t = this.track;
     if (t.pads.length === 0) return;
     const b = new MeshBuilder();
     const white: RGB = [1, 1, 1];
     for (const pad of t.pads) {
-      for (let k = 0; k < pad.length; k++) {
-        const i = pad.seg + k;
+      let i = pad.seg;
+      for (let k = 0; k < pad.length; k++, i = t.next[i]) {
         b.quadUv(
           this.P(i, 0, pad.lat - pad.halfWidth, 0.05),
           this.P(i, 0, pad.lat + pad.halfWidth, 0.05),
@@ -419,7 +803,8 @@ export class World {
     const d = Math.sqrt(bestD);
     const lat = best < 0 ? 0 : (x - t.px[best]) * rightX(t, best) + (z - t.pz[best]) * rightZ(t, best);
     const whb = best < 0 ? 0 : t.wh[best];
-    const roadY = best < 0 ? th.farY : t.base[best] + Math.max(-whb, Math.min(whb, lat)) * t.bank[best] - 0.3;
+    // In Tunneln und Höhlen liegt das Gelände tiefer: an Steigungen schaute es sonst am Rand heraus.
+    const roadY = best < 0 ? th.farY : t.base[best] + Math.max(-whb, Math.min(whb, lat)) * t.bank[best] - (t.edge[best] & EDGE_TUNNEL ? 1.6 : 0.3);
 
     // Grundform abseits der Strecke
     let base: number;
@@ -448,7 +833,7 @@ export class World {
       // Gelände daneben ab – man sieht, dass es dort hinuntergeht.
       let drop = base;
       let dropK = 0;
-      for (let i = 0; i < t.n; i += 2) {
+      for (let i = 0; i < t.total; i += 2) {
         if ((t.edge[i] & EDGE_DECK) === 0 || (t.edge[i] & (EDGE_OPEN_L | EDGE_OPEN_R)) === 0) continue;
         const dd = Math.hypot(x - t.px[i], z - t.pz[i]);
         if (dd > 36) continue;
@@ -462,7 +847,16 @@ export class World {
     }
     const k = smooth((d - whb - 1.2) / 24);
     const bumps = (noise(x * 0.045, z * 0.045) - 0.5) * 2 * th.rough + (noise(x * 0.13 + 9, z * 0.13) - 0.5) * th.rough * 0.5;
-    return roadY + (base + bumps - roadY) * k;
+    let h = roadY + (base + bumps - roadY) * k;
+    // Unter Brücken und Stegen bleibt das Gelände unter der Fahrbahn – auch wenn
+    // gleich daneben eine höhere Fahrbahn am Boden verläuft.
+    for (const i of this.deckSegs) {
+      const cap = t.py[i] - DECK_D - 0.8;
+      if (h <= cap) continue;
+      const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
+      if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
+    }
+    return h;
   }
 
   private buildTerrain(minX: number, maxX: number, minZ: number, maxZ: number): void {
@@ -731,8 +1125,9 @@ export class World {
 
   // --- Pro Bild --------------------------------------------------------------
 
-  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number): void {
+  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink): void {
     for (const m of this.timed) m.uniforms.time.value = time;
+    this.life?.update(time, dt, camera, fx);
     this.skyGroup.position.set(camera.x, 0, camera.z);
     this.clouds.rotation.y = time * 0.004;
     const rays = this.skyGroup.getObjectByName('rays');

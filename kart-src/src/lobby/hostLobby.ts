@@ -23,6 +23,16 @@ import { MAX_PLAYERS } from '../game/sim';
 const LOBBY_GRACE_MS = 45_000;
 const HELLO_TIMEOUT_MS = 8000;
 export const MAX_NAME_LENGTH = 14;
+/** Wählbare Rundenzahl in der Lobby. */
+export const MIN_LAPS = 2;
+export const MAX_LAPS = 5;
+export const DEFAULT_LAPS = 3;
+
+/** Rundenzahl auf MIN_LAPS..MAX_LAPS begrenzen. */
+export function cleanLaps(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_LAPS;
+  return Math.max(MIN_LAPS, Math.min(MAX_LAPS, Math.round(n)));
+}
 
 interface Seat {
   slot: number;
@@ -44,6 +54,7 @@ export interface HostLobbySave {
   bots?: boolean;
   aiLevel?: number;
   track?: number;
+  laps?: number;
 }
 
 /** Gültige Figur 0..3; sonst der Rückfallwert (üblich: die Standardfigur des Platzes). */
@@ -68,6 +79,8 @@ export class HostLobby {
   aiLevel = 1;
   /** Gewählte Strecke. */
   track = 0;
+  /** Rundenzahl des Rennens. */
+  laps = DEFAULT_LAPS;
   readonly localSlot: number;
 
   /** Irgendetwas an der Lobby hat sich geändert (für die Anzeige). */
@@ -94,6 +107,7 @@ export class HostLobby {
       if (typeof saved.bots === 'boolean') this.bots = saved.bots;
       if (typeof saved.aiLevel === 'number') this.aiLevel = Math.max(0, Math.min(2, saved.aiLevel | 0));
       if (typeof saved.track === 'number') this.track = Math.max(0, saved.track | 0);
+      if (typeof saved.laps === 'number') this.laps = cleanLaps(saved.laps);
       // Nach einem Neuladen des Host-Bildschirms: Plätze wiederherstellen,
       // damit die anderen beim automatischen Wiederverbinden ihren Platz finden.
       for (const s of saved.seats) {
@@ -154,7 +168,7 @@ export class HostLobby {
         ping: s.isHost ? 0 : s.link ? Math.round(s.link.rtt) : -1,
       });
     }
-    return { code: this.code, phase: this.phase, players, bots: this.bots, aiLevel: this.aiLevel, track: this.track };
+    return { code: this.code, phase: this.phase, players, bots: this.bots, aiLevel: this.aiLevel, track: this.track, laps: this.laps };
   }
 
   setBots(bots: boolean): void {
@@ -167,6 +181,15 @@ export class HostLobby {
     const l = Math.max(0, Math.min(2, level | 0));
     if (this.aiLevel === l) return;
     this.aiLevel = l;
+    this.changed();
+  }
+
+  /** Rundenzahl (nur in der Lobby; der Wert gilt ab dem nächsten Start). */
+  setLaps(n: number): void {
+    if (this.phase !== 'lobby') return;
+    const laps = cleanLaps(n);
+    if (this.laps === laps) return;
+    this.laps = laps;
     this.changed();
   }
 
@@ -271,6 +294,7 @@ export class HostLobby {
       bots: this.bots,
       aiLevel: this.aiLevel,
       track: this.track,
+      laps: this.laps,
     };
   }
 

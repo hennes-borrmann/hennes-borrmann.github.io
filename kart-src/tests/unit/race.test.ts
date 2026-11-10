@@ -73,7 +73,7 @@ describe('Rennen auf dem Host', () => {
     const b = host.authoritative(1)!;
     b.x = a.x + Math.sin(a.heading) * 14;
     b.z = a.z + Math.cos(a.heading) * 14;
-    b.seg = a.seg + 14;
+    b.seg = (a.seg + 14) % TRACK.n;
 
     host.giveItem(0, ITEM_TIRE);
     host.step(press);
@@ -102,6 +102,13 @@ describe('Rennen auf dem Host', () => {
     c.shield = 0;
     c.x = oil.x;
     c.z = oil.z;
+    c.y = oil.y;
+    // Das Kart muss auch "wissen", wo es jetzt ist: nächster Abschnitt zum Fleck.
+    let near = 0;
+    for (let i = 1; i < TRACK.total; i++) {
+      if (Math.hypot(TRACK.px[i] - oil.x, TRACK.pz[i] - oil.z) < Math.hypot(TRACK.px[near] - oil.x, TRACK.pz[near] - oil.z)) near = i;
+    }
+    c.seg = near;
     host.step(gas);
     expect(c.spin).toBeGreaterThan(0);
     expect(count(host, THING_OIL)).toBe(0);
@@ -230,7 +237,9 @@ describe('Rennen über das Netz (simuliert)', () => {
   });
 
   it('Strecke hat Kisten und Boost-Felder an sinnvollen Stellen', () => {
-    expect(TRACK.boxes.length).toBe(12);
-    expect(TRACK.pads.length).toBe(3);
+    // Höchstens 32 Kisten: mehr passen nicht in die Zustandspakete.
+    expect(TRACK.boxes.length).toBeGreaterThanOrEqual(12);
+    expect(TRACK.boxes.length).toBeLessThanOrEqual(32);
+    expect(TRACK.pads.length).toBeGreaterThanOrEqual(3);
   });
 });

@@ -1046,6 +1046,11 @@
   color: var(--muted);
 }
 
+/* Stärke und Runden: gleich breite Beschriftung, damit die Knöpfe untereinander bündig stehen. */
+.setup-row .setup-label {
+  min-width: 64px;
+}
+
 /* --- Einstellungen (im Dialog) ---------------------------------------------- */
 
 .settings {

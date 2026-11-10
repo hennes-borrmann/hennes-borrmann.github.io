@@ -26,10 +26,14 @@ import {
   projectOnTrack,
   rightX,
   rightZ,
+  samePath,
   segDelta,
+  sideLimit,
   trackHeading,
-  wrapSeg,
+  walk,
+  type Track,
 } from './track';
+import { SURFACES } from './surface';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -206,6 +210,19 @@ export const V_TOW = 40;
 const TOW_LIFT = 1.0;
 const TOW_ACCEL = 70;
 const TOW_LOOK = 9;
+/** Steilkurven: Querneigung über das gewöhnliche Maß hinaus gibt Halt – bis zu diesem Zuschlag. */
+const BANK_FROM = 0.2;
+const BANK_GRIP = 3;
+const BANK_GRIP_MAX = 0.9;
+
+/**
+ * Faktor auf den Kurvenhalt in einer Steilkurve. dir = Richtung der Kurve
+ * (1 rechts, −1 links); die Neigung hilft nur, wenn sie zur Kurve passt.
+ */
+export function bankGrip(t: Track, seg: number, dir: number): number {
+  const help = -t.bank[seg] * dir - BANK_FROM;
+  return help > 0 ? 1 + Math.min(BANK_GRIP_MAX, help * BANK_GRIP) : 1;
+}
 const STALL_FACTOR = 0.55;
 
 export const NEUTRAL: Cmd = { steer: 0, buttons: 0 };
@@ -241,7 +258,7 @@ export const CHARACTERS: Character[] = [
     name: 'Kolben-Kalle',
     trait: 'Schnell auf der Geraden, braucht etwas länger auf Touren.',
     bars: [5, 2, 3],
-    vmax: 1.01,
+    vmax: 1.006,
     accel: 0.88,
     grip: 0.985,
     offroad: OFFROAD_FACTOR,
@@ -453,7 +470,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // Gelenkt wird von selbst; die eigene Lenkung verschiebt nur die Spur.
     const nudge = Math.max(-1, Math.min(1, cmd.steer / 127));
     projectOnTrack(t, s.x, s.z, s.seg);
-    const ahead = wrapSeg(t, proj.seg + Math.round(TOW_LOOK / t.step));
+    const ahead = walk(t, proj.seg, Math.round(TOW_LOOK / t.step));
     const room = Math.max(0.5, t.rh[ahead] - 1.5);
     const lane = Math.max(-room, Math.min(room, proj.lat * 0.9 + nudge * 3.5));
     const want = Math.atan2(t.px[ahead] + rightX(t, ahead) * lane - s.x, t.pz[ahead] + rightZ(t, ahead) * lane - s.z);
@@ -468,9 +485,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     projectOnTrack(t, s.x, s.z, s.seg);
     s.seg = proj.seg;
     let tlat = proj.lat;
-    const tlimit = t.wh[s.seg] - KART_RADIUS;
+    const tside = tlat > 0 ? 1 : -1;
+    const tlimit = sideLimit(t, s.seg, tside) - KART_RADIUS;
     if (Math.abs(tlat) > tlimit) {
-      const side = tlat > 0 ? 1 : -1;
+      const side = tside;
       s.x -= rightX(t, s.seg) * side * (Math.abs(tlat) - tlimit);
       s.z -= rightZ(t, s.seg) * side * (Math.abs(tlat) - tlimit);
       tlat = side * tlimit;
@@ -536,7 +554,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Lenken ---
   // Langsam: fester kleinster Wendekreis. Schnell: begrenzt durch die Haftung.
   const v = Math.abs(vf);
-  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * ch.grip) / v)) * (wasAir ? AIR_STEER : 1);
+  // Untergrund: Sand, Schotter und Co. halten weniger, Fels und Stadtasphalt mehr.
+  const ground = SURFACES[t.surf[seg0]] ?? SURFACES[0];
+  const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
+  const hold = A_LAT * ch.grip * ground.grip * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
+  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
@@ -561,13 +583,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // umgelenkt. So kostet Kurvenfahren kein Tempo ("griffig"), und im Drift
     // (geringe Haftung) rutscht das Heck sichtbar nach außen.
     const speed = Math.hypot(vf, vl);
-    const grip = s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP;
+    // Auf losem Grund rutscht das Kart länger quer, bevor es wieder spurt.
+    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip;
     vl *= Math.exp(-grip * DT);
     vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
 
     // --- Beschleunigen und Bremsen ---
     const boosting = s.boost > 0;
-    let vmax = V_MAX * env.speedFactor * ch.vmax;
+    let vmax = V_MAX * env.speedFactor * ch.vmax * ground.speed;
     if (boosting) vmax = V_BOOST * env.speedFactor;
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
@@ -588,7 +611,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
-      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
       if (vf > 0.4) vf = Math.max(0, vf - BRAKE * DT);
@@ -612,9 +635,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   let flags = itemBtn ? FLAG_ITEM_HELD : 0;
   // Wer schon unter die Fahrbahn gefallen ist, stößt nirgends mehr an.
   const sunk = y0 < centerHeight(t, s.seg, along) + lat * t.bank[s.seg] - STEP_MAX;
-  const limit = t.wh[s.seg] - KART_RADIUS;
+  const side = lat > 0 ? 1 : -1;
+  const limit = sideLimit(t, s.seg, side) - KART_RADIUS;
   if (!sunk && Math.abs(lat) > limit) {
-    const side = lat > 0 ? 1 : -1;
     const open = (t.edge[s.seg] & (side > 0 ? EDGE_OPEN_R : EDGE_OPEN_L)) !== 0;
     if (!open) {
       const nx = rightX(t, s.seg) * side;
@@ -709,6 +732,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Boost-Felder ---
   if (!air && vf > 6 && s.boost < PAD_TICKS - 8) {
     for (const pad of t.pads) {
+      if (!samePath(t, pad.seg, s.seg)) continue;
       const d = segDelta(t, pad.seg, s.seg);
       if (d >= 0 && d <= pad.length && Math.abs(lat - pad.lat) < pad.halfWidth + 0.5) {
         s.boost = PAD_TICKS;

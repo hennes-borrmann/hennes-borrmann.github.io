@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -87,6 +87,8 @@ export interface LobbyState {
   aiLevel: number;
   /** Gewählte Strecke (Index in TRACK_DEFS). */
   track: number;
+  /** Rundenzahl des Rennens (MIN_LAPS..MAX_LAPS). */
+  laps: number;
 }
 
 export type RejectReason = 'full' | 'running' | 'version';

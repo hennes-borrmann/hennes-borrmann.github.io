@@ -3,7 +3,8 @@
 // Verteilt wird mit festem Zufall entlang der Strecke – nie auf der Fahrbahn.
 
 import * as THREE from 'three';
-import { EDGE_DECK, rightX, rightZ } from '../game/track';
+import { SURFACE_INDEX } from '../game/surface';
+import { EDGE_DECK, EDGE_TUNNEL, rightX, rightZ } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, textTexture, type RGB } from './build';
 import { addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
 import type { World } from './world';
@@ -43,14 +44,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
   disposables.push(toon, glow);
 
   /** Abstand zur nächsten Fahrbahn-Bande (negativ = auf der Strecke). */
-  const clearance = (x: number, z: number): number => {
-    let best = Infinity;
-    for (let k = 0; k < t.n; k += 2) {
-      const d = Math.hypot(x - t.px[k], z - t.pz[k]) - t.wh[k];
-      if (d < best) best = d;
-    }
-    return best;
-  };
+  const clearance = (x: number, z: number): number => world.clearance(x, z);
 
   /** Zufällige Plätze neben der Strecke, zwischen minOut und maxOut Metern hinter der Bande. */
   const scatter = (
@@ -65,6 +59,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     for (let tries = 0; out.length < want && tries < want * 12; tries++) {
       const i = Math.floor(rnd() * t.n);
       if (t.edge[i] & EDGE_DECK && th.liquidY !== null) continue;
+      if (t.edge[i] & EDGE_TUNNEL) continue;
       const lat = (rnd() < 0.5 ? -1 : 1) * (t.wh[i] + 0.5 + minOut + rnd() * (maxOut - minOut));
       const x = t.px[i] + rightX(t, i) * lat;
       const z = t.pz[i] + rightZ(t, i) * lat;
@@ -145,9 +140,11 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     texL.needsUpdate = true;
     const right: Placement[] = [];
     const left: Placement[] = [];
-    for (let i = 0; i < t.n; i += 5) {
+    for (let i = 0; i < t.total; i += 5) {
       const k = t.curv[i];
       if (Math.abs(k) < 1 / 30) continue;
+      // Wo zwei Fahrbahnen ineinander liegen, stünde die Tafel mitten auf der anderen.
+      if (t.twin[i] >= 0) continue;
       // Außenseite der Kurve; in Fahrtrichtung lesbar.
       const sgn = k > 0 ? -1 : 1;
       if (t.edge[i] & (sgn < 0 ? 1 : 2)) continue;
@@ -173,6 +170,94 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     place(board(), right, mR);
     place(board(), left, mL);
     disposables.push(texR, texL, mR, mL);
+  }
+
+  // --- Gemeinsam: Wald entlang der Waldwege --------------------------------------------
+  {
+    const dirt = SURFACE_INDEX.dirt;
+    const spots: Placement[] = [];
+    const cap = Math.round(170 * dense);
+    for (let i = 0; i < t.total && spots.length < cap; i++) {
+      if (t.surf[i] !== dirt || t.edge[i] & (EDGE_DECK | EDGE_TUNNEL)) continue;
+      // Dicht an den Weg heran, dahinter lichter – auf jeder Seite etwa ein Baum alle drei Meter.
+      for (const sgn of [-1, 1]) {
+        if (rnd() > 0.34) continue;
+        const lat = sgn * (t.wh[i] + 1.6 + rnd() * rnd() * 16);
+        const x = t.px[i] + rightX(t, i) * lat + (rnd() - 0.5) * 2;
+        const z = t.pz[i] + rightZ(t, i) * lat + (rnd() - 0.5) * 2;
+        if (world.clearance(x, z) < 1.2) continue;
+        const y = world.heightAt(x, z);
+        if (th.liquidY !== null && y < th.liquidY + 0.6) continue;
+        const k = 0.8 + rnd() * 0.7;
+        spots.push({ x, y: y - 0.2, z, rot: rnd() * Math.PI * 2, sx: k, sy: k * (0.9 + rnd() * 0.4), sz: k });
+      }
+    }
+    if (spots.length > 0) {
+      // Kiefer: Stamm und drei gestufte Kronen
+      const fb = new MeshBuilder();
+      const needle = th.stars ? rgb(0x1f4a44) : rgb(0x2f7d4f);
+      const needleD = th.stars ? rgb(0x183a36) : rgb(0x256642);
+      put(fb, cyl(0.22, 0.34, 2.6, 5), th.stars ? rgb(0x3a2c33) : rgb(0x7a5230), mat(0, 1.3, 0));
+      put(fb, new THREE.ConeGeometry(2.1, 3.2, 6), needleD, mat(0, 3.6, 0));
+      put(fb, new THREE.ConeGeometry(1.6, 2.8, 6), needle, mat(0, 5.4, 0, 0, 0.5, 0));
+      put(fb, new THREE.ConeGeometry(1.05, 2.4, 6), needleD, mat(0, 7.1, 0, 0, 1, 0));
+      place(fb.build(), spots, toon);
+    }
+  }
+
+  // --- Gemeinsam: Tafel im Keil jeder Gabelung – hier teilt sich die Strecke ----------
+  if (t.branches.length > 0) {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#ffd23f';
+    g.fillRect(0, 0, 256, 128);
+    g.strokeStyle = '#16131c';
+    g.lineWidth = 12;
+    g.strokeRect(6, 6, 244, 116);
+    g.lineWidth = 16;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (const dir of [-1, 1]) {
+      const x0 = 128 + dir * 22;
+      const x1 = 128 + dir * 84;
+      g.beginPath();
+      g.moveTo(x0, 100);
+      g.lineTo(x0, 70);
+      g.lineTo(x1, 34);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(x1 - dir * 34, 30);
+      g.lineTo(x1, 34);
+      g.lineTo(x1 - dir * 8, 66);
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+    if (th.stars) material.color.setScalar(0.85);
+    const signs: Placement[] = [];
+    for (const b of t.branches) {
+      // Letzter Abschnitt, auf dem beide Fahrbahnen noch ineinander liegen: dahinter beginnt der Keil.
+      let last = -1;
+      for (let k = 0; k < b.count && t.twin[b.first + k] >= 0; k++) last = b.first + k;
+      if (last < 0) continue;
+      const other = t.twin[last];
+      const ax = (t.tx[last] + t.tx[other]) / 2;
+      const az = (t.tz[last] + t.tz[other]) / 2;
+      signs.push({
+        x: (t.px[last] + t.px[other]) / 2 + ax * 5,
+        y: Math.max(t.py[last], t.py[other]) + 2.6,
+        z: (t.pz[last] + t.pz[other]) / 2 + az * 5,
+        rot: Math.atan2(-ax, -az),
+        sx: 1,
+        sy: 1,
+        sz: 1,
+      });
+    }
+    place(new THREE.PlaneGeometry(4.4, 2.2), signs, material);
+    disposables.push(tex, material);
   }
 
   // --- Ferne Kulisse: Ring am Horizont ---------------------------------------------
@@ -384,7 +469,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     put(lb, cyl(1.9, 1.9, 0.4, 10), rgb(0x30364a), mat(0, 22.2, 0));
     put(lb, cyl(1.0, 1.0, 2.2, 8), rgb(0xfff06a), mat(0, 23.5, 0));
     put(lb, new THREE.ConeGeometry(1.7, 1.8, 8), rgb(0xff5a4e), mat(0, 25.5, 0));
-    const li = Math.round(t.n * 0.845);
+    const li = t.landmark;
     const llat = t.wh[li] + 13;
     const lx = t.px[li] + rightX(t, li) * llat;
     const lz = t.pz[li] + rightZ(t, li) * llat;

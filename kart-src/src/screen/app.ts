@@ -236,6 +236,7 @@ export class App {
       },
       setBots: (bots) => this.hostLobby?.setBots(bots),
       setAiLevel: (level) => this.hostLobby?.setAiLevel(level),
+      setLaps: (laps) => this.hostLobby?.setLaps(laps),
       setTrack: (track) => this.hostLobby?.setTrack(Math.max(0, Math.min(TRACK_COUNT - 1, track))),
       setCharacter: (character) => {
         this.character = character;
@@ -643,6 +644,7 @@ export class App {
       canStart: this.hostLobby?.canStart() ?? false,
       bots: state.bots,
       aiLevel: state.aiLevel,
+      laps: state.laps,
       track: state.track,
       character: me?.character ?? Math.max(0, slot),
       quality: this.quality,
@@ -737,7 +739,7 @@ export class App {
     this.lastHudJson = '';
     if (this.hostLobby) {
       const lobby = this.hostLobby;
-      const game = new HostGame(lobby.localSlot, { laps: this.debug.laps || undefined, aiLevel: lobby.aiLevel });
+      const game = new HostGame(lobby.localSlot, { laps: this.debug.laps || lobby.laps, aiLevel: lobby.aiLevel });
       this.hostGame = game;
       game.setRoster(lobby.slots(), lobby.bots, lobby.characters());
       for (const p of lobby.state().players) if (!p.isHost) game.setOnline(p.slot, p.online);
@@ -888,7 +890,7 @@ export class App {
     // Falsch herum? Erst nach einem Moment melden, damit ein Dreher nicht gleich Alarm schlägt.
     let wrongWay = false;
     if (me && race.phase === RACE_RUNNING && !me.finished && me.respawn === 0 && me.spin === 0) {
-      const seg = me.seg % TRACK.n;
+      const seg = me.seg < TRACK.total ? me.seg : 0;
       const along = me.vx * TRACK.tx[seg] + me.vz * TRACK.tz[seg];
       const facing = Math.sin(me.heading) * TRACK.tx[seg] + Math.cos(me.heading) * TRACK.tz[seg];
       if (along < -3 && facing < -0.3) {
@@ -1157,8 +1159,10 @@ export class App {
         return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
       },
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
+      tree: () => this.scene?.debugTree() ?? [],
+      buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
-      place: (slot: number, meters: number, lat = 0) => this.hostGame?.debugPlace(slot, meters, lat),
+      place: (slot: number, meters: number, lat = 0, branch = -1) => this.hostGame?.debugPlace(slot, meters, lat, branch),
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
       debugHit: (slot: number) => this.hostGame?.debugHit(slot),
