@@ -12,6 +12,22 @@ export const WERKSHOF: TrackDef = {
   name: 'Werkshof',
   theme: 'werkshof',
   blurb: 'Breit und übersichtlich: Verladebrücke oder Lagerhalle, Steilkurve, Containersprung.',
+  twist: 'Die Maschinen laufen: Förderbänder nehmen dich mit oder bremsen, und die Stampfpressen plätten, wer den Takt verpasst.',
+  // Stampfpressen: je drei quer über die Bahn, reihum – zwei Spuren sind immer frei.
+  presses: [
+    { at: 21.5, lat: -4.3, period: 3.6, phase: 0 },
+    { at: 21.5, lat: 0, period: 3.6, phase: 1.2 },
+    { at: 21.5, lat: 4.3, period: 3.6, phase: 2.4 },
+    { at: 39.7, lat: -4.3, period: 3.3, phase: 1.1 },
+    { at: 39.7, lat: 0, period: 3.3, phase: 2.2 },
+    { at: 39.7, lat: 4.3, period: 3.3, phase: 0 },
+  ],
+  // Verladebrücke: Querbänder schieben abwechselnd nach rechts und links.
+  belts: [
+    { from: 10.25, to: 10.75, lat0: -6.5, lat1: 6.5, across: 3.2 },
+    { from: 11.1, to: 11.6, lat0: -6.5, lat1: 6.5, across: -3.2 },
+    { from: 11.95, to: 12.45, lat0: -6.5, lat1: 6.5, across: 3.2 },
+  ],
   grade: 1,
   points: [
     // 0–3: Startgerade nach Norden
@@ -103,8 +119,14 @@ export const WERKSHOF: TrackDef = {
         [174, 117, 3],
       ],
       tunnels: [[1.3, 2.8]],
-      boxRows: [2.4],
+      boxRows: [3.2],
       pads: [{ at: 5.2, lat: 0 }],
+      // Lagerhalle: drei Bänder längs – das mittlere läuft vorwärts, die äußeren kommen einem entgegen.
+      belts: [
+        { from: 1.35, to: 2.75, lat0: -6.5, lat1: -2.2, along: -5 },
+        { from: 1.35, to: 2.75, lat0: -2.2, lat1: 2.2, along: 7 },
+        { from: 1.35, to: 2.75, lat0: 2.2, lat1: 6.5, along: -5 },
+      ],
     },
     // b: geradeaus über die Containergrube – kürzer, aber nur mit Anlauf
     {

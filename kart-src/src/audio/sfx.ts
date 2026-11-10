@@ -68,6 +68,8 @@ const LEVEL: Record<SfxName, number> = {
   honk: 2.4,
   pass: 2.3,
   burn: 1.1,
+  press: 3.2,
+  splash: 1.4,
 };
 
 interface ToneOpts {
@@ -432,6 +434,13 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Maschinen und Wasser (vorläufig, schlicht) ---
+      case 'press':
+        v.tone('sine', 90, 40, 0.25, 0.6).noise(2200, 500, 0.12, 0.3, { q: 1 }).tone('triangle', 620, 300, 0.08, 0.15);
+        break;
+      case 'splash':
+        v.noise(1800, 700, 0.3, 0.14, { type: 'lowpass', attack: 0.03 });
+        break;
       case 'stall':
         v.tone('sawtooth', 120, 100, 0.07, 0.24)
           .tone('sawtooth', 105, 88, 0.07, 0.22, { at: 0.11 })

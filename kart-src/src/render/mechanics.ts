@@ -6,7 +6,10 @@
 import type * as THREE from 'three';
 import type { Track } from '../game/track';
 import type { FxSink } from './fxApi';
+import { PULSE_PRESS } from '../game/mechanics';
 import { buildLava } from './mechanics/lava';
+import { buildMachines } from './mechanics/machines';
+import { buildTide } from './mechanics/tide';
 import { buildTraffic } from './mechanics/traffic';
 
 export interface MechanicView {
@@ -26,6 +29,9 @@ export interface MechanicView {
 export function buildMechanics(track: Track, detail: boolean): MechanicView[] {
   const out: MechanicView[] = [];
   if (track.vehicles.length > 0) out.push(buildTraffic(track, detail));
-  if (track.pulses.length > 0 || track.floods.length > 0) out.push(buildLava(track, detail));
+  const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
+  if (track.pulses.some((p) => p.kind !== PULSE_PRESS) || track.floods.length > 0) out.push(buildLava(track, detail));
+  if (track.belts.length > 0 || presses) out.push(buildMachines(track, detail));
+  if (track.tide) out.push(buildTide(track, detail));
   return out;
 }

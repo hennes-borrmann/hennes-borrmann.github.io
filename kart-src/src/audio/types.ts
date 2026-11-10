@@ -43,6 +43,8 @@ export type SfxName =
   | 'honk' // ein Bus oder Taxi hupt, weil man es berührt
   | 'pass' // dicht an einem Fahrzeug vorbeigezogen: kurzer Fahrtwind
   | 'burn' // das Kart fährt durch Lava: Zischen (wird etwa 3×/s aufgerufen)
+  | 'press' // eine Stampfpresse schlägt herunter: schwerer metallischer Schlag
+  | 'splash' // das Kart fährt durch Wasser: Platschen (wird etwa 3–4×/s aufgerufen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten
 
