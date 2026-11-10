@@ -311,6 +311,43 @@ describe('Rennen über das Netz (simuliert)', () => {
     expect(s.boost).toBeGreaterThan(60);
   });
 
+  it('verliert die Rennuhr des Hosts Zeit (Hänger), folgt ihr die Uhr des Mitspielers nach kurzer Zeit', () => {
+    const host = new HostGame(0);
+    host.setRoster([0, 1], true);
+    host.newRace();
+    const LAG = 20;
+    const client = new ClientGame(1, () => LAG * 2);
+    const line: Packet[] = [];
+    let now = 0;
+    let acc = 0;
+    const run = (ms: number, hostRuns: boolean): void => {
+      for (const end = now + ms; now < end; now++) {
+        while (line.length > 0 && line[0].at <= now) client.onSnapshot(decodeSnapshot(new DataView(line.shift()!.data))!, now / 1000);
+        if (!hostRuns) continue;
+        acc += 1;
+        while (acc >= 1000 / 60) {
+          acc -= 1000 / 60;
+          host.step(NEUTRAL);
+          if (host.tick % 2 === 0) line.push({ at: now + LAG, data: host.snapshot() });
+        }
+      }
+    };
+    /** Um wie viel weichen die Zeiten bis „Los“ voneinander ab (Sekunden)? */
+    const apart = (): number => Math.abs(client.race(now / 1000).untilGo - (host.goTick - host.tick) / 60);
+    run(1000, true);
+    expect(apart()).toBeLessThan(0.04);
+    // Der Host hängt 0,3 s und holt nichts davon nach: seine Rennuhr geht jetzt 0,3 s nach.
+    run(300, false);
+    run(100, true);
+    expect(apart()).toBeGreaterThan(0.25);
+    // Zwei Sekunden später hat der Mitspieler die neue Uhr übernommen – sonst sähe er „Los“ zu früh.
+    run(1900, true);
+    expect(apart()).toBeLessThan(0.04);
+    // Schwankende Laufzeiten bringen die Uhr dabei nicht aus dem Tritt: einzelne verspätete Stände zählen nicht.
+    for (let i = 0; i < 40; i++) client.onSnapshot(decodeSnapshot(new DataView(host.snapshot()))!, now / 1000 + LAG / 1000 + (i % 3 === 0 ? 0 : 0.06));
+    expect(apart()).toBeLessThan(0.04);
+  });
+
   it('nach einem Verbindungsabbruch sendet der Mitspieler nichts, bis der Host wieder einen Stand geschickt hat', () => {
     const host = new HostGame(0);
     host.setRoster([0, 1], true);
