@@ -49,6 +49,9 @@ export function buildKlippeLife(world: World): Life {
   const disposables: { dispose(): void }[] = [];
   const detail = world.detail;
   const sea = th.liquidY ?? -2.2;
+  /** Gezeiten (mechanics/tide.ts): sea ist der Pegel bei Ebbe, seaHigh bei Flut; der aktuelle kommt über world.floating. */
+  const sea0 = sea;
+  const seaHigh = t.tide ? t.tide.high : sea;
   const rnd = seeded(7300 + t.index * 41);
   const toon = toonMaterial({ vertexColors: true });
   disposables.push(toon);
@@ -182,6 +185,8 @@ export function buildKlippeLife(world: World): Life {
   // --- Brandung --------------------------------------------------------------------
   // Küstenpunkte: von der Bande aus nach außen, bis das Gelände unter den Meeresspiegel fällt.
   const shore: number[] = []; // x, z, Richtung zum Meer (x, z), Phase
+  // Dieselbe Küste bei Flut (x, z): dorthin wandert die Brandung, wenn das Wasser steigt.
+  const shoreHigh: number[] = [];
   const maxShore = detail === 0 ? 60 : 110;
   for (let i = 0; i < t.n && shore.length < maxShore * 5 * 3; i += 4) {
     for (const sgn of [-1, 1]) {
@@ -208,6 +213,20 @@ export function buildKlippeLife(world: World): Life {
           const nx = gl > 1e-3 ? -gx / gl : rightX(t, i) * sgn;
           const nz = gl > 1e-3 ? -gz / gl : rightZ(t, i) * sgn;
           shore.push(sx, sz, nx, nz, i * 0.011 + rnd() * 0.08);
+          // Wo liegt die Wasserkante bei Flut? Gleicher Strahl, höherer Pegel – nie näher als 2 m an der Bande.
+          let hl = l;
+          let hy = Infinity;
+          let hLat = t.wh[i] + 2;
+          for (let la = t.wh[i] + 2; la < l; la += 1.5) {
+            const yy = world.heightAt(t.px[i] + rightX(t, i) * sgn * la, t.pz[i] + rightZ(t, i) * sgn * la);
+            if (yy < seaHigh) {
+              hl = hy === Infinity ? la : hLat + (la - hLat) * ((hy - seaHigh) / (hy - yy));
+              break;
+            }
+            hy = yy;
+            hLat = la;
+          }
+          shoreHigh.push(t.px[i] + rightX(t, i) * sgn * hl, t.pz[i] + rightZ(t, i) * sgn * hl);
           break;
         }
         prevY = y;
@@ -499,6 +518,10 @@ export function buildKlippeLife(world: World): Life {
   return {
     group,
     update(time: number, dt: number, cam: THREE.Vector3, fx: FxSink): void {
+      // Gezeiten: alles auf dem Wasser folgt dem Pegel (world.floating wird in mechanics/tide.ts gehoben).
+      const lift = world.floating.position.y;
+      const sea = sea0 + lift;
+      const flood = seaHigh > sea0 ? Math.max(0, Math.min(1, lift / (seaHigh - sea0))) : 0;
       // --- Möwen ---
       for (let si = 0; si < nSwarm; si++) {
         const s = swarms[si];
@@ -595,8 +618,9 @@ export function buildKlippeLife(world: World): Life {
       // --- Brandung ---
       for (let k = 0; k < nShore; k++) {
         const o = shoreIdx[k] * 5;
-        const x = shore[o];
-        const z = shore[o + 1];
+        const oh = shoreIdx[k] * 2;
+        const x = shore[o] + (shoreHigh[oh] - shore[o]) * flood;
+        const z = shore[o + 1] + (shoreHigh[oh + 1] - shore[o + 1]) * flood;
         const nx = shore[o + 2];
         const nz = shore[o + 3];
         const cyc = time / SURF_PERIOD - shore[o + 4];

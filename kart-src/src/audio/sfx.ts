@@ -68,6 +68,8 @@ const LEVEL: Record<SfxName, number> = {
   honk: 2.4,
   pass: 2.3,
   burn: 1.1,
+  press: 2.6,
+  splash: 1.8,
 };
 
 interface ToneOpts {
@@ -218,6 +220,7 @@ export class SfxPlayer {
   private tick = 0;
   private passTick = 0;
   private burnTick = 0;
+  private splashTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -430,6 +433,40 @@ export class SfxPlayer {
           const fc = crackle[i + 1];
           v.noise(fc, fc * 0.85, 0.02, 0.07, { q: 5, at: crackle[i] });
         }
+        break;
+      }
+      // --- Maschinen und Wasser ---
+      case 'press':
+        // Stampfpresse: ganz kurz zischt die Hydraulik, dann (ab 0,06 s) der Schlag –
+        // tiefer Sinus und braunes Rauschen als Bauch, ein harter Aufprall-Knack, darüber
+        // zwei unharmonische Dreiecks-Teiltöne als Metallklang und ein kurzes Nachklirren.
+        v.noise(6000, 3800, 0.08, 0.13, { type: 'highpass', attack: 0.015 })
+          .tone('sine', 105, 36, 0.44, 0.55, { at: 0.06 })
+          .noise(650, 110, 0.32, 0.45, { type: 'lowpass', brown: true, at: 0.06 })
+          .tone('square', 72, 44, 0.12, 0.1, { at: 0.06 })
+          .noise(2000, 600, 0.05, 0.26, { q: 1, at: 0.06 })
+          .tone('triangle', 287, 281, 0.32, 0.1, { at: 0.06 })
+          .tone('triangle', 761, 748, 0.24, 0.07, { at: 0.065 })
+          .tone('sine', 1532, 1510, 0.16, 0.04, { at: 0.065 })
+          .noise(3300, 2800, 0.03, 0.08, { q: 5, at: 0.19 })
+          .noise(4100, 3500, 0.025, 0.05, { q: 5, at: 0.28 });
+        break;
+      case 'splash': {
+        // Wasser: zwei breite, weich ein- und ausschwingende Rauschschichten, um eine
+        // halbe Aufrufspanne versetzt, damit die ~0,28 s folgenden Aufrufe zu einem
+        // durchgehenden Rauschen verschmelzen. Dazu je Aufruf ein Platscher und ein
+        // Tröpfchen aus wechselnden Fassungen (reihum, wie bei 'burn').
+        const k = this.splashTick++ % 3;
+        const [pAt, pF, dAt, dF] = [
+          [0.04, 1500, 0.16, 900],
+          [0.12, 1150, 0.22, 1250],
+          [0.07, 1800, 0.25, 1050],
+        ][k];
+        v.noise(1500, 900, 0.7, 0.12, { q: 0.7, attack: 0.2 })
+          .noise(1300, 800, 0.7, 0.11, { q: 0.7, attack: 0.2, at: 0.14 })
+          .noise(420, 260, 0.6, 0.13, { type: 'lowpass', brown: true, attack: 0.22, at: 0.07 })
+          .noise(pF, pF * 0.45, 0.1, 0.1, { q: 1.3, attack: 0.008, at: pAt })
+          .tone('sine', dF, dF * 1.7, 0.045, 0.05, { at: dAt });
         break;
       }
       case 'stall':
