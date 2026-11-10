@@ -62,6 +62,12 @@ const LEVEL: Record<SfxName, number> = {
   finish: 1.35,
   win: 1.5,
   lose: 1.3,
+  draft: 3,
+  geyser: 3,
+  bomb: 3.4,
+  honk: 2.4,
+  pass: 3,
+  burn: 2.4,
 };
 
 interface ToneOpts {
@@ -357,6 +363,25 @@ export class SfxPlayer {
           .tone('triangle', 1510, 1490, 0.3, 0.16, { at: 0.01 })
           .tone('triangle', 2260, 2230, 0.24, 0.1, { at: 0.01 })
           .noise(3000, 1500, 0.04, 0.2, { q: 1 });
+        break;
+      // --- Streckenmechanik (vorläufig, schlicht) ---
+      case 'draft':
+        v.noise(900, 2600, 0.35, 0.16, { q: 1.5, attack: 0.04 });
+        break;
+      case 'geyser':
+        v.noise(500, 3200, 0.9, 0.3, { q: 0.8, attack: 0.05 }).tone('sine', 70, 45, 0.6, 0.3);
+        break;
+      case 'bomb':
+        v.tone('sine', 110, 38, 0.3, 0.55).noise(1600, 300, 0.45, 0.3, { type: 'lowpass' });
+        break;
+      case 'honk':
+        v.tone('square', 392, 392, 0.32, 0.12).tone('square', 494, 494, 0.32, 0.1);
+        break;
+      case 'pass':
+        v.noise(700, 1500, 0.22, 0.12, { q: 1, attack: 0.05 });
+        break;
+      case 'burn':
+        v.noise(4200, 2600, 0.16, 0.1, { type: 'highpass' });
         break;
       case 'stall':
         v.tone('sawtooth', 120, 100, 0.07, 0.24)

@@ -44,6 +44,11 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'use-smoke',
   'use-spring',
   'use-kite',
+  // Was die Strecke selbst von sich gibt
+  'geyser',
+  'bomb',
+  'honk',
+  'pass',
 ]);
 
 export class Sound {

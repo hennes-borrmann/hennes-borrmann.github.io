@@ -37,6 +37,12 @@ export type SfxName =
   | 'lap' // neue Runde
   | 'final-lap' // letzte Runde beginnt (kurzer Jingle)
   | 'finish' // Ziel erreicht
+  | 'draft' // aus dem Windschatten ausgeschert: kurzer Sog (leiser als ein Schub)
+  | 'geyser' // ein Geysir bricht aus: Zischen und Fauchen, gut eine Sekunde
+  | 'bomb' // eine Lavabombe schlägt ein: dumpfer Schlag, Zischen
+  | 'honk' // ein Bus oder Taxi hupt, weil man es berührt
+  | 'pass' // dicht an einem Fahrzeug vorbeigezogen: kurzer Fahrtwind
+  | 'burn' // das Kart fährt durch Lava: Zischen (wird etwa 3×/s aufgerufen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten
 
