@@ -357,7 +357,8 @@ describe('Neue Items', () => {
         expect(s.tow).toBe(TOW_TICKS);
         let dist = 0;
         let top = 0;
-        for (let i = 0; i < TOW_TICKS + 120 && (s.tow > 0 || s.flags & FLAG_AIR); i++) {
+        // (Über einer langen Flugstrecke lässt der Drache erst hinter der Landung los – deshalb die großzügige Frist.)
+        for (let i = 0; i < TOW_TICKS + 480 && (s.tow > 0 || s.flags & FLAG_AIR); i++) {
           const x = s.x;
           const z = s.z;
           ev |= stepKart(s, NEUTRAL, ENV);

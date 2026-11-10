@@ -5,6 +5,9 @@ import {
   DRAFT_PULL_FROM,
   FLAT_FACTOR,
   FLOOD_FROM,
+  GLIDE_FALL,
+  GLIDE_SINK,
+  GLIDE_SPEED,
   PULSE_BOMB,
   PULSE_PRESS,
   PULSE_VENT,
@@ -27,10 +30,13 @@ import {
   EV_BURN,
   EV_DRAFT,
   EV_FLAT,
+  EV_FALL,
   EV_HIT,
+  EV_PAD,
   EV_SPLASH,
   EV_WALL,
   FLAG_AIR,
+  FLAG_GLIDE,
   GUARD_TICKS,
   V_MAX,
   forwardSpeed,
@@ -39,7 +45,7 @@ import {
   stepKart,
   type KartState,
 } from '../../src/game/sim';
-import { TRACK, newVehiclePose, proj, projectOnTrack, rightX, rightZ, segDelta, setTrack, trackHeading, vehiclePose, wrapSeg } from '../../src/game/track';
+import { EDGE_GAP, EDGE_GLIDE, TRACK, newVehiclePose, proj, projectOnTrack, rightX, rightZ, segDelta, setTrack, trackHeading, vehiclePose, wrapSeg } from '../../src/game/track';
 
 afterAll(() => {
   setTrack(0);
@@ -871,5 +877,108 @@ describe('Möwenklippe: Ebbe und Flut (Streckendaten)', () => {
       expect(bay(slot, HIGH, -1).route).toBe(2);
       expect(bay(slot, LOW, -1).route).toBe(0);
     }
+  });
+});
+
+describe('Fliegen (Wolkenwerft)', () => {
+  /** Erste Flugstrecke der Hauptstrecke: erster und letzter Abschnitt. */
+  function firstGlide(): { first: number; last: number } {
+    const t = TRACK;
+    let first = -1;
+    let last = -1;
+    for (let i = 0; i < t.n; i++) {
+      if (t.edge[i] & EDGE_GLIDE) {
+        if (first < 0) first = i;
+        last = i;
+      } else if (first >= 0) break;
+    }
+    return { first, last };
+  }
+
+  /** Kart in der Luft über Abschnitt seg, dy Meter über der Ideallinie, seitlich lat. */
+  function airborne(seg: number, dy: number, lat = 0, speed = GLIDE_SPEED): KartState {
+    const t = TRACK;
+    const s = gridState(0);
+    s.seg = seg;
+    s.x = t.px[seg] - t.tz[seg] * lat;
+    s.z = t.pz[seg] + t.tx[seg] * lat;
+    s.y = t.py[seg] + dy;
+    s.heading = trackHeading(t, seg);
+    s.vx = Math.sin(s.heading) * speed;
+    s.vz = Math.cos(s.heading) * speed;
+    s.vy = 0;
+    s.flags = FLAG_AIR;
+    return s;
+  }
+
+  it('über einer Flugstrecke sinkt das Kart langsam, statt zu fallen', () => {
+    const t = setTrack(4);
+    const g = firstGlide();
+    expect(g.first).toBeGreaterThan(0);
+    expect(t.edge[g.first] & EDGE_GAP).not.toBe(0);
+    // Mitten in der Luft, abseits von Aufwinden und Ringen
+    const s = airborne(g.first + 20, 4, 11);
+    const y0 = s.y;
+    run(s, 0, 60);
+    expect(s.flags & FLAG_GLIDE).not.toBe(0);
+    const sunk = y0 - s.y;
+    // Eine Sekunde: knapp die Sinkrate (sie stellt sich erst ein) – im freien Fall wären es 15 m.
+    expect(sunk).toBeGreaterThan(GLIDE_SINK * 0.5);
+    expect(sunk).toBeLessThan(GLIDE_SINK * 1.1);
+    expect(s.vy).toBeCloseTo(-GLIDE_SINK, 0);
+    // Das Tempo hält sich beim Reisetempo.
+    expect(Math.hypot(s.vx, s.vz)).toBeGreaterThan(GLIDE_SPEED * 0.93);
+  });
+
+  it('ein Aufwind hebt, ein Ring gibt Schub', () => {
+    const t = setTrack(4);
+    const th = t.thermals[0];
+    // Kurz vor dem Aufwind, auf seiner Spur
+    const before = airborne(th.seg - 12, 2, th.lat);
+    const plain = airborne(th.seg - 12, 2, th.lat + 22);
+    run(before, 0, 70);
+    run(plain, 0, 70);
+    const gain = before.y - t.py[before.seg] - (plain.y - t.py[plain.seg]);
+    console.log(`Aufwind: ${gain.toFixed(1)} m höher als ohne`);
+    expect(gain).toBeGreaterThan(3);
+    const ring = t.rings[0];
+    const dy = ring.y - t.py[ring.seg];
+    const s = airborne(ring.seg - 6, dy - 0.3, ring.lat);
+    const ev = run(s, 0, 30);
+    expect(ev & EV_PAD).not.toBe(0);
+    expect(s.boost).toBeGreaterThan(0);
+    // Wer unter dem Ring durchfliegt, bekommt nichts.
+    const low = airborne(ring.seg - 6, dy - 6, ring.lat);
+    expect(run(low, 0, 30) & EV_PAD).toBe(0);
+  });
+
+  it('wer zu tief sinkt, stürzt ab und startet wieder vor der Kante', () => {
+    const t = setTrack(4);
+    const g = firstGlide();
+    // Knapp über der Grenze und im Sturzflug (die Ideallinie fällt selbst etwa so schnell, wie ein Kart sinkt).
+    const s = airborne(g.first + 30, -GLIDE_FALL + 1.5, 12);
+    s.vy = -9;
+    let ev = 0;
+    for (let i = 0; i < 90 && !(ev & EV_FALL); i++) ev |= stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: i });
+    expect(ev & EV_FALL).not.toBe(0);
+    // Aufgesetzt wird vor dem Absprung, auf festem Boden.
+    expect(segDelta(t, s.seg, g.first)).toBeGreaterThan(10);
+    expect(t.edge[s.seg] & EDGE_GAP).toBe(0);
+  });
+
+  it('im Gleitflug lenkt das Kart weich: Vollausschlag dreht in einer Sekunde um gut 60 Grad', () => {
+    const t = setTrack(4);
+    const g = firstGlide();
+    const s = airborne(g.first + 15, 6, 0);
+    const h0 = s.heading;
+    for (let i = 0; i < 60; i++) stepKart(s, { steer: 127, buttons: BTN_GAS }, { canDrive: true, speedFactor: 1, time: i });
+    const turned = Math.abs(s.heading - h0);
+    expect(turned).toBeGreaterThan(1.0);
+    expect(turned).toBeLessThan(1.3);
+    // Die Flugrichtung folgt der Nase mit Verzögerung: nach einer Sekunde noch nicht ganz.
+    const course = Math.atan2(s.vx, s.vz);
+    expect(Math.abs(course - h0)).toBeLessThan(turned);
+    expect(Math.abs(course - h0)).toBeGreaterThan(turned * 0.4);
+    void t;
   });
 });

@@ -22,6 +22,14 @@ import {
   FLAT_FACTOR,
   FLAT_TICKS,
   FLOOD_FROM,
+  GLIDE_ACCEL,
+  GLIDE_CEILING,
+  GLIDE_FALL,
+  GLIDE_GRIP,
+  GLIDE_RESPONSE,
+  GLIDE_SINK,
+  GLIDE_SPEED,
+  GLIDE_YAW,
   PULSE_PRESS,
   PULSE_VENT,
   WATER_FROM,
@@ -34,6 +42,7 @@ import {
   waterFactor,
 } from './mechanics';
 import {
+  EDGE_GLIDE,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   NO_GROUND,
@@ -114,6 +123,8 @@ export const FLAG_OFFROAD = 2;
 export const FLAG_WALL = 4;
 /** Das Kart ist in der Luft (Sprung, Absturz oder gerade am Kran). */
 export const FLAG_AIR = 8;
+/** Das Kart gleitet über einer Flugstrecke (Flügel ausgeklappt). */
+export const FLAG_GLIDE = 16;
 
 export interface KartState {
   x: number;
@@ -797,7 +808,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const ground = SURFACES[t.surf[seg0]] ?? SURFACES[0];
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
   const hold = A_LAT * ch.grip * ground.grip * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
-  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
+  // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
+  const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
+  const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
@@ -887,6 +900,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  if (gliding) {
+    // Die Flugrichtung folgt der Nase weich; das Tempo pendelt sich auf Reisetempo ein (mit Schub darüber).
+    const speed = Math.hypot(vf, vl);
+    vl *= Math.exp(-GLIDE_GRIP * DT);
+    vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
+    const cruise = (s.boost > 0 ? V_BOOST : GLIDE_SPEED * ch.vmax) * env.speedFactor * (s.stall > 0 ? STALL_FACTOR : 1);
+    if (env.canDrive && !spinning) vf += Math.max(-GLIDE_ACCEL * DT, Math.min(GLIDE_ACCEL * DT, cruise - vf));
+  }
   s.vx = fx * vf + rx * vl;
   s.vz = fz * vf + rz * vl;
   s.x += s.vx * DT;
@@ -979,7 +1000,31 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       g = g0;
     }
   }
-  s.vy -= GRAVITY * DT;
+  if (gliding && g === NO_GROUND) {
+    // Statt zu fallen, sinkt das Kart langsam – und steigt in einem Aufwind.
+    let want = -GLIDE_SINK;
+    for (const th of t.thermals) {
+      const dx = s.x - th.x;
+      const dz = s.z - th.z;
+      if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(s.y - th.y) < GLIDE_FALL + GLIDE_CEILING) want = th.lift;
+    }
+    // Oben ist Schluss: über der Decke geht es nur noch abwärts.
+    if (s.y > t.py[s.seg] + GLIDE_CEILING) want = Math.min(want, -GLIDE_SINK);
+    s.vy += (want - s.vy) * Math.min(1, GLIDE_RESPONSE * DT);
+    flags |= FLAG_GLIDE;
+    // Schubringe
+    if (s.boost < PAD_TICKS - 8) {
+      for (const r of t.rings) {
+        const dx = s.x - r.x;
+        const dy = s.y + 0.6 - r.y;
+        const dz = s.z - r.z;
+        if (dx * dx + dy * dy + dz * dz < r.radius * r.radius) {
+          s.boost = PAD_TICKS;
+          ev |= EV_PAD;
+        }
+      }
+    }
+  } else s.vy -= GRAVITY * DT;
   s.y += s.vy * DT;
   if (s.y <= g) {
     if (wasAir && s.vy < -5) ev |= EV_LAND;
@@ -996,7 +1041,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
 
   // --- Absturz ---
-  if (s.y < t.py[s.seg] - t.fallDepth) {
+  if (s.y < t.py[s.seg] - (t.edge[s.seg] & EDGE_GLIDE ? GLIDE_FALL : t.fallDepth)) {
     const r = t.respawn[s.seg];
     s.seg = r;
     s.x = t.px[r];

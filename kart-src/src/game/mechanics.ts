@@ -230,3 +230,45 @@ export function waterFactor(depth: number): number {
 /** Geplättet (Stampfpresse): so lange fährt das Kart flach und langsam (Ticks). */
 export const FLAT_TICKS = 130;
 export const FLAT_FACTOR = 0.55;
+
+// --- Fliegen -----------------------------------------------------------------------
+// Über einer Flugstrecke (Lücke mit EDGE_GLIDE) trägt die Luft: das Kart sinkt
+// nur langsam, lenkt weich und hält sein Tempo. Aufwinde heben es, Ringe geben
+// Schub. Die gedachte Ideallinie ist die Höhe der Abschnitte (track.py).
+
+/** Sinkgeschwindigkeit im Gleitflug (m/s) und wie schnell sich die Steig-/Sinkrate einstellt (1/s). */
+export const GLIDE_SINK = 2.6;
+export const GLIDE_RESPONSE = 2.4;
+/** Reisetempo im Gleitflug (m/s) und wie zügig es erreicht wird (m/s²). */
+export const GLIDE_SPEED = 29;
+export const GLIDE_ACCEL = 12;
+/** Drehrate bei vollem Lenkeinschlag (rad/s) und wie schnell die Flugrichtung der Nase folgt (1/s). */
+export const GLIDE_YAW = 1.15;
+export const GLIDE_GRIP = 2.6;
+/** So weit über der Ideallinie ist Schluss mit Steigen, so weit darunter ist das Kart abgestürzt (Meter). */
+export const GLIDE_CEILING = 13;
+export const GLIDE_FALL = 15;
+
+/** Aufwind: eine Säule aufsteigender Luft. Wer hindurchfliegt, steigt. */
+export interface Thermal {
+  seg: number;
+  lat: number;
+  x: number;
+  z: number;
+  /** Höhe der Ideallinie an dieser Stelle. */
+  y: number;
+  radius: number;
+  /** Steiggeschwindigkeit in der Säule (m/s). */
+  lift: number;
+}
+
+/** Schubring in der Luft: wer hindurchfliegt, bekommt Schub. */
+export interface Ring {
+  seg: number;
+  lat: number;
+  x: number;
+  /** Höhe der Ringmitte. */
+  y: number;
+  z: number;
+  radius: number;
+}
