@@ -916,8 +916,15 @@ export function newVehiclePose(): VehiclePose {
  */
 export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
   const lap = t.n * t.step;
-  let s = vehicleAt(v, time, lap) - car * v.pitch;
-  if (s < 0) s += lap;
+  let s = vehicleAt(v, time, lap);
+  if (car > 0) {
+    // Hintere Wagen folgen im Abstand der Kupplung – gemessen auf der eigenen Spur, nicht auf der
+    // Mittellinie: außen in der Kurve ist der Weg länger, innen kürzer (curv > 0 = Rechtskurve).
+    const lead = Math.min(t.n - 1, Math.floor(s / t.step));
+    const scale = Math.max(0.6, Math.min(1.6, 1 - ((v.lat * t.rh[lead]) / t.def.roadHalf) * t.curv[lead]));
+    s -= (car * v.pitch) / scale;
+    if (s < 0) s += lap;
+  }
   const i = Math.min(t.n - 1, Math.floor(s / t.step));
   const along = s - i * t.step;
   const f = along / t.step;
