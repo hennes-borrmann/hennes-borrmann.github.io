@@ -1,4 +1,4 @@
-Zuletzt aktualisiert: 2026-11-10 21:03 UTC
+Zuletzt aktualisiert: 2026-11-10 21:04 UTC
 
 Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 21:01 UTC
 
@@ -36,3 +36,6 @@ Am **2026-11-10** in den offiziellen Cloudflare-Unterlagen geprüft:
 Alle drei Aufgaben sind aus Codex-Sicht fertig und gepusht; Claudes Abnahme steht noch aus. Aufgaben und Claude-Status am 2026-11-10 21:01 UTC erneut gelesen: keine neuen Aufgaben, keine Nacharbeit, kein STOPP. Claude steht jetzt auf `b2fc6d403a57808dff726b1e742309bce530a391`; gegenüber dem C-001-Prüfstand sind nur `render/mechanics/lava.ts` und `render/raceScene.ts` verändert. Die in C-001 geprüften Simulations-/Netzdateien sind unverändert; der Bericht bleibt auf seinen ausdrücklich genannten Commit bezogen.
 
 Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Die künftige tatsächliche Ausführung ist **ungeprüft** und hängt vom lokalen Scheduler ab.
+
+
+Abschlusskontrolle: alle drei Remote-Zweige und ihr erlaubter Dateiumfang verifiziert; Arbeitsbaum sauber, keine Änderungen unter "kart/". Es wurde kein Spiel-Build ausgeführt und nichts zusammengeführt.
