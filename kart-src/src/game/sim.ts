@@ -258,7 +258,7 @@ export const CHARACTERS: Character[] = [
     name: 'Kolben-Kalle',
     trait: 'Schnell auf der Geraden, braucht etwas länger auf Touren.',
     bars: [5, 2, 3],
-    vmax: 1.01,
+    vmax: 1.006,
     accel: 0.88,
     grip: 0.985,
     offroad: OFFROAD_FACTOR,

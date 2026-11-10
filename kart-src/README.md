@@ -2,7 +2,7 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 3 mit Ausbau Schritt 2.** Vier Strecken mit Höhen, Sprüngen und Abgründen, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+**Stand: Phase 3 mit Ausbau Schritt 3.** Vier Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
 
 Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
@@ -27,12 +27,20 @@ Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scanne
 
 ### Strecken
 
-| Strecke | Länge | Besonderheiten |
-| --- | --- | --- |
-| **Werkshof** | 720 m | Einsteigerstrecke: breit, überall Bande, sanfte Hügel, eine Laderampe zum Springen, ein rollendes Fass |
-| **Möwenklippe** | 820 m | Holzsteg ohne Geländer, Serpentine die Klippe hinauf, zwei Kuppen, Sprung über die Bucht, eine Krabbe quert |
-| **Glutkessel** | 760 m | Acht um einen Vulkan: überhöhte Kurven, schmaler Grat, Sprung über den Lavastrom, Felsbrücke über die eigene Strecke |
-| **Nachtschicht** | 700 m | Hochstraße bei Nacht: rechte Winkel, Sprung von Dach zu Dach, Parkhaus-Spirale über sich selbst hinweg |
+| Strecke | Länge | Untergrund | Besonderheiten |
+| --- | --- | --- | --- |
+| **Werkshof** | 1 480 m | Asphalt, Stahlplatten, Schotter | Einsteigerstrecke. Verladebrücke oder Lagerhalle (die Wege kreuzen sich), Steilkurve, Laderampe, rutschige Kehre über den Schotterplatz, Schikane oder Sprung über die Containergrube |
+| **Möwenklippe** | 1 490 m | Sand, Holzbohlen, Waldweg, Wiese, Fels | Strandpromenade, schmaler Holzsteg ohne Geländer, Serpentinen durch den Kiefernwald oder Felsgrotte darunter hindurch, Wiese am Leuchtturm, Abfahrt mit Sprung, Steilkurve, Uferstraße oder Steg mit Sprung über die Bucht |
+| **Glutkessel** | 1 480 m | Fels, Schotter (Asche), Gitterrost | Eine Acht um den Vulkan: Bogen oder Sprung über den Lavastrom, schmaler Grat ohne Bande oder Lavahöhle darunter, Sprung über die Glutrinne, Felsbrücke über die eigene Strecke, Steilkurve in der Abfahrt |
+| **Nachtschicht** | 1 470 m | Neon-Asphalt, Stahl, Pflaster | Hochstraße bei Nacht: rechte Winkel, Bogen um den Block oder Sprung über die Dächer, Hochstraße oder Röhre auf Bodenhöhe darunter, Parkhaus-Spirale als Steilkurve |
+
+**Abzweigungen:** Jede Strecke teilt sich zweimal. Beide Wege zählen für Runden und Platzierung gleich und dauern ähnlich lange; der eine ist meist sicherer, der andere riskanter (Sprung, keine Bande) oder enger. Eine gelbe Tafel im Keil zeigt die Gabelung an.
+
+**Untergründe** fahren sich verschieden: Sand und Schotter sind rutschig und etwas langsamer, der Waldweg leicht rutschig, die Wiese weich, Fels und Neon-Asphalt griffig, Stahl schnell, aber glatt, Pflaster holprig. Auf losem Grund zieht das Kart eine Staubfahne. Jede Sorte hat ihre eigene Begrenzung – Holzzaun, Seil, Felswall, Mauer, Leitplanke.
+
+**Steilkurven** sind nach innen geneigt und geben Halt: man kommt deutlich schneller herum als in einer flachen Kurve.
+
+Im Hintergrund bewegt sich die Welt: Vulkane brechen aus und werfen Lavabomben, Möwenschwärme kreisen, ein Kutter zieht durch die Bucht, Kräne drehen sich, ein Güterzug fährt um den Werkshof, über der Stadt ziehen ein Luftschiff und Feuerwerk. Das alles ist Kulisse und greift nicht ins Rennen ein.
 
 Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wieder auf die Strecke gesetzt – vor Sprüngen mit genug Anlauf. Bergab ist das Kart schneller als bergauf.
 
@@ -205,6 +213,8 @@ Der Browser-Test läuft auf einem Rechner über die lokale Schleife. Er sagt nic
 ## Bekannte Grenzen
 
 - **Nicht auf echten Geräten geprüft** (von mir aus): iPhone/iPad, Safari, echte Sensoren, echte Netze, Bildrate auf dem iPad, Höreindruck des Tons.
+- **Größere Welten:** Seit den langen Strecken zeichnet das Spiel rund doppelt so viele Dreiecke wie vorher (je nach Strecke etwa 110 000–150 000 in hoher Qualität). Ob das auf jedem iPad flüssig bleibt, ist nicht gemessen; notfalls in den Einstellungen die Qualität senken.
+- **KI an Gabelungen:** Die KI-Gegner würfeln ihren Weg, sie wählen ihn nicht nach Lage des Rennens.
 - **Ohne TURN** keine Verbindung über Mobilfunk und viele Schul-/Firmennetze (siehe oben).
 - **Der Host hat keinen Latenz-Nachteil** und muss im Vordergrund bleiben. Verlässt er die Lobby, ist das Rennen für alle vorbei (Host-Wechsel ist nicht eingebaut).
 - **Rempler, Treffer und Hindernisse** kennt nur der Host; beim Mitspieler zieht das eigene Kart danach einen Moment nach.

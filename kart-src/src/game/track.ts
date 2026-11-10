@@ -101,6 +101,8 @@ export interface TrackDef extends PathFeatures {
   boxRows: number[];
   /** Höchstens zwei, nicht verschachtelt; beide Wege zählen für die Platzierung gleich. */
   branches?: BranchDef[];
+  /** Wo das Wahrzeichen der Welt steht (z. B. der Leuchtturm) – Stützpunkt-Einheiten der Hauptstrecke. */
+  landmarkAt?: number;
 }
 
 export interface BoostPad {
@@ -211,6 +213,8 @@ export interface Track {
   cand: Int32Array;
   candAt: Int32Array;
   fallDepth: number;
+  /** Abschnitt der Hauptstrecke, neben dem das Wahrzeichen der Welt steht. */
+  landmark: number;
   pads: BoostPad[];
   boxes: { x: number; y: number; z: number; seg: number }[];
   hazards: Hazard[];
@@ -736,6 +740,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     cand: Int32Array.from(candList),
     candAt,
     fallDepth: def.fallDepth ?? 5,
+    landmark: def.landmarkAt !== undefined ? mainSeg(def.landmarkAt) : Math.round(n * 0.845) % n,
     pads: [],
     boxes: [],
     hazards: [],

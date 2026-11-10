@@ -141,6 +141,7 @@ export class World {
   /** Sichtbare Größe jeder Kiste (0..1) – wächst nach dem Einsammeln wieder an. */
   private boxScale: Float32Array;
   private nonDeck: number[] = [];
+  private deckSegs: number[] = [];
   private idwSegs: number[] = [];
   private life: Life | null = null;
   buildTimes: number[] = [];
@@ -167,7 +168,7 @@ export class World {
       if ((t.edge[i] & EDGE_DECK) === 0) {
         this.nonDeck.push(i);
         if (i % 8 === 0) this.idwSegs.push(i);
-      }
+      } else if (i % 2 === 0) this.deckSegs.push(i);
     }
     this.center.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     this.radius = Math.hypot(maxX - minX, maxZ - minZ) / 2;
@@ -802,7 +803,8 @@ export class World {
     const d = Math.sqrt(bestD);
     const lat = best < 0 ? 0 : (x - t.px[best]) * rightX(t, best) + (z - t.pz[best]) * rightZ(t, best);
     const whb = best < 0 ? 0 : t.wh[best];
-    const roadY = best < 0 ? th.farY : t.base[best] + Math.max(-whb, Math.min(whb, lat)) * t.bank[best] - 0.3;
+    // In Tunneln und Höhlen liegt das Gelände tiefer: an Steigungen schaute es sonst am Rand heraus.
+    const roadY = best < 0 ? th.farY : t.base[best] + Math.max(-whb, Math.min(whb, lat)) * t.bank[best] - (t.edge[best] & EDGE_TUNNEL ? 1.6 : 0.3);
 
     // Grundform abseits der Strecke
     let base: number;
@@ -831,7 +833,7 @@ export class World {
       // Gelände daneben ab – man sieht, dass es dort hinuntergeht.
       let drop = base;
       let dropK = 0;
-      for (let i = 0; i < t.n; i += 2) {
+      for (let i = 0; i < t.total; i += 2) {
         if ((t.edge[i] & EDGE_DECK) === 0 || (t.edge[i] & (EDGE_OPEN_L | EDGE_OPEN_R)) === 0) continue;
         const dd = Math.hypot(x - t.px[i], z - t.pz[i]);
         if (dd > 36) continue;
@@ -845,7 +847,16 @@ export class World {
     }
     const k = smooth((d - whb - 1.2) / 24);
     const bumps = (noise(x * 0.045, z * 0.045) - 0.5) * 2 * th.rough + (noise(x * 0.13 + 9, z * 0.13) - 0.5) * th.rough * 0.5;
-    return roadY + (base + bumps - roadY) * k;
+    let h = roadY + (base + bumps - roadY) * k;
+    // Unter Brücken und Stegen bleibt das Gelände unter der Fahrbahn – auch wenn
+    // gleich daneben eine höhere Fahrbahn am Boden verläuft.
+    for (const i of this.deckSegs) {
+      const cap = t.py[i] - DECK_D - 0.8;
+      if (h <= cap) continue;
+      const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
+      if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
+    }
+    return h;
   }
 
   private buildTerrain(minX: number, maxX: number, minZ: number, maxZ: number): void {

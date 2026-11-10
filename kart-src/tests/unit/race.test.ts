@@ -102,6 +102,13 @@ describe('Rennen auf dem Host', () => {
     c.shield = 0;
     c.x = oil.x;
     c.z = oil.z;
+    c.y = oil.y;
+    // Das Kart muss auch "wissen", wo es jetzt ist: nächster Abschnitt zum Fleck.
+    let near = 0;
+    for (let i = 1; i < TRACK.total; i++) {
+      if (Math.hypot(TRACK.px[i] - oil.x, TRACK.pz[i] - oil.z) < Math.hypot(TRACK.px[near] - oil.x, TRACK.pz[near] - oil.z)) near = i;
+    }
+    c.seg = near;
     host.step(gas);
     expect(c.spin).toBeGreaterThan(0);
     expect(count(host, THING_OIL)).toBe(0);

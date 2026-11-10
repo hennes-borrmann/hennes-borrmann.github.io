@@ -469,7 +469,7 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     put(lb, cyl(1.9, 1.9, 0.4, 10), rgb(0x30364a), mat(0, 22.2, 0));
     put(lb, cyl(1.0, 1.0, 2.2, 8), rgb(0xfff06a), mat(0, 23.5, 0));
     put(lb, new THREE.ConeGeometry(1.7, 1.8, 8), rgb(0xff5a4e), mat(0, 25.5, 0));
-    const li = Math.round(t.n * 0.845);
+    const li = t.landmark;
     const llat = t.wh[li] + 13;
     const lx = t.px[li] + rightX(t, li) * llat;
     const lz = t.pz[li] + rightZ(t, li) * llat;

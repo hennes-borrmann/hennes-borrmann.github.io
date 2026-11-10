@@ -15,6 +15,8 @@ export const KLIPPE: TrackDef = {
   blurb: 'Holzsteg ohne Geländer, Serpentinen oder Grotte, Steilkurve und Sprung über die Bucht.',
   grade: 2,
   surface: 'dirt',
+  // Der Leuchtturm steht oben auf der Hochfläche.
+  landmarkAt: 34,
   points: [
     // 0–2: Strandpromenade nach Osten
     [100, -100, 0],

@@ -378,7 +378,7 @@ export function buildKlippeLife(world: World): Life {
   // --- Leuchtfeuer --------------------------------------------------------------------
   // Der Leuchtturm steht in scenery.ts; hier nur sein Lichtkegel – dieselbe Stelle
   // wie dort berechnet.
-  const li = Math.round(t.n * 0.845) % t.n;
+  const li = t.landmark;
   const llat = t.wh[li] + 13;
   const lhx = t.px[li] + rightX(t, li) * llat;
   const lhz = t.pz[li] + rightZ(t, li) * llat;

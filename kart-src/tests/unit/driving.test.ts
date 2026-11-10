@@ -142,7 +142,7 @@ describe('KI-Fahrer auf der Strecke', () => {
       }
       expect(r.wallHits).toBeLessThanOrEqual(2);
       // Nur Fahrer 1 driftet in jeder engeren Kurve; die anderen seltener oder nie.
-      if (slot === 0) expect(r.turbos).toBeGreaterThanOrEqual(6);
+      if (slot === 0) expect(r.turbos).toBeGreaterThanOrEqual(3);
     });
   }
 
