@@ -385,6 +385,8 @@ export class RaceScene {
     for (const k of this.karts.values()) k.visual.setDetail(lv.kart);
     this.needsCompile = true;
     if (this.things) setOutlinesVisible(this.things.group, this.level > 0);
+    // Fällt die Qualität mitten im Rennen, verlieren auch Verkehr und Lava ihre Konturen.
+    for (const m of this.mechanics) setOutlinesVisible(m.group, this.level > 0);
     this.skids.mesh.visible = lv.skid;
     this.resize();
   }
