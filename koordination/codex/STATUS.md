@@ -1,4 +1,4 @@
-Zuletzt aktualisiert: 2026-11-10 23:16 UTC
+Zuletzt aktualisiert: 2026-11-10 23:29 UTC
 
 Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 23:15 UTC
 
@@ -8,7 +8,7 @@ Zuletzt nach neuen Aufgaben gesehen: 2026-11-10 23:15 UTC
 | C-002 | fertig | codex/c-002-musik | 0c23f20b78160a0647de63d60452ab38a5dde814 | npm ci OK; tsc OK / 112 Tests OK (10 neu) | Von Claude als Notendaten abgenommen und übernommen. Nicht angehört, noch nicht eingebunden; Musikzweig bleibt unverändert. |
 | C-003 | fertig | codex/c-003-turn | 4a2e344e0c469bec49c121dff7c7c88f88bde674 | npm ci OK; tsc OK / 102 Tests OK; node --check OK; 24 lokale Worker-Prüfungen OK | Von Claude als Vorlage abgenommen. CORS, 30-Minuten-TTL, IP-Drosselung, Fehlerbehandlung und deutsche Anleitung; nicht ausgerollt. |
 | C-004 | fertig | codex/c-004-grenztests | ff8eae3ea83610d5c67874420ee6bd8e266a0570 | npm ci OK; tsc und 150 Tests dreimal nacheinander OK (12 Dateien, 23 neue Tests) | Nur neue netzgrenzen.test.ts; Basis ce3e36e, Protokoll 8. Keine zusätzlichen bestätigten Spielcodefehler. |
-| C-005 | in Arbeit | codex/koordination | noch keiner | Protokoll 9 auf main bestätigt; fachliche Prüfung läuft | Bezugsstand deac72f4aa71d1c964ddde34001f43627951d259; nur Bericht. |
+| C-005 | fertig | codex/koordination | 084785f28db47e1a7ef0dde154aa5b8120cbacf9 | npm ci OK; tsc OK / 145 Tests OK (12 Dateien); 13 Wegwerfproben OK | main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Zwei Fehler in Pressendarstellung/Trefferprüfung, abgegrenzte Risiken; nur Bericht. |
 
 
 ## C-002 · Stückbeschreibungen
@@ -49,13 +49,20 @@ Alle Tests verwenden berechnete Tickzeiten und festgesetzte interne Uhren; Item-
 
 Die Basis `ce3e36e` bleibt ausdrücklich zulässig. Claudes Hinweis zur Queue-Kürzung wurde am gelieferten Commit `ff8eae3` geprüft: Beide Queue-Fälle erzeugen ihre Eingaben ausschließlich mit `GAS` (`buttons: BTN_GAS`), enthalten also keine Item-Taste in den später verworfenen Befehlen. Dafür ist keine Codeänderung nötig. Ausführung der Tests auf Protokoll 9 weiterhin **ungeprüft**; die drei erfolgreichen vollständigen Läufe beziehen sich auf die dokumentierte Protokoll-8-Basis.
 
-## C-005 · Prüfung begonnen
+## C-005 · Prüfbericht abgeliefert
 
-Die Startbedingung ist seit dem Abruf am 2026-11-10 23:15 UTC erfüllt: origin/main steht auf `deac72f4aa71d1c964ddde34001f43627951d259` mit Protokoll 9. C-004 ist bereits fertig. C-005 prüft nun ausschließlich diesen veröffentlichten Stand; Quellcode bleibt unverändert. Fachliche Ergebnisse noch ungeprüft.
+Die Startbedingung wurde beim Abruf am 2026-11-10 23:15 UTC erfüllt. Geprüfter main-Stand: `deac72f4aa71d1c964ddde34001f43627951d259`, Protokoll 9. Bericht: `koordination/codex/berichte/C-005.md`, Commit `084785f28db47e1a7ef0dde154aa5b8120cbacf9`. Spielcode unverändert.
+
+- Zwei reproduzierte Darstellungs-/Geometriefehler: Pressen werden ungefährlich, während ihr Stempel noch unten steht; die quadratische Platte hat ungefährliche Ecken durch eine kreisförmige Trefferprüfung. Renderer-Geometrie und Instanzmatrizen ohne GPU geprüft, kein betrachtetes Browserbild.
+- Risiken: float32-Rundung an einer Hallenbandnaht verstärkt ca. 1.4 Mikrometer Anfangsdifferenz auf ca. 20 cm; bestätigter Snapshot korrigiert. Pressen-/Wassergrenzen reagieren auf die gewollte ±40-Zeitklemme. Erst im Trefferschritt aktivierte Schutz-/Fluchtitems kommen nach der Presse zum Zug; eine gewünschte andere Reihenfolge ist nicht vorgegeben.
+- Item-Bewegung mit/ohne Bänder/Flut verglichen; Reifen/Kreisel ignorieren die Mechanik, Öl bleibt ortsfest. Begrenzte Fluchtversuche mit allen sechs Pressen, Gegenband/Hallenwand, seitlichem Stoß, Rauch und Rücksetzen unter Presse bzw. in 0.519 m tiefes Wasser erfolgreich. Kein dauerhafter Hänger oder flat-Überlauf nachgewiesen; keine lückenlose Zustandsprüfung.
+- npm ci und tsc erfolgreich, vollständige Bestandssuite 12 Dateien / 145 Tests bestanden. 13 zusätzliche, nicht committete Wegwerfproben erfolgreich. Eigene Probenfehler beim Gleitkommavergleich, Sequenzfeldnamen und Diagnosezähler korrigiert; nicht als Spielmechanikfehler gewertet. C-004-Tests sind in diesem main-Stand noch nicht enthalten.
+
+Browserdarstellung/GPU, Ton, subjektives Fahrgefühl, echte Geräte/Netze und vollständige Mehrkart-Rempler bleiben **ungeprüft**. Reproduktionsabläufe, Vorschläge und genauere Prüfgrenzen stehen im Bericht.
 
 ## Weiterer Aufgabenabruf
 
-C-001 bis C-003 sind von Claude abgenommen. C-004 ist abgeliefert und wartet auf seine Prüfung. C-005 ist in Arbeit, nachdem Protokoll 9 auf main bestätigt wurde. Beim Aufgabenabruf am 2026-11-10 23:15 UTC wurden Auftrag, Regeln, Aufgaben und Claude-Status vollständig gelesen: Abnahme C-002, Freigabe C-005; kein STOPP. Claude-Stand `fca541d3e90dabb597557d40a720626fb081cf6a`, main `deac72f4aa71d1c964ddde34001f43627951d259`.
+C-001 bis C-003 sind von Claude abgenommen. C-004 und C-005 sind abgeliefert und warten auf seine Prüfung. Beim Aufgabenabruf am 2026-11-10 23:15 UTC wurden Auftrag, Regeln, Aufgaben und Claude-Status vollständig gelesen: Abnahme C-002, Freigabe C-005; kein STOPP. Claude-Stand `fca541d3e90dabb597557d40a720626fb081cf6a`, main `deac72f4aa71d1c964ddde34001f43627951d259`. Keine weitere bekannte offene Aufgabe; auf neue Aufgaben oder Nacharbeit warten.
 
 Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-10 23:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
