@@ -883,7 +883,7 @@ export class App {
     this.ui.setHudNoteVisible(race.phase === RACE_COUNTDOWN);
     // Während der Kamerafahrt vor der Ampel: Name der Strecke
     const intro = race.phase === RACE_COUNTDOWN && race.untilGo > 3.15 && race.untilGo < COUNTDOWN_TICKS / TICK_RATE;
-    this.ui.setRaceTitle(intro ? TRACK.def.name : null, `Strecke ${TRACK.index + 1} · ${race.laps} ${race.laps === 1 ? 'Runde' : 'Runden'}`);
+    this.ui.setRaceTitle(intro ? TRACK.def.name : null, `Strecke ${TRACK.index + 1} · ${race.laps} ${race.laps === 1 ? 'Runde' : 'Runden'}`, TRACK.def.twist ?? '');
     this.sound.roulette((me?.roulette ?? 0) > 0, nowMs);
     const threat = race.phase === RACE_RUNNING ? (this.scene?.threat ?? 0) : 0;
     this.sound.warn(threat, nowMs);

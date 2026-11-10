@@ -490,7 +490,8 @@ export class ScreenUi {
   }
 
   /** Name der Strecke zur Kamerafahrt vor dem Start; null blendet ihn aus. */
-  setRaceTitle(name: string | null, sub = ''): void {
+  /** @param twist Ein Satz zur Eigenheit der Strecke (Verkehr, Lava …) – leer, wenn sie keine hat. */
+  setRaceTitle(name: string | null, sub = '', twist = ''): void {
     const key = name ?? '';
     if (this.hudCache.title === key) return;
     this.hudCache.title = key;
@@ -499,6 +500,9 @@ export class ScreenUi {
     if (name === null) return;
     $('race-title-name').textContent = name;
     $('race-title-sub').textContent = sub;
+    const line = $('race-title-twist');
+    line.textContent = twist;
+    line.hidden = twist === '';
   }
 
   /** Minikarte neu zeichnen (läuft nicht jedes Bild – die App drosselt). */
@@ -740,6 +744,8 @@ export class ScreenUi {
         svg,
         h('span', { class: 'track-name', text: t.def.name }),
         h('span', { class: 'track-blurb', text: t.def.blurb }),
+        // Was diese Strecke anders macht als die anderen
+        ...(t.def.twist ? [h('span', { class: 'track-twist', text: t.def.twist })] : []),
         h('span', { class: 'track-meta', text: `${Math.round(t.length / 10) * 10} m · ${'●'.repeat(t.def.grade)}${'○'.repeat(3 - t.def.grade)}` }),
       ) as HTMLButtonElement;
       card.dataset.on = String(i === m.track);

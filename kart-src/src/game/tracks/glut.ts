@@ -13,7 +13,7 @@ export const GLUT: TrackDef = {
   name: 'Glutkessel',
   theme: 'glut',
   blurb: 'Lavasprung oder Bogen, Grat oder Höhle, Felsbrücke über die eigene Spur.',
-  twist: 'Der Vulkan spielt mit: Geysire brechen aus, Lavabomben schlagen ein, und durch die Höhle schießt im Takt ein Lavaschwall – die Ampel an der Gabelung warnt.',
+  twist: 'Der Vulkan spielt mit: Geysire, Lavabomben – und durch die Höhle schießt ein Lavaschwall. Die Ampel warnt.',
   grade: 3,
   points: [
     // 0–1: Start im Tal nach Norden

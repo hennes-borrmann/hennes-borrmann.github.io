@@ -15,7 +15,7 @@ export const NACHT: TrackDef = {
   name: 'Nachtschicht',
   theme: 'nacht',
   blurb: 'Hochstraße bei Nacht: Dachsprung oder Bogen, Unterführung durch die Röhre, Parkhaus-Spirale.',
-  twist: 'Stadtverkehr: Busse, Taxis und die Straßenbahn fahren mit. Nicht auffahren – aber dicht dahinter lädt der Windschatten.',
+  twist: 'Stadtverkehr fährt mit: nicht auffahren – dicht dahinter lädt der Windschatten.',
   // Verkehr auf der ganzen Hochstraße, drei Spuren. Links das Gleis der
   // Straßenbahn (mit Taxis dazwischen) und die Mitte fahren gleich schnell und
   // sind gegeneinander versetzt besetzt; rechts rollen langsamer die Busse und
