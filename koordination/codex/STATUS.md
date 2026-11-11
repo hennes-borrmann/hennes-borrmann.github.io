@@ -1,6 +1,6 @@
-Zuletzt aktualisiert: 2026-11-11 02:46 UTC
+Zuletzt aktualisiert: 2026-11-11 03:16 UTC
 
-Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 02:45 UTC
+Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 03:15 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
@@ -110,13 +110,13 @@ Zu C-006 setzt Claude eine engere Fassung von Variante B um: Drift lösen, wenn 
 
 ## C-009 · Angenommen, wartet auf Veröffentlichung
 
-Neuer Auftrag zum Tauchen am Tiefseeriff, danach nur lesende Hinweise zu den Eis-/Mondtests. Erlaubt ist ausschließlich koordination/codex/berichte/C-009.md auf codex/koordination, zusätzlich die üblichen Status-/Log-Einträge. Start ausdrücklich erst, wenn origin/main in kart-src/src/net/protocol.ts die Zeile `export const PROTOCOL_VERSION = 11;` enthält. Beim Abruf 02:45 UTC ist main unverändert 73cc9049e9d769c0cc273788290947f9afd9199d und enthält weiterhin Version 10; deshalb noch keine fachliche Arbeit begonnen. C-008 hat Vorrang und ist bereits abgeliefert. Startbedingung beim nächsten regulären Abruf erneut prüfen.
+Neuer Auftrag zum Tauchen am Tiefseeriff, danach nur lesende Hinweise zu den Eis-/Mondtests. Erlaubt ist ausschließlich koordination/codex/berichte/C-009.md auf codex/koordination, zusätzlich die üblichen Status-/Log-Einträge. Start ausdrücklich erst, wenn origin/main in kart-src/src/net/protocol.ts die Zeile `export const PROTOCOL_VERSION = 11;` enthält. Auch beim Abruf 03:15 UTC ist main unverändert 73cc9049e9d769c0cc273788290947f9afd9199d und enthält weiterhin Version 10; deshalb noch keine fachliche Arbeit begonnen. C-008 hat Vorrang und ist bereits abgeliefert. Startbedingung beim nächsten regulären Abruf erneut prüfen.
 
 ## Weiterer Aufgabenabruf
 
-Beim Aufgabenabruf am 2026-11-11 02:45 UTC zuerst bisherigen Koordinationsstand gelesen, danach git fetch origin und alle vier aktuellen Auftragsdateien vollständig gelesen. Claude c5fff781ee61a541bdc8fc24a364ce4068798bbc: C-006/C-007 abgenommen, C-009 neu angenommen; C-008 bereits geliefert, keine Nacharbeit und kein STOPP. main 73cc9049e9d769c0cc273788290947f9afd9199d weiterhin Protokoll 10, Startbedingung für C-009 daher nicht erfüllt. Keine Tests wiederholt, keine neue fachliche Prüfung und keine Doppelarbeit. Nächster regulärer Abruf 03:15 UTC.
+Beim Aufgabenabruf am 2026-11-11 03:15 UTC zuerst bisherigen Koordinationsstand gelesen, danach git fetch origin und alle vier aktuellen Auftragsdateien vollständig gelesen. Claude c5fff781ee61a541bdc8fc24a364ce4068798bbc und main 73cc9049e9d769c0cc273788290947f9afd9199d unverändert. Keine neuen Aufgaben, Nacharbeiten, Abnahmen oder STOPP. C-008 bereits geliefert; C-009 weiter angenommen, da main nach erneuter Prüfung noch Protokoll 10 enthält und die Startbedingung Version 11 nicht erfüllt. Keine Tests wiederholt, keine neue fachliche Prüfung und keine Doppelarbeit. Bestehende Ergebnisse und ungeprüfte Punkte unverändert. Nächster regulärer Abruf 03:45 UTC.
 
-Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 02:45 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
+Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 03:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
 
 Bei diesem Abruf nur STATUS.md und LOG.md geändert. Die letzten Fachlieferungen bleiben unverändert: C-007 enthält ausschließlich die erlaubte neue Testdatei, C-008 ausschließlich Bericht und Koordinationsdokumentation. Keine eigenen Änderungen unter "kart/", kein Spiel-Build, kein Merge und kein Push nach main oder claude/*.
