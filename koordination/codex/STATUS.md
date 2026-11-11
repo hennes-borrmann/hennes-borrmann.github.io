@@ -1,6 +1,6 @@
-Zuletzt aktualisiert: 2026-11-11 02:16 UTC
+Zuletzt aktualisiert: 2026-11-11 02:46 UTC
 
-Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 02:15 UTC
+Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 02:45 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
@@ -9,9 +9,10 @@ Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 02:15 UTC
 | C-003 | fertig | codex/c-003-turn | 4a2e344e0c469bec49c121dff7c7c88f88bde674 | npm ci OK; tsc OK / 102 Tests OK; node --check OK; 24 lokale Worker-Prüfungen OK | Von Claude als Vorlage abgenommen. CORS, 30-Minuten-TTL, IP-Drosselung, Fehlerbehandlung und deutsche Anleitung; nicht ausgerollt. |
 | C-004 | fertig | codex/c-004-grenztests | ff8eae3ea83610d5c67874420ee6bd8e266a0570 | npm ci OK; tsc und 150 Tests dreimal nacheinander OK (12 Dateien, 23 neue Tests) | Von Claude abgenommen und als ac0189b übernommen. Eigene Prüfung auf Basis ce3e36e, Protokoll 8. |
 | C-005 | fertig | codex/koordination | 084785f28db47e1a7ef0dde154aa5b8120cbacf9 | npm ci OK; tsc OK / 145 Tests OK (12 Dateien); 13 Wegwerfproben OK | main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Von Claude abgenommen; Korrekturen laut Auftrag in a2fc907. Nachprüfung auf Protokoll 10 inzwischen durch C-007; nur Bericht. |
-| C-006 | fertig | codex/koordination | b7ec9a791670039afdd6fe47b6de8f21354551a3 | npm ci OK; tsc OK / 145 Tests OK; 128 Kombinationen je Basis/3 Varianten vollständig gemessen | Drift wird trotz entgegengesetzter Ziellenkung gehalten; Bericht mit 2.048 ausgewerteten Runden. Keine der drei Varianten erfüllt das Kriterium ohne Verschlechterung. Spielcode unverändert. |
-| C-007 | fertig | codex/c-007-mechaniktests | 93bf052b4ba42f9631e6dee96667a1731254dc74 | npm ci OK; tsc und 219 Tests dreimal nacheinander OK (14 Dateien, 36 neu) | Basis main 73cc904 / Protokoll 10; nur mechanikgrenzen.test.ts. Kein zusätzlicher Spielcodefehler nachgewiesen. |
+| C-006 | fertig | codex/koordination | b7ec9a791670039afdd6fe47b6de8f21354551a3 | npm ci OK; tsc OK / 145 Tests OK; 128 Kombinationen je Basis/3 Varianten vollständig gemessen | Von Claude abgenommen. Bericht mit 2.048 Messrunden; keine getestete Variante ohne Nachteile. Claude übernimmt eine engere Drift-Freigabe am Innenrand; neue Fassung durch Codex ungeprüft. |
+| C-007 | fertig | codex/c-007-mechaniktests | 93bf052b4ba42f9631e6dee96667a1731254dc74 | npm ci OK; tsc und 219 Tests dreimal nacheinander OK (14 Dateien, 36 neu) | Von Claude abgenommen, laut Auftrag als 54758ff übernommen und alle 36 Fälle auch auf Schritt-7-Stand erfolgreich. Eigene Prüfung weiterhin auf main 73cc904 / Protokoll 10; Zweig unverändert. |
 | C-008 | fertig | codex/koordination | f8cc21c3fb23d1bd8b8c89a8e256c1a259138940 | npm ci auf identischer C-007-Basis OK; tsc und 183 Bestandstests erneut OK; 14 Wegwerfproben OK | main 73cc904 / Protokoll 10. Drei bestätigte Fehler, zwei Risiken; nur Bericht. Katapult verliert Rennfortschritt, Ziel 157 Ticks nach dritter Linienquerung. |
+| C-009 | angenommen | codex/koordination | noch keiner | Startbedingung geprüft: main 73cc904 weiterhin Protokoll 10; fachliche Prüfung offen | Prüfbericht Tauchen. Erst beginnen, wenn origin/main exakt PROTOCOL_VERSION = 11 enthält; C-008 ist bereits geliefert. |
 
 ## C-002 · Stückbeschreibungen
 
@@ -99,13 +100,23 @@ Basis origin/main 73cc9049e9d769c0cc273788290947f9afd9199d, Protokoll 10. Berich
 - 144 KI-Flugfälle (drei Flüge, vier Figuren, drei Stärken, normal/Rauch/seitlicher Impuls/Rücksetzen) bis zur tatsächlichen Bodenberührung erfolgreich, kein weiterer Sturz oder Wandtreffer. 24 Kombinationen aus Figur/Stärke/Route mit je zwei vollen physischen Runden erfolgreich. 48 zusätzliche Erholungsfälle, 45 tiefe/seitliche Landungen, 18 Abschlepp-Endfälle, niedrige/negative Anfangstempi, echte Rückwärts-Eintritte und kontrollierte Host-Item-/Zweikartkontakte geprüft. Tiefe Landungen oder bewusstes Abfliegen außen können erwartungsgemäß einmal stürzen; anschließend kein Hänger. Rücksetzpunkt hinter Landung weicht von der im Kommentar beschriebenen Anlaufregel ab; gewünschte Regel offen.
 - npm ci bereits für C-007 auf exakt gleicher Basis erfolgreich; Abhängigkeiten unverändert weiterverwendet. TypeScript und reine main-Bestandssuite erneut erfolgreich: 13 Dateien / 183 Tests. 14 Wegwerfproben außerhalb des Repositorys erfolgreich; eigener Syntaxfehler vor Ausführung korrigiert. Alle Quellen wie beauftragt gelesen, keine Proben committet.
 
-Reale Geräte/Browser, Bild/Ton, Fahrgefühl, echte Leitungen mit Verlust/Jitter, freie KI-Wegwahl über viele Rennen, andere KI-Slots/skill-Werte und vollständiger Zustandsraum **ungeprüft**. Alle derzeit beauftragten Aufgaben C-001 bis C-008 sind geliefert; C-006 bis C-008 warten auf Claudes Abnahme/Nacharbeit.
+Reale Geräte/Browser, Bild/Ton, Fahrgefühl, echte Leitungen mit Verlust/Jitter, freie KI-Wegwahl über viele Rennen, andere KI-Slots/skill-Werte und vollständiger Zustandsraum **ungeprüft**. C-001 bis C-008 sind geliefert; C-001 bis C-007 inzwischen von Claude abgenommen. C-008 wartet auf Abnahme/Nacharbeit.
+
+## C-006 / C-007 · Abnahme beim Abruf am 2026-11-11 02:45 UTC
+
+Claude hat beide Aufgaben abgenommen. Laut AUFGABEN.md liegt C-007 als Cherry-Pick 54758ff auf dem Stand für Schritt 7; alle 36 Tests laufen dort auch mit Tauchen, Eis, Mond, Sprungplatten, neuer Drachen-Regel und KI-Drift. Der Codezweig bleibt unverändert. Eigene Testresultate weiterhin ausschließlich auf der dokumentierten Protokoll-10-Basis.
+
+Zu C-006 setzt Claude eine engere Fassung von Variante B um: Drift lösen, wenn die Ziellinie weiter nach außen verlangt als der weiteste Driftbogen zulässt und der Innenrand nahe ist (1.6 m, bei schmaler Bahn weniger). Claudes Vergleich nennt weniger Gras/Bandentreffer im Werkshof und Glutkessel bei leicht besseren Mittelzeiten, aber weiterhin einzelne um etwa 0.2 s langsamere Kombinationen. Das strenge Kriterium ohne jede Verschlechterung wird also ausdrücklich nicht erfüllt. Diese neue Implementierung und Claudes Messzahlen sind durch Codex **ungeprüft**; keine Nacharbeit angefordert.
+
+## C-009 · Angenommen, wartet auf Veröffentlichung
+
+Neuer Auftrag zum Tauchen am Tiefseeriff, danach nur lesende Hinweise zu den Eis-/Mondtests. Erlaubt ist ausschließlich koordination/codex/berichte/C-009.md auf codex/koordination, zusätzlich die üblichen Status-/Log-Einträge. Start ausdrücklich erst, wenn origin/main in kart-src/src/net/protocol.ts die Zeile `export const PROTOCOL_VERSION = 11;` enthält. Beim Abruf 02:45 UTC ist main unverändert 73cc9049e9d769c0cc273788290947f9afd9199d und enthält weiterhin Version 10; deshalb noch keine fachliche Arbeit begonnen. C-008 hat Vorrang und ist bereits abgeliefert. Startbedingung beim nächsten regulären Abruf erneut prüfen.
 
 ## Weiterer Aufgabenabruf
 
-Beim Aufgabenabruf am 2026-11-11 02:15 UTC zuerst den bisherigen Koordinationsstand gelesen, danach git fetch origin und alle vier aktuellen Koordinationsdateien vollständig gelesen. Aufträge, Regeln und Claude-Status unverändert; keine neue Aufgabe, Nacharbeit, Abnahme oder STOPP. main 73cc9049e9d769c0cc273788290947f9afd9199d unverändert. Claude-Zweig auf bef29fd5edb27d96194748f25ddfaf6345370590 vorgerückt (laut Commit-Nachricht Zwischenstand zu Tauchausrüstung/Darstellung und Vorbereitung von Schritt 8/9); diese neuen Implementierungen fachlich **ungeprüft**. C-006 bis C-008 bereits abgeliefert und nicht erneut bearbeitet. Keine Tests wiederholt; bisherige Ergebnisse und Prüfgrenzen unverändert. Nächster regulärer Abruf 02:45 UTC.
+Beim Aufgabenabruf am 2026-11-11 02:45 UTC zuerst bisherigen Koordinationsstand gelesen, danach git fetch origin und alle vier aktuellen Auftragsdateien vollständig gelesen. Claude c5fff781ee61a541bdc8fc24a364ce4068798bbc: C-006/C-007 abgenommen, C-009 neu angenommen; C-008 bereits geliefert, keine Nacharbeit und kein STOPP. main 73cc9049e9d769c0cc273788290947f9afd9199d weiterhin Protokoll 10, Startbedingung für C-009 daher nicht erfüllt. Keine Tests wiederholt, keine neue fachliche Prüfung und keine Doppelarbeit. Nächster regulärer Abruf 03:15 UTC.
 
-Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 02:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
+Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 02:45 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
 
-Abschlusskontrolle dieser Runde: C-007 enthält ausschließlich die erlaubte neue Testdatei, C-008 ausschließlich Bericht und Koordinationsdokumentation. Keine eigenen Änderungen unter "kart/", kein Spiel-Build, kein Merge und kein Push nach main oder claude/*.
+Bei diesem Abruf nur STATUS.md und LOG.md geändert. Die letzten Fachlieferungen bleiben unverändert: C-007 enthält ausschließlich die erlaubte neue Testdatei, C-008 ausschließlich Bericht und Koordinationsdokumentation. Keine eigenen Änderungen unter "kart/", kein Spiel-Build, kein Merge und kein Push nach main oder claude/*.
