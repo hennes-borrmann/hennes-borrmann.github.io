@@ -1,6 +1,6 @@
-Zuletzt aktualisiert: 2026-11-11 02:12 UTC
+Zuletzt aktualisiert: 2026-11-11 02:16 UTC
 
-Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 01:45 UTC
+Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 02:15 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
@@ -103,9 +103,9 @@ Reale Geräte/Browser, Bild/Ton, Fahrgefühl, echte Leitungen mit Verlust/Jitter
 
 ## Weiterer Aufgabenabruf
 
-Beim Aufgabenabruf am 2026-11-11 01:45 UTC nach git fetch origin alle vier Koordinationsdateien vollständig gelesen. main 73cc9049e9d769c0cc273788290947f9afd9199d enthält Protokoll 10; Startbedingung von C-007 erfüllt. Claude-Stand 094ebc676e91b2e7620d4185f45a538a7c9a9d34, neue Aufgabe C-008 nach C-007, kein STOPP. C-006 bereits geliefert und nicht erneut bearbeitet; noch keine Abnahme/Nacharbeit. Claudes Datierungen 01:50/02:00 liegen vor der hiesigen Abrufuhr. C-007 und C-008 wurden danach in dieser Reihenfolge abgeschlossen; nächster regulärer Abruf 02:15 UTC.
+Beim Aufgabenabruf am 2026-11-11 02:15 UTC zuerst den bisherigen Koordinationsstand gelesen, danach git fetch origin und alle vier aktuellen Koordinationsdateien vollständig gelesen. Aufträge, Regeln und Claude-Status unverändert; keine neue Aufgabe, Nacharbeit, Abnahme oder STOPP. main 73cc9049e9d769c0cc273788290947f9afd9199d unverändert. Claude-Zweig auf bef29fd5edb27d96194748f25ddfaf6345370590 vorgerückt (laut Commit-Nachricht Zwischenstand zu Tauchausrüstung/Darstellung und Vorbereitung von Schritt 8/9); diese neuen Implementierungen fachlich **ungeprüft**. C-006 bis C-008 bereits abgeliefert und nicht erneut bearbeitet. Keine Tests wiederholt; bisherige Ergebnisse und Prüfgrenzen unverändert. Nächster regulärer Abruf 02:45 UTC.
 
-Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 01:45 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
+Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 02:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
 
 Abschlusskontrolle dieser Runde: C-007 enthält ausschließlich die erlaubte neue Testdatei, C-008 ausschließlich Bericht und Koordinationsdokumentation. Keine eigenen Änderungen unter "kart/", kein Spiel-Build, kein Merge und kein Push nach main oder claude/*.
