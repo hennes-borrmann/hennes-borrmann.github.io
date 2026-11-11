@@ -23,6 +23,8 @@ export interface Theme {
   discSize: number;
   clouds: number;
   cloudShade: number;
+  /** Kein Wetter (Mond): der Himmel bleibt ohne Wolken. */
+  noClouds?: boolean;
   stars: boolean;
 
   road: number;
@@ -348,6 +350,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     discSize: 54,
     clouds: 0x10142a,
     cloudShade: 0x0a0d1c,
+    noClouds: true,
     stars: true,
     road: 0x4d5063,
     roadAlt: 0x565a6e,
