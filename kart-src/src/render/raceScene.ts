@@ -20,8 +20,11 @@ import {
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
+  PAD_TICKS,
   SPIN_TICKS,
   V_MAX,
+  ringAt,
+  thermalLift,
   turboStage,
   lavaAt,
 } from '../game/sim';
@@ -29,8 +32,6 @@ import {
   DRAFT_FULL,
   DRAFT_PULL_FROM,
   FLOOD_FROM,
-  GLIDE_CEILING,
-  GLIDE_FALL,
   PULSE_AVALANCHE,
   PULSE_BUBBLE,
   PULSE_ICICLE,
@@ -234,6 +235,9 @@ function labelSprite(name: string, color: string): THREE.Sprite {
   sprite.renderOrder = 15;
   return sprite;
 }
+
+/** So viel weiter als in der Rechnung gilt ein Schubring für die Anzeige als durchflogen (das Bild läuft dem Treffer leicht nach). */
+const RING_SEEN = 2.5;
 
 export class RaceScene {
   cameraMode: 'chase' | 'top' = 'chase';
@@ -701,14 +705,11 @@ export class RaceScene {
     const wasAir = (k.flags & FLAG_AIR) !== 0;
     const glide = (e.flags & FLAG_GLIDE) !== 0 && e.respawn === 0;
     const stage = e.driftDir !== 0 ? turboStage(e.driftCharge, e.char) : 0;
-    // Im Aufwind? (Säule um die Ideallinie, wie in sim.ts)
+    // Im Aufwind? Dieselbe Frage wie in der Rechnung: über der Flugdecke und neben dem Korridor trägt keine Säule.
     let lift = false;
-    if (glide) {
-      for (const th of this.track.thermals) {
-        const dx = e.x - th.x;
-        const dz = e.z - th.z;
-        if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(e.y - th.y) < GLIDE_FALL + GLIDE_CEILING) lift = true;
-      }
+    if (glide && this.track.thermals.length > 0) {
+      projectOnTrack(this.track, e.x, e.z, e.seg < this.track.total ? e.seg : 0);
+      lift = thermalLift(this.track, proj.seg, proj.lat, e.x, e.y, e.z) > 0;
     }
     // Tauchen: unter Wasser? Über einem blasenden Schlot?
     const dive = (e.flags & FLAG_DIVE) !== 0 && e.respawn === 0;
@@ -794,8 +795,9 @@ export class RaceScene {
           this.shake = Math.max(this.shake, 0.6);
         }
       }
-      if (glide && e.boost > 0 && e.boost > k.boost + 20) {
-        // Durch einen Schubring geflogen
+      if (air && e.boost > k.boost + 20 && e.boost <= PAD_TICKS && ringAt(this.track, e.x, e.y, e.z, RING_SEEN)) {
+        // Durch einen Schubring geflogen (im Gleitflug, unter Wasser oder im Mondsprung). Der Schub allein
+        // sagt das nicht: ein Schub-Item im Flug hebt ihn genauso an – deshalb muss auch ein Ring da sein.
         this.pop('RING!', e, 'warm', 3);
         this.burst(e.x, e.y + 0.6, e.z, 12, 9, 0xffd23f, true, 0.5, 0.5, 4);
         k.visual.squash(-0.8);

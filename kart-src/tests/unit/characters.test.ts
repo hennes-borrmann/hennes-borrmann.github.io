@@ -2,7 +2,7 @@ import { withoutMechanics } from './helpers';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { CHARACTERS, EV_FALL, forwardSpeed, gridState, stepKart, turboStage } from '../../src/game/sim';
-import { TRACK, TRACK_COUNT, getTrack, rightX, rightZ, segDelta, setTrack } from '../../src/game/track';
+import { TRACK, TRACK_COUNT, getTrack, rightX, rightZ, addProgress, progDelta, setTrack } from '../../src/game/track';
 
 afterAll(() => {
   setTrack(0);
@@ -29,7 +29,7 @@ function quietLap(char: number, drifter: boolean, route: number): number {
   brain.skill = 1;
   brain.route = route;
   brain.routeLock = true;
-  let progress = segDelta(TRACK, 0, s.seg);
+  let progress = progDelta(TRACK, 0, s.seg);
   let lapStart = 0;
   let laps = 0;
   let best = Infinity;
@@ -37,7 +37,7 @@ function quietLap(char: number, drifter: boolean, route: number): number {
     const before = s.seg;
     const ev = stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false }), { canDrive: true, speedFactor: 1, time: tick });
     expect(ev & EV_FALL).toBe(0);
-    progress += segDelta(TRACK, before, s.seg);
+    progress = addProgress(TRACK, progress, before, s.seg);
     if (progress >= (laps + 1) * TRACK.n) {
       // Die erste Runde beginnt aus dem Stand und zählt nicht.
       if (laps > 0) best = Math.min(best, (tick - lapStart) / 60);

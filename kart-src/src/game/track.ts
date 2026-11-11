@@ -803,7 +803,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         edge[seg] |= EDGE_GAP | EDGE_GLIDE | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
         respawn[seg] = back;
       });
-      // Kurz vor der Kante und hinter der Landung keine Bande; auch dort führt ein Sturz zurück zum Anlauf.
+      // Kurz vor der Kante und hinter der Landung keine Bande. Wer vor der Kante seitlich fällt, bekommt den
+      // Anlauf; wer hinter der Landung fällt, wird an der Landung wieder aufgesetzt – den Flug hat er geschafft.
       const first = segAt(p, from);
       const last = segAt(p, to);
       for (const g of [prev[first], prev[prev[first]], next[last], next[next[last]]]) {
@@ -1148,6 +1149,35 @@ export function segDelta(t: Track, from: number, to: number): number {
   if (d > half) d -= t.n;
   else if (d < -half) d += t.n;
   return d;
+}
+
+/**
+ * Rennfortschritt von from nach to, überall im Maß der Hauptstrecke (−n/2 … n/2).
+ *
+ * segDelta zählt innerhalb einer Abzweigung deren eigene Abschnitte – richtig für
+ * Abstände auf der Fahrbahn, aber falsch zum Aufsummieren: eine Abzweigung hat
+ * selten genau so viele Abschnitte wie das Stück Hauptstrecke, das sie ersetzt.
+ * Wer Runden zählt oder Plätze vergleicht, summiert deshalb diese Differenz.
+ */
+export function progDelta(t: Track, from: number, to: number): number {
+  let d = t.prog[to] - t.prog[from];
+  const half = t.n / 2;
+  if (d > half) d -= t.n;
+  else if (d < -half) d += t.n;
+  return d;
+}
+
+/**
+ * Aufsummierten Rennfortschritt um den Schritt von from nach to fortschreiben.
+ *
+ * Bis auf ganze Runden ist der Fortschritt immer der Fortschrittswert des Abschnitts.
+ * Darauf wird die Summe nach jedem Schritt gezogen: Auf Abzweigungen sind die Werte
+ * gebrochen, und ein aufsummierter Rundungsrest ließe die Summe an der Ziellinie um
+ * ein Haar unter der vollen Runde liegen – das Ziel käme einen Abschnitt zu spät.
+ */
+export function addProgress(t: Track, progress: number, from: number, to: number): number {
+  const p = progress + progDelta(t, from, to);
+  return Math.round((p - t.prog[to]) / t.n) * t.n + t.prog[to];
 }
 
 /** Liegen beide Abschnitte auf demselben Weg (beide Hauptstrecke oder dieselbe Abzweigung)? */

@@ -7,6 +7,7 @@ import {
   DRAFT_PULL_FROM,
   FLAT_FACTOR,
   FLOOD_FROM,
+  GLIDE_CEILING,
   GLIDE_EDGE,
   GLIDE_FALL,
   GLIDE_SINK,
@@ -31,6 +32,7 @@ import {
 import {
   BTN_BRAKE,
   BTN_GAS,
+  BTN_ITEM,
   EV_BLOCK,
   EV_BURN,
   EV_DRAFT,
@@ -39,15 +41,20 @@ import {
   EV_HIT,
   EV_PAD,
   EV_SPLASH,
+  EV_USE_BOOST,
   EV_WALL,
   FLAG_AIR,
   FLAG_GLIDE,
   GUARD_TICKS,
+  ITEM_BOOST,
+  PAD_TICKS,
   V_MAX,
   forwardSpeed,
   gridState,
   lavaAt,
+  ringAt,
   stepKart,
+  thermalLift,
   type KartState,
 } from '../../src/game/sim';
 import { EDGE_GAP, EDGE_GLIDE, TRACK, newVehiclePose, proj, projectOnTrack, rightX, rightZ, segDelta, setTrack, trackHeading, vehiclePose, wrapSeg } from '../../src/game/track';
@@ -1062,6 +1069,42 @@ describe('Fliegen (Wolkenwerft)', () => {
     // Wer unter dem Ring durchfliegt, bekommt nichts.
     const low = airborne(ring.seg - 6, dy - 6, ring.lat);
     expect(run(low, 0, 30) & EV_PAD).toBe(0);
+  });
+
+  it('Anzeige und Rechnung fragen dasselbe: kein Aufwind über der Flugdecke, kein Ring ohne Ring (Funde aus C-008)', () => {
+    const t = setTrack(4);
+    const th = t.thermals[0];
+    // In der Säule, in üblicher Flughöhe: Aufwind.
+    const mid = airborne(th.seg, 2, th.lat);
+    projectOnTrack(t, mid.x, mid.z, mid.seg);
+    expect(thermalLift(t, proj.seg, proj.lat, mid.x, mid.y, mid.z)).toBe(th.lift);
+    // Über der Decke reicht die Säule zwar noch hinauf, trägt aber nicht: das Kart sinkt – und so wird es auch gemeldet.
+    const high = airborne(th.seg, GLIDE_CEILING + 1, th.lat);
+    expect(thermalLift(t, proj.seg, proj.lat, high.x, high.y, high.z)).toBe(0);
+    run(high, 0, 1, { steer: 0, buttons: 0 });
+    expect(high.flags & FLAG_GLIDE).not.toBe(0);
+    expect(high.vy).toBeLessThan(0);
+    // Neben dem Korridor ebenso.
+    expect(thermalLift(t, proj.seg, t.wh[proj.seg] + 0.5, mid.x, mid.y, mid.z)).toBe(0);
+    // Ein Schub-Item mitten im Flug, weit weg von jedem Ring: Schub ja – aber höher als der eines Rings, und kein Ring in der Nähe.
+    const g = firstGlide();
+    const s = airborne(g.first + 20, 3);
+    s.flags |= FLAG_GLIDE;
+    s.item = ITEM_BOOST;
+    const ev = stepKart(s, { steer: 0, buttons: BTN_GAS | BTN_ITEM }, { canDrive: true, speedFactor: 1, time: 0 });
+    expect(ev & EV_USE_BOOST).not.toBe(0);
+    expect(ev & EV_PAD).toBe(0);
+    expect(s.boost).toBeGreaterThan(PAD_TICKS);
+    expect(ringAt(t, s.x, s.y, s.z, 2.5)).toBe(false);
+    // Am Ring selbst: ja, und der Schub ist genau der eines Boost-Felds.
+    const ring = t.rings[0];
+    expect(ringAt(t, ring.x, ring.y - 0.6, ring.z)).toBe(true);
+    const through = airborne(ring.seg - 6, ring.y - t.py[ring.seg] - 0.3, ring.lat);
+    let hit = 0;
+    for (let i = 0; i < 30 && hit === 0; i++) hit = stepKart(through, GAS, { canDrive: true, speedFactor: 1, time: i }) & EV_PAD;
+    expect(hit).not.toBe(0);
+    expect(through.boost).toBe(PAD_TICKS);
+    expect(ringAt(t, through.x, through.y, through.z, 2.5)).toBe(true);
   });
 
   it('neben dem Korridor trägt die Luft nicht: wer abdriftet, sackt durch', () => {

@@ -356,6 +356,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
 
   // --- Verkehr, Geysire, Lavabomben: gesperrte Streifen voraus ---
   let jam = false;
+  /** Bis zu diesem Tempo wird im Stau gebremst. Vor einer Lawine sinkt es bis zum Stillstand – auf Eis rollte das Kart sonst hinein. */
+  let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
   if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide) && !air) {
@@ -416,10 +418,14 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       if (p.kind === PULSE_AVALANCHE) {
         // Eine Lawine sperrt die ganze Bahn: wer bei der Ankunft hineingeriete, nimmt vorher Tempo heraus
         // (wer schon drinsteckt, fährt weiter).
-        const inSnow = d < p.radius + 2;
+        const inSnow = d < p.radius;
         const c = pulseCycle(p, ctx.time + ((d - p.radius) / Math.max(v, 8)) * 60);
         const out = pulseCycle(p, ctx.time + ((d + p.radius) / Math.max(v, 8)) * 60);
-        if (!inSnow && (c < p.on + 6 || out < p.on || out < c)) jam = true;
+        if (!inSnow && (c < p.on + 6 || out < p.on || out < c)) {
+          jam = true;
+          // So schnell, dass es vor dem Schnee noch zum Stehen reicht (gerechnet mit dem schwachen Bremsen auf Eis).
+          haltSpeed = Math.min(haltSpeed, Math.sqrt(Math.max(0, 4.4 * (d - p.radius - 2.5))));
+        }
         continue;
       }
       if (p.kind === PULSE_BUBBLE) {
@@ -498,7 +504,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   if (gapAhead || v < limit + 0.5) buttons |= BTN_GAS;
   else if (v > limit + 5) buttons |= BTN_BRAKE;
   // Kein Durchkommen im Verkehr: bremsen, bis sich eine Lücke auftut.
-  if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > 13 ? BTN_BRAKE : 0);
+  if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > haltSpeed ? BTN_BRAKE : 0);
 
   // --- Lenken und Driften ---
   const here0 = SURFACES[t.surf[s.seg]] ?? SURFACES[0];

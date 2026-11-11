@@ -109,6 +109,9 @@ export const RIFF: TrackDef = {
     { at: 1.3, lat: 0 },
     { at: 12.5, lat: 0 },
     { at: 17.1, lat: 0 },
+    // am Wrack außen vorbei: der längere Weg hat dafür Schub
+    { at: 20.7, lat: 0 },
+    { at: 23.4, lat: 0 },
     { at: 27.6, lat: 0 },
   ],
   boxRows: [2.2, 8.7, 15.2, 21.6, 25.3],

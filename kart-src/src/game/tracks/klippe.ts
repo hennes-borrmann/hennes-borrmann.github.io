@@ -95,7 +95,11 @@ export const KLIPPE: TrackDef = {
   pads: [
     { at: 0.5, lat: 0 },
     { at: 13.6, lat: 0 },
+    // Serpentinen: der längere Weg um den Hang hat dafür Schub (die Grotte ist 85 m kürzer)
+    { at: 19.6, lat: 0 },
+    { at: 22.6, lat: 0 },
     { at: 24.6, lat: 0 },
+    { at: 27.3, lat: 0 },
     { at: 34.2, lat: 0 },
     { at: 46.6, lat: 0 },
   ],
@@ -153,7 +157,6 @@ export const KLIPPE: TrackDef = {
       surfaces: [[4.3, 7.5, 'rock']],
       tunnels: [[4.55, 7.2]],
       boxRows: [2.5, 6.5],
-      pads: [{ at: 4.9, lat: 0 }],
     },
     // b: über die Bucht – schmaler Holzsteg ohne Bande mit Schanze über eine
     // Lücke. Wer den Sprung verpatzt, landet im Wasser.

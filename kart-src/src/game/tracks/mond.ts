@@ -64,6 +64,9 @@ export const MOND: TrackDef = {
   fallDepth: 6,
   surfaces: [
     [0, 3.7, 'panel'],
+    // Kraterrandstraße und der Weg um das Solarfeld: befestigt – die langen Wege sind dafür die schnelleren Böden
+    [9.0, 12.7, 'panel'],
+    [16.9, 19.3, 'panel'],
     [19.9, 21.2, 'panel'],
     [23.3, 25.99, 'panel'],
   ],
@@ -91,7 +94,10 @@ export const MOND: TrackDef = {
   ],
   pads: [
     { at: 1.2, lat: 0 },
+    { at: 9.4, lat: 0 },
+    { at: 10.9, lat: 0 },
     { at: 12.3, lat: 0 },
+    { at: 18.0, lat: 0 },
     { at: 20.3, lat: 0, halfWidth: 0 },
     { at: 24.2, lat: 0 },
   ],
@@ -111,7 +117,6 @@ export const MOND: TrackDef = {
       roadHalf: 5.6,
       launchers: [{ at: 1.55, power: 9.5 }],
       ramps: [{ at: 1.55, length: 7, height: 0.4, gap: 30 }],
-      rings: [{ at: 2.05, lat: 0, up: 4.2 }],
       pads: [{ at: 1.0, lat: 0, halfWidth: 0 }],
     },
     // b: durch die Lavaröhre unter dem Solarfeld – kürzer und eng
