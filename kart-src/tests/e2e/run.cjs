@@ -1157,7 +1157,32 @@ async function main() {
     }
     await c7.page.keyboard.up('ArrowUp');
     check('Ben taucht – beim Host und auf seinem eigenen Bildschirm', diveTicks[0] >= 25 && diveTicks[1] >= 25, `${diveTicks[0]} / ${diveTicks[1]} Abfragen unter Wasser, bis ${(-deepest).toFixed(1)} m tief`);
-    check('Unter Wasser sinkt das Kart langsam', fastSink > -7.5 && deepest < -2, `größte Sinkrate ${(-fastSink).toFixed(1)} m/s`);
+    // Sinken unter Wasser, eindeutig gemessen: Ben wird fünf Meter über dem Meeresgrund losgelassen (dort gut sechs
+    // Meter tief). Im freien Fall wäre er nach 35 Ticks unten und dabei 17 m/s schnell; unter Wasser dauert es
+    // 67 Ticks bei höchstens 6,5 m/s. (Der Sprung vom Steg taugt dafür nicht: er endet fast genau an der Wasserlinie.)
+    await kart(h7.page, `place(1, ${reef.from + 110}, 0, -1, 5)`);
+    let sinkFrom = -1;
+    let sinkTo = -1;
+    let sinkSamples = 0;
+    fastSink = 0;
+    const untilS = Date.now() + 6000;
+    while (Date.now() < untilS) {
+      const [eh, rh] = await Promise.all([kart(h7.page, 'entities()'), kart(h7.page, 'race()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      if ((bh.flags & 40) === 40) {
+        if (sinkFrom < 0) sinkFrom = rh.time;
+        sinkTo = rh.time;
+        sinkSamples++;
+        fastSink = Math.min(fastSink, bh.vy);
+        deepest = Math.min(deepest, bh.y - reef.sea);
+      } else if (sinkFrom >= 0) break;
+      await sleep(30);
+    }
+    check(
+      'Unter Wasser sinkt das Kart langsam',
+      sinkSamples >= 3 && sinkTo - sinkFrom > 45 && fastSink > -7 && fastSink < -3,
+      `mindestens ${Math.round(sinkTo - sinkFrom)} Ticks für fünf Meter (freier Fall: 35), größte Sinkrate ${(-fastSink).toFixed(1)} m/s, ${sinkSamples} Abfragen`,
+    );
     const sc5 = await kart(h7.page, 'scene()');
     check('Tiefseeriff wird gezeichnet', sc5 && sc5.triangles > 20000, sc5 ? `${sc5.calls} Zeichenaufrufe, ${sc5.triangles} Dreiecke` : '');
     await toLobby(h7.page);

@@ -509,7 +509,7 @@ export class HostGame implements GameView {
    * Nur für Tests: ein Kart an eine Stelle der Strecke setzen – Meter hinter
    * der Startlinie bzw., mit branch ≥ 0, Meter hinter der Gabelung dieser Abzweigung.
    */
-  debugPlace(slot: number, meters: number, lat = 0, branch = -1): void {
+  debugPlace(slot: number, meters: number, lat = 0, branch = -1, up = 0): void {
     const k = this.karts.get(slot);
     if (!k) return;
     const t = TRACK;
@@ -519,7 +519,8 @@ export class HostGame implements GameView {
     k.state.seg = seg;
     k.state.x = t.px[seg] + rightX(t, seg) * lat;
     k.state.z = t.pz[seg] + rightZ(t, seg) * lat;
-    k.state.y = t.py[seg] + lat * t.bank[seg];
+    // up: so viele Meter über der Fahrbahn loslassen (das Kart fällt oder sinkt dann von dort)
+    k.state.y = t.py[seg] + lat * t.bank[seg] + up;
     k.state.heading = Math.atan2(t.tx[seg], t.tz[seg]);
     k.state.vx = k.state.vy = k.state.vz = 0;
     k.progress = addProgress(t, k.progress, before, seg);
