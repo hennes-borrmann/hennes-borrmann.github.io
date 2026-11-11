@@ -57,6 +57,8 @@ export type SfxName =
   | 'icicle' // ein Eiszapfen schlägt ein (ortsfest): scharfes Knacken, glasiges Nachklingen, klirrende Splitter (~0,4 s)
   | 'launch' // eine Sprungplatte schleudert das Kart hoch (Mond): satter Federschlag, Druckluft-Zischen, dann ein schwebend aufsteigender Ton (~1 s)
   | 'meteor' // ein Meteorit schlägt ein (ortsfest): kurzes fallendes Heulen, ab 0,3 s dumpfer Einschlag, nachrieselndes Geröll (~1 s)
+  | 'gust' // Sturmhafen: eine Böe setzt ein (ortsfest) – VORLÄUFIG
+  | 'storm' // Sturmhafen: das eigene Kart steckt in der Böe (wird etwa alle 0,3 s aufgerufen) – VORLÄUFIG
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

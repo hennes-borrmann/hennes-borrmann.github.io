@@ -10,6 +10,7 @@ import type { World } from './world';
 import { PULSE_AVALANCHE, PULSE_BOMB, PULSE_BUBBLE, PULSE_ICICLE, PULSE_METEOR, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
 import { buildDive } from './mechanics/dive';
 import { buildFlight, hasGlide } from './mechanics/flight';
+import { buildHarbor } from './mechanics/harbor';
 import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
 import { buildMoon } from './mechanics/moon';
@@ -45,5 +46,6 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.belts.some((b) => b.swim) || track.pulses.some((p) => p.kind === PULSE_BUBBLE)) out.push(buildDive(track, detail));
   if (track.pulses.some((p) => p.kind === PULSE_AVALANCHE || p.kind === PULSE_ICICLE)) out.push(buildSnow(track, detail));
   if (track.launchers.length > 0 || track.pulses.some((p) => p.kind === PULSE_METEOR)) out.push(buildMoon(track, detail));
+  if (track.winds.length > 0 || track.pontoons.length > 0) out.push(buildHarbor(track, detail));
   return out;
 }

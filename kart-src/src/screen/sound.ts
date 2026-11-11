@@ -58,6 +58,7 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'icicle',
   'launch',
   'meteor',
+  'gust',
 ]);
 
 export class Sound {

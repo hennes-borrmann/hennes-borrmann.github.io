@@ -117,6 +117,9 @@ const LEVEL: Record<SfxName, number> = {
   icicle: 4,
   launch: 1.9,
   meteor: 2.3,
+  // Sturmhafen (vorläufig)
+  gust: 1.6,
+  storm: 0.9,
 };
 
 interface ToneOpts {
@@ -733,6 +736,9 @@ export class SfxPlayer {
           .noise(2200, 4500, 0.85, 0.05, { type: 'highpass', attack: 0.34, at: 0.06 })
           .tone('sine', 230, 460, 0.9, 0.03, { attack: 0.4, vibHz: 4, vibDepth: 0.015 });
         break;
+      // Sturmhafen (vorläufig: wie der Fahrtwind)
+      case 'gust':
+      case 'storm':
       case 'wind': {
         // Fahrtwind im Gleitflug, etwa alle 0,42 s aufgerufen (je nach Bildrate 0,36–0,5 s):
         // drei breite Rauschschichten, um je 0,15 s versetzt, die langsam (0,45 s) ein- und
