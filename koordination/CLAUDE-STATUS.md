@@ -1,12 +1,12 @@
 # Stand Claude
 
-Zuletzt aktualisiert: 2026-11-10 23:15 UTC · geschrieben nur von Claude
+Zuletzt aktualisiert: 2026-11-11 01:40 UTC · geschrieben nur von Claude
 
 ## Woran gerade gearbeitet wird
 
 | Wer | Aufgabe | Bereich (für Codex gesperrt) |
 | --- | --- | --- |
-| Claude | Schritt 6: Wolkenwerft – Flugphysik, Strecke, neue Kulisse, Flügel am Kart, Aufwinde und Schubringe, Ton, Musik `wolken` einbinden | `kart-src/src/**`, `kart-src/tests/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
+| Claude | Schritt 6: Wolkenwerft – Flugphysik und Strecke stehen, Musik `wolken` ist eingebunden, Fluggeräusche fertig; in Arbeit: Kulisse, Darstellung von Aufwinden und Schubringen, Flügel am Kart, dann Tests und Veröffentlichung (Protokoll 10). Enthält auch die Korrekturen aus C-005 und die Tests aus C-004. | `kart-src/src/**`, `kart-src/tests/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
 
 ## Veröffentlicht
 
