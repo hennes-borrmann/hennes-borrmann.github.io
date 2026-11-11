@@ -932,8 +932,9 @@ export class RaceScene {
       // Von der Presse geplättet: flach wie eine Flunder, dafür etwas breiter – und am Ende federt es zurück.
       k.flatK += ((e.flat > 6 ? 1 : 0) - k.flatK) * Math.min(1, dt * (e.flat > 6 ? 26 : 9));
       root.scale.set(1 + 0.22 * k.flatK, 1 - 0.7 * k.flatK, 1 + 0.12 * k.flatK);
-      // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist.
-      root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && Math.floor(this.time * 14) % 2 === 0);
+      // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist – nur nicht, solange es platt ist:
+      // die Flunder soll man sehen.
+      root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
       k.visual.update(dt, pose);
 
       if (ground !== NO_GROUND && e.respawn === 0) {

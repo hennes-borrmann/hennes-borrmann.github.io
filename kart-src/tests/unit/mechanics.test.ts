@@ -1,14 +1,17 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import {
+  BELT_EDGE,
+  BELT_RAMP,
   DRAFT_FULL,
   DRAFT_PULL_FROM,
   FLAT_FACTOR,
   FLOOD_FROM,
-  GLIDE_FALL,
   GLIDE_EDGE,
+  GLIDE_FALL,
   GLIDE_SINK,
   GLIDE_SPEED,
+  PRESS_STRIKE,
   PULSE_BOMB,
   PULSE_PRESS,
   PULSE_VENT,
@@ -17,6 +20,7 @@ import {
   VEH_TRAM,
   floodLevel,
   floodPeak,
+  pressOpen,
   pulseCycle,
   pulseWarning,
   tideLevel,
@@ -575,7 +579,9 @@ describe('Förderband, Stampfpresse, Gezeiten (Grundgerüst, mit Testdaten auf d
     expect(tideLevel(tide, 1300)).toBeCloseTo(0.6);
     expect(tideLevel(tide, 100)).toBeCloseTo(-0.7);
     expect(waterFactor(0.03)).toBe(1);
-    expect(waterFactor(0.3)).toBeCloseTo(0.73);
+    // Setzt an der Wasserlinie stetig ein: knapp darüber bremst es noch kaum.
+    expect(waterFactor(0.07)).toBeGreaterThan(0.98);
+    expect(waterFactor(0.3)).toBeCloseTo(0.76);
     expect(waterFactor(2)).toBeCloseTo(0.45);
   });
 
@@ -686,6 +692,109 @@ describe('Werkshof: Förderbänder und Stampfpressen (Streckendaten)', () => {
         expect(down).toBeLessThanOrEqual(1);
       }
     }
+  });
+
+  it('unter der ganzen quadratischen Platte wird geplättet – auch unter den Ecken, aber nicht daneben', () => {
+    const t = setTrack(0);
+    const p = t.pulses[0];
+    const hit = (alongOff: number, sideOff: number): boolean => {
+      const s = gridState(0);
+      s.seg = p.seg;
+      s.x = p.x + t.tx[p.seg] * alongOff + rightX(t, p.seg) * sideOff;
+      s.z = p.z + t.tz[p.seg] * alongOff + rightZ(t, p.seg) * sideOff;
+      s.y = p.y;
+      s.heading = trackHeading(t, p.seg);
+      s.vx = 0;
+      s.vz = 0;
+      s.flags = 0;
+      const time = 10 - p.phase;
+      return (stepKart(s, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time }) & EV_FLAT) !== 0;
+    };
+    const R = p.radius;
+    expect(hit(0, 0)).toBe(true);
+    // Ecke der Platte: mit einer runden Trefferfläche bliebe man hier verschont.
+    expect(hit(R - 0.05, R - 0.05)).toBe(true);
+    expect(hit(-(R - 0.05), R - 0.05)).toBe(true);
+    // Knapp daneben (Kartmitte mehr als einen halben Kartradius außerhalb der Platte) passiert nichts.
+    expect(hit(R + 0.7, 0)).toBe(false);
+    expect(hit(0, -(R + 0.7))).toBe(false);
+    expect(hit(R + 0.7, R + 0.7)).toBe(false);
+  });
+
+  it('der Stempel steht genau so lange unter Karthöhe, wie die Presse gefährlich ist', () => {
+    const t = setTrack(0);
+    // Hub des Stempels in der Darstellung (machines.ts: REST ≈ 3,8 m) und Höhe eines Karts mit Fahrer
+    const LIFT = 3.8;
+    const KART = 1.5;
+    for (const p of t.pulses) {
+      for (let c = 0; c < p.period; c++) {
+        const open = pressOpen(p, c - p.phase);
+        expect(pulseCycle(p, c - p.phase)).toBe(c);
+        if (c < p.on - 4) {
+          // gefährlich: der Stempel liegt auf oder hebt sich gerade erst
+          expect(open * LIFT).toBeLessThan(KART);
+        } else if (c >= p.on && c < p.period - PRESS_STRIKE) {
+          // frei: man passt darunter durch
+          expect(open * LIFT).toBeGreaterThan(KART);
+        }
+      }
+      // Aufschlag genau zum Beginn der Gefahr; einen Tick davor ist er fast unten, drei davor noch oben.
+      expect(pressOpen(p, -p.phase)).toBe(0);
+      expect(pressOpen(p, -p.phase - 1)).toBeLessThan(0.6);
+      expect(pressOpen(p, -p.phase - PRESS_STRIKE)).toBe(1);
+    }
+  });
+
+  it('an der Naht zweier Bänder springt das Tempo nicht (winzige Lageunterschiede bleiben winzig)', () => {
+    const t = setTrack(0);
+    const hall = t.belts.filter((b) => b.along !== 0);
+    const mid = hall.find((b) => b.lat0 < 0 && b.lat1 > 0)!;
+    const seg = mid.first + 8;
+    const step = (lat: number): number => {
+      const s = gridState(0);
+      s.seg = seg;
+      s.x = t.px[seg] + rightX(t, seg) * lat;
+      s.z = t.pz[seg] + rightZ(t, seg) * lat;
+      s.y = t.py[seg] + lat * t.bank[seg];
+      s.heading = trackHeading(t, seg);
+      s.vx = 0;
+      s.vz = 0;
+      s.flags = 0;
+      const x = s.x;
+      const z = s.z;
+      stepKart(s, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time: 100 });
+      // Weg in Fahrtrichtung in diesem einen Schritt
+      return (s.x - x) * t.tx[seg] + (s.z - z) * t.tz[seg];
+    };
+    // Genau an der Naht (links läuft das Band mit −5 m/s entgegen, rechts trägt es mit +7 m/s):
+    const seam = mid.lat0;
+    const a = step(seam - 1e-6);
+    const b = step(seam + 1e-6);
+    expect(Math.abs(a - b)).toBeLessThan(1e-4);
+    expect(Math.abs(a)).toBeLessThan(1e-3);
+    // Einen halben Meter weiter innen wirken die Bänder voll.
+    expect(step(seam + BELT_EDGE + 0.05)).toBeCloseTo(mid.along / 60, 3);
+    expect(step(seam - BELT_EDGE - 0.05)).toBeCloseTo(-5 / 60, 3);
+    // Auch am Anfang des Bands setzt die Wirkung über BELT_RAMP Meter ein statt mit einem Ruck.
+    const at = (k: number): number => {
+      const sg = mid.first + k;
+      const s = gridState(0);
+      s.seg = sg;
+      s.x = t.px[sg];
+      s.z = t.pz[sg];
+      s.y = t.py[sg];
+      s.heading = trackHeading(t, sg);
+      s.vx = 0;
+      s.vz = 0;
+      s.flags = 0;
+      const x = s.x;
+      const z = s.z;
+      stepKart(s, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time: 100 });
+      return (s.x - x) * t.tx[sg] + (s.z - z) * t.tz[sg];
+    };
+    expect(at(0)).toBeLessThan((mid.along / 60) * 0.5);
+    expect(at(0)).toBeGreaterThan(0);
+    expect(at(Math.ceil(BELT_RAMP / t.step) + 1)).toBeCloseTo(mid.along / 60, 3);
   });
 
   it('in der Lagerhalle trägt das mittlere Band, die äußeren laufen entgegen', () => {

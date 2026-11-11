@@ -70,10 +70,10 @@ const LEVEL: Record<SfxName, number> = {
   burn: 1.1,
   press: 2.6,
   splash: 1.8,
-  wings: 2,
-  ring: 2.4,
+  wings: 3,
+  ring: 2.2,
   lift: 1.8,
-  wind: 1,
+  wind: 0.8,
 };
 
 interface ToneOpts {
@@ -225,6 +225,7 @@ export class SfxPlayer {
   private passTick = 0;
   private burnTick = 0;
   private splashTick = 0;
+  private windTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -439,19 +440,63 @@ export class SfxPlayer {
         }
         break;
       }
-      // --- Fliegen (vorläufig, wird ausgearbeitet) ---
+      // --- Fliegen ---
       case 'wings':
-        v.noise(2400, 900, 0.22, 0.2, { q: 0.8, attack: 0.01 });
+        // Ausklappen: zwei schnelle Stoff-Schnapper (enges Rauschen, der zweite tiefer),
+        // dazwischen ein trockenes Klacken des Gestänges; dann rauscht die Luft kurz in
+        // die Flügel und ein leises „Hui" steigt nach oben.
+        v.noise(2600, 1500, 0.04, 0.3, { q: 2.5, attack: 0.002 })
+          .tone('triangle', 1250, 980, 0.035, 0.12, { at: 0.03 })
+          .tone('sine', 170, 95, 0.06, 0.12, { at: 0.03 })
+          .noise(1900, 1100, 0.05, 0.24, { q: 2.5, attack: 0.002, at: 0.065 })
+          .noise(500, 2300, 0.34, 0.16, { q: 0.8, attack: 0.07, at: 0.05 })
+          .tone('sine', 380, 880, 0.3, 0.05, { attack: 0.1, at: 0.09, vibHz: 6, vibDepth: 0.02 });
         break;
       case 'ring':
-        v.tone('triangle', 660, 1320, 0.22, 0.2).tone('sine', 990, 1980, 0.2, 0.1, { at: 0.04 });
+        // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
+        // (G6 + D7, leicht schwebend) – Glocke statt Notenfolge wie beim Einsammeln;
+        // darunter breites, nach oben fahrendes Rauschen als Schub, aber ohne den
+        // tiefen Schlag und den Sägezahn des Boost-Felds.
+        v.tone('triangle', 520, 1568, 0.17, 0.16, { attack: 0.09 })
+          .tone('sine', 1568, 1562, 0.42, 0.2, { at: 0.11, attack: 0.008, vibHz: 7, vibDepth: 0.004 })
+          .tone('sine', 2349, 2340, 0.36, 0.11, { at: 0.12, attack: 0.008, vibHz: 7.6, vibDepth: 0.004 })
+          .tone('triangle', 784, 782, 0.3, 0.08, { at: 0.11, attack: 0.01 })
+          .noise(800, 5000, 0.45, 0.34, { q: 1, attack: 0.05 })
+          .noise(6000, 9000, 0.25, 0.05, { type: 'highpass', attack: 0.02, at: 0.11 });
         break;
       case 'lift':
-        v.noise(700, 1900, 0.6, 0.14, { q: 0.8, attack: 0.2 });
+        // Aufwind: weiches, breites Rauschen, das langsam anschwillt und dabei nach oben
+        // zieht, darüber ein Hauch Luft; ein leiser Sinus steigt mit und schwebt sacht.
+        v.noise(380, 1700, 0.95, 0.2, { q: 0.7, attack: 0.38 })
+          .noise(2200, 4500, 0.85, 0.05, { type: 'highpass', attack: 0.34, at: 0.06 })
+          .tone('sine', 230, 460, 0.9, 0.03, { attack: 0.4, vibHz: 4, vibDepth: 0.015 });
         break;
-      case 'wind':
-        v.noise(900, 700, 0.75, 0.07, { q: 0.6, attack: 0.25 });
+      case 'wind': {
+        // Fahrtwind im Gleitflug, etwa alle 0,42 s aufgerufen (je nach Bildrate 0,36–0,5 s):
+        // drei breite Rauschschichten, um je 0,15 s versetzt, die langsam (0,45 s) ein- und
+        // lang ausschwingen. So liegt alle ~0,15 s ein neuer Gipfel an, die Folge verschmilzt
+        // (gemessen, ohne das Zufallsflattern des Rauschens: die Hüllkurve schwankt um gut
+        // 1 dB, bei 0,5 s Takt knapp 2 dB); nach dem letzten Aufruf klingt es in rund einer
+        // Sekunde aus. Der Versatz 0,15 statt 0,14 verteilt die Gipfel auch beim langsamen
+        // Takt gleichmäßig.
+        // Lebendig machen es die reihum wechselnden Fassungen: die Mitten der Schichten fahren
+        // mal hinauf, mal hinunter (eng gehalten, sonst wandert mit der Bandbreite der Pegel),
+        // dazu ein leises Pfeifen an den Flügeln mit wechselnder Tonhöhe und tiefes, braunes
+        // Rauschen als Körper (ebenfalls zweifach versetzt, sonst pumpt es im Aufruftakt).
+        const k = this.windTick++ % 3;
+        const [a, b, c, w] = [
+          [760, 900, 820, 1350],
+          [880, 780, 940, 1600],
+          [800, 950, 760, 1200],
+        ][k];
+        v.noise(a, b, 1.35, 0.1, { q: 0.6, attack: 0.45 })
+          .noise(b, c, 1.35, 0.1, { q: 0.6, attack: 0.45, at: 0.15 })
+          .noise(c, a, 1.35, 0.1, { q: 0.6, attack: 0.45, at: 0.3 })
+          .noise(260, 200, 1.35, 0.05, { type: 'lowpass', brown: true, attack: 0.45, at: 0.075 })
+          .noise(240, 200, 1.35, 0.05, { type: 'lowpass', brown: true, attack: 0.45, at: 0.3 })
+          .noise(w, w * 1.15, 0.9, 0.02, { q: 7, attack: 0.35, at: 0.1 });
         break;
+      }
       // --- Maschinen und Wasser ---
       case 'press':
         // Stampfpresse: ganz kurz zischt die Hydraulik, dann (ab 0,06 s) der Schlag –

@@ -15,6 +15,8 @@
 // Sekunde): das rechnet auf jedem Gerät identisch.
 
 import {
+  BELT_EDGE,
+  BELT_RAMP,
   CRASH_SPEED,
   DRAFT_FULL,
   DRAFT_PULL_FROM,
@@ -779,7 +781,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   projectOnTrack(t, x0, z0, s.seg);
   const seg0 = proj.seg;
   const lat0 = proj.lat;
-  const g0 = groundAt(t, seg0, proj.along, lat0);
+  const along0 = proj.along;
+  const g0 = groundAt(t, seg0, along0, lat0);
 
   let fx = Math.sin(s.heading);
   let fz = Math.cos(s.heading);
@@ -914,13 +917,25 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.vz = fz * vf + rz * vl;
   s.x += s.vx * DT;
   s.z += s.vz * DT;
-  // Förderband: der Boden nimmt das Kart mit.
+  // Förderband: der Boden nimmt das Kart mit. Zu den Rändern hin läuft die Wirkung aus (siehe BELT_EDGE).
   if (!wasAir && t.belts.length > 0) {
+    let carry = 0;
+    let push = 0;
     for (const b of t.belts) {
-      if (seg0 < b.first || seg0 >= b.first + b.count || lat0 < b.lat0 || lat0 > b.lat1) continue;
-      s.x += (t.tx[seg0] * b.along + rightX(t, seg0) * b.across) * DT;
-      s.z += (t.tz[seg0] * b.along + rightZ(t, seg0) * b.across) * DT;
-      break;
+      if (seg0 < b.first || seg0 >= b.first + b.count) continue;
+      const side = Math.min(lat0 - b.lat0, b.lat1 - lat0) / BELT_EDGE;
+      if (side <= 0) continue;
+      // Lage längs des Bands in Metern ab seinem Anfang
+      const u = (seg0 - b.first) * t.step + along0;
+      const ends = Math.min(u + t.step * 0.5, b.count * t.step - u - t.step * 0.5) / BELT_RAMP;
+      if (ends <= 0) continue;
+      const k = Math.min(1, side) * Math.min(1, ends);
+      carry += b.along * k;
+      push += b.across * k;
+    }
+    if (carry !== 0 || push !== 0) {
+      s.x += (t.tx[seg0] * carry + rightX(t, seg0) * push) * DT;
+      s.z += (t.tz[seg0] * carry + rightZ(t, seg0) * push) * DT;
     }
   }
 
@@ -1076,8 +1091,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (dy < -1.5 || dy > 2.5) continue;
     const dx = s.x - p.x;
     const dz = s.z - p.z;
-    const reach = p.radius + KART_RADIUS * 0.6;
-    if (dx * dx + dz * dz > reach * reach) continue;
+    if (p.kind === PULSE_PRESS) {
+      // Die Platte ist quadratisch, wie gezeichnet – auch unter ihren Ecken wird man geplättet.
+      const half = p.radius + KART_RADIUS * 0.5;
+      if (Math.abs(dx * t.tx[p.seg] + dz * t.tz[p.seg]) > half || Math.abs(dx * rightX(t, p.seg) + dz * rightZ(t, p.seg)) > half) continue;
+    } else {
+      const reach = p.radius + KART_RADIUS * 0.6;
+      if (dx * dx + dz * dz > reach * reach) continue;
+    }
     if (pulseCycle(p, env.time) >= p.on) continue;
     if (p.kind === PULSE_PRESS) {
       // Die Presse plättet: kein Dreher, aber das Kart ist eine Weile flach und langsam.

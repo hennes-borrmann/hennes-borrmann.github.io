@@ -80,6 +80,15 @@ export const PULSE_VENT = 0;
 export const PULSE_BOMB = 1;
 /** Stampfpresse: schlägt im Takt herunter und plättet, was darunter steht. */
 export const PULSE_PRESS = 2;
+/**
+ * Ablauf einer Presse, gemeinsam für Physik und Bild: in den letzten PRESS_STRIKE Ticks
+ * vor Zyklus 0 fällt der Stempel und schlägt bei 0 auf – genau dann beginnt die Gefahr
+ * (on Ticks lang). Er hebt sich schon PRESS_LEAD Ticks vor deren Ende wieder, so dass er
+ * bei ihrem Ende über Karthöhe steht; nach PRESS_RISE Ticks ist er ganz oben.
+ */
+export const PRESS_STRIKE = 3;
+export const PRESS_LEAD = 10;
+export const PRESS_RISE = 40;
 
 /**
  * Eine Stelle, an der im Takt etwas passiert. Der Zyklus beginnt mit dem
@@ -109,6 +118,22 @@ export function pulseCycle(p: Pulse, time: number): number {
 
 export function pulseActive(p: Pulse, time: number): boolean {
   return pulseCycle(p, time) < p.on;
+}
+
+/**
+ * Wie weit der Stempel einer Presse offen steht: 0 = liegt auf der Fahrbahn, 1 = ganz oben
+ * (das Ansenken während der Vorwarnung ist Zierde und hier nicht enthalten).
+ */
+export function pressOpen(p: Pulse, time: number): number {
+  const c = pulseCycle(p, time);
+  if (c >= p.period - PRESS_STRIKE) {
+    const k = (c - (p.period - PRESS_STRIKE)) / PRESS_STRIKE;
+    return 1 - k * k;
+  }
+  const up = p.on - PRESS_LEAD;
+  if (c < up) return 0;
+  const k = (c - up) / PRESS_RISE;
+  return k >= 1 ? 1 : 1 - (1 - k) * (1 - k);
 }
 
 /** 0 = Ruhe … 1 = bricht gleich aus. */
@@ -178,6 +203,14 @@ export interface Belt {
   along: number;
   across: number;
 }
+/**
+ * Zum Rand eines Bands hin läuft seine Wirkung aus: seitlich über BELT_EDGE Meter, an
+ * Anfang und Ende über BELT_RAMP Meter. An der Naht zweier gegenläufiger Bänder springt
+ * das Tempo deshalb nicht – sonst genügte dort ein Tausendstelmillimeter Unterschied
+ * zwischen Host und Mitspieler für 20 cm Abweichung.
+ */
+export const BELT_EDGE = 0.5;
+export const BELT_RAMP = 2;
 
 // --- Ebbe und Flut -----------------------------------------------------------------
 
@@ -219,12 +252,16 @@ export function tideLevel(t: Tide, time: number): number {
 
 /** Ab dieser Wassertiefe (Meter) bremst es; WATER_DRAG je Meter Tiefe, höchstens WATER_MAX. */
 export const WATER_FROM = 0.06;
-export const WATER_DRAG = 0.9;
+export const WATER_DRAG = 1;
 export const WATER_MAX = 0.55;
 
-/** Faktor auf die Höchstgeschwindigkeit bei dieser Wassertiefe. */
+/**
+ * Faktor auf die Höchstgeschwindigkeit bei dieser Wassertiefe. Setzt an der Wasserlinie
+ * stetig ein (kein Sprung): eine Welle oder eine um einen Tick andere Rennzeit ändert
+ * das Tempo dort nur unmerklich.
+ */
 export function waterFactor(depth: number): number {
-  return depth <= WATER_FROM ? 1 : 1 - Math.min(WATER_MAX, depth * WATER_DRAG);
+  return depth <= WATER_FROM ? 1 : 1 - Math.min(WATER_MAX, (depth - WATER_FROM) * WATER_DRAG);
 }
 
 /** Geplättet (Stampfpresse): so lange fährt das Kart flach und langsam (Ticks). */

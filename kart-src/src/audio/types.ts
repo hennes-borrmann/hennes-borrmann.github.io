@@ -46,9 +46,9 @@ export type SfxName =
   | 'press' // eine Stampfpresse schlägt herunter: schwerer metallischer Schlag
   | 'splash' // das Kart fährt durch Wasser: Platschen (wird etwa 3–4×/s aufgerufen)
   | 'wings' // die Gleitflügel klappen aus (Abflug von der Rampe): Schnappen von Stoff, kurzes Aufrauschen
-  | 'ring' // durch einen Schubring geflogen: heller, aufsteigender Klang mit Schub
+  | 'ring' // durch einen Schubring geflogen: Gleitton in hellen Glanz-Zweiklang, Schubrauschen (auch fremde Karts)
   | 'lift' // in einen Aufwind geraten: weiches Aufrauschen, das nach oben zieht
-  | 'wind' // Fahrtwind im Gleitflug (wird etwa alle 0,42 s aufgerufen und soll zu einem Rauschen verschmelzen)
+  | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten
 
