@@ -386,6 +386,36 @@ export class ScreenUi {
     this.modal.hidden = true;
   }
 
+  /**
+   * Meldung über dem Rennen, wenn der Browser die 3D-Grafik nicht (mehr) zeichnet: was gemessen wurde, und ein
+   * Knopf zum Neuaufbau. null blendet sie aus. Das Element entsteht erst, wenn es gebraucht wird.
+   */
+  setGfxNote(lines: string[] | null, onRebuild?: () => void, onHide?: () => void): void {
+    let box = document.getElementById('gfx-note');
+    if (!lines) {
+      if (box) box.hidden = true;
+      return;
+    }
+    if (!box) {
+      box = h('div', { id: 'gfx-note' });
+      box.style.cssText =
+        'position:fixed;left:50%;top:92px;transform:translateX(-50%);z-index:60;width:min(680px,86vw);padding:14px 18px 16px;' +
+        'background:#1b1e25;color:#f4f1e8;border-top:5px solid #ffd23f;box-shadow:6px 6px 0 #000;font:14px/1.45 system-ui,sans-serif;';
+      document.body.append(box);
+    }
+    const title = h('strong', { text: 'Grafikproblem erkannt' });
+    title.style.cssText = 'display:block;font-size:17px;margin-bottom:6px;';
+    const btn = h('button', { class: 'btn', type: 'button', text: 'Grafik neu aufbauen' });
+    btn.style.cssText = 'margin-top:10px;';
+    btn.addEventListener('click', () => onRebuild?.());
+    const hide = h('button', { class: 'btn', type: 'button', text: 'Ausblenden' });
+    hide.style.cssText = 'margin:10px 0 0 10px;';
+    hide.addEventListener('click', () => onHide?.());
+    box.replaceChildren(title, ...lines.map((l) => h('p', { text: l })), btn, hide);
+    for (const el of Array.from(box.querySelectorAll('p'))) (el as HTMLElement).style.cssText = 'margin:4px 0;overflow-wrap:anywhere;';
+    box.hidden = false;
+  }
+
   // --- Rennen ---------------------------------------------------------------
 
   /** Schreibt nur ins Dokument, wenn sich der Text wirklich geändert hat (läuft jedes Bild). */
