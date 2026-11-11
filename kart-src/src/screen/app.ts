@@ -1188,6 +1188,8 @@ export class App {
         }
         return { glides, thermals: TRACK.thermals.length, rings: TRACK.rings.length };
       },
+      // Mond: Sprungplatten (Meter ab Start, Abzweigung oder −1) und Schwerkraft der Strecke.
+      launchers: () => ({ gravity: TRACK.gravity, pads: TRACK.launchers.map((l) => ({ at: TRACK.prog[l.seg] * TRACK.step, branch: TRACK.branchOf[l.seg], power: l.power })) }),
       // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
       dive: () => {
         let from = -1;
