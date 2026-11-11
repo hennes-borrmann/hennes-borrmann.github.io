@@ -2,7 +2,7 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 3 mit Ausbau Schritt 5.** Vier Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen – jede mit eigener Streckenmechanik (Förderbänder und Stampfpressen im Werkshof; Ebbe und Flut an der Möwenklippe; Geysire, Lavabomben und Lavaschwall im Glutkessel; Stadtverkehr auf der Nachtschicht) –, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+**Stand: Phase 3 mit Ausbau Schritt 6.** Fünf Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen – jede mit eigener Streckenmechanik (Förderbänder und Stampfpressen im Werkshof; Ebbe und Flut an der Möwenklippe; Geysire, Lavabomben und Lavaschwall im Glutkessel; Stadtverkehr auf der Nachtschicht; Fliegen auf der Wolkenwerft) –, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
 
 Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
@@ -33,8 +33,9 @@ Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scanne
 | **Möwenklippe** | 1 490 m | Sand, Holzbohlen, Waldweg, Wiese, Fels | Strandpromenade, schmaler Holzsteg ohne Geländer, Serpentinen durch den Kiefernwald oder Felsgrotte darunter hindurch, Wiese am Leuchtturm, Abfahrt mit Sprung, Steilkurve, Uferstraße (bei Flut unter Wasser) oder Steg mit Sprung über die Bucht |
 | **Glutkessel** | 1 480 m | Fels, Schotter (Asche), Gitterrost | Eine Acht um den Vulkan: Bogen oder Sprung über den Lavastrom, schmaler Grat ohne Bande oder Lavahöhle darunter, Sprung über die Glutrinne, Felsbrücke über die eigene Strecke, Steilkurve in der Abfahrt |
 | **Nachtschicht** | 1 470 m | Neon-Asphalt, Stahl, Pflaster | Hochstraße bei Nacht: rechte Winkel, Bogen um den Block oder Sprung über die Dächer, Hochstraße oder Röhre auf Bodenhöhe darunter, Parkhaus-Spirale als Steilkurve |
+| **Wolkenwerft** | 1 460 m | Holzbohlen, Stahl | Luftschiffwerft über den Wolken, alles auf Stegen: Helling, Wendelrampe, dann 180 m Gleitflug zum Ballonhafen; Laufsteg außen herum oder per Katapult im Flug quer über die Bucht; durch den Hangar aufs Dach und im Bogen zurück zur Helling geflogen |
 
-**Abzweigungen:** Jede Strecke teilt sich zweimal. Beide Wege zählen für Runden und Platzierung gleich und dauern ähnlich lange; der eine ist meist sicherer, der andere riskanter (Sprung, keine Bande) oder enger. Eine gelbe Tafel im Keil zeigt die Gabelung an. Solange beide Fahrbahnen ineinander liegen, steht zwischen ihnen keine Begrenzung, sie liegen in einer Ebene, und jede Stelle wird nur einmal gezeichnet: die Hauptstrecke hat Vorrang und zieht ihre Randlinie gestrichelt über die Öffnung, die Abzweigung beginnt an ihrem Fahrbahnrand. Erst hinter dem Keil findet die Abzweigung zu ihrer eigenen Höhe. Zwei Tests prüfen das auf allen Strecken.
+**Abzweigungen:** Jede Strecke teilt sich zweimal (die Wolkenwerft einmal). Beide Wege zählen für Runden und Platzierung gleich und dauern ähnlich lange; der eine ist meist sicherer, der andere riskanter (Sprung, keine Bande) oder enger. Eine gelbe Tafel im Keil zeigt die Gabelung an. Solange beide Fahrbahnen ineinander liegen, steht zwischen ihnen keine Begrenzung, sie liegen in einer Ebene, und jede Stelle wird nur einmal gezeichnet: die Hauptstrecke hat Vorrang und zieht ihre Randlinie gestrichelt über die Öffnung, die Abzweigung beginnt an ihrem Fahrbahnrand. Erst hinter dem Keil findet die Abzweigung zu ihrer eigenen Höhe. Zwei Tests prüfen das auf allen Strecken.
 
 **Streckenmechanik:** Jede Strecke soll sich nicht nur anders ansehen, sondern anders fahren:
 
@@ -44,13 +45,17 @@ Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scanne
 - **Nachtschicht – Stadtverkehr.** Auf der Hochstraße fahren rund 40 Fahrzeuge in drei Spuren mit: links die Straßenbahn auf ihrem Gleis und Taxis, in der Mitte Taxis und Lieferwagen, rechts langsamer die Busse. Die Spuren sind so besetzt, dass nebeneinander höchstens zwei Fahrzeuge fahren – eine ganze Spur ist immer frei. Wer mit Tempo ins Heck fährt, schleudert; seitlich streift man nur entlang, und eine gestreifte Ecke kostet Tempo, aber keinen Dreher. Dicht hinter einem Fahrzeug lädt der **Windschatten** (die Tempostriche wachsen); wer geladen ausschert, wird gut eine Sekunde lang schneller („SOG!“). Die Dächer und die Röhre sind verkehrsfrei.
 - **Glutkessel – der Vulkan spielt mit.** Geysire sitzen in Reihen quer über der Bahn und brechen reihum aus – eine Spur bleibt immer frei; wer über einem steht, wird hochgeworfen. Lavabomben kündigen sich mit einem wachsenden Schatten an und lassen kurz eine Glutpfütze zurück. Durch die Höhle schießt im Takt ein Lavaschwall, der das Kart auf halbes Tempo bremst: bei freier Bahn ist die Höhle der schnellere Weg, bei Lava der langsamere. Die Ampel vor der Gabelung zeigt, wie es bei der Durchfahrt sein wird.
 
-All das läuft nach einem festen Fahrplan (Rennzeit seit „Los“), ist also auf jedem Bildschirm gleich und in jedem Rennen gleich – man kann es lernen.
+- **Wolkenwerft – Fliegen.** An drei Stellen endet die Fahrbahn an einer Absprungkante: dort klappen die Karts Flügel aus (jede Figur ihre eigenen) und **gleiten** – sie sinken nur langsam, lenken weich und halten ihr Tempo. Gelenkt wird wie am Boden; Gas und Bremse braucht man in der Luft nicht. **Aufwinde** (helle, aufsteigende Säulen) heben das Kart, **Schubringe** geben Schub wie ein Boost-Feld – wer beides mitnimmt, kommt hoch und schnell an und spart die Auffahrt von der tiefer liegenden Fangrampe. Markierungsballone zeigen den Korridor: wer ihn seitlich verlässt, sackt durch und wird vor die Kante zurückgesetzt. Die Abkürzung per Katapult ist kürzer, verlangt aber einen sauberen Flug; der Laufsteg außen herum bleibt am Boden.
+
+Verkehr, Geysire, Lava, Pressen und Gezeiten laufen nach einem festen Fahrplan (Rennzeit seit „Los“), sind also auf jedem Bildschirm gleich und in jedem Rennen gleich – man kann sie lernen.
 
 **Untergründe** fahren sich deutlich verschieden: Sand und Schotter rutschen stark und kosten Tempo, laden dafür den Drift schneller; der Waldweg lässt das Heck arbeiten, die Wiese bremst; Fels und Neon-Asphalt kleben; Stahl ist am schnellsten, aber glatt – auch beim Bremsen; Pflaster ist holprig. Auf losem Grund zieht das Kart eine Staubfahne. Jede Sorte hat ihre eigene Begrenzung – Holzzaun, Seil, Felswall, Mauer, Leitplanke.
 
 **Steilkurven** sind nach innen geneigt und geben Halt: man kommt deutlich schneller herum als in einer flachen Kurve.
 
 Im Hintergrund bewegt sich die Welt: Vulkane brechen aus und werfen Lavabomben, Möwenschwärme kreisen, ein Kutter zieht durch die Bucht, Kräne drehen sich, ein Güterzug fährt um den Werkshof, über der Stadt ziehen ein Luftschiff und Feuerwerk. Das alles ist Kulisse und greift nicht ins Rennen ein.
+
+**Pressen und Bild stimmen überein:** Eine Presse ist genau so lange gefährlich, wie ihr Stempel unter Karthöhe steht, und zwar unter der ganzen quadratischen Platte. Die Wirkung eines Förderbands läuft zu seinen Rändern hin über einen halben Meter aus – auf der Naht zweier gegenläufiger Bänder steht man still.
 
 Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wieder auf die Strecke gesetzt – vor Sprüngen mit genug Anlauf. Bergab ist das Kart schneller als bergauf.
 
@@ -185,13 +190,13 @@ Die Schalter für Netz, Grafik und Ton wandern automatisch in den QR-Code und de
 src/net/         Verbindungsschicht: Signaling-Endpunkt, Link (zuverlässiger + unreliable Kanal), Protokoll, ICE/TURN
 src/lobby/       Lobby auf dem Host und auf den Mitspieler-Bildschirmen, Platzvergabe, Wiedereinstieg
 src/controller/  Handy-Seite: Neigung → Lenkwert, Kalibrierung, Touch-Tasten, Verbindung zum Bildschirm
-src/game/        sim.ts Fahrphysik (Ebene + Höhe, Sprünge, Abstürze) · track.ts Streckenbau · tracks.ts die vier Strecken
+src/game/        sim.ts Fahrphysik (Ebene + Höhe, Sprünge, Abstürze, Gleitflug) · track.ts Streckenbau · tracks.ts die Strecken
                  · mechanics.ts Streckenmechanik (Verkehr, Geysire, Lavabomben, Lavaschwall, Förderbänder,
-                   Stampfpressen, Gezeiten) als Funktion der Rennzeit
+                   Stampfpressen, Gezeiten) als Funktion der Rennzeit, dazu die Regeln fürs Fliegen
                  · ai.ts KI-Fahrer · hostGame.ts Rennen auf dem Host (Ablauf, Items, Rempler, Hindernisse)
                  · clientGame.ts Vorhersage/Abgleich · interp.ts Interpolation
 src/render/      three.js-Szene: world.ts Fahrbahn, Gelände, Himmel · scenery.ts Kulissen · kartModel.ts Figuren
-                 · things.ts Items und Hindernisse · mechanics.ts (+ mechanics/) Verkehr, Lava, Maschinen, Gezeiten
+                 · things.ts Items und Hindernisse · mechanics.ts (+ mechanics/) Verkehr, Lava, Maschinen, Gezeiten, Flug
                  · effects.ts Teilchen, Spuren, Comic-Wörter · toon.ts Farbstufen und Kontur
 src/audio/       Ton: Mischpult, Motoren, Geräusche, Musik – alles zur Laufzeit erzeugt
 src/screen/      Ablauf und Oberfläche des Bildschirms (Lobby, Renn-Anzeige, Minikarte, Einstellungen)
@@ -212,7 +217,7 @@ Eine neue Strecke ist nur eine weitere Beschreibung in `src/game/tracks.ts` (St�
 
 ## Ton: Quellen
 
-Es gibt keine Tondateien. Motoren, Geräusche und Musik werden im Browser mit der Web Audio API erzeugt (Oszillatoren, Rauschen, Filter, Hüllkurven); die Musikstücke sind eigene Kompositionen und stehen als Noten in `src/audio/songs.ts`. Fremde Aufnahmen, Samples oder Melodien werden nicht verwendet.
+Es gibt keine Tondateien. Motoren, Geräusche und Musik werden im Browser mit der Web Audio API erzeugt (Oszillatoren, Rauschen, Filter, Hüllkurven); die Musikstücke sind eigene Kompositionen und stehen als Noten in `src/audio/songs.ts` und `src/audio/songs-neu.ts`. Fremde Aufnahmen, Samples oder Melodien werden nicht verwendet.
 
 ## Tests
 
@@ -230,7 +235,10 @@ Der Browser-Test läuft auf einem Rechner über die lokale Schleife. Er sagt nic
 - **Nicht auf echten Geräten geprüft** (von mir aus): iPhone/iPad, Safari, echte Sensoren, echte Netze, Bildrate auf dem iPad, Höreindruck des Tons.
 - **Größere Welten:** Seit den langen Strecken zeichnet das Spiel rund doppelt so viele Dreiecke wie vorher (je nach Strecke etwa 110 000–150 000 in hoher Qualität). Ob das auf jedem iPad flüssig bleibt, ist nicht gemessen; notfalls in den Einstellungen die Qualität senken.
 - **KI an Gabelungen:** Die KI-Gegner würfeln ihren Weg, sie wählen ihn nicht nach Lage des Rennens. Ausnahmen: die Lavahöhle im Glutkessel nehmen mittlere und starke Gegner nur bei freier Bahn, und an der Möwenklippe nehmen sie bei Flut den Steg, bei Ebbe die Uferstraße.
+- **KI hinter der Werkshof-Brücke:** Wer als KI über die Verladebrücke kommt, gerät in der folgenden Steilkurve je nach Figur für zwei bis vier Sekunden in den Seitenstreifen und verliert rund eine Sekunde pro Runde; durch die Halle fahren alle sauber. Die Ursache ist noch nicht gefunden.
 - **KI und Maschinen:** Allein fahrend werden die Gegner von den Stampfpressen nie erwischt (sie rechnen den Takt aus); geplättet werden sie nur, wenn ein Rempler oder ein Item sie aus der Spur bringt. Die Querbänder der Brücke gleichen sie aus, ohne sie zu nutzen.
+- **Fliegen:** In der Luft wird nur gelenkt – steigen und sinken bestimmen Aufwinde und Ideallinie, nicht der Spieler. Die KI fliegt Aufwinde und Ringe an, wählt die Flug-Abkürzung aber wie jede Abzweigung per Würfel. Ein Rollreifen endet an der Absprungkante; der Brummkreisel folgt der Ideallinie auch durch die Luft und trifft nur, wer nahe an ihr fliegt.
+- **Items und Maschinen:** Rollreifen, Brummkreisel und Ölfleck werden von Förderbändern und Wasser nicht beeinflusst (ein Ölfleck bleibt auf einem laufenden Band liegen).
 - **Wasser:** Die Flut bremst nur auf der Uferstraße. Wer vom Steg ins Wasser fällt, wird wie bisher zurückgesetzt; schwimmen oder tauchen gibt es (noch) nicht.
 - **KI im Verkehr:** Die Gegner weichen aus und bremsen, fahren im Verkehr aber vorsichtiger als ein guter Mensch und brauchen pro Runde einige Sekunden länger als auf freier Strecke. Den Windschatten nutzen sie nicht gezielt.
 - **Verkehr und Items:** Ein Rollreifen zerschellt an Fahrzeugen; Brummkreisel, Öl und Rauch gehen durch sie hindurch.

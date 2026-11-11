@@ -28,6 +28,8 @@ import {
   type Belt,
   type Flood,
   type Pulse,
+  type Ring,
+  type Thermal,
   type Tide,
   type TrafficDef,
   type Vehicle,
@@ -35,7 +37,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -91,6 +93,16 @@ export interface PathFeatures {
   belts?: { from: number; to: number; lat0: number; lat1: number; along?: number; across?: number }[];
   /** Stücke, auf denen Ebbe und Flut gelten: [von, bis] (siehe TrackDef.tide). */
   tidal?: [number, number][];
+  /**
+   * Flugstrecken: [von, bis] ist eine Lücke ohne Fahrbahn, über der das Kart
+   * gleitet (siehe mechanics.ts). Die Höhen der Stützpunkte dort sind die
+   * Ideallinie des Flugs.
+   */
+  glides?: [number, number][];
+  /** Aufwinde: lat = seitliche Lage in Metern, lift = Steigen in m/s (ohne Angabe 7). */
+  thermals?: { at: number; lat: number; radius?: number; lift?: number }[];
+  /** Schubringe in der Luft: up = Höhe der Ringmitte über der Ideallinie (Meter). */
+  rings?: { at: number; lat: number; up?: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -165,6 +177,8 @@ export const EDGE_DECK = 8;
 export const EDGE_RAMP = 16;
 /** In einem Tunnel bzw. einer Höhle (Darstellung, Kamera). */
 export const EDGE_TUNNEL = 32;
+/** Flugstrecke: Lücke, über der das Kart gleitet statt zu fallen. */
+export const EDGE_GLIDE = 256;
 /**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
@@ -260,6 +274,9 @@ export interface Track {
   pulses: Pulse[];
   floods: Flood[];
   belts: Belt[];
+  /** Fliegen: Aufwinde und Schubringe über den Flugstrecken (Abschnitte mit EDGE_GLIDE). */
+  thermals: Thermal[];
+  rings: Ring[];
   /** Ebbe und Flut (null = keine) und je Abschnitt, ob sie dort gilt. */
   tide: Tide | null;
   tidal: Uint8Array;
@@ -738,6 +755,24 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         if (k < gapCount) respawn[g] = back;
       }
     }
+    // Flugstrecken: lange Lücken, über denen geglitten wird. Wer abstürzt, startet wieder vor der Kante.
+    for (const [from, to] of p.f.glides ?? []) {
+      const a = p.meters(from);
+      const backLocal = Math.round((a - RESPAWN_RUNUP) / p.step) - lead(p);
+      const back = idx(p, p.closed ? backLocal : Math.max(0, backLocal));
+      spanU(p, from, to, (seg) => {
+        edge[seg] |= EDGE_GAP | EDGE_GLIDE | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
+        respawn[seg] = back;
+      });
+      // Kurz vor der Kante und hinter der Landung keine Bande; auch dort führt ein Sturz zurück zum Anlauf.
+      const first = segAt(p, from);
+      const last = segAt(p, to);
+      for (const g of [prev[first], prev[prev[first]], next[last], next[next[last]]]) {
+        edge[g] |= EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
+      }
+      respawn[prev[first]] = back;
+      respawn[prev[prev[first]]] = back;
+    }
     for (const b of p.f.bumps ?? []) {
       span(p, p.meters(b.at), b.length, (seg, u) => {
         const s = Math.sin(Math.PI * u);
@@ -826,6 +861,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     pulses: [],
     floods: [],
     belts: [],
+    thermals: [],
+    rings: [],
     tide: def.tide
       ? {
           low: def.tide.low,
@@ -886,6 +923,29 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0 });
     }
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
+    for (const th of p.f.thermals ?? []) {
+      const seg = segAt(p, th.at);
+      track.thermals.push({
+        seg,
+        lat: th.lat,
+        x: px[seg] + rightX(track, seg) * th.lat,
+        z: pz[seg] + rightZ(track, seg) * th.lat,
+        y: py[seg],
+        radius: th.radius ?? 6,
+        lift: th.lift ?? 7,
+      });
+    }
+    for (const r of p.f.rings ?? []) {
+      const seg = segAt(p, r.at);
+      track.rings.push({
+        seg,
+        lat: r.lat,
+        x: px[seg] + rightX(track, seg) * r.lat,
+        y: py[seg] + (r.up ?? 0),
+        z: pz[seg] + rightZ(track, seg) * r.lat,
+        radius: RING_RADIUS,
+      });
+    }
     for (const f of p.f.floods ?? []) {
       const first = segAt(p, f.from);
       const last = segAt(p, f.to);
@@ -925,6 +985,8 @@ const PULSE_KINDS = [
   { radius: 2.6, on: 150, warn: 110 },
   { radius: 2.0, on: 34, warn: 60 },
 ];
+/** Innenradius eines Schubrings (Meter). */
+const RING_RADIUS = 3.4;
 /** Welle auf dem Wasser bei Ebbe und Flut: Ausschlag (Meter) und Periode (Ticks). */
 const TIDE_WAVE = 0.1;
 const TIDE_WAVE_PERIOD = 250;

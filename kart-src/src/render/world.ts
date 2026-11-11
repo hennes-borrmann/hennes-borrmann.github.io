@@ -596,8 +596,18 @@ export class World {
         }
         if (free) {
           const rot = Math.atan2(t.tx[i], t.tz[i]);
-          const c = this.P(i, 0, 0);
-          solid.box(c[0], c[1] - DECK_D - 0.35, c[2], lat * 2 + 1.1, 0.7, 1.1, cPillar, rot);
+          // Querträger: liegt unter dem Deck an und folgt dessen Querneigung – ein waagerechter Balken
+          // stünde in einer Steilkurve auf der tiefen Seite durch die Fahrbahn.
+          const L = lat + 0.55;
+          const y0 = -DECK_D - 0.7;
+          const y1 = -DECK_D;
+          const f0 = -0.55 / t.step;
+          const f1 = 0.55 / t.step;
+          cross(i, f1, -L, L, y0, y1, true, cPillar);
+          cross(i, f0, -L, L, y0, y1, false, cPillar);
+          side(i, f0, f1, L, y0, y1, true, cPillar);
+          side(i, f0, f1, -L, y0, y1, false, cPillar);
+          solid.quad(this.P(i, f0, L, y0), this.P(i, f0, -L, y0), this.P(i, f1, -L, y0), this.P(i, f1, L, y0), cPillar);
           for (const p of posts) {
             const foot = Math.min(this.heightAt(p[0], p[2]), th.liquidY ?? Infinity) - 1.5;
             const topY = p[1] - DECK_D - 0.7;
@@ -641,14 +651,14 @@ export class World {
     const id = t.def.theme;
     // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
     // Wänden, die Naturstrecken eine Höhle im Fels.
-    const hall = id === 'werkshof' || id === 'nacht';
+    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken';
     const H = TUNNEL_H;
     const R = hall ? 0.9 : TUNNEL_ROCK;
     const cRock = rgb(th.ground[2]);
-    const cWall = id === 'nacht' ? rgb(0x2d3050) : rgb(0xd9c7a8);
-    const cBand = id === 'nacht' ? rgb(0xff5ad1) : rgb(0x6fd0e6);
-    const cRoof = id === 'nacht' ? rgb(0x23263f) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1 }[id] ?? 0x7ef0ff);
+    const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
+    const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
+    const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -854,6 +864,8 @@ export class World {
     const t = this.track;
     const th = this.theme;
     if (th.rough === 0 && th.liquidY === null && t.def.theme === 'nacht') return th.farY;
+    // Über den Wolken gibt es kein Gelände: alles steht auf Pfeilern, die im Wolkenmeer verschwinden.
+    if (t.def.theme === 'wolken') return th.farY;
 
     // Nächstes Stück Fahrbahn, das auf dem Boden liegt
     let best = -1;
@@ -929,7 +941,7 @@ export class World {
   private buildTerrain(minX: number, maxX: number, minZ: number, maxZ: number): void {
     const th = this.theme;
     const t = this.track;
-    const flat = t.def.theme === 'nacht';
+    const flat = t.def.theme === 'nacht' || t.def.theme === 'wolken';
     const margin = flat ? 0 : 150;
     const cell = this.detail === 0 ? 11 : 7.5;
     const x0 = minX - margin;

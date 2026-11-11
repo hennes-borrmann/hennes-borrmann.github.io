@@ -80,6 +80,15 @@ export const PULSE_VENT = 0;
 export const PULSE_BOMB = 1;
 /** Stampfpresse: schlägt im Takt herunter und plättet, was darunter steht. */
 export const PULSE_PRESS = 2;
+/**
+ * Ablauf einer Presse, gemeinsam für Physik und Bild: in den letzten PRESS_STRIKE Ticks
+ * vor Zyklus 0 fällt der Stempel und schlägt bei 0 auf – genau dann beginnt die Gefahr
+ * (on Ticks lang). Er hebt sich schon PRESS_LEAD Ticks vor deren Ende wieder, so dass er
+ * bei ihrem Ende über Karthöhe steht; nach PRESS_RISE Ticks ist er ganz oben.
+ */
+export const PRESS_STRIKE = 3;
+export const PRESS_LEAD = 10;
+export const PRESS_RISE = 40;
 
 /**
  * Eine Stelle, an der im Takt etwas passiert. Der Zyklus beginnt mit dem
@@ -109,6 +118,22 @@ export function pulseCycle(p: Pulse, time: number): number {
 
 export function pulseActive(p: Pulse, time: number): boolean {
   return pulseCycle(p, time) < p.on;
+}
+
+/**
+ * Wie weit der Stempel einer Presse offen steht: 0 = liegt auf der Fahrbahn, 1 = ganz oben
+ * (das Ansenken während der Vorwarnung ist Zierde und hier nicht enthalten).
+ */
+export function pressOpen(p: Pulse, time: number): number {
+  const c = pulseCycle(p, time);
+  if (c >= p.period - PRESS_STRIKE) {
+    const k = (c - (p.period - PRESS_STRIKE)) / PRESS_STRIKE;
+    return 1 - k * k;
+  }
+  const up = p.on - PRESS_LEAD;
+  if (c < up) return 0;
+  const k = (c - up) / PRESS_RISE;
+  return k >= 1 ? 1 : 1 - (1 - k) * (1 - k);
 }
 
 /** 0 = Ruhe … 1 = bricht gleich aus. */
@@ -178,6 +203,14 @@ export interface Belt {
   along: number;
   across: number;
 }
+/**
+ * Zum Rand eines Bands hin läuft seine Wirkung aus: seitlich über BELT_EDGE Meter, an
+ * Anfang und Ende über BELT_RAMP Meter. An der Naht zweier gegenläufiger Bänder springt
+ * das Tempo deshalb nicht – sonst genügte dort ein Tausendstelmillimeter Unterschied
+ * zwischen Host und Mitspieler für 20 cm Abweichung.
+ */
+export const BELT_EDGE = 0.5;
+export const BELT_RAMP = 2;
 
 // --- Ebbe und Flut -----------------------------------------------------------------
 
@@ -219,14 +252,66 @@ export function tideLevel(t: Tide, time: number): number {
 
 /** Ab dieser Wassertiefe (Meter) bremst es; WATER_DRAG je Meter Tiefe, höchstens WATER_MAX. */
 export const WATER_FROM = 0.06;
-export const WATER_DRAG = 0.9;
+export const WATER_DRAG = 1;
 export const WATER_MAX = 0.55;
 
-/** Faktor auf die Höchstgeschwindigkeit bei dieser Wassertiefe. */
+/**
+ * Faktor auf die Höchstgeschwindigkeit bei dieser Wassertiefe. Setzt an der Wasserlinie
+ * stetig ein (kein Sprung): eine Welle oder eine um einen Tick andere Rennzeit ändert
+ * das Tempo dort nur unmerklich.
+ */
 export function waterFactor(depth: number): number {
-  return depth <= WATER_FROM ? 1 : 1 - Math.min(WATER_MAX, depth * WATER_DRAG);
+  return depth <= WATER_FROM ? 1 : 1 - Math.min(WATER_MAX, (depth - WATER_FROM) * WATER_DRAG);
 }
 
 /** Geplättet (Stampfpresse): so lange fährt das Kart flach und langsam (Ticks). */
 export const FLAT_TICKS = 130;
 export const FLAT_FACTOR = 0.55;
+
+// --- Fliegen -----------------------------------------------------------------------
+// Über einer Flugstrecke (Lücke mit EDGE_GLIDE) trägt die Luft: das Kart sinkt
+// nur langsam, lenkt weich und hält sein Tempo. Aufwinde heben es, Ringe geben
+// Schub. Die gedachte Ideallinie ist die Höhe der Abschnitte (track.py).
+
+/** Sinkgeschwindigkeit im Gleitflug (m/s) und wie schnell sich die Steig-/Sinkrate einstellt (1/s). */
+export const GLIDE_SINK = 2.6;
+export const GLIDE_RESPONSE = 2.4;
+/** Reisetempo im Gleitflug (m/s) und wie zügig es erreicht wird (m/s²). */
+export const GLIDE_SPEED = 29;
+export const GLIDE_ACCEL = 12;
+/** Drehrate bei vollem Lenkeinschlag (rad/s) und wie schnell die Flugrichtung der Nase folgt (1/s). */
+export const GLIDE_YAW = 1.15;
+export const GLIDE_GRIP = 2.6;
+/** So weit über der Ideallinie ist Schluss mit Steigen, so weit darunter ist das Kart abgestürzt (Meter). */
+export const GLIDE_CEILING = 13;
+export const GLIDE_FALL = 15;
+/**
+ * Neben dem Flugkorridor trägt die Luft nicht: GLIDE_EDGE Meter außerhalb sinkt das Kart
+ * um GLIDE_DROP m/s schneller (dazwischen anteilig) – wer abdriftet, fällt bald und wird zurückgesetzt.
+ */
+export const GLIDE_EDGE = 6;
+export const GLIDE_DROP = 10;
+
+/** Aufwind: eine Säule aufsteigender Luft. Wer hindurchfliegt, steigt. */
+export interface Thermal {
+  seg: number;
+  lat: number;
+  x: number;
+  z: number;
+  /** Höhe der Ideallinie an dieser Stelle. */
+  y: number;
+  radius: number;
+  /** Steiggeschwindigkeit in der Säule (m/s). */
+  lift: number;
+}
+
+/** Schubring in der Luft: wer hindurchfliegt, bekommt Schub. */
+export interface Ring {
+  seg: number;
+  lat: number;
+  x: number;
+  /** Höhe der Ringmitte. */
+  y: number;
+  z: number;
+  radius: number;
+}

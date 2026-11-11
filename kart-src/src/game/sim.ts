@@ -15,6 +15,8 @@
 // Sekunde): das rechnet auf jedem Gerät identisch.
 
 import {
+  BELT_EDGE,
+  BELT_RAMP,
   CRASH_SPEED,
   DRAFT_FULL,
   DRAFT_PULL_FROM,
@@ -22,6 +24,16 @@ import {
   FLAT_FACTOR,
   FLAT_TICKS,
   FLOOD_FROM,
+  GLIDE_ACCEL,
+  GLIDE_CEILING,
+  GLIDE_DROP,
+  GLIDE_EDGE,
+  GLIDE_FALL,
+  GLIDE_GRIP,
+  GLIDE_RESPONSE,
+  GLIDE_SINK,
+  GLIDE_SPEED,
+  GLIDE_YAW,
   PULSE_PRESS,
   PULSE_VENT,
   WATER_FROM,
@@ -34,6 +46,7 @@ import {
   waterFactor,
 } from './mechanics';
 import {
+  EDGE_GLIDE,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   NO_GROUND,
@@ -114,6 +127,8 @@ export const FLAG_OFFROAD = 2;
 export const FLAG_WALL = 4;
 /** Das Kart ist in der Luft (Sprung, Absturz oder gerade am Kran). */
 export const FLAG_AIR = 8;
+/** Das Kart gleitet über einer Flugstrecke (Flügel ausgeklappt). */
+export const FLAG_GLIDE = 16;
 
 export interface KartState {
   x: number;
@@ -766,7 +781,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   projectOnTrack(t, x0, z0, s.seg);
   const seg0 = proj.seg;
   const lat0 = proj.lat;
-  const g0 = groundAt(t, seg0, proj.along, lat0);
+  const along0 = proj.along;
+  const g0 = groundAt(t, seg0, along0, lat0);
 
   let fx = Math.sin(s.heading);
   let fz = Math.cos(s.heading);
@@ -797,7 +813,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const ground = SURFACES[t.surf[seg0]] ?? SURFACES[0];
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
   const hold = A_LAT * ch.grip * ground.grip * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
-  const yawMax = (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
+  // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
+  const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
+  const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
@@ -887,17 +905,37 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  if (gliding) {
+    // Die Flugrichtung folgt der Nase weich; das Tempo pendelt sich auf Reisetempo ein (mit Schub darüber).
+    const speed = Math.hypot(vf, vl);
+    vl *= Math.exp(-GLIDE_GRIP * DT);
+    vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
+    const cruise = (s.boost > 0 ? V_BOOST : GLIDE_SPEED * ch.vmax) * env.speedFactor * (s.stall > 0 ? STALL_FACTOR : 1);
+    if (env.canDrive && !spinning) vf += Math.max(-GLIDE_ACCEL * DT, Math.min(GLIDE_ACCEL * DT, cruise - vf));
+  }
   s.vx = fx * vf + rx * vl;
   s.vz = fz * vf + rz * vl;
   s.x += s.vx * DT;
   s.z += s.vz * DT;
-  // Förderband: der Boden nimmt das Kart mit.
+  // Förderband: der Boden nimmt das Kart mit. Zu den Rändern hin läuft die Wirkung aus (siehe BELT_EDGE).
   if (!wasAir && t.belts.length > 0) {
+    let carry = 0;
+    let push = 0;
     for (const b of t.belts) {
-      if (seg0 < b.first || seg0 >= b.first + b.count || lat0 < b.lat0 || lat0 > b.lat1) continue;
-      s.x += (t.tx[seg0] * b.along + rightX(t, seg0) * b.across) * DT;
-      s.z += (t.tz[seg0] * b.along + rightZ(t, seg0) * b.across) * DT;
-      break;
+      if (seg0 < b.first || seg0 >= b.first + b.count) continue;
+      const side = Math.min(lat0 - b.lat0, b.lat1 - lat0) / BELT_EDGE;
+      if (side <= 0) continue;
+      // Lage längs des Bands in Metern ab seinem Anfang
+      const u = (seg0 - b.first) * t.step + along0;
+      const ends = Math.min(u + t.step * 0.5, b.count * t.step - u - t.step * 0.5) / BELT_RAMP;
+      if (ends <= 0) continue;
+      const k = Math.min(1, side) * Math.min(1, ends);
+      carry += b.along * k;
+      push += b.across * k;
+    }
+    if (carry !== 0 || push !== 0) {
+      s.x += (t.tx[seg0] * carry + rightX(t, seg0) * push) * DT;
+      s.z += (t.tz[seg0] * carry + rightZ(t, seg0) * push) * DT;
     }
   }
 
@@ -979,7 +1017,34 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       g = g0;
     }
   }
-  s.vy -= GRAVITY * DT;
+  if (gliding && g === NO_GROUND) {
+    // Statt zu fallen, sinkt das Kart langsam – und steigt in einem Aufwind.
+    let want = -GLIDE_SINK;
+    for (const th of t.thermals) {
+      const dx = s.x - th.x;
+      const dz = s.z - th.z;
+      if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(s.y - th.y) < GLIDE_FALL + GLIDE_CEILING) want = th.lift;
+    }
+    // Oben ist Schluss: über der Decke geht es nur noch abwärts.
+    if (s.y > t.py[s.seg] + GLIDE_CEILING) want = Math.min(want, -GLIDE_SINK);
+    // Neben dem Korridor trägt die Luft nicht mehr – auch kein Aufwind.
+    const out = Math.abs(lat) - t.wh[s.seg];
+    if (out > 0) want = -GLIDE_SINK - Math.min(1, out / GLIDE_EDGE) * GLIDE_DROP;
+    s.vy += (want - s.vy) * Math.min(1, GLIDE_RESPONSE * DT);
+    flags |= FLAG_GLIDE;
+    // Schubringe
+    if (s.boost < PAD_TICKS - 8) {
+      for (const r of t.rings) {
+        const dx = s.x - r.x;
+        const dy = s.y + 0.6 - r.y;
+        const dz = s.z - r.z;
+        if (dx * dx + dy * dy + dz * dz < r.radius * r.radius) {
+          s.boost = PAD_TICKS;
+          ev |= EV_PAD;
+        }
+      }
+    }
+  } else s.vy -= GRAVITY * DT;
   s.y += s.vy * DT;
   if (s.y <= g) {
     if (wasAir && s.vy < -5) ev |= EV_LAND;
@@ -996,7 +1061,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
 
   // --- Absturz ---
-  if (s.y < t.py[s.seg] - t.fallDepth) {
+  if (s.y < t.py[s.seg] - (t.edge[s.seg] & EDGE_GLIDE ? GLIDE_FALL : t.fallDepth)) {
     const r = t.respawn[s.seg];
     s.seg = r;
     s.x = t.px[r];
@@ -1026,8 +1091,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (dy < -1.5 || dy > 2.5) continue;
     const dx = s.x - p.x;
     const dz = s.z - p.z;
-    const reach = p.radius + KART_RADIUS * 0.6;
-    if (dx * dx + dz * dz > reach * reach) continue;
+    if (p.kind === PULSE_PRESS) {
+      // Die Platte ist quadratisch, wie gezeichnet – auch unter ihren Ecken wird man geplättet.
+      const half = p.radius + KART_RADIUS * 0.5;
+      if (Math.abs(dx * t.tx[p.seg] + dz * t.tz[p.seg]) > half || Math.abs(dx * rightX(t, p.seg) + dz * rightZ(t, p.seg)) > half) continue;
+    } else {
+      const reach = p.radius + KART_RADIUS * 0.6;
+      if (dx * dx + dz * dz > reach * reach) continue;
+    }
     if (pulseCycle(p, env.time) >= p.on) continue;
     if (p.kind === PULSE_PRESS) {
       // Die Presse plättet: kein Dreher, aber das Kart ist eine Weile flach und langsam.

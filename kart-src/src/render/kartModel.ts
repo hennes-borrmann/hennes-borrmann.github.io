@@ -47,6 +47,8 @@ export interface KartPose {
   held: number;
   /** Der Abschleppdrache zieht gerade. */
   tow: boolean;
+  /** Gleitflug über einer Flugstrecke: die Flügel sind ausgeklappt. */
+  glide: boolean;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -111,8 +113,13 @@ const B = {
   bolt1: 28,
   puff0: 29,
   puff1: 30,
+  wingL: 31, // Gleitflügel: Gelenk an der Karosserie …
+  wingR: 32,
+  tipL: 33, // … und Außenteil (federt im Flug)
+  tipR: 34,
+  wtail: 35, // Leitwerk bzw. Propeller am Heck
 } as const;
-const BONE_COUNT = 31;
+const BONE_COUNT = 36;
 
 // Farben, die alle Karts teilen.
 const DARK = 0x2d2a36; // Gummi, Rahmen
@@ -979,6 +986,11 @@ interface Spec {
   aux1: V3;
   /** Wo es bei „Kurzschluss“ qualmt. */
   smoke: V3;
+  /** Gleitflügel: linkes Gelenk, Abstand zum Außenteil, V-Stellung (rad), Leitwerk. */
+  wing: V3;
+  wingTip: number;
+  wingUp: number;
+  wingTail: V3;
 }
 
 const SPECS: Spec[] = [
@@ -1008,6 +1020,10 @@ const SPECS: Spec[] = [
     aux1Parent: B.head, // Unterkiefer
     aux1: [0, 0.15, 0.08],
     smoke: [0, 0.85, 0.6],
+    wing: [0.33, 0.47, 0.05],
+    wingTip: 0.62,
+    wingUp: 0.02,
+    wingTail: [0, 0.62, -0.9],
   },
   // 1 – Vera Vergaser: schlanker Renner
   {
@@ -1035,6 +1051,10 @@ const SPECS: Spec[] = [
     aux1Parent: B.chassis,
     aux1: [0, 0.5, 0],
     smoke: [0, 0.8, -0.75],
+    wing: [0.24, 0.47, -0.05],
+    wingTip: 0.78,
+    wingUp: 0.1,
+    wingTail: [0, 0.6, -0.86],
   },
   // 2 – Bremsen-Bert: Badewanne auf Rädern
   {
@@ -1062,6 +1082,10 @@ const SPECS: Spec[] = [
     aux1Parent: B.head,
     aux1: [-0.1, 0.19, 0.27],
     smoke: [0, 0.75, -0.85],
+    wing: [0.44, 0.45, -0.02],
+    wingTip: 0.5,
+    wingUp: 0.12,
+    wingTail: [0, 0.62, -1.0],
   },
   // 3 – Zünd-Zoe: kantiger Keil mit Zündkerzen
   {
@@ -1089,6 +1113,10 @@ const SPECS: Spec[] = [
     aux1Parent: B.chassis,
     aux1: [-0.3, 0.648, -0.86],
     smoke: [0, 0.8, -0.8],
+    wing: [0.38, 0.36, -0.05],
+    wingTip: 0.72,
+    wingUp: 0.06,
+    wingTail: [0, 0.5, -0.5],
   },
 ];
 
@@ -2349,6 +2377,126 @@ function buildZoe(c: Ctx): void {
 
 const BUILDERS = [buildKalle, buildVera, buildBert, buildZoe];
 
+// ───────────────────────────── Gleitflügel ─────────────────────────────
+//
+// Über Flugstrecken klappt jedes Kart Flügel aus. Sie stecken im selben Netz
+// wie das Kart (kein zusätzlicher Zeichenaufruf) und hängen an eigenen
+// Knochen: Gelenk links/rechts an der Karosserie, daran das federnde
+// Außenteil, dazu ein Knochen fürs Leitwerk. Eingeklappt sind diese Knochen
+// auf null geschrumpft – dann ist nichts zu sehen.
+//
+// Flügel-Koordinaten (Knochen wingL): +x nach außen, +z nach vorn, y oben.
+// Der rechte Flügel ist gespiegelt.
+
+/** Flügelgrundriss: Punkte (x, z) in der Ebene y = 0, Dicke entlang y. */
+function plan(pts: readonly number[], depth: number): THREE.BufferGeometry {
+  const poly: number[] = [];
+  for (let i = 0; i < pts.length; i += 2) poly.push(pts[i], -pts[i + 1]);
+  const g = prism(poly, depth);
+  g.rotateX(-HALF_PI);
+  return g;
+}
+
+/** Kalle: Doppeldecker-Stummel mit Chromstreben, hinten ein Höhenruder auf zwei Stelzen. */
+function wingsKalle(c: Ctx): void {
+  const b = c.b;
+  const RED = c.p.base;
+  const RED_D = c.p.dark;
+  const CREAM = trim(c, 0xffefd2);
+  const W = B.wingL;
+  const T = B.tipL;
+  const UP = 0.28;
+  // runde Flügelenden
+  const end = [0, -0.16, 0.36, -0.16, 0.43, -0.06, 0.41, 0.13, 0.32, 0.22, 0, 0.22];
+  b.put(box(0.62, 0.045, 0.38), { bone: W, color: RED_D, pos: [0.31, 0, 0.03], mirror: B.wingR, outline: 0.7 });
+  b.put(box(0.4, 0.045, 0.38), { bone: W, color: RED, pos: [0.42, UP, 0.03], mirror: B.wingR, outline: 0.7 });
+  b.put(plan(end, 0.045), { bone: T, color: RED_D, mirror: B.tipR, outline: 0.7 });
+  b.put(plan(end, 0.045), { bone: T, color: RED, pos: [0, UP, 0], mirror: B.tipR, outline: 0.7 });
+  if (b.fine) b.put(box(0.07, 0.05, 0.385), { bone: T, color: CREAM, pos: [0.12, UP, 0.03], mirror: B.tipR, outline: 0 });
+  const strut = (bone: number, mirror: number, x: number): void =>
+    b.put(box(0.034, UP, 0.034), { bone, color: CHROME, pos: [x, UP / 2, 0.03], mirror, outline: 0.55 });
+  strut(W, B.wingR, 0.25);
+  strut(T, B.tipR, 0.27);
+  // Höhenruder hinter der Lehne
+  const TL = B.wtail;
+  b.put(box(0.034, 0.22, 0.034), { bone: TL, color: CHROME, pos: [0.2, 0.11, 0], mirror: TL, outline: 0.55 });
+  b.put(box(0.78, 0.045, 0.2), { bone: TL, color: RED_D, pos: [0, 0.23, -0.02], outline: 0.7 });
+}
+
+/** Vera: schlanke, nach außen spitz zulaufende Tragflächen mit hellen Enden, Höhenflosse an der Heckflosse. */
+function wingsVera(c: Ctx): void {
+  const b = c.b;
+  const TURQ = c.p.base;
+  const TURQ_D = c.p.dark;
+  const TRIM = trim(c, WHITE);
+  b.put(plan([0, -0.18, 0.78, -0.18, 0.78, 0.08, 0, 0.32], 0.035), { bone: B.wingL, color: TURQ, mirror: B.wingR, outline: 0.7 });
+  b.put(plan([0, -0.18, 0.26, -0.17, 0.33, -0.11, 0.33, -0.04, 0, 0.08], 0.035), {
+    bone: B.tipL,
+    color: TRIM,
+    mirror: B.tipR,
+    outline: 0.7,
+  });
+  // Zierstreifen an der Vorderkante
+  if (b.fine)
+    b.put(plan([0.1, 0.27, 0.78, 0.065, 0.78, 0.025, 0.1, 0.235], 0.04), { bone: B.wingL, color: TURQ_D, mirror: B.wingR, outline: 0 });
+  b.put(plan([0, -0.1, 0.38, -0.16, 0.4, -0.09, 0, 0.13], 0.03), { bone: B.wtail, color: TURQ_D, mirror: B.wtail, outline: 0.6 });
+  if (b.fine)
+    b.put(plan([0.3, -0.15, 0.38, -0.16, 0.4, -0.09, 0.3, -0.06], 0.034), { bone: B.wtail, color: TRIM, mirror: B.wtail, outline: 0 });
+}
+
+/** Bert: breite Flossen wie Walross-Flossen, hinten ein Schubpropeller aus Holz. */
+function wingsBert(c: Ctx): void {
+  const b = c.b;
+  const YEL = c.p.base;
+  const YEL_D = c.p.dark;
+  const RIM = trim(c, 0xfff6e2);
+  b.put(plan([0, -0.1, 0.5, -0.2, 0.5, 0.18, 0, 0.1], 0.05), { bone: B.wingL, color: YEL, mirror: B.wingR, outline: 0.75 });
+  const paddle = [0, -0.2, 0.2, -0.27, 0.38, -0.24, 0.48, -0.12, 0.5, 0.0, 0.46, 0.13, 0.32, 0.24, 0.14, 0.24, 0, 0.18];
+  b.put(plan(paddle, 0.05), { bone: B.tipL, color: YEL, mirror: B.tipR, outline: 0.75 });
+  // Zehenstriche
+  if (b.fine)
+    for (const z of [-0.09, 0.07])
+      b.put(box(0.22, 0.056, 0.026), { bone: B.tipL, color: YEL_D, pos: [0.3, 0, z], rot: [0, z * 1.6, 0], mirror: B.tipR, outline: 0 });
+  // Propeller: Welle, Nabe, drei verdrehte Holzblätter mit hellen Spitzen
+  const P = B.wtail;
+  b.put(cyl(0.03, 0.03, 0.16, 5), { bone: P, color: DARK, pos: [0, 0, -0.06], rot: [HALF_PI, 0, 0], outline: 0.55 });
+  b.put(cone(0.07, 0.13, b.s(8, 6)), { bone: P, color: CHROME, pos: [0, 0, -0.14], rot: [-HALF_PI, 0, 0], outline: 0.6 });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * TAU;
+    const s = Math.sin(a);
+    const co = Math.cos(a);
+    b.put(box(0.085, 0.27, 0.02), { bone: P, color: 0xc98a4b, pos: [s * 0.165, co * 0.165, -0.15], rot: [0, 0.5, -a], order: 'ZYX', outline: 0.6 });
+    if (b.fine)
+      b.put(box(0.087, 0.06, 0.024), { bone: P, color: RIM, pos: [s * 0.27, co * 0.27, -0.15], rot: [0, 0.5, -a], order: 'ZYX', outline: 0 });
+  }
+}
+
+/** Zoe: kantiges Delta mit Blitz-Zacken an der Hinterkante und hochgestellten Winglets. */
+function wingsZoe(c: Ctx): void {
+  const b = c.b;
+  const VIO = c.p.base;
+  const VIO_D = c.p.dark;
+  const ACC = c.p.accent;
+  // prettier-ignore
+  const inner = [0, -0.22, 0.12, -0.22, 0.2, -0.13, 0.3, -0.22, 0.42, -0.22, 0.5, -0.13, 0.6, -0.22, 0.72, -0.22, 0.72, 0.057, 0, 0.38];
+  b.put(plan(inner, 0.04), { bone: B.wingL, color: VIO, mirror: B.wingR, outline: 0.7 });
+  b.put(plan([0, -0.22, 0.26, -0.22, 0.26, -0.06, 0, 0.057], 0.04), { bone: B.tipL, color: VIO_D, mirror: B.tipR, outline: 0.7 });
+  // Winglet: senkrechte Platte, leicht nach außen gekippt
+  b.put(prism([-0.24, 0, -0.02, 0, -0.15, 0.24, -0.26, 0.26], 0.03), {
+    bone: B.tipL,
+    color: ACC,
+    pos: [0.26, 0, 0],
+    rot: [0, -HALF_PI, -0.25],
+    order: 'ZYX',
+    mirror: B.tipR,
+    outline: 0.65,
+  });
+  // heller Keil an der Vorderkante
+  if (b.fine) b.put(plan([0.06, 0.34, 0.6, 0.11, 0.6, 0.06, 0.06, 0.29], 0.046), { bone: B.wingL, color: c.p.light, mirror: B.wingR, outline: 0 });
+}
+
+const WING_BUILDERS = [wingsKalle, wingsVera, wingsBert, wingsZoe];
+
 // ───────────────────────────── Effekte ─────────────────────────────
 
 /** Schutzring, Blitze und Qualm – ein Netz, sichtbar nur bei Bedarf. */
@@ -3086,7 +3234,6 @@ export class KartVisual {
   private aSs = 0;
   // Werte des laufenden Bildes, die sich die Teilschritte von update() teilen
   private fDt = 0;
-  private fSpeed = 0;
   private fSteer = 0;
   private fStage = 0;
   private fSpin = 0;
@@ -3100,6 +3247,13 @@ export class KartVisual {
   private fCough = 0;
   private fHeld = 0;
   private fTow = false;
+  private fGlide = false;
+  // Gleitflug: Ausklappen (0 eingeklappt … 1 offen, linear in der Zeit), Haltung, Schräglage, Räder
+  private wingU = 0;
+  private glideS = 0;
+  private bank = 0;
+  private wheelV = 0;
+  private propA = 0;
 
   // Item in der Hand: eigenes Netz am Karosserie-Knochen, Geometrie wird getauscht
   private readonly prop: THREE.Mesh;
@@ -3341,8 +3495,17 @@ export class KartVisual {
     set(B.bolt1, B.spin, [-0.6, 0.8, 0]);
     set(B.puff0, B.spin, sp.smoke);
     set(B.puff1, B.spin, sp.smoke);
+    const wg = sp.wing;
+    set(B.wingL, B.chassis, wg);
+    set(B.wingR, B.chassis, [-wg[0], wg[1], wg[2]]);
+    set(B.tipL, B.wingL, [sp.wingTip, 0, 0]);
+    set(B.tipR, B.wingR, [-sp.wingTip, 0, 0]);
+    set(B.wtail, B.chassis, sp.wingTail);
     this.bones[B.wFL].rotation.order = 'YXZ';
     this.bones[B.wFR].rotation.order = 'YXZ';
+    // Flügel: erst um die eigene Längsachse verwinden, dann V-Stellung, dann nach hinten anklappen.
+    this.bones[B.wingL].rotation.order = 'YZX';
+    this.bones[B.wingR].rotation.order = 'YZX';
 
     this.root.updateMatrixWorld(true);
     for (let i = 0; i < BONE_COUNT; i++) {
@@ -3355,6 +3518,10 @@ export class KartVisual {
       this.restRot[i * 3 + 1] = bone.rotation.y;
       this.restRot[i * 3 + 2] = bone.rotation.z;
     }
+    // Eingeklappt: Flügel und Leitwerk auf null geschrumpft (erst nach der Ruhelage, sonst stimmt die Bindung nicht).
+    this.bones[B.wingL].scale.setScalar(0);
+    this.bones[B.wingR].scale.setScalar(0);
+    this.bones[B.wtail].scale.setScalar(0);
   }
 
   /** Baut alle Netze für die aktuelle Detailstufe neu. */
@@ -3373,6 +3540,7 @@ export class KartVisual {
       eyeStart: 0,
     };
     BUILDERS[this.character](ctx);
+    WING_BUILDERS[this.character](ctx);
     const fx = new Builder(this.rest, this.detail, lines);
     buildFx(fx, this.paint.base);
     const fl = new Builder(this.rest, this.detail, false);
@@ -3462,7 +3630,6 @@ export class KartVisual {
     const spin = clamp(pose.spin === pose.spin ? pose.spin : 0, 0, 1);
     const v = Math.min(Math.abs(speed) / 26, 1.35);
     const v1 = Math.min(v, 1);
-    this.fSpeed = speed;
     this.fSteer = steer;
     this.fStage = clamp(pose.driftStage === pose.driftStage ? pose.driftStage : 0, 0, 3);
     this.fSpin = spin;
@@ -3473,6 +3640,9 @@ export class KartVisual {
     const held = pose.held;
     this.fHeld = held >= 1 && held < I_COUNT ? Math.floor(held) : 0;
     this.fTow = pose.tow === true;
+    // Ältere Aufrufer kennen glide nicht (undefined → false).
+    const glide = pose.glide === true;
+    this.fGlide = glide;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -3485,7 +3655,14 @@ export class KartVisual {
     this.spinS = damp(this.spinS, spin > 0 ? 1 : 0, 12, dt);
     this.offS = damp(this.offS, pose.offroad ? 1 : 0, 8, dt);
     this.driftS = damp(this.driftS, drift, 9, dt);
-    this.armsUp = damp(this.armsUp, pose.air || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
+    // Im Gleitflug bleiben die Hände am Lenkrad – gesteuert wird ja weiter.
+    this.armsUp = damp(this.armsUp, (pose.air && !glide) || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
+    this.wingU = glide ? Math.min(1, this.wingU + dt / 0.25) : Math.max(0, this.wingU - dt / 0.2);
+    this.glideS = damp(this.glideS, glide ? 1 : 0, 6, dt);
+    // In die Kurve legen: etwa 0,35 rad bei vollem Einschlag
+    this.bank = damp(this.bank, glide ? steer * 0.35 : 0, 5, dt);
+    // Räder laufen in der Luft langsam aus und drehen bei der Landung sofort wieder mit.
+    this.wheelV = glide ? damp(this.wheelV, 0, 0.8, dt) : speed;
     this.flameS = damp(this.flameS, pose.boost ? 1 : 0, pose.boost ? 18 : 11, dt);
     this.lean = damp(this.lean, steer * 0.2 * (0.3 + 0.7 * v1) + this.driftS * 0.22, 8, dt);
 
@@ -3509,6 +3686,7 @@ export class KartVisual {
     this.moveDriver();
     this.moveExtras();
     this.moveEffects(pose.guard);
+    this.moveWings();
     this.moveItem();
     this.pickEyes(pose);
     this.placeAnchors();
@@ -3521,8 +3699,8 @@ export class KartVisual {
     const rp = this.restPos;
     const t = this.time;
     const dt = this.fDt;
-    this.wheelF += (this.fSpeed * dt) / sp.wf.r;
-    this.wheelR += (this.fSpeed * dt) / sp.wr.r;
+    this.wheelF += (this.wheelV * dt) / sp.wf.r;
+    this.wheelR += (this.wheelV * dt) / sp.wr.r;
     if (Math.abs(this.wheelF) > 6000) this.wheelF %= TAU;
     if (Math.abs(this.wheelR) > 6000) this.wheelR %= TAU;
     const yawF = -this.fSteer * 0.5 + this.driftS * 0.26;
@@ -3551,7 +3729,15 @@ export class KartVisual {
     const e = 1 - spin;
     const spinYaw = spin > 0 ? TAU * 2 * (1 - e * e * e) : 0;
     this.fSpinYaw = spinYaw;
-    bn[B.spin].rotation.y = spinYaw;
+    // Gleitflug: das ganze Kart legt sich in die Kurve, gedreht um einen Punkt
+    // auf halber Höhe (nicht um die Radaufstandsfläche).
+    const sb = bn[B.spin];
+    const bank = this.bank;
+    sb.rotation.set(0, spinYaw, bank);
+    if (bank !== 0) {
+      const h = 0.5 * Math.sin(bank);
+      sb.position.set(h * Math.cos(spinYaw), 0.5 - 0.5 * Math.cos(bank), -h * Math.sin(spinYaw));
+    } else sb.position.set(0, 0, 0);
     // Drift: Drehung um einen Punkt vorn, damit das Heck ausbricht
     const driftYaw = -driftS * (0.31 + 0.04 * this.fStage);
     this.fDriftYaw = driftYaw;
@@ -3568,7 +3754,7 @@ export class KartVisual {
     this.fIdle = idle;
     this.fCough = cough;
 
-    const rollT = -this.fSteer * v1 * 0.075 - driftS * 0.11 + (spin > 0 ? Math.sin(spinYaw) * 0.1 : 0);
+    const rollT = -this.fSteer * v1 * 0.075 * (1 - this.glideS) - driftS * 0.11 + (spin > 0 ? Math.sin(spinYaw) * 0.1 : 0);
     const pitchT = clamp(-this.accel * 0.0035, -0.08, 0.09) - boostS * 0.07 + airS * 0.05 + stallS * 0.03;
     this.rollV += ((rollT - this.roll) * 140 - this.rollV * 13) * dt;
     this.roll += this.rollV * dt;
@@ -3608,7 +3794,7 @@ export class KartVisual {
 
     const torso = bn[B.torso];
     torso.rotation.set(
-      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.gTx,
+      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.gTx,
       this.gTy,
       lean + this.gTz,
     );
@@ -3622,7 +3808,8 @@ export class KartVisual {
       winS * 0.2 -
       airS * 0.14 +
       clamp(-acc * 0.006, -0.12, 0.15) +
-      stallS * 0.08 +
+      stallS * 0.08 -
+      this.glideS * 0.1 +
       Math.sin(t * 2.1) * 0.02 +
       this.gHx;
     const hzT = lean * 0.7 + stallS * 0.1 * Math.sin(t * 7) + spinS * 0.22 * Math.sin(t * 14);
@@ -4058,6 +4245,50 @@ export class KartVisual {
       this.leash.quaternion.setFromUnitVectors(Y_AXIS, _iw.multiplyScalar(1 / len));
       this.leash.scale.set(0.028, len, 0.028);
     } else this.leash.visible = false;
+  }
+
+  /** Gleitflügel: ausklappen mit Überschwinger, einklappen ohne; im Flug federn die Enden. */
+  private moveWings(): void {
+    const bn = this.bones;
+    const u = this.wingU;
+    const tl = bn[B.wtail];
+    if (u <= 0) {
+      if (bn[B.wingL].scale.x !== 0) {
+        bn[B.wingL].scale.setScalar(0);
+        bn[B.wingR].scale.setScalar(0);
+        tl.scale.setScalar(0);
+      }
+      return;
+    }
+    const sp = this.spec;
+    const t = this.time;
+    const open = this.fGlide;
+    // Ausklappen schießt etwas über, Einklappen läuft weich
+    const deploy = open ? easeOutBack(u) : smooth01(u);
+    const size = open ? smooth01(u / 0.4) : smooth01(u / 0.5);
+    const tail = open ? Math.max(easeOutBack((u - 0.2) / 0.8), 0) : smooth01(u / 0.6);
+    const g = this.glideS;
+    const sweep = 1.45 * (1 - deploy);
+    // Tragen: die Flügel biegen sich leicht nach oben und wippen; ausgeklappt drückt der Fahrtwind
+    const lift = sp.wingUp * deploy + g * (0.03 + 0.025 * Math.sin(t * 3.1 + this.slot));
+    const twist = g * 0.03 * Math.sin(t * 2.3 + 1);
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1;
+      const w = bn[B.wingL + i];
+      w.rotation.set(twist, side * sweep, side * lift);
+      w.scale.setScalar(Math.max(size, 0.001));
+      // Außenteil: flattert im Wind, die kurvenäußere Seite biegt sich stärker
+      const flutter = Math.sin(t * 13 + i * 1.7) * 0.035 + Math.sin(t * 7.3 + i) * 0.025;
+      const tip = bn[B.tipL + i];
+      tip.rotation.set(g * Math.sin(t * 9.5 + i * 2) * 0.05, 0, side * (g * (0.05 + flutter - side * this.bank * 0.12) + (deploy - 1) * 0.6));
+    }
+    tl.scale.setScalar(Math.max(tail, 0.001));
+    tl.rotation.set(g * Math.sin(t * 4.1) * 0.03, 0, 0);
+    if (this.character === 2) {
+      // Bert: Propeller dreht im Flug, mit Schub schneller
+      this.propA = (this.propA + this.fDt * g * (22 + 18 * this.boostS)) % TAU;
+      tl.rotation.z = this.propA;
+    }
   }
 
   /** Augen: Kringel beim Schleudern, verdattert bei Kurzschluss, sonst je nach Lage – und ab und zu blinzeln. */

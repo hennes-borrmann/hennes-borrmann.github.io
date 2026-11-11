@@ -724,7 +724,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Vier Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 4);
+    check('Fünf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 5);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -908,7 +908,7 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen');
     const h7 = await openScreen('host7', '&laps=2');
     const code7 = await createLobby(h7, 'Anna');
     const c7 = await openScreen('client7', '&laps=2');
@@ -1060,9 +1060,59 @@ async function main() {
     const wet = await dip();
     check('Bei Flut bremst das Wasser in der Senke', dry > 14 && wet < dry * 0.75, `Ebbe ${dry.toFixed(1)} m/s, Flut ${wet.toFixed(1)} m/s`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Wolkenwerft: Ben (Mitspieler) fährt über die Absprungkante und gleitet – auf beiden Bildschirmen.
+    const twist4 = await h7.page.locator('.track-card').nth(4).locator('.track-twist').textContent();
+    check('Streckenwahl nennt die Eigenheit der Wolkenwerft', /Fliegen/.test(twist4 || ''), twist4 || '');
+    await h7.page.locator('.track-card').nth(4).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 4, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 4, null, { timeout: 30000 });
+    const flight = await kart(h7.page, 'flight()');
+    // (flight() nennt nur die Flugstrecken der Hauptstrecke; die dritte liegt auf der Abzweigung.)
+    check('Wolkenwerft hat Flugstrecken, Aufwinde und Schubringe', flight && flight.glides.length >= 2 && flight.thermals >= 3 && flight.rings >= 3, JSON.stringify(flight));
+    // 45 m Anlauf bis zur ersten Kante der Hauptstrecke
+    await kart(h7.page, `place(1, ${flight.glides[0].from - 45}, 0)`);
+    await sleep(250);
+    await c7.page.keyboard.down('ArrowUp');
+    let glideTicks = [0, 0];
+    let minVy = 0;
+    let sunk = 0;
+    let y0 = null;
+    let landed = false;
+    let fell = false;
+    const untilF = Date.now() + 14000;
+    while (Date.now() < untilF && !landed && !fell) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      const bc = ec.find((e) => e.slot === 1);
+      if (bh.flags & 16) {
+        glideTicks[0]++;
+        if (y0 === null) y0 = bh.y;
+        // Sinkrate nur am Anfang des Flugs messen: Ben lenkt nicht, treibt später aus dem Korridor und sackt dort
+        // absichtlich durch (neben dem Korridor trägt die Luft nicht).
+        if (glideTicks[0] <= 20) {
+          sunk = y0 - bh.y;
+          minVy = Math.min(minVy, bh.vy);
+        }
+      } else if (glideTicks[0] > 5 && (bh.flags & 8) === 0 && bh.respawn === 0) landed = true;
+      if (bc.flags & 16) glideTicks[1]++;
+      if (bh.respawn > 0) fell = true;
+      await sleep(50);
+    }
+    await c7.page.keyboard.up('ArrowUp');
+    check('Ben gleitet über die Lücke – beim Host und auf seinem eigenen Bildschirm', glideTicks[0] > 10 && glideTicks[1] > 10, `${glideTicks[0]} / ${glideTicks[1]} Abfragen im Gleitflug`);
+    check('Im Gleitflug sinkt das Kart langsam statt zu fallen', minVy > -6, `größte Sinkrate ${(-minVy).toFixed(1)} m/s, ${sunk.toFixed(1)} m gesunken (erste 20 Abfragen im Korridor)`);
+    check('Der Flug endet auf der Landebahn oder mit einem Absturz samt Rücksetzen (ohne zu lenken)', landed || fell, landed ? 'gelandet' : fell ? 'abgestürzt und zurückgesetzt' : 'weder noch');
+    const sc4 = await kart(h7.page, 'scene()');
+    check('Wolkenwerft wird gezeichnet', sc4 && sc4.triangles > 20000, sc4 ? `${sc4.calls} Zeichenaufrufe, ${sc4.triangles} Dreiecke` : '');
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die vier großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die fünf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(8000);
   }
 

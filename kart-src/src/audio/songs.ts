@@ -14,6 +14,7 @@
 //
 // Hat eine Stimme weniger Takte als der Abschnitt, wird sie wiederholt.
 
+import { NEUE_STUECKE } from './songs-neu';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -409,6 +410,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   klippe: KLIPPE,
   glut: GLUT,
   nacht: NACHT,
+  // Die Stücke der neueren Welten stehen in songs-neu.ts; eingebunden wird jedes mit seiner Welt.
+  wolken: NEUE_STUECKE.wolken,
   results: RESULTS,
 };
 

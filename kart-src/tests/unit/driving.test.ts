@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { botCmd, newBrain } from '../../src/game/ai';
+import { withoutMechanics } from './helpers';
+import { AI_HARD, botCmd, newBrain } from '../../src/game/ai';
 import {
   BTN_DRIFT,
   BTN_GAS,
@@ -94,9 +95,13 @@ describe('Fahrphysik', () => {
 });
 
 /** Lässt einen KI-Fahrer allein fahren und zählt, was passiert. */
-function soloRun(slot: number, laps: number, cmdFilter?: (c: Cmd) => Cmd) {
+function soloRun(slot: number, laps: number, cmdFilter?: (c: Cmd) => Cmd, level?: number, route = -1) {
   const s = gridState(slot);
-  const brain = newBrain(slot);
+  const brain = level === undefined ? newBrain(slot) : newBrain(slot, level);
+  if (route >= 0) {
+    brain.route = route;
+    brain.routeLock = true;
+  }
   let progress = segDelta(TRACK, 0, s.seg);
   const lapTimes: number[] = [];
   let lapStart = 0;
@@ -147,12 +152,17 @@ describe('KI-Fahrer auf der Strecke', () => {
   }
 
   it('ohne Drift ist man messbar langsamer – Driften lohnt sich', () => {
-    const withDrift = soloRun(0, 2);
-    const without = soloRun(0, 2, (c) => ({ steer: c.steer, buttons: c.buttons & ~BTN_DRIFT }));
+    // Derselbe starke Fahrer auf demselben Weg, ohne Maschinen (die träfen den einen Lauf und den anderen nicht):
+    // einmal mit Drift, einmal mit gesperrter Drift-Taste.
+    const withDrift = withoutMechanics(() => soloRun(0, 2, undefined, AI_HARD, 3));
+    const without = withoutMechanics(() => soloRun(0, 2, (c) => ({ steer: c.steer, buttons: c.buttons & ~BTN_DRIFT }), AI_HARD, 3));
     const a = withDrift.lapTimes[1];
     const b = without.lapTimes[1];
-    console.log(`fliegende Runde mit Drift ${a.toFixed(1)} s, ohne ${b.toFixed(1)} s`);
+    console.log(`fliegende Runde mit Drift ${a.toFixed(2)} s (${withDrift.turbos} Mini-Turbos), ohne ${b.toFixed(2)} s`);
     expect(without.lapTimes.length).toBe(2);
-    expect(b).toBeGreaterThan(a);
+    expect(without.turbos).toBe(0);
+    expect(withDrift.turbos).toBeGreaterThanOrEqual(6);
+    // Mindestens drei Zehntel pro Runde.
+    expect(b).toBeGreaterThan(a + 0.3);
   });
 });

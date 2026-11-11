@@ -16,7 +16,7 @@
 // (+1), Kolben 1 (+1), Lampen 1, Schatten 1 – höchstens 9.
 
 import * as THREE from 'three';
-import { PULSE_PRESS, pulseCycle, pulseWarning, type Belt, type Pulse } from '../../game/mechanics';
+import { PULSE_PRESS, pulseCycle, pulseWarning, type Belt, type Pulse, PRESS_LEAD, PRESS_STRIKE, pressOpen } from '../../game/mechanics';
 import { rightX, rightZ, type Track } from '../../game/track';
 import { MeshBuilder, smooth, type RGB, type V3 } from '../build';
 import type { MechanicView } from '../mechanics';
@@ -64,10 +64,6 @@ const CYL_OFF = 0.95;
 const RAM_H = 1.4;
 const REST = BEAM_LO - CYL_LEN - RAM_H - 0.12;
 const DIP = 0.75;
-/** Schlag: so viele Ticks vor und nach Zyklus 0 fällt er (zusammen gut 3 Ticks). */
-const STRIKE = 1.6;
-/** Hochfahren nach der Gefahr (Ticks). */
-const RISE = 75;
 
 // --- Musterstruktur der Bänder ----------------------------------------------------
 
@@ -499,19 +495,18 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
 
   /** Unterkante des Stempels über der Fahrbahn zur Rennzeit time. */
   function ramLift(p: Pulse, time: number, seconds: number): number {
+    // Der Ablauf (Fallen, Liegen, Heben) steht in game/mechanics.ts und gilt genauso für die Physik:
+    // solange die Gefahr besteht, steht der Stempel unter Karthöhe – und umgekehrt.
     const c = pulseCycle(p, time);
-    const fallFrom = REST - DIP;
-    if (c >= p.period - STRIKE || c < STRIKE) {
-      // Schlag: beschleunigt herunter
-      const k = c >= p.period - STRIKE ? (c - (p.period - STRIKE)) / (2 * STRIKE) : (c + STRIKE) / (2 * STRIKE);
-      return fallFrom * (1 - k * k);
-    }
-    if (c < p.on) {
+    const open = pressOpen(p, time);
+    // Schlag: fällt aus der angesenkten Lage
+    if (c >= p.period - PRESS_STRIKE) return (REST - DIP) * open;
+    if (c < p.on - PRESS_LEAD) {
       // unten; kurz nach dem Aufschlag ein kleines Nachfedern
-      const k = (c - STRIKE) / 8;
+      const k = c / 8;
       return k < 1 ? 0.07 * Math.sin(k * Math.PI) : 0;
     }
-    if (c < p.on + RISE) return REST * smooth((c - p.on) / RISE);
+    if (open < 1) return REST * open;
     const w = pulseWarning(p, time);
     if (w > 0) {
       // ansenken, zum Ende hin zittern
@@ -557,7 +552,7 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
         rods.setMatrixAt(i, mat4);
 
         // Lampe: grün in Ruhe, rot blinkend bei der Warnung (immer schneller), rot während der Gefahr
-        const danger = c < p.on || c >= p.period - STRIKE;
+        const danger = c < p.on || c >= p.period - PRESS_STRIKE;
         if (danger) col.setHex(0xff2414);
         else if (w > 0) {
           const hz = 3 + 7 * w;
@@ -580,7 +575,7 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
         // Aufschlag: Staub und Funken (nur mit Zierde und in Kameranähe)
         const prev = lastC[i];
         lastC[i] = c;
-        if (detail && !Number.isNaN(prev) && c >= STRIKE && c < STRIKE + 20 && (prev < STRIKE || prev > c)) {
+        if (detail && !Number.isNaN(prev) && c < 20 && prev > c) {
           const dx = p.x - cam.x;
           const dz = p.z - cam.z;
           if (dx * dx + dz * dz < 150 * 150) {
