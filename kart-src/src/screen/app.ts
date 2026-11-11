@@ -1488,6 +1488,8 @@ export class App {
       place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),
       // Nur Host, nur für Tests: das Rennen sofort beenden, Zieleinlauf in der genannten Reihenfolge der Plätze.
       finish: (order?: number[]) => this.hostGame?.debugFinish(order),
+      // Nur Host, nur für Tests: die Rennzeit auf so viele Sekunden nach „Los“ stellen.
+      clock: (seconds: number) => this.hostGame?.debugClock(seconds),
       // Fotokamera für die Streckenbilder (tools/streckenbilder.cjs): Standort, Blickpunkt, Bildwinkel; ohne Angaben = aus.
       photo: (from?: number[], to?: number[], fov = 50) => {
         if (this.scene) this.scene.photo = from && to ? { from, to, fov } : null;

@@ -76,7 +76,11 @@ export const VULKAN: TrackDef = {
     // Basaltbrücke
     [27.0, 28.4, 7.2, 0.8],
   ],
-  decks: [[27.0, 28.4]],
+  // Kraterrand und Basaltbrücke sind Stege: darunter liegt der Glutgraben (render/world.ts), in den die Platten stürzen
+  decks: [
+    [15.05, 18.95],
+    [27.0, 28.4],
+  ],
   cracks: [
     // Kraterrand: abwechselnd außen und innen, in jeder Runde mehr
     { from: 15.2, to: 15.5, lat0: 3, lat1: 10, at: 38 },
