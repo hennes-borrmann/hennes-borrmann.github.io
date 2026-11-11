@@ -713,30 +713,37 @@ export class App {
     if (!state) return;
     this.ui.show('game');
     setTrack(state.track);
-    // Der Porträt-Renderer der Lobby gibt seinen Grafikkontext frei, bevor das Rennen einen braucht.
+    // Die Porträts der Lobby werden nicht mehr gebraucht; ihr Grafikkontext wird erst freigegeben, wenn das Rennen
+    // seinen eigenen hat (ein iPad verweigerte den neuen Kontext, wenn der alte unmittelbar davor zwangsweise endete).
     this.ui.cancelPortraits();
-    disposePortraits();
     if (!this.scene) {
-      try {
-        this.scene = new RaceScene($<HTMLCanvasElement>('stage'), this.quality);
-      } catch (first) {
-        console.error(first);
-        // Zweiter Anlauf auf einer frischen Zeichenfläche: hängt an der alten schon ein unbrauchbarer Kontext, hilft nur das.
+      const errors: unknown[] = [];
+      // 1. solange der Porträt-Kontext noch lebt · 2. nachdem er zwangsweise freigegeben ist (falls der Browser nur
+      // einen erlaubt) · 3. auf einer frischen Zeichenfläche (falls an der alten ein unbrauchbarer Kontext hängt)
+      for (let attempt = 0; attempt < 3 && !this.scene; attempt++) {
         try {
-          const old = $<HTMLCanvasElement>('stage');
-          const fresh = old.cloneNode(false) as HTMLCanvasElement;
-          old.replaceWith(fresh);
-          this.scene = new RaceScene(fresh, this.quality);
+          if (attempt === 1) disposePortraits(true);
+          let canvas = $<HTMLCanvasElement>('stage');
+          if (attempt === 2) {
+            const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
+            canvas.replaceWith(fresh);
+            canvas = fresh;
+          }
+          this.scene = new RaceScene(canvas, this.quality);
         } catch (err) {
           console.error(err);
-          this.ui.showModal('3D-Darstellung nicht möglich', sceneFailure(first, err), [
-            { label: 'Erneut versuchen', primary: true, run: () => this.enterGame() },
-            { label: 'Schließen', run: () => undefined },
-          ]);
-          return;
+          errors.push(err);
         }
       }
+      if (!this.scene) {
+        this.ui.showModal('3D-Darstellung nicht möglich', sceneFailure(errors), [
+          { label: 'Erneut versuchen', primary: true, run: () => this.enterGame() },
+          { label: 'Schließen', run: () => undefined },
+        ]);
+        return;
+      }
     }
+    disposePortraits();
     this.scene.setTrack();
     this.scene.reset();
     this.ui.setCameraLabel(false);
@@ -1243,26 +1250,27 @@ export class App {
   }
 }
 
-/** Ob der Browser auf einer frischen Zeichenfläche einen Grafikkontext dieser Art hergibt (der Kontext wird gleich wieder freigegeben). */
+/** Ob der Browser auf einer frischen Zeichenfläche einen Grafikkontext dieser Art hergibt. */
 function probeContext(kind: 'webgl2' | 'webgl'): string {
   try {
-    const gl = document.createElement('canvas').getContext(kind) as WebGLRenderingContext | null;
-    if (!gl) return 'nein';
-    gl.getExtension('WEBGL_lose_context')?.loseContext();
-    return 'ja';
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 2;
+    const ok = canvas.getContext(kind) !== null;
+    canvas.width = canvas.height = 0;
+    return ok ? 'ja' : 'nein';
   } catch {
     return 'Fehler';
   }
 }
 
 /** Text für den Dialog, wenn die 3D-Szene nicht entsteht: was der Browser gemeldet hat, und was meist hilft. */
-function sceneFailure(first: unknown, second: unknown): string[] {
-  const text = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-  const a = text(first);
-  const b = text(second);
+function sceneFailure(errors: unknown[]): string[] {
+  const names = ['Erster Anlauf', 'Nach Freigabe der Porträts', 'Frische Zeichenfläche'];
+  const texts = errors.map((e) => (e instanceof Error ? e.message : String(e)));
+  const lines = texts.map((t, i) => (i > 0 && t === texts[0] ? `${names[i]}: wie oben.` : `${names[i]}: ${t}`));
   return [
     'Der Browser hat dem Spiel keine 3D-Grafik bereitgestellt.',
-    `Gemeldet: ${a}${b !== a ? ` – zweiter Anlauf: ${b}` : ''}`,
+    ...lines,
     `Prüfung auf frischer Fläche: WebGL 2 ${probeContext('webgl2')}, WebGL 1 ${probeContext('webgl')} · Version ${BUILD_ID}`,
     'Hilft oft: diesen Tab schließen und die Seite neu öffnen, sonst den Browser ganz beenden und neu starten. Im Blockierungsmodus von iOS/iPadOS ist WebGL abgeschaltet.',
   ];
