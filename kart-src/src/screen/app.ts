@@ -39,7 +39,6 @@ import {
   type Phase,
 } from '../net/protocol';
 import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../render/debugOverlay';
-import { readCrash } from '../render/gfxGuard';
 import { setPortraitRenderer } from '../render/portraits';
 import { RaceScene, type KartAudio, type Quality } from '../render/raceScene';
 import { $, ms } from '../util/dom';
@@ -301,8 +300,6 @@ export class App {
 
     // Beim Verlassen/Neuladen der Seite die Verbindungen aktiv schließen, damit
     // die Gegenseiten nicht erst auf ein Zeitlimit warten müssen.
-    // Die Seite wird regulär verlassen: eine stehende Marke des behutsamen Aufbaus wäre kein Absturz.
-    window.addEventListener('pagehide', () => this.scene?.leave());
     window.addEventListener('pagehide', () => {
       this.hostLobby?.dropLinks();
       this.clientLobby?.link?.close();
@@ -322,14 +319,6 @@ export class App {
     const name = loadName();
     this.ui.setHome(name, isValidCode(urlCode, ROOM_CODE_LENGTH) ? urlCode : '');
     this.ui.setVersion(BUILD_ID);
-    // Ist die Grafik beim letzten Mal gestorben, während das erste Bild entstand? Dann steht hier, bei welchem Teil.
-    const crash = readCrash();
-    if (crash) {
-      this.gfxBoot =
-        crash.label === 'alles auf einmal'
-          ? `Beim letzten Start (${crash.where}) ging die Grafik verloren, als das erste Bild auf einmal entstand. Diesmal wird es Teil für Teil vorbereitet.`
-          : `Beim letzten Start (${crash.where}) ging die Grafik verloren – beim Vorbereiten von „${crash.label}“${crash.prev ? ` (davor: „${crash.prev}“)` : ''}. Diese Teile werden jetzt ausgelassen.`;
-    }
     // Die 3D-Grafik gleich jetzt anlegen (siehe createScene). Klappt es nicht, entstehen vorerst keine Porträts,
     // und beim Rennstart wird es noch einmal versucht – dort mit Meldung.
     this.createScene();
@@ -731,10 +720,7 @@ export class App {
     if (!state) return;
     this.ui.show('game');
     this.gfxRebuilt = false;
-    this.gfxRebuilds = 0;
-    this.gfxSkippedAtRebuild = 0;
     this.gfxHistory.length = 0;
-    if (this.gfxBoot) this.gfxHistory.push(this.gfxBoot);
     this.gfxHidden = '';
     setTrack(state.track);
     // Die Szene (und mit ihr die eine 3D-Grafik der Seite) steht normalerweise schon seit dem Laden.
@@ -798,7 +784,6 @@ export class App {
   private exitGame(): void {
     if (!this.inGame) return;
     this.inGame = false;
-    this.scene?.leave();
     this.ticker.stop();
     this.hostGame = null;
     this.clientGame = null;
@@ -864,14 +849,10 @@ export class App {
   /** Die 3D-Szene ließ sich beim Rennstart nicht anlegen (Dialog steht): kein selbsttätiger neuer Anlauf. */
   private sceneFailed = false;
   private gfxShown = '';
-  /** Befund vom Laden der Seite: wobei die Grafik beim letzten Mal starb (gfxGuard.ts). */
-  private gfxBoot = '';
   /** Befund, den der Spieler ausgeblendet hat – er kommt erst wieder, wenn sich etwas ändert. */
   private gfxHidden = '';
   private gfxLostSince = 0;
   private gfxRebuilt = false;
-  private gfxRebuilds = 0;
-  private gfxSkippedAtRebuild = 0;
   private readonly gfxHistory: string[] = [];
 
   private readonly frame = (): void => {
@@ -940,28 +921,15 @@ export class App {
     }
     const g = scene.gfx;
     // Bleibt der Kontext länger verloren, einmal von selbst auf einer frischen Zeichenfläche neu aufbauen.
-    // (Noch einmal, wenn der behutsame Aufbau inzwischen ein weiteres Teil als Auslöser gefunden hat – höchstens sechsmal.)
     if (g.isLost) {
       if (!this.gfxLostSince) this.gfxLostSince = now;
-      else if (now - this.gfxLostSince > 1500 && (!this.gfxRebuilt || (g.skipped.length > this.gfxSkippedAtRebuild && this.gfxRebuilds < 6))) {
+      else if (now - this.gfxLostSince > 1500 && !this.gfxRebuilt) {
         this.gfxRebuilt = true;
-        this.gfxRebuilds++;
-        this.gfxSkippedAtRebuild = g.skipped.length;
         this.rebuildScene('von selbst');
         return;
       }
     } else this.gfxLostSince = 0;
-    // Behutsamer Aufbau läuft: statt eines schwarzen Bildes steht da, was geschieht.
-    if (g.warm >= 0 && !g.isLost) {
-      const text = `Grafik wird vorbereitet … ${Math.round(g.warm * 100)} %`;
-      if (text !== this.gfxShown) {
-        this.gfxShown = text;
-        this.ui.setGfxNote([text, 'Beim ersten Rennen auf einer Strecke dauert das ein paar Sekunden.'], undefined, undefined, 'Einen Moment');
-      }
-      return;
-    }
     const lines = [...this.gfxHistory];
-    if (g.skipped.length > 0) lines.push(`Ausgelassen, weil es hier die Grafik beendet hat: ${g.skipped.map((l) => `„${l}“`).join(', ')}.`);
     if (g.lost > 0) lines.push(`Der Browser hat die 3D-Grafik beendet: ${g.lost}× (zuerst ${g.lostWhen}), wiederhergestellt ${g.restored}×.`);
     if (g.shaderErrors.length > 0) lines.push(`Grafikprogramm abgelehnt (${g.shaderErrors.length}): ${g.shaderErrors[0]}`);
     if (g.glErrors.length > 0) lines.push(`Grafikfehler: ${g.glErrors.join(', ')}`);
