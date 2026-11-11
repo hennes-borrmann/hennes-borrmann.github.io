@@ -509,6 +509,29 @@ export class HostGame implements GameView {
    * Nur für Tests: ein Kart an eine Stelle der Strecke setzen – Meter hinter
    * der Startlinie bzw., mit branch ≥ 0, Meter hinter der Gabelung dieser Abzweigung.
    */
+  /**
+   * Nur für Tests: beendet das laufende Rennen sofort. order nennt die Plätze (slots) in der
+   * Reihenfolge des Zieleinlaufs; wer fehlt, folgt im aktuellen Stand des Rennens.
+   */
+  debugFinish(order: number[] = []): void {
+    if (this.phase !== RACE_RUNNING) return;
+    this.rank();
+    const rest = [...this.karts.values()]
+      .sort((a, b) => a.place - b.place)
+      .map((k) => k.slot)
+      .filter((slot) => !order.includes(slot));
+    let n = 0;
+    for (const slot of [...order, ...rest]) {
+      const k = this.karts.get(slot);
+      if (!k) continue;
+      k.finished = true;
+      k.finishTicks = Math.max(1, this.tick - this.goTick) + n++;
+    }
+    if (this.firstFinishTick < 0) this.firstFinishTick = this.tick;
+    this.resultsAtTick = this.tick;
+    this.rank();
+  }
+
   debugPlace(slot: number, meters: number, lat = 0, branch = -1, up = 0): void {
     const k = this.karts.get(slot);
     if (!k) return;

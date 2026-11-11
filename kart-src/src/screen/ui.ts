@@ -2,7 +2,7 @@
 // Rennen sowie Meldungen. Reine Anzeige – die Logik sitzt in app.ts.
 
 import { BOT_NAMES } from '../game/ai';
-import type { LobbyPlayer } from '../net/protocol';
+import type { CupDraw, LobbyPlayer } from '../net/protocol';
 import { CHARACTERS, ITEM_NONE, MAX_PLAYERS } from '../game/sim';
 import { CODE_ALPHABET, ROOM_CODE_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { $, h, ms } from '../util/dom';
@@ -15,6 +15,34 @@ import { PLAYER_COLOR_NAMES, playerColor } from '../util/players';
 import { qrSvg } from '../util/qr';
 
 export type ViewName = 'boot' | 'home' | 'lobby' | 'game';
+
+/** So lange läuft der Streifen der Auslosung, und so lange bleibt die ausgeloste Strecke danach stehen (ms). */
+export const DRAW_SPIN_MS = 6500;
+export const DRAW_HOLD_MS = 2400;
+/** Diese Karte des Streifens steht beim Start unter der Markierung. */
+const DRAW_START = 1;
+
+/** Eine Zeile des Turnierstands. */
+export interface CupRow {
+  rank: number;
+  slot: number;
+  name: string;
+  bot: boolean;
+  me: boolean;
+  character: number;
+  stars: number;
+  /** Sterne aus dem letzten gewerteten Rennen. */
+  gain: number;
+}
+
+/** Stand des Turniers für die Anzeige. */
+export interface CupModel {
+  races: number;
+  done: number;
+  over: boolean;
+  /** Nach Rang geordnet. */
+  rows: CupRow[];
+}
 
 export interface LobbyModel {
   code: string;
@@ -32,6 +60,10 @@ export interface LobbyModel {
   track: number;
   /** Rundenzahl des Rennens. */
   laps: number;
+  /** 0 = Einzelrennen, sonst die Zahl der Rennen eines Turniers. */
+  cupRaces: number;
+  /** Laufendes oder gerade beendetes Turnier. */
+  cup: CupModel | null;
   /** Eigene Figur. */
   character: number;
   quality: 'auto' | 'low' | 'medium' | 'high';
@@ -89,6 +121,13 @@ export interface ResultRow {
   character: number;
   /** Fahrzeit in Sekunden, -1 = nicht im Ziel. */
   timeSec: number;
+  /** Im Turnier: Sterne für dieses Rennen (fehlt, solange die Wertung noch nicht da ist). */
+  gain?: number;
+}
+
+/** Adresse des Vorschaubilds einer Strecke (liegt neben der Seite unter karten/). */
+function trackImage(t: Track): string {
+  return `karten/${t.def.id}.jpg`;
 }
 
 export function formatTime(sec: number): string {
@@ -110,6 +149,15 @@ export interface UiHandlers {
   start(): void;
   /** Host: dasselbe Rennen noch einmal. */
   again(): void;
+  /** Host: Einzelrennen (0) oder Turnier über so viele Rennen. */
+  setCupRaces(races: number): void;
+  /** Host, im Turnier: nächste Strecke auslosen und weiterfahren. */
+  nextRace(): void;
+  /** Host: das Turnier beenden. */
+  endCup(): void;
+  /** Die Auslosung: eine Karte zieht unter der Markierung durch / der Streifen steht. */
+  drawTick(): void;
+  drawStop(): void;
   setBots(bots: boolean): void;
   setAiLevel(level: number): void;
   setLaps(laps: number): void;
@@ -158,6 +206,12 @@ export class ScreenUi {
   private portraitJobs: { key: string; character: number; slot: number; targets: HTMLImageElement[] }[] = [];
   private portraitTimer = 0;
   private lastOrderJson = '';
+  private lastCupJson = '';
+  private lastResultsJson = '';
+  /** Zuletzt gewählte Turnierlänge – gilt, wenn der Host von Einzelrennen auf Turnier schaltet. */
+  private cupSize = 5;
+  private drawRaf = 0;
+  private imagesWarm = false;
   private readonly minimap = new Minimap($<HTMLCanvasElement>('minimap'));
   private readonly on: UiHandlers;
 
@@ -202,6 +256,27 @@ export class ScreenUi {
     this.btnLeave.addEventListener('click', () => on.leave());
     $('btn-again').addEventListener('click', () => on.again());
     $('btn-lobby').addEventListener('click', () => on.backToLobby());
+    $('btn-next').addEventListener('click', () => {
+      on.click('click');
+      on.nextRace();
+    });
+    $('btn-cup-end').addEventListener('click', () => {
+      on.click('back');
+      on.endCup();
+    });
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#mode button')) {
+      btn.addEventListener('click', () => {
+        on.click('click');
+        on.setCupRaces(btn.dataset.mode === 'cup' ? this.cupSize : 0);
+      });
+    }
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#cup-size button')) {
+      btn.addEventListener('click', () => {
+        on.click('click');
+        this.cupSize = Number(btn.dataset.races);
+        on.setCupRaces(this.cupSize);
+      });
+    }
     const chkBots = $<HTMLInputElement>('chk-bots');
     chkBots.addEventListener('change', () => on.setBots(chkBots.checked));
     $('btn-debug-lobby').addEventListener('click', () => on.toggleDebug());
@@ -327,22 +402,29 @@ export class ScreenUi {
     this.btnReady.classList.toggle('btn-on', m.localReady);
     this.btnStart.hidden = !m.isHost;
     this.btnStart.disabled = !m.canStart;
+    const cupRunning = m.cup !== null && !m.cup.over;
+    this.btnStart.textContent = cupRunning ? (m.cup!.done > 0 ? 'Nächstes Rennen auslosen' : 'Strecke auslosen') : m.cupRaces > 0 ? 'Turnier starten' : 'Rennen starten';
     this.btnLeave.textContent = m.isHost ? 'Lobby schließen' : 'Lobby verlassen';
     this.btnBack.textContent = m.isHost ? 'Zur Lobby' : 'Verlassen';
 
     const chkBots = $<HTMLInputElement>('chk-bots');
     chkBots.checked = m.bots;
     chkBots.disabled = !m.isHost;
-    $('bots-note').textContent = m.isHost ? '' : 'Strecke, Runden und Gegner legt der Host fest.';
+    $('bots-note').textContent = m.isHost ? '' : 'Modus, Strecke, Runden und Gegner legt der Host fest.';
     const charJson = JSON.stringify([m.character, m.localSlot]);
     if (charJson !== this.lastCharJson) {
       this.lastCharJson = charJson;
       this.renderCharacters(m);
     }
-    const setupJson = JSON.stringify([m.track, m.aiLevel, m.laps, m.bots, m.isHost]);
+    const setupJson = JSON.stringify([m.track, m.aiLevel, m.laps, m.bots, m.isHost, m.cupRaces, cupRunning]);
     if (setupJson !== this.lastSetupJson) {
       this.lastSetupJson = setupJson;
       this.renderSetup(m);
+    }
+    const cupJson = JSON.stringify([m.cup, m.cupRaces, m.isHost]);
+    if (cupJson !== this.lastCupJson) {
+      this.lastCupJson = cupJson;
+      this.renderCup(m);
     }
 
     let hint = '';
@@ -351,7 +433,7 @@ export class ScreenUi {
       else if (m.players.length === 1) hint = m.bots ? 'Du kannst gegen die KI starten oder auf Mitspieler warten.' : 'Du kannst allein starten oder auf Mitspieler warten.';
       else hint = 'Alle bereit.';
     } else {
-      hint = m.localReady ? 'Der Host startet das Rennen.' : 'Melde dich bereit, wenn dein Controller verbunden ist.';
+      hint = m.localReady ? (m.cupRaces > 0 ? 'Der Host startet das Turnier.' : 'Der Host startet das Rennen.') : 'Melde dich bereit, wenn dein Controller verbunden ist.';
     }
     $('lobby-hint').textContent = hint;
 
@@ -561,10 +643,19 @@ export class ScreenUi {
     el.classList.add('pop');
   }
 
-  showResults(rows: ResultRow[], isHost: boolean, trackName = ''): void {
-    $('results-track').textContent = trackName;
+  /**
+   * Zieleinlauf; im Turnier darunter der Gesamtstand. Darf mehrfach gerufen werden (die Wertung
+   * des Turniers trifft bei Mitspielern etwas später ein als das Rennende) – neu aufgebaut wird
+   * nur, wenn sich etwas geändert hat.
+   */
+  showResults(rows: ResultRow[], isHost: boolean, trackName = '', cup: CupModel | null = null): void {
+    const json = JSON.stringify([rows, isHost, trackName, cup]);
+    if (json === this.lastResultsJson && !$('results').hidden) return;
+    this.lastResultsJson = json;
+    $('results-track').textContent = cup ? `Turnier · Rennen ${Math.max(1, cup.done)} von ${cup.races} · ${trackName}` : trackName;
     $('menu').hidden = true;
     const list = $('results-list');
+    list.dataset.cup = String(cup !== null);
     list.replaceChildren();
     for (const r of rows) {
       const face = this.face(r.character, r.slot, 'result-face', false);
@@ -576,16 +667,186 @@ export class ScreenUi {
           face,
           h('span', { class: 'result-name' }, r.name, r.bot ? h('span', { class: 'tag', text: 'KI' }) : null, r.me ? h('span', { class: 'you', text: 'du' }) : null),
           h('span', { class: 'result-time', text: r.timeSec >= 0 ? formatTime(r.timeSec) : 'nicht im Ziel' }),
+          cup ? h('span', { class: 'result-gain', text: r.gain === undefined ? '' : `+${r.gain} ★` }) : null,
         ),
       );
     }
-    $('btn-again').hidden = !isHost;
-    $('btn-lobby').hidden = !isHost;
+    const box = $('results-cup');
+    box.hidden = cup === null;
+    if (cup) {
+      const leaders = cup.rows.filter((r) => r.rank === 1).map((r) => r.name);
+      box.dataset.over = String(cup.over);
+      $('results-cup-title').textContent = cup.over ? `Turniersieg: ${leaders.join(' & ')}` : 'Gesamtstand';
+      $('results-cup-progress').textContent = cup.over ? `Endstand nach ${cup.races} Rennen` : `noch ${cup.races - cup.done} Rennen`;
+      $('results-cup-list').replaceChildren(...cup.rows.map((r) => this.cupLine(r, 'result-face', false)));
+    }
+    const next = cup !== null && !cup.over;
+    $('btn-again').hidden = !isHost || cup !== null;
+    $('btn-next').hidden = !isHost || !next;
+    const lobby = $('btn-lobby');
+    lobby.hidden = !isHost;
+    lobby.classList.toggle('btn-primary', cup !== null && cup.over);
     $('results-note').textContent = isHost ? '' : 'Der Host entscheidet, wie es weitergeht.';
     $('results').hidden = false;
   }
 
+  /** Eine Zeile des Turnierstands: Rang, Gesicht, Name, Sterne. */
+  private cupLine(r: CupRow, faceClass: string, render: boolean): HTMLElement {
+    const li = h(
+      'li',
+      { class: `cup-line${r.me ? ' cup-line-me' : ''}` },
+      h('span', { class: 'cup-rank', text: `${r.rank}.` }),
+      this.face(r.character, r.slot, faceClass, render),
+      h('span', { class: 'cup-name' }, r.name, r.bot ? h('span', { class: 'tag', text: 'KI' }) : null, r.me ? h('span', { class: 'you', text: 'du' }) : null),
+      h('span', { class: 'cup-gain', text: r.gain > 0 ? `+${r.gain}` : '' }),
+      h('span', { class: 'cup-stars' }, h('span', { class: 'cup-star', text: '★' }), String(r.stars)),
+    );
+    li.dataset.rank = String(r.rank);
+    return li;
+  }
+
+  // --- Turnier: Auslosung -----------------------------------------------------------------
+
+  get drawVisible(): boolean {
+    return !$('draw').hidden;
+  }
+
+  /**
+   * Zeigt die Auslosung: Der Streifen der Streckenkarten zieht von rechts nach links unter der
+   * Markierung durch, wird langsamer und bleibt auf der ausgelosten Karte stehen.
+   */
+  showDraw(draw: CupDraw, raceNo: number, races: number): void {
+    this.hideDraw();
+    const root = $('draw');
+    const strip = $('draw-strip');
+    $('draw-eyebrow').textContent = `Turnier · Rennen ${raceNo} von ${races}`;
+    const title = $('draw-title');
+    title.textContent = 'Wohin geht’s?';
+    $('draw-twist').textContent = '';
+    root.dataset.state = 'spinning';
+    strip.replaceChildren(...draw.strip.map((t) => this.drawCard(t)));
+    strip.style.transform = '';
+    root.hidden = false;
+    const cards = strip.children;
+    const started = performance.now();
+    let lastIndex = -1;
+    let lastTick = 0;
+    const frame = (now: number): void => {
+      const first = cards[0] as HTMLElement | undefined;
+      const second = cards[1] as HTMLElement | undefined;
+      if (!first) return;
+      // Maße je Bild neu lesen: dreht jemand das iPad mitten in der Auslosung, stimmt die Lage trotzdem.
+      const w = first.offsetWidth;
+      const pitch = second ? second.offsetLeft - first.offsetLeft : w;
+      const k = Math.min(1, (now - started) / DRAW_SPIN_MS);
+      // Schnell los, lange ausrollen
+      const eased = 1 - Math.pow(1 - k, 3);
+      // Der Streifen beginnt in der Bildmitte (CSS); die Mitte der Karte i liegt bei i·pitch + w/2.
+      const from = DRAW_START * pitch + w / 2;
+      const to = draw.stop * pitch + w / 2 + draw.nudge * w;
+      const x = from + (to - from) * eased;
+      strip.style.transform = `translate3d(${(-x).toFixed(1)}px,0,0)`;
+      const index = Math.floor(x / pitch);
+      if (index !== lastIndex) {
+        lastIndex = index;
+        if (k < 1 && now - lastTick > 60) {
+          lastTick = now;
+          this.on.drawTick();
+        }
+      }
+      if (k < 1) {
+        this.drawRaf = requestAnimationFrame(frame);
+        return;
+      }
+      this.drawRaf = 0;
+      const picked = getTrack(draw.strip[draw.stop]);
+      (cards[draw.stop] as HTMLElement | undefined)?.classList.add('is-picked');
+      root.dataset.state = 'stopped';
+      title.textContent = picked.def.name;
+      $('draw-twist').textContent = picked.def.twist ?? picked.def.blurb;
+      this.on.drawStop();
+    };
+    this.drawRaf = requestAnimationFrame(frame);
+  }
+
+  hideDraw(): void {
+    if (this.drawRaf !== 0) cancelAnimationFrame(this.drawRaf);
+    this.drawRaf = 0;
+    const root = $('draw');
+    if (root.hidden) return;
+    root.hidden = true;
+    $('draw-strip').replaceChildren();
+  }
+
+  /** Eine Karte des Streifens: Bild der Strecke, darunter ihr Name. Fehlt das Bild, bleibt der Streckenverlauf. */
+  private drawCard(track: number): HTMLElement {
+    const t = getTrack(track);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 120 74');
+    svg.setAttribute('class', 'draw-map');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', trackPath(t, 120, 74, 10));
+    svg.append(path);
+    const img = h('img', { class: 'draw-img', alt: '', src: trackImage(t), decoding: 'async', draggable: 'false' });
+    img.addEventListener('error', () => img.remove());
+    return h(
+      'div',
+      { class: 'draw-card' },
+      h(
+        'div',
+        { class: 'draw-face' },
+        svg,
+        img,
+        h('div', { class: 'draw-label' }, h('strong', { text: t.def.name }), h('span', { text: `${Math.round(t.length / 10) * 10} m · ${'●'.repeat(t.def.grade)}${'○'.repeat(3 - t.def.grade)}` })),
+      ),
+    );
+  }
+
+  /** Lädt die Streckenbilder vor, damit der Streifen nicht mit leeren Karten losläuft. */
+  private warmTrackImages(): void {
+    if (this.imagesWarm) return;
+    this.imagesWarm = true;
+    for (let i = 0; i < OFFERED_TRACKS; i++) new Image().src = trackImage(getTrack(i));
+  }
+
+  /** Lobby: Stand des Turniers und die Wahl zwischen Einzelrennen und Turnier. */
+  private renderCup(m: LobbyModel): void {
+    const running = m.cup !== null && !m.cup.over;
+    const isCup = m.cupRaces > 0;
+    if (isCup) {
+      this.cupSize = m.cupRaces;
+      this.warmTrackImages();
+    }
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#mode button')) {
+      btn.setAttribute('aria-pressed', String((btn.dataset.mode === 'cup') === isCup));
+      btn.disabled = !m.isHost || running;
+    }
+    $('cup-size-box').hidden = !isCup;
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#cup-size button')) {
+      btn.setAttribute('aria-pressed', String(Number(btn.dataset.races) === m.cupRaces));
+      btn.disabled = !m.isHost || running;
+    }
+    $('mode-note').textContent = !isCup
+      ? ''
+      : running
+        ? ''
+        : `${m.cupRaces} Rennen auf ausgelosten Strecken. Je Rennen gibt es einen Stern für jeden, den du hinter dir lässt – wer am Ende die meisten hat, gewinnt.`;
+    const panel = $('cup-panel');
+    panel.hidden = m.cup === null;
+    if (m.cup) {
+      const c = m.cup;
+      const leaders = c.rows.filter((r) => r.rank === 1).map((r) => r.name);
+      $('cup-title').textContent = c.over ? `Turniersieg: ${leaders.join(' & ')}` : 'Turnier läuft';
+      $('cup-progress').textContent = c.over ? `Endstand nach ${c.races} Rennen` : c.done === 0 ? `${c.races} Rennen` : `${c.done} von ${c.races} Rennen gefahren`;
+      $('cup-table').replaceChildren(...c.rows.map((r) => this.cupLine(r, 'player-face', true)));
+      const end = $('btn-cup-end');
+      end.hidden = !m.isHost;
+      end.textContent = c.over ? 'Stand ausblenden' : 'Turnier beenden';
+    }
+  }
+
   hideResults(): void {
+    this.lastResultsJson = '';
     $('results').hidden = true;
   }
 
@@ -761,6 +1022,10 @@ export class ScreenUi {
   /** Streckenkarten und KI-Stärke in der Lobby. */
   private renderSetup(m: LobbyModel): void {
     const list = $('track-list');
+    // Im Turnier wird nicht gewählt, sondern gelost: alle Strecken liegen im Topf.
+    const pool = m.cupRaces > 0;
+    list.dataset.pool = String(pool);
+    $('track-head').textContent = pool ? 'Lostopf – die Strecke wird vor jedem Rennen ausgelost' : 'Strecke';
     list.replaceChildren();
     for (let i = 0; i < OFFERED_TRACKS; i++) {
       const t = getTrack(i);
@@ -780,9 +1045,9 @@ export class ScreenUi {
         ...(t.def.twist ? [h('span', { class: 'track-twist', text: t.def.twist })] : []),
         h('span', { class: 'track-meta', text: `${Math.round(t.length / 10) * 10} m · ${'●'.repeat(t.def.grade)}${'○'.repeat(3 - t.def.grade)}` }),
       ) as HTMLButtonElement;
-      card.dataset.on = String(i === m.track);
-      card.disabled = !m.isHost;
-      card.setAttribute('aria-pressed', String(i === m.track));
+      card.dataset.on = String(!pool && i === m.track);
+      card.disabled = !m.isHost || pool;
+      card.setAttribute('aria-pressed', String(!pool && i === m.track));
       card.addEventListener('click', () => {
         this.on.click('click');
         this.on.setTrack(i);

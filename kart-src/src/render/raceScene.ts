@@ -373,6 +373,8 @@ const RING_SEEN = 2.5;
 
 export class RaceScene {
   cameraMode: 'chase' | 'top' = 'chase';
+  /** Fotokamera: fester Standort, Blickpunkt und Bildwinkel – null = normale Kamera. */
+  photo: { from: number[]; to: number[]; fov: number } | null = null;
   /** Wie tief das eigene Kart in einer Rauchwolke steckt (0..1) – die Oberfläche legt einen Schleier darüber. */
   smoke = 0;
   /** Wie nah ein Brummkreisel ist, der das eigene Kart sucht (0 = keiner, 1 = gleich da). */
@@ -1632,6 +1634,16 @@ export class RaceScene {
     const cam = this.camera;
     const w = this.world!;
     const t = this.track;
+    if (this.photo) {
+      // Fotokamera (nur für das Werkzeug, das die Streckenbilder erzeugt): fester Standort und Blick.
+      const ph = this.photo;
+      cam.position.set(ph.from[0], ph.from[1], ph.from[2]);
+      cam.lookAt(ph.to[0], ph.to[1], ph.to[2]);
+      cam.fov = ph.fov;
+      cam.updateProjectionMatrix();
+      this.camReady = false;
+      return;
+    }
     if (this.cameraMode === 'top' || !me || !k) {
       const h = w.radius * 1.5;
       cam.position.set(w.center.x, h, w.center.z - h * 0.55);

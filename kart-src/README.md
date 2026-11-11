@@ -12,6 +12,16 @@ Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt ke
 
 Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen, Strecke wählen, Rennen starten.
 
+### Einzelrennen oder Turnier
+
+Der Host wählt in der Lobby den Modus:
+
+- **Einzelrennen:** eine Strecke aussuchen, fahren, danach „Nochmal“ oder zurück in die Lobby.
+- **Turnier** über 3, 5 oder 10 Rennen: Vor jedem Rennen wird die Strecke **ausgelost** – auf allen Bildschirmen zieht derselbe Streifen aus Streckenbildern von rechts nach links unter einer Markierung durch, wird langsamer und bleibt auf einer Strecke stehen; die wird gefahren. Keine Strecke kommt zweimal dran, bevor nicht alle an der Reihe waren, und nie dieselbe zweimal hintereinander.
+- **Sterne:** Je Rennen gibt es einen Stern für jedes Kart, das man hinter sich lässt (bei vier Karts 3 – 2 – 1 – 0); auch die KI-Gegner sammeln mit. Nach jedem Rennen zeigt der Zieleinlauf die Sterne des Rennens und den Gesamtstand. Wer nach dem letzten Rennen die meisten Sterne hat, gewinnt das Turnier; bei Gleichstand entscheiden die Siege, dann das bessere letzte Rennen.
+- Der Stand gehört zum Platz in der Lobby: Verlässt jemand das Turnier und ein anderer (oder die KI) übernimmt den Platz, beginnt dieser bei null. Lädt der Host seine Seite neu, bleibt der Stand erhalten; ein dabei laufendes Rennen wird nicht gewertet und neu ausgelost.
+- Die Streckenbilder des Streifens liegen als Dateien unter `public/karten/` und werden mit `node tools/streckenbilder.cjs` aus dem Spiel selbst erzeugt (siehe Kopf der Datei). Fehlt ein Bild, zeigt die Karte den Streckenverlauf.
+
 ### Steuerung
 
 | Handy | Tastatur | Wirkung |

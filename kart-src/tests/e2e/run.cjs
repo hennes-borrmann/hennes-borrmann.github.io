@@ -1268,6 +1268,82 @@ async function main() {
     await sleep(10000);
   }
 
+  if (wants('cup')) {
+    // === Turnier =============================================================
+    section('Turnier: Auslosung auf zwei Bildschirmen, Sterne je Platz, Gesamtsieg');
+    const hc = await openScreen('hostT', '&laps=1');
+    const codeT = await createLobby(hc, 'Anna');
+    const cc = await openScreen('clientT', '&laps=1');
+    await joinLobby(cc, 'Ben', codeT);
+    await cc.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
+    await hc.page.click('#mode button[data-mode="cup"]');
+    await hc.page.click('#cup-size button[data-races="3"]');
+    await cc.page.waitForFunction(() => window.__kart.lobby().cupRaces === 3, null, { timeout: 5000 });
+    check('Turnier über 3 Rennen kommt beim Mitspieler an', true);
+    check('Im Turnier wird die Strecke nicht gewählt, sondern gelost', /Lostopf/.test(await cc.page.textContent('#track-head')) && (await hc.page.locator('.track-card').first().isDisabled()));
+    check('Start-Knopf heißt „Turnier starten“', /Turnier starten/i.test(await hc.page.textContent('#btn-start')), await hc.page.textContent('#btn-start'));
+    await cc.page.click('#btn-ready');
+    await hc.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    for (const s of [hc, cc]) await s.page.setViewportSize({ width: 480, height: 300 });
+
+    const tracks = [];
+    const drawInfo = (s) => s.page.evaluate(() => { const c = window.__kart.lobby().cup; return c && c.draw ? { id: c.draw.id, pick: c.draw.strip[c.draw.stop], strip: c.draw.strip.join(','), done: c.done } : null; });
+    // Drei Rennen: je Auslosung auf beiden Bildschirmen, dann Rennen, das der Test sofort beendet.
+    const orders = [[1, 0], [0, 1], [1, 0]];
+    for (let race = 0; race < 3; race++) {
+      await hc.page.click(race === 0 ? '#btn-start' : '#btn-next');
+      await hc.page.waitForSelector('#draw:not([hidden])', { timeout: 8000 });
+      await cc.page.waitForSelector('#draw:not([hidden])', { timeout: 8000 });
+      const [dh, dc] = await Promise.all([drawInfo(hc), drawInfo(cc)]);
+      if (race === 0) {
+        check('Auslosung erscheint auf beiden Bildschirmen mit demselben Streifen', !!dh && !!dc && dh.strip === dc.strip && dh.pick === dc.pick, dh ? `Strecke ${dh.pick}` : 'keine Auslosung');
+        check('Überschrift nennt das Rennen', /Rennen 1 von 3/.test(await cc.page.textContent('#draw-eyebrow')), await cc.page.textContent('#draw-eyebrow'));
+      }
+      await cc.page.waitForSelector('#draw[data-state="stopped"]', { timeout: 15000 });
+      const name = await cc.page.textContent('#draw-title');
+      await cc.page.waitForSelector('#app[data-view="game"]', { timeout: 30000 });
+      await hc.page.waitForSelector('#app[data-view="game"]', { timeout: 30000 });
+      const [th, tc] = await Promise.all([kart(hc.page, 'track()'), kart(cc.page, 'track()')]);
+      tracks.push(th.index);
+      if (race === 0) {
+        check('Der Streifen bleibt auf der ausgelosten Strecke stehen, und genau die wird gefahren', !!dh && th.index === dh.pick && tc.index === dh.pick && name === th.name, `${name} / ${th.name}`);
+        check('Die Auslosung ist weg, sobald das Rennen beginnt', !(await hc.page.isVisible('#draw')) && !(await cc.page.isVisible('#draw')));
+      }
+      await hc.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 40000 });
+      await kart(hc.page, `finish(${JSON.stringify(orders[race])})`);
+      await hc.page.waitForSelector('#results:not([hidden])', { timeout: 15000 });
+      await cc.page.waitForSelector('#results-cup:not([hidden])', { timeout: 15000 });
+      if (race === 0) {
+        // Ben (Platz 1 im Rennen) lässt drei hinter sich, Anna zwei.
+        const cup = (await kart(hc.page, 'lobby()')).cup;
+        check('Sterne nach dem ersten Rennen: 3 für den Sieger, 2 für den Zweiten', cup.done === 1 && cup.stars[1] === 3 && cup.stars[0] === 2 && cup.stars[2] + cup.stars[3] === 1, JSON.stringify(cup.stars));
+        await cc.page.waitForFunction(() => /\+3/.test(document.querySelector('#results-list .result .result-gain')?.textContent || ''), null, { timeout: 8000 });
+        check('Der Mitspieler sieht seine Sterne im Zieleinlauf und den Gesamtstand', /Ben/.test(await cc.page.locator('#results-cup-list .cup-line').first().textContent()), await cc.page.locator('#results-cup-list .cup-line').first().textContent());
+        check('Nur der Host hat „Nächstes Rennen“', (await hc.page.isVisible('#btn-next')) && !(await cc.page.isVisible('#btn-next')) && !(await hc.page.isVisible('#btn-again')));
+      }
+    }
+    check('Drei Rennen, keine Strecke zweimal', new Set(tracks).size === 3, tracks.join(', '));
+    const end = (await kart(hc.page, 'lobby()')).cup;
+    // Ben: 3 + 2 + 3 = 8, Anna: 2 + 3 + 2 = 7; zusammen mit der KI sind es je Rennen 6 Sterne.
+    check('Endstand: Ben 8, Anna 7, insgesamt 18 Sterne', end.done === 3 && end.stars[1] === 8 && end.stars[0] === 7 && end.stars.reduce((a, b) => a + b, 0) === 18, JSON.stringify(end.stars));
+    await cc.page.waitForFunction(() => /Turniersieg: Ben/.test(document.getElementById('results-cup-title').textContent || ''), null, { timeout: 8000 });
+    check('Beide Bildschirme nennen den Turniersieger', /Turniersieg: Ben/.test(await hc.page.textContent('#results-cup-title')), await hc.page.textContent('#results-cup-title'));
+    check('Nach dem letzten Rennen gibt es kein „Nächstes Rennen“ mehr', !(await hc.page.isVisible('#btn-next')));
+    await hc.page.click('#btn-lobby');
+    await cc.page.waitForSelector('#app[data-view="lobby"]', { timeout: 8000 });
+    check('Zurück in der Lobby steht der Endstand', (await cc.page.isVisible('#cup-panel')) && /Turniersieg: Ben/.test(await cc.page.textContent('#cup-title')), await cc.page.textContent('#cup-title'));
+    // Neuladen des Hosts: der Stand bleibt erhalten.
+    await hc.page.reload();
+    await hc.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
+    const kept = (await kart(hc.page, 'lobby()')).cup;
+    check('Der Turnierstand übersteht ein Neuladen des Hosts', !!kept && kept.done === 3 && kept.stars[1] === 8, JSON.stringify(kept && kept.stars));
+    await hc.page.click('#btn-cup-end');
+    await hc.page.waitForFunction(() => window.__kart.lobby().cup === null, null, { timeout: 5000 });
+    check('„Stand ausblenden“ räumt das beendete Turnier weg', !(await hc.page.isVisible('#cup-panel')));
+    await hc.ctx.close();
+    await cc.ctx.close();
+  }
+
   if (wants('netsim')) {
     // === Schlechte Leitung ===================================================
     section('Simulierte schlechte Leitung: 80 ms + 25 ms Jitter + 5 % Verlust je Richtung');
