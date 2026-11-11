@@ -83,6 +83,19 @@ export const PULSE_PRESS = 2;
 /** Blasenschlot (unter Wasser): hebt im Takt an, was über ihm ist – ein Sprungbrett, kein Treffer. */
 export const PULSE_BUBBLE = 3;
 /**
+ * Lawine: geht im Takt quer über die Fahrbahn nieder. Solange sie läuft, schiebt sie alles im
+ * Streifen (radius Meter vor und hinter der Stelle, über die ganze Breite) talwärts und bremst
+ * stark – kein Dreher. lat nennt die Bergseite: von dort kommt sie.
+ */
+export const PULSE_AVALANCHE = 4;
+/** Eiszapfen: fällt im Takt von der Höhlendecke – trifft wie eine Lavabombe, lässt Splitter liegen. */
+export const PULSE_ICICLE = 5;
+/** Meteorit: schlägt im Takt ein – trifft wie eine Lavabombe, der Krater glüht kurz nach. */
+export const PULSE_METEOR = 6;
+/** Lawine: seitlicher Schub (m/s) und Bremsfaktor je Tick. */
+export const AVALANCHE_PUSH = 6.5;
+export const AVALANCHE_DRAG = 0.962;
+/**
  * Ablauf einer Presse, gemeinsam für Physik und Bild: in den letzten PRESS_STRIKE Ticks
  * vor Zyklus 0 fällt der Stempel und schlägt bei 0 auf – genau dann beginnt die Gefahr
  * (on Ticks lang). Er hebt sich schon PRESS_LEAD Ticks vor deren Ende wieder, so dass er
@@ -339,3 +352,13 @@ export const DIVE_COAST = 7;
 export const DIVE_STEER = 0.75;
 /** Ein Blasenschlot hebt mit dieser Geschwindigkeit (m/s). */
 export const BUBBLE_LIFT = 6.5;
+
+// --- Geringe Schwerkraft -------------------------------------------------------------
+// Auf dem Mond (Track.gravity < 1) fällt alles langsam: jeder Buckel wird zum hohen,
+// weiten Sprung – anders als unter Wasser ohne Bremse und ohne Grenze beim Sinken.
+// Sprungplatten (Track.launchers) schleudern das Kart hoch, über Krater hinweg.
+
+/** In der Luft lenkt es sich bei geringer Schwerkraft etwas besser (Steuerdüsen): Anteil der Lenkung am Boden. */
+export const LOWG_STEER = 0.5;
+/** Eine Sprungplatte gibt diese Steiggeschwindigkeit (m/s), wenn nichts anderes angegeben ist. */
+export const LAUNCH_SPEED = 9;
