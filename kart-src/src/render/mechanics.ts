@@ -7,7 +7,8 @@ import type * as THREE from 'three';
 import type { Track } from '../game/track';
 import type { FxSink } from './fxApi';
 import type { World } from './world';
-import { PULSE_BOMB, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
+import { PULSE_BOMB, PULSE_BUBBLE, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
+import { buildDive } from './mechanics/dive';
 import { buildFlight, hasGlide } from './mechanics/flight';
 import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
@@ -39,5 +40,6 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.belts.some((b) => !b.swim) || presses) out.push(buildMachines(track, detail));
   if (track.tide) out.push(buildTide(track, detail, world));
   if (track.thermals.length > 0 || track.rings.length > 0 || hasGlide(track)) out.push(buildFlight(track, detail));
+  if (track.belts.some((b) => b.swim) || track.pulses.some((p) => p.kind === PULSE_BUBBLE)) out.push(buildDive(track, detail));
   return out;
 }
