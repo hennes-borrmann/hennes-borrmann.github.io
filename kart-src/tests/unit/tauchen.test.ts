@@ -267,6 +267,33 @@ describe('Tauchen (Tiefseeriff)', () => {
     expect(dry(cross)).toBe(false);
   });
 
+  it('die KI nimmt Blasenschlote mit, wenn sie gerade blasen, und stürzt dabei nicht ab', () => {
+    const t = setTrack(RIFF);
+    let lifts = 0;
+    let rings = 0;
+    for (let slot = 0; slot < 4; slot++) {
+      const s = gridState(slot);
+      const brain = newBrain(slot, AI_HARD);
+      let progress = segDelta(t, 0, s.seg);
+      let wasBoost = 0;
+      for (let tick = 1; tick < 3 * 80 * 60 && progress < 2 * t.n; tick++) {
+        const before = s.seg;
+        const ev = stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false }), { canDrive: true, speedFactor: brain.skill, time: tick });
+        expect(ev & EV_FALL).toBe(0);
+        if (ev & EV_BUBBLE) lifts++;
+        // Ring: Schub beginnt im Schweben
+        if (ev & EV_PAD && s.flags & FLAG_AIR && s.boost > wasBoost) rings++;
+        wasBoost = s.boost;
+        progress += segDelta(t, before, s.seg);
+      }
+      expect(progress).toBeGreaterThanOrEqual(2 * t.n);
+    }
+    console.log(`Vier starke KI-Fahrer, je zwei Runden: ${lifts}-mal vom Schlot angehoben, ${rings}-mal durch einen Ring`);
+    // Zwei Schlotstellen je Runde, acht Runden: mindestens jede zweite Gelegenheit wird genutzt.
+    expect(lifts).toBeGreaterThanOrEqual(8);
+    expect(rings).toBeGreaterThanOrEqual(6);
+  });
+
   it('die anderen Strecken haben keine Tauchstrecken', () => {
     for (let i = 0; i < RIFF; i++) expect(getTrack(i).deep.some((d) => d !== 0)).toBe(false);
   });
