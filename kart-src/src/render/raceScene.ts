@@ -213,6 +213,41 @@ function wrapAngle(a: number): number {
   return a;
 }
 
+const KEY_NO_HIGH = 'schraeglage.gfx.ohneHoheLeistung';
+let noHighPerformance = false;
+/** Wurde der zuletzt angelegte Renderer mit „hoher Leistung“ angefordert? */
+let usedHighPerformance = false;
+
+/**
+ * Soll der Grafikkontext mit powerPreference „high-performance“ angefordert werden?
+ *
+ * Auf Rechnern mit zwei Grafikkarten wählt der Browser damit die schnelle. Auf einem iPad (10. Generation,
+ * Safari 26.2) kam aber jeder so angeforderte Kontext verloren an oder ging nach dem ersten Bild verloren – mit
+ * „default“ und „low-power“ lief alles (gemessen mit grafiktest.html). Deshalb: nie in WebKit (Safari und alle
+ * Browser auf iPhone/iPad; dort gibt es ohnehin nur eine Grafikeinheit) und nie mehr auf einem Gerät, auf dem es
+ * einmal schiefging.
+ */
+function wantsHighPerformance(): boolean {
+  if (noHighPerformance) return false;
+  const ua = navigator.userAgent;
+  if (/AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg\/|Android/.test(ua)) return false;
+  try {
+    if (localStorage.getItem(KEY_NO_HIGH)) return false;
+  } catch {
+    // kein Speicher: dann gilt nur die Erfahrung dieses Seitenaufrufs
+  }
+  return true;
+}
+
+function avoidHighPerformance(): void {
+  noHighPerformance = true;
+  try {
+    localStorage.setItem(KEY_NO_HIGH, '1');
+  } catch {
+    // siehe oben
+  }
+}
+
 /**
  * Legt den WebGL-Renderer an. Ein iPad lieferte mit den Wunsch-Einstellungen einen Kontext, der schon verloren war.
  * Deshalb mehrere Anläufe mit anderen Einstellungen – jeder auf einer frischen Zeichenfläche, denn eine Fläche
@@ -220,8 +255,9 @@ function wrapAngle(a: number): number {
  * dem Browser alle Vorgaben, wie es die schlichtesten Testseiten tun. Scheitert alles, nennt der Fehler jeden Anlauf.
  */
 function createRenderer(first: HTMLCanvasElement): THREE.WebGLRenderer {
+  const high = wantsHighPerformance();
   const tries: [string, THREE.WebGLRendererParameters | null][] = [
-    ['Wunsch', { antialias: window.devicePixelRatio < 1.5, powerPreference: 'high-performance' }],
+    ['Wunsch', { antialias: window.devicePixelRatio < 1.5, powerPreference: high ? 'high-performance' : 'default' }],
     ['Vorgaben des Browsers', null],
     ['schlicht', { antialias: false }],
     ['sparsam', { antialias: false, stencil: false, powerPreference: 'low-power' }],
@@ -255,8 +291,11 @@ function createRenderer(first: HTMLCanvasElement): THREE.WebGLRenderer {
         renderer.dispose();
         throw new Error('Kontext kam schon verloren an');
       }
+      usedHighPerformance = i === 0 && high;
       return renderer;
     } catch (err) {
+      // Mit „hoher Leistung“ gescheitert: auf diesem Gerät nicht wieder verlangen.
+      if (i === 0 && high) avoidHighPerformance();
       let text = err instanceof Error ? err.message : String(err);
       // Abfragen an einen verlorenen Kontext liefern null – three.js stolpert dann über die erste davon.
       if (/getShaderPrecisionFormat|getContextAttributes/.test(text)) text = 'Kontext kam schon verloren an';
@@ -388,7 +427,10 @@ export class RaceScene {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // Verliert der Browser den Grafikkontext (Absturz seines Grafikprozesses, Speichernot, App im Hintergrund),
     // bleibt das Bild schwarz, ohne dass ein Fehler fällt. Mitschreiben, damit es gemeldet werden kann.
+    const high = usedHighPerformance;
     canvas.addEventListener('webglcontextlost', () => {
+      // Ging ein Kontext mit „hoher Leistung“ verloren, verlangt der Neuaufbau (und jedes spätere Laden) sie nicht mehr.
+      if (high) avoidHighPerformance();
       this.gfx.lost++;
       this.gfx.isLost = true;
       if (!this.gfx.lostWhen) this.gfx.lostWhen = `${this.phase}, nach ${this.gfx.frames} Bildern`;

@@ -180,6 +180,8 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | `?laps=1` | Rundenzahl überschreiben, geht der Auswahl in der Lobby vor (zählt beim Host) |
 | `?track=2` / `?ai=0` | Strecke (ab 0 gezählt) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
 | `?alle=1` | auch Strecken anbieten, die noch in Arbeit sind (fahrbar, aber ohne eigene Welt und Ton) |
+
+Dazu gibt es die eigenständige Seite `grafiktest.html` (an die Adresse des Spiels anhängen): Sie probiert aus, mit welchen Einstellungen der Browser einen WebGL-Kontext hergibt, und zeigt das Ergebnis samt Gerätedaten als Tabelle – gedacht für den Fall, dass auf einem Gerät das 3D-Bild fehlt.
 | `?q=low` | Grafik: `low`, `medium`, `high`, `auto` |
 | `?mute=1` | ohne Ton starten |
 | `?auto=1` | das eigene Kart fährt von selbst – zum Ausprobieren ohne Controller |
@@ -236,6 +238,7 @@ Der Browser-Test läuft auf einem Rechner über die lokale Schleife. Er sagt nic
 
 ## Bekannte Grenzen
 
+- **3D-Grafik auf dem iPad:** Auf einem iPad der 10. Generation (Safari 26.2) kam jeder Grafikkontext, der mit „hoher Leistung“ (`powerPreference: 'high-performance'`) angefordert wurde, verloren an oder ging nach dem ersten Bild verloren; ohne diese Vorgabe läuft er (gemessen mit `grafiktest.html`). Das Spiel verlangt sie deshalb in Safari und auf iPhone/iPad gar nicht mehr und merkt sich auf jedem anderen Gerät, wenn sie einmal schiefging. Es gibt nur noch einen WebGL-Kontext für die ganze Seite (Rennen und Figuren-Porträts teilen ihn). Geht er verloren, steht das im Rennen auf dem Bildschirm, und die Szene wird neu aufgebaut. Warum Safari so reagiert, ist nicht geklärt.
 - **Nicht auf echten Geräten geprüft** (von mir aus): iPhone/iPad, Safari, echte Sensoren, echte Netze, Bildrate auf dem iPad, Höreindruck des Tons.
 - **Größere Welten:** Seit den langen Strecken zeichnet das Spiel rund doppelt so viele Dreiecke wie vorher (je nach Strecke etwa 110 000–150 000 in hoher Qualität). Ob das auf jedem iPad flüssig bleibt, ist nicht gemessen; notfalls in den Einstellungen die Qualität senken.
 - **KI an Gabelungen:** Die KI-Gegner würfeln ihren Weg, sie wählen ihn nicht nach Lage des Rennens. Ausnahmen: die Lavahöhle im Glutkessel nehmen mittlere und starke Gegner nur bei freier Bahn, und an der Möwenklippe nehmen sie bei Flut den Steg, bei Ebbe die Uferstraße.
