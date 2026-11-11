@@ -596,8 +596,18 @@ export class World {
         }
         if (free) {
           const rot = Math.atan2(t.tx[i], t.tz[i]);
-          const c = this.P(i, 0, 0);
-          solid.box(c[0], c[1] - DECK_D - 0.35, c[2], lat * 2 + 1.1, 0.7, 1.1, cPillar, rot);
+          // Querträger: liegt unter dem Deck an und folgt dessen Querneigung – ein waagerechter Balken
+          // stünde in einer Steilkurve auf der tiefen Seite durch die Fahrbahn.
+          const L = lat + 0.55;
+          const y0 = -DECK_D - 0.7;
+          const y1 = -DECK_D;
+          const f0 = -0.55 / t.step;
+          const f1 = 0.55 / t.step;
+          cross(i, f1, -L, L, y0, y1, true, cPillar);
+          cross(i, f0, -L, L, y0, y1, false, cPillar);
+          side(i, f0, f1, L, y0, y1, true, cPillar);
+          side(i, f0, f1, -L, y0, y1, false, cPillar);
+          solid.quad(this.P(i, f0, L, y0), this.P(i, f0, -L, y0), this.P(i, f1, -L, y0), this.P(i, f1, L, y0), cPillar);
           for (const p of posts) {
             const foot = Math.min(this.heightAt(p[0], p[2]), th.liquidY ?? Infinity) - 1.5;
             const topY = p[1] - DECK_D - 0.7;
