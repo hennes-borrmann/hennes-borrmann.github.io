@@ -6,7 +6,8 @@ import type { LobbyPlayer } from '../net/protocol';
 import { CHARACTERS, ITEM_NONE, MAX_PLAYERS } from '../game/sim';
 import { CODE_ALPHABET, ROOM_CODE_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { $, h, ms } from '../util/dom';
-import { TRACK_COUNT, getTrack, type Track } from '../game/track';
+import { getTrack, type Track } from '../game/track';
+import { OFFERED_TRACKS } from './offered';
 import { portraitUrl } from '../render/portraits';
 import { ITEMS, ROLLING_ICON, itemSvg } from '../util/items';
 import { Minimap, trackPath } from './minimap';
@@ -730,7 +731,7 @@ export class ScreenUi {
   private renderSetup(m: LobbyModel): void {
     const list = $('track-list');
     list.replaceChildren();
-    for (let i = 0; i < TRACK_COUNT; i++) {
+    for (let i = 0; i < OFFERED_TRACKS; i++) {
       const t = getTrack(i);
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('viewBox', '0 0 120 74');

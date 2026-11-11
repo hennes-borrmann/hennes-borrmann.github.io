@@ -178,7 +178,8 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | `?lag=80&jitter=20&loss=5` | künstliche Verzögerung (ms pro Richtung), Schwankung, Paketverlust in % |
 | `?debug=0` / `?debug=1` | Diagnose ausgeblendet bzw. auch im Rennen von Anfang an sichtbar |
 | `?laps=1` | Rundenzahl überschreiben, geht der Auswahl in der Lobby vor (zählt beim Host) |
-| `?track=2` / `?ai=0` | Strecke (0–3) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
+| `?track=2` / `?ai=0` | Strecke (ab 0 gezählt) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
+| `?alle=1` | auch Strecken anbieten, die noch in Arbeit sind (fahrbar, aber ohne eigene Welt und Ton) |
 | `?q=low` | Grafik: `low`, `medium`, `high`, `auto` |
 | `?mute=1` | ohne Ton starten |
 | `?auto=1` | das eigene Kart fährt von selbst – zum Ausprobieren ohne Controller |
