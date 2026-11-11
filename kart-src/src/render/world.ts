@@ -55,7 +55,8 @@ interface SurfaceLook {
 }
 
 /** Tunnel und Höhlen: lichte Höhe über der Fahrbahn und Dicke des Felsmantels. */
-const TUNNEL_H = 7.4;
+/** Scheitelhöhe der Tunnel und Höhlen über der Fahrbahn (auch für das, was an der Decke hängt: Eiszapfen). */
+export const TUNNEL_H = 7.4;
 const TUNNEL_ROCK = 5;
 
 const FOG_VERT = /* glsl */ `
