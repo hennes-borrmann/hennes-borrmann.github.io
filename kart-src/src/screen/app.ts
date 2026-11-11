@@ -719,12 +719,22 @@ export class App {
     if (!this.scene) {
       try {
         this.scene = new RaceScene($<HTMLCanvasElement>('stage'), this.quality);
-      } catch (err) {
-        console.error(err);
-        this.ui.showModal('3D-Darstellung nicht möglich', ['Dieser Browser stellt kein WebGL bereit.'], [
-          { label: 'Schließen', run: () => undefined },
-        ]);
-        return;
+      } catch (first) {
+        console.error(first);
+        // Zweiter Anlauf auf einer frischen Zeichenfläche: hängt an der alten schon ein unbrauchbarer Kontext, hilft nur das.
+        try {
+          const old = $<HTMLCanvasElement>('stage');
+          const fresh = old.cloneNode(false) as HTMLCanvasElement;
+          old.replaceWith(fresh);
+          this.scene = new RaceScene(fresh, this.quality);
+        } catch (err) {
+          console.error(err);
+          this.ui.showModal('3D-Darstellung nicht möglich', sceneFailure(first, err), [
+            { label: 'Erneut versuchen', primary: true, run: () => this.enterGame() },
+            { label: 'Schließen', run: () => undefined },
+          ]);
+          return;
+        }
       }
     }
     this.scene.setTrack();
@@ -1231,4 +1241,29 @@ export class App {
       dropControllerLink: () => this.pairing.link?.close(),
     };
   }
+}
+
+/** Ob der Browser auf einer frischen Zeichenfläche einen Grafikkontext dieser Art hergibt (der Kontext wird gleich wieder freigegeben). */
+function probeContext(kind: 'webgl2' | 'webgl'): string {
+  try {
+    const gl = document.createElement('canvas').getContext(kind) as WebGLRenderingContext | null;
+    if (!gl) return 'nein';
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return 'ja';
+  } catch {
+    return 'Fehler';
+  }
+}
+
+/** Text für den Dialog, wenn die 3D-Szene nicht entsteht: was der Browser gemeldet hat, und was meist hilft. */
+function sceneFailure(first: unknown, second: unknown): string[] {
+  const text = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+  const a = text(first);
+  const b = text(second);
+  return [
+    'Der Browser hat dem Spiel keine 3D-Grafik bereitgestellt.',
+    `Gemeldet: ${a}${b !== a ? ` – zweiter Anlauf: ${b}` : ''}`,
+    `Prüfung auf frischer Fläche: WebGL 2 ${probeContext('webgl2')}, WebGL 1 ${probeContext('webgl')} · Version ${BUILD_ID}`,
+    'Hilft oft: diesen Tab schließen und die Seite neu öffnen, sonst den Browser ganz beenden und neu starten. Im Blockierungsmodus von iOS/iPadOS ist WebGL abgeschaltet.',
+  ];
 }

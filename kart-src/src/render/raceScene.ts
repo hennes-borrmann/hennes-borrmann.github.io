@@ -213,6 +213,27 @@ function wrapAngle(a: number): number {
   return a;
 }
 
+/**
+ * Legt den WebGL-Renderer an. Gibt der Browser mit den Wunsch-Einstellungen keinen Grafikkontext her
+ * (gesehen auf einem iPad), wird es mit sparsameren versucht. Scheitert alles, nennt der Fehler jeden Versuch.
+ */
+function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
+  const tries: [string, THREE.WebGLRendererParameters][] = [
+    ['Wunsch', { canvas, antialias: window.devicePixelRatio < 1.5, powerPreference: 'high-performance' }],
+    ['schlicht', { canvas, antialias: false }],
+    ['sparsam', { canvas, antialias: false, stencil: false, powerPreference: 'low-power' }],
+  ];
+  const errors: string[] = [];
+  for (const [name, params] of tries) {
+    try {
+      return new THREE.WebGLRenderer(params);
+    } catch (err) {
+      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  throw new Error(errors.join(' · '));
+}
+
 function labelSprite(name: string, color: string): THREE.Sprite {
   const c = document.createElement('canvas');
   c.width = 256;
@@ -317,7 +338,7 @@ export class RaceScene {
     private readonly canvas: HTMLCanvasElement,
     quality: Quality = 'auto',
   ) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: window.devicePixelRatio < 1.5, powerPreference: 'high-performance' });
+    this.renderer = createRenderer(canvas);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.quality = quality;
     this.level = quality === 'low' ? 0 : quality === 'high' ? 2 : 1;
