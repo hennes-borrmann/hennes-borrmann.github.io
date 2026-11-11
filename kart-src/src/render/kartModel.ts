@@ -51,6 +51,8 @@ export interface KartPose {
   glide: boolean;
   /** Unter Wasser (Tauchstrecke). */
   dive: boolean;
+  /** Im luftleeren Raum (Mondbasis): Raumhelm und Steuerdüsen. */
+  space: boolean;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
