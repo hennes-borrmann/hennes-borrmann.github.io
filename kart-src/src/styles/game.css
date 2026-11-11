@@ -916,6 +916,8 @@
 
 .track-card {
   position: relative;
+  /* Die Karte ist das Maß für ihre Schrift: auf schmalen Bildschirmen (iPad quer mit 1024 px) wird der Name kleiner. */
+  container-type: inline-size;
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
   grid-template-rows: auto auto auto 1fr;
@@ -973,6 +975,9 @@
 
 .track-name {
   font: 800 20px/1.05 var(--font-display);
+  /* Lange Namen („Nachtschicht“, „Wolkenwerft“) passen sonst nicht neben die Karte; ältere Browser behalten 20 px und brechen um. */
+  font-size: clamp(14px, 6.1cqi, 20px);
+  overflow-wrap: anywhere;
   font-style: italic;
   text-transform: uppercase;
   letter-spacing: 0.03em;
