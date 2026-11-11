@@ -131,8 +131,17 @@ const B = {
   bub2: 42,
   jetL: 43, // Blasenstrahl statt Auspuffflamme
   jetR: 44,
+  sHead: 45, // Raumausrüstung: Helm am Kopf (Drehpunkt = Mitte der Glaskugel) …
+  sPack: 46, // … Tornister am Oberkörper …
+  sAnt: 47, // … dessen Antenne (wippt träge) …
+  sBody: 48, // … Steuerdüsen und Positionsleuchte an der Karosserie …
+  sLamp: 49, // … deren leuchtendes Glas (blinkt) …
+  sJet0: 50, // … und vier Düsenstöße: vorn links, vorn rechts, hinten links, hinten rechts
+  sJet1: 51,
+  sJet2: 52,
+  sJet3: 53,
 } as const;
-const BONE_COUNT = 45;
+const BONE_COUNT = 54;
 
 // Farben, die alle Karts teilen.
 const DARK = 0x2d2a36; // Gummi, Rahmen
@@ -1009,6 +1018,17 @@ interface Spec {
   diveBody: V3;
   diveProp: V3;
   diveBub: V3;
+  /** Raum: Mitte der Helmkugel (im Kopf), ihre Halbachsen und wie weit sie unten offen ist (Winkel vom Scheitel). */
+  spaceHelm: V3;
+  spaceHelmR: V3;
+  spaceCut: number;
+  /** Tornister (relativ zur Hüfte) und Fuß der Antenne (relativ zum Tornister). */
+  spacePack: V3;
+  spaceAnt: V3;
+  /** Linke Düsenmündungen vorn und hinten, Positionsleuchte (alles an der Karosserie). */
+  spaceJetF: V3;
+  spaceJetR: V3;
+  spaceLamp: V3;
 }
 
 const SPECS: Spec[] = [
@@ -1046,6 +1066,14 @@ const SPECS: Spec[] = [
     diveBody: [0, 0.27, -1.0],
     diveProp: [0, 0.27, -1.13],
     diveBub: [0.34, 0.77, 0.07],
+    spaceHelm: [0, 0.32, 0.1],
+    spaceHelmR: [0.5, 0.5, 0.5],
+    spaceCut: 2.5,
+    spacePack: [0, 0.43, -0.3],
+    spaceAnt: [0.11, 0.15, -0.02],
+    spaceJetF: [0.25, 0.62, 0.9],
+    spaceJetR: [0.36, 0.56, -0.9],
+    spaceLamp: [0, 0.63, -0.85],
   },
   // 1 – Vera Vergaser: schlanker Renner
   {
@@ -1081,6 +1109,14 @@ const SPECS: Spec[] = [
     diveBody: [0, 0.34, -1.0],
     diveProp: [0.33, 0.34, -1.04],
     diveBub: [0, 0.16, 0.44],
+    spaceHelm: [0, 0.3, 0.08],
+    spaceHelmR: [0.38, 0.45, 0.47],
+    spaceCut: 2.45,
+    spacePack: [-0.1, 0.3, -0.27],
+    spaceAnt: [0, 0.2, 0],
+    spaceJetF: [0.13, 0.4, 0.85],
+    spaceJetR: [0.25, 0.6, -0.72],
+    spaceLamp: [0, 1.09, -0.96],
   },
   // 2 – Bremsen-Bert: Badewanne auf Rädern
   {
@@ -1116,6 +1152,14 @@ const SPECS: Spec[] = [
     diveBody: [-0.34, 0.62, -0.86],
     diveProp: [-0.34, 0.17, -1.1],
     diveBub: [0, 0.07, 0.44],
+    spaceHelm: [0, 0.24, 0.06],
+    spaceHelmR: [0.5, 0.52, 0.52],
+    spaceCut: 2.35,
+    spacePack: [0, 0.3, -0.36],
+    spaceAnt: [0.2, 0.08, 0],
+    spaceJetF: [0.36, 0.63, 0.66],
+    spaceJetR: [0.36, 0.63, -0.66],
+    spaceLamp: [0, 0.64, -0.86],
   },
   // 3 – Zünd-Zoe: kantiger Keil mit Zündkerzen
   {
@@ -1151,6 +1195,14 @@ const SPECS: Spec[] = [
     diveBody: [0, 0.4, -0.9],
     diveProp: [0.22, 0.38, -1.1],
     diveBub: [0, 0.8, -0.2],
+    spaceHelm: [0, 0.3, 0.03],
+    spaceHelmR: [0.43, 0.43, 0.43],
+    spaceCut: 2.4,
+    spacePack: [0, 0.33, -0.25],
+    spaceAnt: [-0.08, 0.14, -0.02],
+    spaceJetF: [0.2, 0.27, 0.99],
+    spaceJetR: [0.42, 0.56, -0.98],
+    spaceLamp: [0, 0.67, -0.99],
   },
 ];
 
@@ -2704,6 +2756,192 @@ function buildJets(b: Builder): void {
   }
 }
 
+// ───────────────────────────── Raumausrüstung ─────────────────────────────
+//
+// Auf dem Mond tragen alle Raumhelm und Tornister, am Kart sitzen Steuerdüsen
+// und eine blinkende Positionsleuchte – wieder nach dem Muster der
+// Gleitflügel: alles im Netz des Karts, an eigenen Knochen, die sonst auf
+// null geschrumpft sind.
+//
+// Der Helm ist eine Glaskugel, deren Dreiecke nach innen zeigen: von außen
+// fällt die zugewandte Hälfte weg, sichtbar bleibt nur die Innenseite der
+// abgewandten Wand. So sieht man das Gesicht „durch das Glas“ – mit einem
+// einzigen, undurchsichtigen Material. Die Kontur kommt von einer normalen
+// Kugel als Hülle und zeichnet nur den Rand.
+
+const GLASS = 0xbfe6fb;
+const JET_HOT = 0xfffbe8;
+const JET_WARM = 0xffd86a;
+
+/** Dreht alle Dreiecke um (Innenseite sichtbar). flat: kantige Facetten statt runder Schattierung. */
+function inward(g: THREE.BufferGeometry, flat: boolean): THREE.BufferGeometry {
+  if (flat) {
+    const f = g.toNonIndexed();
+    g.dispose();
+    const p = f.getAttribute('position') as THREE.BufferAttribute;
+    const a = p.array as Float32Array;
+    for (let i = 0; i < a.length; i += 9)
+      for (let k = 0; k < 3; k++) {
+        const v = a[i + 3 + k];
+        a[i + 3 + k] = a[i + 6 + k];
+        a[i + 6 + k] = v;
+      }
+    f.deleteAttribute('normal');
+    f.computeVertexNormals();
+    return f;
+  }
+  const idx = g.getIndex()!;
+  for (let i = 0; i < idx.count; i += 3) {
+    const v = idx.getX(i + 1);
+    idx.setX(i + 1, idx.getX(i + 2));
+    idx.setX(i + 2, v);
+  }
+  const n = g.getAttribute('normal') as THREE.BufferAttribute;
+  for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
+  return g;
+}
+
+interface HelmLook {
+  /** Segmente rundum und vom Scheitel bis zum Halsring. */
+  ws: number;
+  hs: number;
+  /** Kantige Facetten (Zoe). */
+  flat?: boolean;
+  /** Halsring. */
+  ring: number;
+  /** Richtungen der Glanzlichter (je zwei Striche), vom Kugelmittelpunkt aus. */
+  glints: readonly V3[];
+}
+
+/** Glaskugel am Knochen sHead (Ursprung = Kugelmitte), unten offen, mit Halsring und Glanzstrichen. */
+function spaceHelmet(c: Ctx, o: HelmLook): void {
+  const b = c.b;
+  const G = B.sHead;
+  const R = c.sp.spaceHelmR;
+  const cut = c.sp.spaceCut;
+  const ws = b.s(o.ws, 6);
+  const hs = b.s(o.hs, 3);
+  // Naht der Segmente hinten (−z)
+  const ball = (): THREE.BufferGeometry => new THREE.SphereGeometry(1, ws, hs, -HALF_PI, TAU, 0, cut);
+  b.put(inward(ball(), o.flat === true), { bone: G, color: GLASS, scale: R, hull: ball(), outline: 0.75 });
+  // Halsring an der Öffnung (Ellipse aus den Halbachsen)
+  const s = Math.sin(cut);
+  const ring = new THREE.TorusGeometry(R[0] * s, 0.04, 3, ws);
+  ring.rotateX(HALF_PI);
+  b.put(ring, { bone: G, color: o.ring, pos: [0, R[1] * Math.cos(cut), 0], scale: [1, 1, R[2] / R[0]], outline: 0 });
+  // Glanzstriche: zwei Streifen dicht über der Kugel, nur von außen sichtbar
+  if (!b.fine) return;
+  for (const d of o.glints) {
+    const l = Math.hypot(d[0], d[1], d[2]);
+    const nx = d[0] / l;
+    const ny = d[1] / l;
+    const nz = d[2] / l;
+    const k = 1 / Math.hypot(nx / R[0], ny / R[1], nz / R[2]) + 0.008;
+    for (let i = 0; i < 2; i++) {
+      const strip = new THREE.PlaneGeometry(i === 0 ? 0.17 : 0.07, 0.03);
+      strip.rotateX(-HALF_PI);
+      strip.translate(i === 0 ? 0 : -0.03, 0, i * 0.055);
+      b.put(strip, { bone: G, color: WHITE, pos: [nx * k, ny * k, nz * k], aim: [nx, ny, nz], outline: 0 });
+    }
+  }
+}
+
+/** Antenne am Knochen sAnt: Stab nach oben, Kugel an der Spitze. */
+function spaceAntenna(b: Builder, len: number, tip: number): void {
+  b.put(cone(0.018, len, 3), { bone: B.sAnt, color: STEEL, outline: 0.45 });
+  b.put(sphere(0.034, 0.034, 0.034, 4, 2), { bone: B.sAnt, color: tip, pos: [0, len + 0.02, 0], outline: 0.55 });
+}
+
+/**
+ * Steuerdüsen an den vier Ecken (Glocke zeigt seitlich nach außen), die
+ * Positionsleuchte mit rotem Glas und darüber dem leuchtenden (eigener
+ * Knochen, blinkt) – und die vier Düsenstöße: helle Kegel entlang ±x.
+ */
+function spaceThrusters(c: Ctx, nozzle: number): void {
+  const b = c.b;
+  const sp = c.sp;
+  const S = B.sBody;
+  // Glocken ohne Kontur, dafür dunkel gegen den Lack
+  for (const m of [sp.spaceJetF, sp.spaceJetR]) {
+    b.put(cone(0.05, 0.1, 4), { bone: S, color: nozzle, pos: [m[0] + 0.005, m[1], m[2]], aim: [-1, 0, 0], mirror: S, outline: 0 });
+  }
+  const L = sp.spaceLamp;
+  b.put(sphere(0.042, 0.05, 0.042, 4, 2), { bone: S, color: 0xc0392b, pos: [L[0], L[1] + 0.05, L[2]], outline: 0.5 });
+  b.put(sphere(0.054, 0.062, 0.054, 4, 2), { bone: B.sLamp, color: 0xfff1d6, outline: 0 });
+  // Düsenstöße: kurzer heller Kern, warmer Saum – Spitze bei x = 0.3 (Knochen skaliert die Länge)
+  const jet: LP[] = [
+    [0, 0, JET_HOT],
+    [0.06, 0.05, JET_WARM],
+    [0, 0.3],
+  ];
+  for (const [bone, mirror] of [
+    [B.sJet0, B.sJet1],
+    [B.sJet2, B.sJet3],
+  ]) {
+    const g = lathe(jet, 4);
+    g.rotateZ(-HALF_PI);
+    b.put(g, { bone, mirror, outline: 0 });
+  }
+}
+
+/** Kalle: runde Goldfischglas-Kugel, kantiger Tornister mit Lackdeckel, Antenne mit Kugel in Lackfarbe. */
+function spaceKalle(c: Ctx): void {
+  const b = c.b;
+  spaceHelmet(c, { ws: 9, hs: 4, ring: c.p.accent, glints: [[0.55, 0.62, 0.55], [-0.6, 0.55, -0.55]] });
+  const P = B.sPack;
+  b.put(box(0.36, 0.3, 0.15), { bone: P, color: trim(c, 0xffefd2), outline: 0.8 });
+  b.put(box(0.37, 0.07, 0.16), { bone: P, color: c.p.base, pos: [0, 0.13, 0], outline: 0 });
+  spaceAntenna(b, 0.34, c.p.base);
+  spaceThrusters(c, DARK);
+}
+
+/** Vera: hohes Ei, das die Schnauze umschließt; schlanke Sauerstoffflasche, Peitschenantenne. */
+function spaceVera(c: Ctx): void {
+  const b = c.b;
+  spaceHelmet(c, { ws: 8, hs: 4, ring: trim(c, WHITE), glints: [[0.5, 0.7, 0.5], [-0.55, 0.6, -0.6]] });
+  const P = B.sPack;
+  b.put(cyl(0.085, 0.085, 0.34, b.s(5, 4)), { bone: P, color: trim(c, WHITE), outline: 0.8 });
+  b.put(sphere(0.05, 0.04, 0.05, 4, 2), { bone: P, color: CHROME, pos: [0, 0.18, 0], outline: 0 });
+  spaceAntenna(b, 0.42, c.p.base);
+  spaceThrusters(c, c.p.dark);
+}
+
+/** Bert: breite Glocke, unten weit offen (die Stoßzähne schauen heraus); dicker Tank quer auf dem Rücken. */
+function spaceBert(c: Ctx): void {
+  const b = c.b;
+  spaceHelmet(c, { ws: 8, hs: 4, ring: c.p.dark, glints: [[0.6, 0.6, 0.5], [-0.6, 0.6, -0.5]] });
+  // Tank quer: Lack mit hellen Enden, ein Drehkörper (Kontur über einen schlichten Zylinder)
+  const RIM = trim(c, 0xfff6e2);
+  const ts = b.s(5, 4);
+  const tank: LP[] = [
+    [0, -0.25, RIM],
+    [0.11, -0.25, RIM, true],
+    [0.11, -0.18, c.p.base],
+    [0.11, 0.18, RIM],
+    [0.11, 0.25, RIM, true],
+    [0, 0.25],
+  ];
+  b.put(lathe(tank, ts), { bone: B.sPack, rot: [0, 0, HALF_PI], hull: cyl(0.11, 0.11, 0.5, ts), outline: 0.8 });
+  spaceAntenna(b, 0.3, 0xff7a3c);
+  spaceThrusters(c, DARK);
+}
+
+/** Zoe: kantiger Kristallhelm aus wenigen Facetten, Keil-Tornister mit Blitz, Antenne in der Akzentfarbe. */
+function spaceZoe(c: Ctx): void {
+  const b = c.b;
+  spaceHelmet(c, { ws: 7, hs: 4, flat: true, ring: c.p.accent, glints: [[0.55, 0.65, 0.5], [-0.55, 0.6, -0.55]] });
+  const P = B.sPack;
+  b.put(prism([-0.15, -0.14, 0.15, -0.14, 0.11, 0.15, -0.11, 0.15], 0.13), { bone: P, color: c.p.dark, outline: 0.8 });
+  if (b.fine) b.put(prism(BOLT, 0.012), { bone: P, color: c.p.accent, pos: [0, 0, -0.068], rot: [0, Math.PI, 0], scale: [0.4, 0.22, 1], outline: 0 });
+  spaceAntenna(b, 0.32, c.p.accent);
+  spaceThrusters(c, c.p.deeper);
+}
+
+const SPACE_BUILDERS = [spaceKalle, spaceVera, spaceBert, spaceZoe];
+
+/** Wie weit die Ohren im Helm nach hinten angelegt werden (rad). */
+const SPACE_EARS = [0.3, 1.2, 0, 1.05];
+
 // ───────────────────────────── Effekte ─────────────────────────────
 
 /** Schutzring, Blitze und Qualm – ein Netz, sichtbar nur bei Bedarf. */
@@ -3472,6 +3710,15 @@ export class KartVisual {
   private swimS = 0;
   private jetS = 0;
   private dPropA = 0;
+  // Raum: Ausrüstung (0 … 1, linear in der Zeit), geglättet, in der Luft; träge Antenne
+  private fSpace = false;
+  private spaceU = 0;
+  private spaceS = 0;
+  private spaceAir = 0;
+  private antX = 0;
+  private antXV = 0;
+  private antZ = 0;
+  private antZV = 0;
 
   // Item in der Hand: eigenes Netz am Karosserie-Knochen, Geometrie wird getauscht
   private readonly prop: THREE.Mesh;
@@ -3728,6 +3975,18 @@ export class KartVisual {
     for (let i = 0; i < 3; i++) set(B.bub0 + i, B.chassis, [0, 1.2, -0.3]);
     set(B.jetL, B.chassis, ex, [Math.PI + sp.exhaustUp, 0, 0]);
     set(B.jetR, B.chassis, [-ex[0], ex[1], ex[2]], [Math.PI + sp.exhaustUp, 0, 0]);
+    set(B.sHead, B.head, sp.spaceHelm);
+    set(B.sPack, B.torso, sp.spacePack);
+    set(B.sAnt, B.sPack, sp.spaceAnt);
+    set(B.sBody, B.chassis, [0, 0, 0]);
+    const sl = sp.spaceLamp;
+    set(B.sLamp, B.sBody, [sl[0], sl[1] + 0.055, sl[2]]);
+    const jf = sp.spaceJetF;
+    const jr = sp.spaceJetR;
+    set(B.sJet0, B.chassis, [jf[0] + 0.01, jf[1], jf[2]]);
+    set(B.sJet1, B.chassis, [-jf[0] - 0.01, jf[1], jf[2]]);
+    set(B.sJet2, B.chassis, [jr[0] + 0.01, jr[1], jr[2]]);
+    set(B.sJet3, B.chassis, [-jr[0] - 0.01, jr[1], jr[2]]);
     this.bones[B.wFL].rotation.order = 'YXZ';
     this.bones[B.wFR].rotation.order = 'YXZ';
     // Flügel: erst um die eigene Längsachse verwinden, dann V-Stellung, dann nach hinten anklappen.
@@ -3751,6 +4010,15 @@ export class KartVisual {
     this.bones[B.wtail].scale.setScalar(0);
     // Ebenso die Tauchausrüstung (Veras Brille ist immer da und klappt nur herunter).
     this.hideDive();
+    this.hideSpace();
+  }
+
+  private hideSpace(): void {
+    const bn = this.bones;
+    bn[B.sHead].scale.setScalar(0);
+    bn[B.sPack].scale.setScalar(0);
+    bn[B.sBody].scale.setScalar(0);
+    for (let i = 0; i < 4; i++) bn[B.sJet0 + i].scale.setScalar(0);
   }
 
   private hideDive(): void {
@@ -3782,6 +4050,7 @@ export class KartVisual {
     WING_BUILDERS[this.character](ctx);
     DIVE_BUILDERS[this.character](ctx);
     diveBubbles(main);
+    SPACE_BUILDERS[this.character](ctx);
     const fx = new Builder(this.rest, this.detail, lines);
     buildFx(fx, this.paint.base);
     const fl = new Builder(this.rest, this.detail, false);
@@ -3890,6 +4159,8 @@ export class KartVisual {
     this.fGlide = glide;
     const dive = pose.dive === true;
     this.fDive = dive;
+    const space = pose.space === true;
+    this.fSpace = space;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -3904,11 +4175,13 @@ export class KartVisual {
     this.driftS = damp(this.driftS, drift, 9, dt);
     // Im Gleitflug bleiben die Hände am Lenkrad – gesteuert wird ja weiter.
     // Unter Wasser schwebt die Figur mit Schwimmzügen statt hochgerissener Arme.
-    this.armsUp = damp(this.armsUp, (pose.air && !glide && !dive) || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
+    // Im Raum hält sie sich in der Luft am Lenkrad fest.
+    this.armsUp = damp(this.armsUp, (pose.air && !glide && !dive && !space) || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
     this.wingU = glide ? Math.min(1, this.wingU + dt / 0.25) : Math.max(0, this.wingU - dt / 0.2);
     this.glideS = damp(this.glideS, glide ? 1 : 0, 6, dt);
     // In die Kurve legen: etwa 0,35 rad bei vollem Einschlag
-    this.bank = damp(this.bank, glide ? steer * 0.35 : 0, 5, dt);
+    // Im Raum dreht sich das Kart in der Luft mit der Lenkung leicht um die Längsachse.
+    this.bank = damp(this.bank, glide ? steer * 0.35 : space && pose.air ? steer * 0.22 : 0, space && !glide ? 3 : 5, dt);
     // Räder laufen in der Luft langsam aus und drehen bei der Landung sofort wieder mit.
     // Unter Wasser drehen sie gemächlicher.
     this.wheelV = glide ? damp(this.wheelV, 0, 0.8, dt) : dive ? speed * 0.55 : speed;
@@ -3919,19 +4192,34 @@ export class KartVisual {
     this.diveS = damp(this.diveS, dive ? 1 : 0, 4, dt);
     this.swimS = damp(this.swimS, dive && pose.air ? 1 : 0, 6, dt);
     this.jetS = damp(this.jetS, dive && pose.boost ? 1 : 0, pose.boost ? 14 : 9, dt);
+    this.spaceU = space ? Math.min(1, this.spaceU + dt / 0.3) : Math.max(0, this.spaceU - dt / 0.2);
+    this.spaceS = damp(this.spaceS, space ? 1 : 0, 4, dt);
+    this.spaceAir = damp(this.spaceAir, space && pose.air ? 1 : 0, 6, dt);
     this.lean = damp(this.lean, steer * 0.2 * (0.3 + 0.7 * v1) + this.driftS * 0.22, 8, dt);
 
     // Nachschwingen: seitlich (Kurve) und längs (Beschleunigung)
     const latT = -(steer * v1 + this.driftS * 0.5);
     const lonT = clamp(-this.accel * 0.02, -0.5, 0.5);
-    this.swayXV += ((latT - this.swayX) * 150 - this.swayXV * 9) * dt;
+    // Geringe Schwerkraft: alles federt weicher und langsamer nach (ohne Raum genau 1).
+    const soft = 1 - 0.55 * this.spaceS;
+    const slow = 1 - 0.35 * this.spaceS;
+    this.swayXV += ((latT - this.swayX) * 150 * soft - this.swayXV * 9 * slow) * dt;
     this.swayX += this.swayXV * dt;
-    this.swayZV += ((lonT - this.swayZ) * 150 - this.swayZV * 9) * dt;
+    this.swayZV += ((lonT - this.swayZ) * 150 * soft - this.swayZV * 9 * slow) * dt;
     this.swayZ += this.swayZV * dt;
-    this.flopXV += ((latT - this.flopX) * 46 - this.flopXV * 4.5) * dt;
+    this.flopXV += ((latT - this.flopX) * 46 * soft - this.flopXV * 4.5 * slow) * dt;
     this.flopX += this.flopXV * dt;
-    this.flopZV += ((lonT - this.flopZ) * 46 - this.flopZV * 4.5) * dt;
+    this.flopZV += ((lonT - this.flopZ) * 46 * soft - this.flopZV * 4.5 * slow) * dt;
     this.flopZ += this.flopZV * dt;
+    // Antenne: sehr weiche Feder, die Landungen spürt sie als Wippen
+    if (this.spaceU > 0) {
+      const ak = 30 * soft;
+      const ac = 2.2 * slow;
+      this.antXV += ((latT * 0.5 - this.antX) * ak - this.antXV * ac) * dt;
+      this.antX += this.antXV * dt;
+      this.antZV += ((lonT * 0.6 - this.sq * 0.5 - this.antZ) * ak - this.antZV * ac) * dt;
+      this.antZ += this.antZV * dt;
+    }
 
     // Die Teilschritte lesen ihre Werte aus den Feldern – so wandern keine
     // Fließkommazahlen als Argumente durch die Aufrufe.
@@ -3943,6 +4231,7 @@ export class KartVisual {
     this.moveEffects(pose.guard);
     this.moveWings();
     this.moveDive();
+    this.moveSpace();
     this.moveItem();
     this.pickEyes(pose);
     this.placeAnchors();
@@ -4012,11 +4301,13 @@ export class KartVisual {
 
     const rollT = -this.fSteer * v1 * 0.075 * (1 - this.glideS) - driftS * 0.11 + (spin > 0 ? Math.sin(spinYaw) * 0.1 : 0);
     const pitchT = clamp(-this.accel * 0.0035, -0.08, 0.09) - boostS * 0.07 + airS * 0.05 + stallS * 0.03;
-    this.rollV += ((rollT - this.roll) * 140 - this.rollV * 13) * dt;
+    const soft = 1 - 0.55 * this.spaceS;
+    const slow = 1 - 0.35 * this.spaceS;
+    this.rollV += ((rollT - this.roll) * 140 * soft - this.rollV * 13 * slow) * dt;
     this.roll += this.rollV * dt;
-    this.pitchV += ((pitchT - this.pitch) * 140 - this.pitchV * 13) * dt;
+    this.pitchV += ((pitchT - this.pitch) * 140 * soft - this.pitchV * 13 * slow) * dt;
     this.pitch += this.pitchV * dt;
-    this.sqV += (-this.sq * 190 - this.sqV * 8.5) * dt;
+    this.sqV += (-this.sq * 190 * soft - this.sqV * 8.5 * slow) * dt;
     this.sq += this.sqV * dt;
     // Stauchen: Höhe runter, Breite und Länge rauf (Volumen bleibt etwa gleich)
     const sq = clamp(this.sq + winS * 0.1 * Math.cos(hopPhase), -1, 1);
@@ -4054,7 +4345,7 @@ export class KartVisual {
 
     const torso = bn[B.torso];
     torso.rotation.set(
-      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.swimS * 0.24 + this.gTx,
+      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.swimS * 0.24 + this.spaceAir * 0.16 + this.gTx,
       this.gTy,
       lean + this.gTz,
     );
@@ -4071,12 +4362,15 @@ export class KartVisual {
       stallS * 0.08 -
       this.glideS * 0.1 -
       this.swimS * 0.2 +
+      this.spaceAir * 0.16 +
       Math.sin(t * 2.1) * 0.02 +
       this.gHx;
     const hzT = lean * 0.7 + stallS * 0.1 * Math.sin(t * 7) + spinS * 0.22 * Math.sin(t * 14);
-    this.headXV += ((hxT - this.headX) * 110 - this.headXV * 9) * dt;
+    const soft = 1 - 0.55 * this.spaceS;
+    const slow = 1 - 0.35 * this.spaceS;
+    this.headXV += ((hxT - this.headX) * 110 * soft - this.headXV * 9 * slow) * dt;
     this.headX += this.headXV * dt;
-    this.headZV += ((hzT - this.headZ) * 110 - this.headZV * 9) * dt;
+    this.headZV += ((hzT - this.headZ) * 110 * soft - this.headZV * 9 * slow) * dt;
     this.headZ += this.headZV * dt;
     const hyT =
       (-steer * 0.32 - driftS * 0.3) * (1 - spinS) + stallS * 0.28 * Math.sin(t * 9.5) + loseS * 0.1 * Math.sin(t * 1.3);
@@ -4085,7 +4379,8 @@ export class KartVisual {
 
     // Ohren: legen sich im Fahrtwind an, zucken ab und zu, hängen bei Niederlage
     const twitch = Math.pow(Math.max(0, Math.sin(t * 1.7 + this.slot * 2)), 24);
-    const earBack = -0.32 * this.fWind + this.swayZ * 0.5 - airS * 0.15 - this.swimS * 0.25;
+    // Im Helm liegen die Ohren angelegt.
+    const earBack = -0.32 * this.fWind + this.swayZ * 0.5 - airS * 0.15 - this.swimS * 0.25 - this.spaceS * SPACE_EARS[this.character];
     const earOut = sp.earTilt + loseS * 0.55 + stallS * 0.3 - winS * 0.1;
     bn[B.earL].rotation.set(earBack, 0, -earOut + this.swayX * 0.25 - twitch * 0.22);
     bn[B.earR].rotation.set(earBack, 0, earOut + this.swayX * 0.25);
@@ -4619,6 +4914,56 @@ export class KartVisual {
       jt.rotation.set(this.restRot[j], 0, Math.sin(t * 9 + i * 2) * 0.6);
       const s = js * (0.85 + 0.25 * Math.sin(t * 37 + i * 2));
       jt.scale.set(s, s, s * (1 + 0.5 * this.fV));
+    }
+  }
+
+  /** Raumausrüstung: ploppt auf, Antenne wippt, Leuchte blinkt, in der Luft feuern die Steuerdüsen zur Lenkrichtung. */
+  private moveSpace(): void {
+    const bn = this.bones;
+    const u = this.spaceU;
+    if (u <= 0) {
+      if (bn[B.sHead].scale.x !== 0) this.hideSpace();
+      return;
+    }
+    const t = this.time;
+    const open = this.fSpace;
+    const pop = Math.max(open ? easeOutBack(u) : smooth01(u), 0.001);
+    bn[B.sHead].scale.setScalar(pop);
+    bn[B.sPack].scale.setScalar(pop);
+    bn[B.sBody].scale.setScalar(pop);
+    // Antenne: träge Feder plus langsames Nachwiegen
+    bn[B.sAnt].rotation.set(
+      this.antZ * 0.9 + 0.05 * Math.sin(t * 1.9 + this.slot),
+      0,
+      this.antX * 0.8 + 0.06 * Math.sin(t * 1.3 + this.slot * 2),
+    );
+    // Positionsleuchte: Doppelblitz etwa jede Sekunde
+    const k = (t * 0.85 + this.slot * 0.23) % 1;
+    bn[B.sLamp].scale.setScalar(k < 0.07 || (k > 0.15 && k < 0.22) ? pop : 0);
+    // Steuerdüsen: kurze Stöße. Lenken nach links (steer < 0) feuern vorn rechts
+    // und hinten links (die Nase dreht nach links), nach rechts umgekehrt.
+    // Geradeaus zuckt ab und zu eine Düse zur Lagekorrektur.
+    const air = this.spaceAir;
+    const steer = this.fSteer;
+    const ph = t * 3.6;
+    const f = ph - Math.floor(ph);
+    const burst = f < 0.45 ? Math.sin((f / 0.45) * Math.PI) : 0;
+    const pick = Math.floor(hash(Math.floor(ph) + this.slot * 7.7) * 4);
+    const turn = clamp((Math.abs(steer) - 0.12) * 1.6, 0, 1);
+    for (let i = 0; i < 4; i++) {
+      const left = i % 2 === 0;
+      const front = i < 2;
+      const fire = steer < 0 ? left !== front : left === front;
+      let s = fire ? turn : 0;
+      if (i === pick) s = Math.max(s, (1 - turn) * 0.45);
+      s *= air * burst;
+      const jt = bn[B.sJet0 + i];
+      if (s < 0.02) {
+        jt.scale.setScalar(0);
+        continue;
+      }
+      const flick = 0.85 + 0.2 * Math.sin(t * 57 + i * 1.7);
+      jt.scale.set(s * flick, 0.6 + 0.4 * s, 0.6 + 0.4 * s);
     }
   }
 
