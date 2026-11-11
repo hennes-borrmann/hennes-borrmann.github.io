@@ -4,7 +4,7 @@
 // der Startgeraden" ungefähr nach oben zeigt – und nicht gespiegelt: wer rechts
 // abbiegt, dessen Punkt wandert auch auf der Karte nach rechts.
 
-import { EDGE_GAP, type Track } from '../game/track';
+import { EDGE_GAP, EDGE_GLIDE, type Track } from '../game/track';
 import { playerColor } from '../util/players';
 
 const INK = '#16131c';
@@ -73,13 +73,15 @@ export class Minimap {
     const g = base.getContext('2d')!;
     g.lineJoin = 'round';
     g.lineCap = 'round';
-    const stroke = (width: number, color: string): void => {
+    // glide = false: die Fahrbahn (Lücken bleiben frei); glide = true: nur die Flugstrecken, gestrichelt.
+    const stroke = (width: number, color: string, glide = false): void => {
       g.lineWidth = width;
       g.strokeStyle = color;
+      g.setLineDash(glide ? [5, 13] : []);
       g.beginPath();
       let pen = false;
       const to = (k: number): void => {
-        if (t.edge[k] & EDGE_GAP) {
+        if (glide ? (t.edge[k] & EDGE_GLIDE) === 0 : (t.edge[k] & EDGE_GAP) !== 0) {
           pen = false;
           return;
         }
@@ -98,8 +100,12 @@ export class Minimap {
       }
       g.stroke();
     };
+    // Flugstrecken: gestrichelte Linie von der Absprungkante zur Landebahn
+    stroke(9, INK, true);
+    stroke(4, '#fff8e7', true);
     stroke(20, INK);
     stroke(11, '#fff8e7');
+    g.setLineDash([]);
     // Startlinie
     const [sx, sy] = this.f(t.px[0], t.pz[0]);
     const [ax, ay] = this.f(t.px[0] - t.tz[0] * 12, t.pz[0] + t.tx[0] * 12);

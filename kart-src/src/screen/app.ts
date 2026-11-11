@@ -14,7 +14,7 @@ import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
 import { tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
-import { TRACK, TRACK_COUNT, newVehiclePose, setTrack, vehiclePose } from '../game/track';
+import { EDGE_GLIDE, TRACK, TRACK_COUNT, newVehiclePose, setTrack, vehiclePose } from '../game/track';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
 import { HostLobby } from '../lobby/hostLobby';
@@ -1173,6 +1173,20 @@ export class App {
         });
       },
       pulses: () => TRACK.pulses.map((p) => ({ kind: p.kind, lat: p.lat, at: TRACK.prog[p.seg] * TRACK.step, period: p.period / 60 })),
+      // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
+      flight: () => {
+        const glides: { from: number; to: number }[] = [];
+        let from = -1;
+        for (let i = 0; i <= TRACK.n; i++) {
+          const on = i < TRACK.n && (TRACK.edge[i] & EDGE_GLIDE) !== 0;
+          if (on && from < 0) from = i;
+          else if (!on && from >= 0) {
+            glides.push({ from: from * TRACK.step, to: i * TRACK.step });
+            from = -1;
+          }
+        }
+        return { glides, thermals: TRACK.thermals.length, rings: TRACK.rings.length };
+      },
       // Gezeit zur Rennzeit dieses Bildschirms: Stand 0 (Ebbe) … 1 (Flut) und Höhe des Wasserspiegels.
       tide: () => {
         const view = this.hostGame ?? this.clientGame;
