@@ -7,8 +7,10 @@
 
 import type * as THREE from 'three';
 import type { FxSink } from './fxApi';
+import { buildEisLife } from './life/eis';
 import { buildGlutLife } from './life/glut';
 import { buildKlippeLife } from './life/klippe';
+import { buildMondLife } from './life/mond';
 import { buildNachtLife } from './life/nacht';
 import { buildRiffLife } from './life/riff';
 import { buildWerkshofLife } from './life/werkshof';
@@ -39,6 +41,10 @@ export function buildLife(world: World): Life | null {
       return buildWolkenLife(world);
     case 'riff':
       return buildRiffLife(world);
+    case 'eis':
+      return buildEisLife(world);
+    case 'mond':
+      return buildMondLife(world);
     default:
       return null;
   }
