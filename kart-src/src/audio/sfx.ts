@@ -20,6 +20,10 @@ const MIN_GAP: Partial<Record<SfxName, number>> = {
 };
 const DEFAULT_GAP = 0.04;
 
+/** Blasenschlot: Tonhöhen (Hz) und Abstände (s) der kleinen Blasen, als feste Muster. */
+const BUBBLE_HZ = [520, 760, 410, 980, 610, 350, 870, 690, 1250, 470, 560, 1080, 640];
+const BUBBLE_GAP = [0.085, 0.06, 0.1, 0.07, 0.05, 0.09, 0.065];
+
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
  * gebaut, nicht nach Pegel; diese Faktoren bringen sie auf gemessene Spitzen
@@ -74,10 +78,10 @@ const LEVEL: Record<SfxName, number> = {
   ring: 2.2,
   lift: 1.8,
   wind: 0.8,
-  dive: 2.4,
-  surface: 2,
-  bubbles: 1.6,
-  blubb: 2,
+  dive: 2.2,
+  surface: 3,
+  bubbles: 2.6,
+  blubb: 1.2,
 };
 
 interface ToneOpts {
@@ -92,6 +96,8 @@ interface ToneOpts {
   tremHz?: number;
   /** Tonhöhe erst halten, dann fahren: Anteil der Dauer bis zum Beginn der Fahrt. */
   hold?: number;
+  /** Pegel nach dem Einschwingen halten: Anteil der Dauer, erst danach klingt der Ton aus. */
+  sustain?: number;
 }
 
 interface NoiseOpts {
@@ -151,6 +157,7 @@ class Voice {
     const attack = Math.min(o.attack ?? 0.004, dur * 0.5);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(vol, t + attack);
+    if (o.sustain) g.gain.setValueAtTime(vol, t + Math.max(attack, dur * o.sustain));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(g);
     g.connect(this.out);
@@ -230,6 +237,8 @@ export class SfxPlayer {
   private burnTick = 0;
   private splashTick = 0;
   private windTick = 0;
+  private surfaceTick = 0;
+  private bubbleTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -444,18 +453,87 @@ export class SfxPlayer {
         }
         break;
       }
-      // --- Tauchen (vorläufig, wird ausgearbeitet) ---
+      // --- Tauchen ---
+      // Beim Ein- und Auftauchen gleitet zugleich der Unterwasser-Filter des Mischpults
+      // (setUnderwater, etwa 0,25 s; abgetaucht 24 dB/Oktave ab 850 Hz). 'dive' beginnt
+      // also noch hell und wird während des Klingens dumpf, 'surface' umgekehrt; 'blubb'
+      // und meist auch 'bubbles' hört man ganz durch das Filter. Deshalb liegt bei allen
+      // vieren der Körper unter ~1,5 kHz, die Höhen sind nur Beiwerk.
       case 'dive':
-        v.noise(1800, 300, 0.5, 0.3, { q: 0.7, attack: 0.01 }).tone('sine', 140, 60, 0.3, 0.3);
+        // Aufschlag: breites Rauschen, das schnell zugeht, ein tiefer Bauchschlag und
+        // braunes Rauschen als Wassermasse; dann „schluckt" das Wasser das Kart (enges,
+        // fallendes Band), vier aufsteigende Blasen gurgeln nach, und ein leises, tiefes
+        // Grollen klingt in die Stille aus. Die Blasen fahren nach oben (Blasen wachsen
+        // beim Aufsteigen nicht – aber so klingen sie im Comic), eine kleiner als die andere.
+        v.noise(3200, 650, 0.17, 0.42, { type: 'lowpass', q: 0.8, attack: 0.003 })
+          .tone('sine', 120, 42, 0.3, 0.45)
+          .noise(700, 150, 0.45, 0.42, { type: 'lowpass', brown: true, attack: 0.008 })
+          .noise(950, 330, 0.13, 0.2, { q: 2.2, attack: 0.01, at: 0.05 })
+          .tone('sine', 380, 720, 0.06, 0.17, { at: 0.14, attack: 0.006 })
+          .tone('sine', 300, 590, 0.07, 0.15, { at: 0.21, attack: 0.006 })
+          .tone('sine', 470, 840, 0.05, 0.11, { at: 0.29, attack: 0.005 })
+          .tone('sine', 340, 650, 0.08, 0.09, { at: 0.36, attack: 0.006 })
+          .noise(260, 110, 0.75, 0.2, { type: 'lowpass', brown: true, attack: 0.12 });
         break;
-      case 'surface':
-        v.noise(900, 3200, 0.4, 0.22, { q: 0.7, attack: 0.05 });
+      case 'surface': {
+        // Durchbruch nach oben: ein kurzes, dumpfes Schwappen (noch durch das sich öffnende
+        // Filter), dann rauscht das abfließende Wasser auf und zieht nach oben; ein hauchiges
+        // „Haah" (hohes Rauschen und ein Formant um 1,2 kHz) als „Luft!"; zuletzt perlen
+        // Tropfen ab – kurze Sinus-Zirper, die nach oben springen, reihum in drei Fassungen.
+        const k = this.surfaceTick++ % 3;
+        const drops = [
+          [0.19, 1700, 0.26, 2300, 0.31, 1450, 0.38, 2050, 0.45, 1800],
+          [0.2, 2100, 0.24, 1550, 0.33, 1900, 0.4, 2400, 0.46, 1650],
+          [0.18, 1600, 0.27, 2000, 0.32, 2500, 0.37, 1500, 0.44, 1950],
+        ][k];
+        v.noise(1600, 520, 0.15, 0.3, { type: 'lowpass', q: 0.9, attack: 0.004 })
+          .tone('sine', 95, 150, 0.12, 0.22, { attack: 0.01 })
+          .noise(520, 2900, 0.34, 0.3, { q: 0.75, attack: 0.07, at: 0.02 })
+          .noise(1100, 1450, 0.2, 0.09, { q: 3, attack: 0.04, at: 0.1 })
+          .noise(2800, 5200, 0.18, 0.07, { type: 'highpass', attack: 0.04, at: 0.1 });
+        for (let i = 0; i < drops.length; i += 2) {
+          const f = drops[i + 1];
+          v.tone('sine', f, f * 1.8, 0.035, 0.09 - i * 0.004, { at: drops[i], attack: 0.003 });
+        }
         break;
-      case 'bubbles':
-        v.tone('sine', 300, 520, 0.12, 0.1).tone('sine', 380, 640, 0.12, 0.1, { at: 0.14 }).tone('sine', 340, 600, 0.12, 0.1, { at: 0.3 });
+      }
+      case 'bubbles': {
+        // Der Schlot beginnt zu blasen: Brodeln aus braunem Rauschen und ein breites Band
+        // um 0,7–1,1 kHz schwellen langsam an; darüber steigen immer dichter und lauter
+        // kleine Blasen auf – Sinus-Zirper (Blasenresonanz 0,35–1,25 kHz, je kleiner desto
+        // höher), die nach oben springen. Abstände, Tonhöhen und Pegel folgen festen Mustern,
+        // die je Ausbruch versetzt beginnen: jeder Ausbruch blubbert etwas anders.
+        const k = this.bubbleTick++ % 5;
+        v.noise(380, 620, 0.9, 0.22, { type: 'lowpass', brown: true, attack: 0.5 })
+          .noise(700, 1100, 0.85, 0.08, { q: 1.2, attack: 0.45 })
+          .tone('sine', 85, 70, 0.8, 0.06, { attack: 0.4 });
+        let t = 0.04;
+        for (let i = 0; i < 17; i++) {
+          const f = BUBBLE_HZ[(i * 3 + k * 2) % BUBBLE_HZ.length];
+          const grow = Math.min(1, t / 0.7);
+          const fade = t > 0.74 ? Math.max(0.3, 1 - (t - 0.74) / 0.12) : 1;
+          const len = 0.035 + 0.04 * (420 / f);
+          v.tone('sine', f, f * 1.55, Math.min(0.08, len), (0.045 + 0.1 * grow) * fade, { at: t, attack: 0.004 });
+          t += BUBBLE_GAP[(i + k) % BUBBLE_GAP.length] * (1 - 0.45 * grow);
+          if (t > 0.84) break;
+        }
         break;
+      }
       case 'blubb':
-        v.tone('sine', 220, 660, 0.28, 0.22).noise(700, 1500, 0.3, 0.08, { q: 1 });
+        // Vom Schlot gehoben: ein komisches, rundes „Blubb". Erst flattert ein tiefer Ansatz
+        // („Bl…", Tremolo 32 Hz statt Vibrato wie bei der Sprungfeder), dann steigt ein
+        // runder Grundton von 200 auf 640 Hz – mit leisem Dreieck eine Oktave höher als
+        // Bauch, ohne Vibrato und ohne Rauschfahrt wie beim Aufwind; darunter hebt braunes
+        // Rauschen mit. Am Ende ploppt die Blase (kurzer Zirper) und zwei Bläschen perlen nach.
+        // Der Grundton hält seinen Pegel über gut die Hälfte (sustain), sonst hörte man vom
+        // Aufstieg nur den tiefen Anfang.
+        v.tone('sine', 165, 235, 0.09, 0.3, { attack: 0.006, tremHz: 32 })
+          .tone('sine', 200, 640, 0.32, 0.36, { at: 0.06, attack: 0.025, sustain: 0.6 })
+          .tone('triangle', 400, 1280, 0.3, 0.06, { at: 0.06, attack: 0.03, sustain: 0.5 })
+          .noise(250, 700, 0.3, 0.15, { type: 'lowpass', brown: true, attack: 0.08 })
+          .tone('sine', 700, 1150, 0.05, 0.16, { at: 0.3, attack: 0.004 })
+          .tone('sine', 900, 1350, 0.03, 0.07, { at: 0.345, attack: 0.003 })
+          .tone('sine', 1100, 1600, 0.03, 0.05, { at: 0.375, attack: 0.003 });
         break;
       // --- Fliegen ---
       case 'wings':

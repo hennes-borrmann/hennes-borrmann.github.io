@@ -48,10 +48,10 @@ export type SfxName =
   | 'wings' // die Gleitflügel klappen aus (Abflug von der Rampe): Schnappen von Stoff, kurzes Aufrauschen
   | 'ring' // durch einen Schubring geflogen: Gleitton in hellen Glanz-Zweiklang, Schubrauschen (auch fremde Karts)
   | 'lift' // in einen Aufwind geraten: weiches Aufrauschen, das nach oben zieht
-  | 'dive' // das Kart taucht ins Wasser ein: großer Platscher, danach dumpf
-  | 'surface' // das Kart durchbricht die Oberfläche nach oben: Aufrauschen, Tropfen
-  | 'bubbles' // ein Blasenschlot beginnt zu blasen: Blubbern, das anschwillt (ortsfest, auch aus der Ferne leise)
-  | 'blubb' // vom Blasenschlot angehoben: ein rundes, aufsteigendes Blubb
+  | 'dive' // das Kart taucht ein: satter Platscher, Schlucken, Gurgeln, tiefes Ausklingen (~0,55 s; der Unterwasser-Filter schließt dabei)
+  | 'surface' // das Kart durchbricht die Oberfläche nach oben: Schwappen, Aufrauschen, hauchiges „Luft!", abperlende Tropfen (~0,5 s)
+  | 'bubbles' // ein Blasenschlot beginnt zu blasen: Brodeln, immer dichter aufsteigende kleine Blasen (~0,9 s; ortsfest, auch aus der Ferne leise)
+  | 'blubb' // vom Blasenschlot angehoben: flatterndes „Bl…", runder steigender Grundton, Plopp am Ende (~0,45 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

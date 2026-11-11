@@ -1,15 +1,25 @@
 // Mischpult: Busse, Master-Kette und die Bausteine, die sich alle Klangquellen
 // teilen (Rauschpuffer, Pulswellen, Panorama mit Rückfall).
 //
-//   Musik ──► musicIn ─► duck ─► musicVol ─┐
-//   Effekte ► sfxIn ───┐                   ├─► master ─► Kompressor ─► trim ─► Begrenzer ─► Ausgang
-//   Motoren ► engineIn ┴─► sfxVol ─────────┘
+//   Musik ──► musicIn ─► duck ─► musicVol ─► Tiefpass (Wasser) ──────────┐
+//   Effekte ► sfxIn ───┐                                                 ├─► master ─► Kompressor ─► trim ─► Begrenzer ─► Ausgang
+//   Motoren ► engineIn ┴─► sfxVol ─► Tiefpass ─► Tiefpass (Wasser) ──────┘
+//                ▲
+//   Unterwasser-Bett (nur abgetaucht)
 //
 // Der Kompressor hält das Gemisch zusammen, wenn Motor, Schub, Musik und
 // mehrere Effekte gleichzeitig laufen. Er ist aber kein harter Begrenzer –
 // kurze Spitzen rutschen durch. Deshalb sitzt dahinter eine Kennlinie, die bis
 // LIMIT_KNEE unverändert durchlässt und darüber weich abflacht: der Ausgang
 // kann rechnerisch nie über etwa 0.88 hinaus.
+//
+// Unter Wasser (setUnderwater) schließen sich die Wasser-Tiefpässe; sie sitzen
+// hinter den Lautstärkereglern und vor dem Summenkompressor, damit der die
+// dumpfe Mischung verarbeitet und Stummschaltung (master) weiter alles trifft.
+// An der Luft sind sie so weit nach oben verstimmt, dass ihre Eckfrequenz über
+// der Nyquist-Frequenz liegt: dann rechnen alle Browser (Blink, Gecko und
+// WebKit teilen sich diesen Biquad-Code) das Filter als reine Durchleitung
+// b0 = 1, Rest 0 – das Signal bleibt Abtastwert für Abtastwert unverändert.
 
 export type Wave = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'pulse25' | 'pulse12';
 
@@ -25,6 +35,26 @@ const NOISE_SECONDS = 2;
 const LIMIT_KNEE = 0.7;
 /** Breite des weichen Bereichs darüber. Bei Eingang 1.0 (und allem darüber) kommt damit etwa 0.88 heraus. */
 const LIMIT_SOFT = 0.26;
+
+/** Unter Wasser: Eckfrequenz für Geräusche und Motoren (zwei Biquads = Butterworth 4. Ordnung, 24 dB/Oktave). */
+const UW_SFX_HZ = 850;
+/** Güten (dB) der beiden Biquads: zusammen ein Butterworth-Tiefpass 4. Ordnung (Q 0,541 und 1,307). */
+const UW_SFX_Q = [-5.33, 2.32];
+/** Unter Wasser: Eckfrequenz der Musik – offener (12 dB/Oktave), damit sie erkennbar bleibt. */
+const UW_MUSIC_HZ = 1400;
+/** Güte (dB) des Musik-Tiefpasses: −3 dB ≈ Butterworth 2. Ordnung, keine Überhöhung. */
+const UW_MUSIC_Q = -3.01;
+/** So weit (Cent) liegt die offene Eckfrequenz über der Nyquist-Frequenz – Sicherheitsabstand. */
+const UW_OPEN_MARGIN = 600;
+/**
+ * Zeitkonstante des Gleitens (Sekunden). Die Verstimmung läuft in Cent, also
+ * gleichmäßig in Oktaven: nach 0,25 s ist der Weg zu 95 % geschafft. Beim
+ * Öffnen überschreitet die Eckfrequenz nach etwa 0,2 s die Nyquist-Frequenz –
+ * ab da ist das Filter wieder exakt durchlässig.
+ */
+const UW_GLIDE = 0.083;
+/** Pegel des leisen, tiefen Unterwasser-Rauschens (vor dem Effekt-Regler). */
+const UW_BED_LEVEL = 0.05;
 
 /**
  * Der DynamicsCompressor hebt sein Ergebnis von sich aus an (je tiefer die
@@ -74,6 +104,19 @@ export class Mixer {
   private readonly musicVol: GainNode;
   private readonly sfxVol: GainNode;
   private readonly master: GainNode;
+  /** Wasser-Tiefpässe (Geräusche/Motoren bzw. Musik) samt ihrer offenen Verstimmung in Cent. */
+  private readonly uwSfx: BiquadFilterNode[];
+  private readonly uwMusic: BiquadFilterNode;
+  private readonly uwOpenSfx: number;
+  private readonly uwOpenMusic: number;
+  /** Zuletzt gesetztes Ziel 0..1 (damit gleiche Aufrufe nichts neu planen). */
+  private uwTarget = 0;
+  /** Leises Rauschbett unter Wasser; nur solange abgetaucht (bzw. bis es ausgeklungen ist). */
+  private uwBed: { src: AudioBufferSourceNode; lfo: OscillatorNode; gain: GainNode; nodes: AudioNode[] } | null = null;
+  /** Ausgang des Effekt-/Motor-Zweigs hinter dem Wasserfilter – zum Messen in Tests. */
+  readonly sfxBus: AudioNode;
+  /** Ausgang des Musikzweigs hinter dem Wasserfilter – zum Messen in Tests. */
+  readonly musicBus: AudioNode;
   private readonly pulses = new Map<number, PeriodicWave>();
   private readonly canPan: boolean;
   /** Zeitpunkt (performance.now) der letzten Bitte ums Fortsetzen. */
@@ -116,12 +159,32 @@ export class Mixer {
     const limiter = ctx.createWaveShaper();
     limiter.curve = limiterCurve();
 
+    // Wasserfilter: Eckfrequenz fest, geöffnet wird über die Verstimmung (detune).
+    const nyquist = ctx.sampleRate / 2;
+    this.uwOpenSfx = 1200 * Math.log2(nyquist / UW_SFX_HZ) + UW_OPEN_MARGIN;
+    this.uwOpenMusic = 1200 * Math.log2(nyquist / UW_MUSIC_HZ) + UW_OPEN_MARGIN;
+    const lowpass = (hz: number, q: number, open: number): BiquadFilterNode => {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = hz;
+      f.Q.value = q;
+      f.detune.value = open;
+      return f;
+    };
+    this.uwSfx = UW_SFX_Q.map((q) => lowpass(UW_SFX_HZ, q, this.uwOpenSfx));
+    this.uwMusic = lowpass(UW_MUSIC_HZ, UW_MUSIC_Q, this.uwOpenMusic);
+
     this.musicIn.connect(this.duckGain);
     this.duckGain.connect(this.musicVol);
-    this.musicVol.connect(this.master);
+    this.musicVol.connect(this.uwMusic);
+    this.uwMusic.connect(this.master);
     this.sfxIn.connect(this.sfxVol);
     this.engineIn.connect(this.sfxVol);
-    this.sfxVol.connect(this.master);
+    this.sfxVol.connect(this.uwSfx[0]);
+    this.uwSfx[0].connect(this.uwSfx[1]);
+    this.uwSfx[1].connect(this.master);
+    this.sfxBus = this.uwSfx[1];
+    this.musicBus = this.uwMusic;
     this.master.connect(comp);
     comp.connect(trim);
     trim.connect(limiter);
@@ -163,6 +226,81 @@ export class Mixer {
     g.cancelScheduledValues(t);
     g.setTargetAtTime(1 - clamp(amount, 0, 1), t, 0.03);
     g.setTargetAtTime(1, t + Math.max(0, seconds), 0.15);
+  }
+
+  /**
+   * Unter Wasser: k = 1 → dumpf (Tiefpässe zu, leises Rauschbett), k = 0 → offen
+   * wie an der Luft. Zwischenwerte schließen anteilig (in Oktaven). Gleitet weich
+   * in etwa 0,25 s; ein gleicher Wert erneut tut nichts.
+   */
+  setUnderwater(k: number): void {
+    const kk = clamp(Number.isFinite(k) ? k : 0, 0, 1);
+    if (kk === this.uwTarget) return;
+    this.uwTarget = kk;
+    const t = this.ctx.currentTime;
+    for (const f of this.uwSfx) {
+      f.detune.cancelScheduledValues(t);
+      f.detune.setTargetAtTime(this.uwOpenSfx * (1 - kk), t, UW_GLIDE);
+    }
+    this.uwMusic.detune.cancelScheduledValues(t);
+    this.uwMusic.detune.setTargetAtTime(this.uwOpenMusic * (1 - kk), t, UW_GLIDE);
+    if (kk > 0) this.startBed(kk, t);
+    else this.stopBed(t);
+  }
+
+  /**
+   * Unterwasser-Bett: tiefes braunes Rauschen (Tiefpass 220 Hz), dessen Pegel
+   * langsam (0,23 Hz) schwankt wie ferne Brandung – kaum hörbar, aber es füllt
+   * die Stille, wenn das Filter die Höhen genommen hat. Es läuft durch den
+   * Effekt-Regler und das Wasserfilter.
+   */
+  private startBed(k: number, t: number): void {
+    let bed = this.uwBed;
+    if (!bed) {
+      const ctx = this.ctx;
+      const src = this.noise(true);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 220;
+      lp.Q.value = -3;
+      const swell = ctx.createGain();
+      swell.gain.value = 0.7;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.23;
+      const depth = ctx.createGain();
+      depth.gain.value = 0.3;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(lp);
+      lp.connect(swell);
+      lfo.connect(depth);
+      depth.connect(swell.gain);
+      swell.connect(gain);
+      gain.connect(this.sfxIn);
+      src.start(t, this.noiseOffset());
+      lfo.start(t);
+      this.stats.started += 2;
+      bed = { src, lfo, gain, nodes: [src, lp, swell, lfo, depth, gain] };
+      this.uwBed = bed;
+    }
+    bed.gain.gain.cancelScheduledValues(t);
+    bed.gain.gain.setTargetAtTime(UW_BED_LEVEL * k, t, 0.25);
+  }
+
+  private stopBed(t: number): void {
+    const bed = this.uwBed;
+    if (!bed) return;
+    this.uwBed = null;
+    bed.gain.gain.cancelScheduledValues(t);
+    bed.gain.gain.setTargetAtTime(0, t, 0.08);
+    // Nach gut zehn Zeitkonstanten ist es bei −90 dB: dann anhalten und abbauen.
+    const end = t + 0.9;
+    bed.src.stop(end);
+    bed.lfo.stop(end);
+    bed.src.onended = () => {
+      this.stats.ended += 2;
+      for (const n of bed.nodes) n.disconnect();
+    };
   }
 
   /** Panorama-Knoten oder null, wenn der Browser keinen StereoPanner kennt. */
