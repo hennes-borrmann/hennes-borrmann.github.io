@@ -1,4 +1,4 @@
-Zuletzt aktualisiert: 2026-11-11 01:46 UTC
+Zuletzt aktualisiert: 2026-11-11 01:53 UTC
 
 Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 01:45 UTC
 
@@ -10,8 +10,8 @@ Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 01:45 UTC
 | C-004 | fertig | codex/c-004-grenztests | ff8eae3ea83610d5c67874420ee6bd8e266a0570 | npm ci OK; tsc und 150 Tests dreimal nacheinander OK (12 Dateien, 23 neue Tests) | Von Claude abgenommen und als ac0189b übernommen. Eigene Prüfung auf Basis ce3e36e, Protokoll 8. |
 | C-005 | fertig | codex/koordination | 084785f28db47e1a7ef0dde154aa5b8120cbacf9 | npm ci OK; tsc OK / 145 Tests OK (12 Dateien); 13 Wegwerfproben OK | main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Von Claude abgenommen; Korrekturen laut Auftrag in a2fc907. Eigene Nachprüfung noch ungeprüft; nur Bericht. |
 | C-006 | fertig | codex/koordination | b7ec9a791670039afdd6fe47b6de8f21354551a3 | npm ci OK; tsc OK / 145 Tests OK; 128 Kombinationen je Basis/3 Varianten vollständig gemessen | Drift wird trotz entgegengesetzter Ziellenkung gehalten; Bericht mit 2.048 ausgewerteten Runden. Keine der drei Varianten erfüllt das Kriterium ohne Verschlechterung. Spielcode unverändert. |
-| C-007 | in Arbeit | codex/c-007-mechaniktests | noch keiner | Startbedingung erfüllt: main 73cc904, Protokoll 10 | Ergänzende Mechanik-Grenztests; Ausführung noch offen. |
-| C-008 | angenommen | codex/koordination | noch keiner | noch ungeprüft | Prüfbericht zum Fliegen auf Protokoll 10, nach C-007. |
+| C-007 | fertig | codex/c-007-mechaniktests | 93bf052b4ba42f9631e6dee96667a1731254dc74 | npm ci OK; tsc und 219 Tests dreimal nacheinander OK (14 Dateien, 36 neu) | Basis main 73cc904 / Protokoll 10; nur mechanikgrenzen.test.ts. Kein zusätzlicher Spielcodefehler nachgewiesen. |
+| C-008 | in Arbeit | codex/koordination | noch keiner | Basis main 73cc904 / Protokoll 10; Prüfung offen | Prüfbericht zum Fliegen; C-007 vorher fertig abgeliefert. |
 
 ## C-002 · Stückbeschreibungen
 
@@ -77,6 +77,21 @@ Basis origin/main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Bericht
 - Genau abgegrenzte Abweichung vom Auftrag: pro Runde gemessen 1.8375 s Gras für Figur 1 und 1.05 s/ein Bandenkontakt für Figur 3 auf Werkshof/Maske 0/stark. Die im Auftrag genannten ungefähr doppelten Gras-/Kontaktzahlen sind als Pro-Runde-Werte nicht reproduziert; ursprünglicher Zähler ungeprüft.
 
 Andere KI-Slots/Startplätze, mehr als vier ausgewertete Runden je Kombination, aktive Mechanik, Items, Mehrkart-Rennen, reale Geräte/Browser und Fahrgefühl **ungeprüft**. Varianten nur in Messläufen ausgeführt, nicht zusätzlich durch eine vollständige Typ-/Bestandstestsuite geprüft. Beim Abruf 01:45 UTC ist Protokoll 10 auf main bestätigt; C-007 wird jetzt bearbeitet.
+
+## C-007 · Grenztests abgeliefert
+
+Basis 73cc9049e9d769c0cc273788290947f9afd9199d, Protokoll 10. Ausschließlich die neue Datei kart-src/tests/unit/mechanikgrenzen.test.ts auf codex/c-007-mechaniktests, Commit 93bf052b4ba42f9631e6dee96667a1731254dc74. 36 deterministische Tests ergänzen den Bestand:
+
+- Alte und künftige Zeitklemme mit 39/40/41 Ticks an Pressenfreigabe und steigender Wasserlinie: echte Eingabepakete, Host-Schritt und anschließender Snapshot. Beide Überschreitungsrichtungen erzeugen nachgewiesene Unterschiede vor dem Abgleich; danach Position unter 0.0001 m und identische Timer.
+- Neun Item-Zeitlagen: Schild, Feder, Drache einen Tick vor, im und nach Aufschlag. Schild/Drache schützen mit einem Tick Vorsprung; die Feder bleibt dann noch in Pressenhöhe und schützt nicht. Im selben Tick kommen alle zu spät, wie beauftragt. Kein daraus abgeleiteter Fehlerbericht.
+- Rücksetzen unter Presse und im tiefsten Rücksetzpunkt der Uferstraße, Schutzzeit und Flucht innerhalb fester Frist; Flut für die Flucht festgehalten, damit die KI nicht nur Ebbe abwartet. Gegenband/Hallenwand nach seitlichem Stoß mit/ohne Rauch. Kein Sturz oder Hänger in diesen Fällen.
+- Rollreifen, Kreisel und Öl: alle 30 Folgezustände mit/ohne Band bzw. Wasser identisch, Bewegungs- bzw. Stillstandskontrolle. Beide Hallenbandnähte über echte Snapshot-Quantisierung mit nachgewiesenem Seitenwechsel der Rundung; vor und nach jedem Abgleich unter 0.0001 m. Landung innen/außen am seitlichen Bandrand und beide Längsenden geprüft. Bereits vorhandene Tests zu Pressenecken, Hub und flat-Feld nicht dupliziert.
+
+npm ci erfolgreich. npx tsc --noEmit und die vollständige Suite **dreimal nacheinander erfolgreich**, jeweils **14 Dateien / 219 Tests** (183 Bestand + 36 neu). Keine it.fails-/skip-Fälle nötig. Keine echte Uhr oder zufällige Item-Auslosung in den neuen Tests; alle veränderten Streckenreferenzen werden wiederhergestellt. Reale Netze, Browser/GPU, subjektives Fahrgefühl und vollständiger Zustandsraum bleiben **ungeprüft**.
+
+## C-008 · Prüfung begonnen
+
+Basis origin/main 73cc9049e9d769c0cc273788290947f9afd9199d, Protokoll 10. Unabhängige Untersuchung von Flugphysik, Netzgrenzen, Rücksetzen, Items, KI und Rundenfortschritt. Nur Bericht koordination/codex/berichte/C-008.md; Spielcode unverändert. Ergebnisse noch offen.
 
 ## Weiterer Aufgabenabruf
 
