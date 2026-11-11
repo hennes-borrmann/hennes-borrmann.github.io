@@ -95,14 +95,15 @@ export const RIFF: TrackDef = {
   ],
   // Blasenschlote: reihum aktiv; darüber hängen Schubringe
   bubbles: [
-    { at: 10.4, lat: -3.2, period: 5, phase: 0 },
-    { at: 10.4, lat: 3.2, period: 5, phase: 2.5 },
+    { at: 10.4, lat: -4, period: 5, phase: 0 },
+    { at: 10.4, lat: 4, period: 5, phase: 2.5 },
     { at: 24.9, lat: 0, period: 4.4, phase: 1 },
   ],
   rings: [
-    { at: 10.76, lat: -3.2, up: 3.6 },
-    { at: 10.76, lat: 3.2, up: 3.6 },
-    { at: 25.26, lat: 0, up: 3.6 },
+    // (nebeneinander, ohne sich zu überdecken; die Mitte der Bahn bleibt für alle frei, die nicht hinauf wollen)
+    { at: 10.76, lat: -4, up: 4.1 },
+    { at: 10.76, lat: 4, up: 4.1 },
+    { at: 25.26, lat: 0, up: 4.1 },
   ],
   pads: [
     { at: 1.3, lat: 0 },

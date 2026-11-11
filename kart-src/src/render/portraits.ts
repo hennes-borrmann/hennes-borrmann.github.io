@@ -45,6 +45,7 @@ const REST: KartPose = {
   tow: false,
   glide: false,
   dive: false,
+  space: false,
 };
 
 interface Stage {

@@ -82,6 +82,11 @@ const LEVEL: Record<SfxName, number> = {
   surface: 3,
   bubbles: 2.6,
   blubb: 1.2,
+  avalanche: 2.4,
+  snow: 1.4,
+  icicle: 2.2,
+  launch: 2.6,
+  meteor: 3,
 };
 
 interface ToneOpts {
@@ -534,6 +539,22 @@ export class SfxPlayer {
           .tone('sine', 700, 1150, 0.05, 0.16, { at: 0.3, attack: 0.004 })
           .tone('sine', 900, 1350, 0.03, 0.07, { at: 0.345, attack: 0.003 })
           .tone('sine', 1100, 1600, 0.03, 0.05, { at: 0.375, attack: 0.003 });
+        break;
+      // --- Eis und Mond (vorläufig, wird ausgearbeitet) ---
+      case 'avalanche':
+        v.noise(180, 90, 1.8, 0.4, { type: 'lowpass', brown: true, attack: 0.5 }).noise(1400, 700, 1.6, 0.12, { q: 0.6, attack: 0.6 });
+        break;
+      case 'snow':
+        v.noise(300, 160, 0.4, 0.22, { type: 'lowpass', brown: true, attack: 0.08 });
+        break;
+      case 'icicle':
+        v.noise(5200, 3000, 0.12, 0.2, { q: 2, attack: 0.004 }).tone('triangle', 1900, 1500, 0.2, 0.1);
+        break;
+      case 'launch':
+        v.tone('square', 90, 60, 0.08, 0.2).tone('triangle', 260, 880, 0.4, 0.18, { at: 0.03 }).noise(2400, 900, 0.3, 0.12, { q: 0.8 });
+        break;
+      case 'meteor':
+        v.tone('sine', 900, 300, 0.25, 0.1).tone('sine', 110, 40, 0.5, 0.5, { at: 0.22 }).noise(600, 150, 0.5, 0.35, { type: 'lowpass', brown: true, at: 0.22 });
         break;
       // --- Fliegen ---
       case 'wings':

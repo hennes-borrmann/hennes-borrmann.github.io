@@ -25,7 +25,23 @@ import {
   turboStage,
   lavaAt,
 } from '../game/sim';
-import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, GLIDE_CEILING, GLIDE_FALL, PULSE_BUBBLE, PULSE_PRESS, PULSE_VENT, WATER_FROM, pulseCycle, tideLevel, vehicleAt } from '../game/mechanics';
+import {
+  DRAFT_FULL,
+  DRAFT_PULL_FROM,
+  FLOOD_FROM,
+  GLIDE_CEILING,
+  GLIDE_FALL,
+  PULSE_AVALANCHE,
+  PULSE_BUBBLE,
+  PULSE_ICICLE,
+  PULSE_METEOR,
+  PULSE_PRESS,
+  PULSE_VENT,
+  WATER_FROM,
+  pulseCycle,
+  tideLevel,
+  vehicleAt,
+} from '../game/mechanics';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
@@ -98,7 +114,14 @@ export interface SceneEvent {
     | 'dive'
     | 'surface'
     | 'bubbles'
-    | 'blubb';
+    | 'blubb'
+    /** Eis: eine Lawine geht nieder (slot −1), das eigene Kart steckt darin (wiederholt), ein Eiszapfen schlägt ein (slot −1). */
+    | 'avalanche'
+    | 'snow'
+    | 'icicle'
+    /** Mond: von einer Sprungplatte hochgeschleudert, ein Meteorit schlägt ein (slot −1). */
+    | 'launch'
+    | 'meteor';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -154,6 +177,9 @@ interface KartView {
   /** Unter Wasser im letzten Bild, über einem blasenden Schlot im letzten Bild. */
   dive: boolean;
   blown: boolean;
+  /** In einer Lawine im letzten Bild; Pause bis zur nächsten Meldung. */
+  snowed: boolean;
+  snowWait: number;
   roulette: number;
   item: number;
   flags: number;
@@ -471,6 +497,7 @@ export class RaceScene {
         tow: false,
         glide: false,
         dive: false,
+        space: false,
       },
       seen: true,
       fresh: true,
@@ -493,6 +520,8 @@ export class RaceScene {
       windWait: 0,
       dive: false,
       blown: false,
+      snowed: false,
+      snowWait: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -550,7 +579,15 @@ export class RaceScene {
             this.emitAt('bubbles', p.x, p.y, p.z);
             continue;
           }
-          if (p.kind > PULSE_BUBBLE) continue;
+          if (p.kind > PULSE_BUBBLE) {
+            // Lawine, Eiszapfen, Meteorit: ortsfest zu hören; Lawine und Meteorit lassen das Bild beben.
+            this.emitAt(p.kind === PULSE_AVALANCHE ? 'avalanche' : p.kind === PULSE_ICICLE ? 'icicle' : 'meteor', p.x, p.y, p.z);
+            if (me && p.kind !== PULSE_ICICLE) {
+              const d = Math.hypot(me.x - p.x, me.z - p.z);
+              if (d < 45) this.shake = Math.max(this.shake, (p.kind === PULSE_METEOR ? 0.6 : 0.35) * (1 - d / 45));
+            }
+            continue;
+          }
           const vent = p.kind === PULSE_VENT;
           this.emitAt(vent ? 'geyser' : p.kind === PULSE_PRESS ? 'press' : 'bomb', p.x, p.y, p.z);
           if (p.kind === PULSE_PRESS) this.burst(p.x, p.y + 0.2, p.z, 10, 7, 0xbfb8ae, false, 0.7, 0.5, 1);
@@ -682,6 +719,44 @@ export class RaceScene {
         const dx = e.x - p.x;
         const dz = e.z - p.z;
         if (dx * dx + dz * dz < (p.radius + 0.6) * (p.radius + 0.6) && e.y - p.y < 5.5 && pulseCycle(p, this.mechTime) < p.on) blown = true;
+      }
+    }
+    // Eis: steckt das Kart in einer laufenden Lawine?
+    let snowed = false;
+    if (!air && e.respawn === 0) {
+      for (const p of this.track.pulses) {
+        if (p.kind !== PULSE_AVALANCHE || pulseCycle(p, this.mechTime) >= p.on || Math.abs(e.y - p.y) > 3) continue;
+        const along = (e.x - p.x) * this.track.tx[p.seg] + (e.z - p.z) * this.track.tz[p.seg];
+        const side = (e.x - p.x) * rightX(this.track, p.seg) + (e.z - p.z) * rightZ(this.track, p.seg);
+        if (Math.abs(along) < p.radius && Math.abs(side) < this.track.wh[p.seg] + 4) snowed = true;
+      }
+    }
+    if (snowed) {
+      // Schnee stiebt um das Kart; das eigene meldet sich regelmäßig (Wummern, Rütteln).
+      if (Math.random() < dt * 40) this.fx.puff(e.x + (Math.random() - 0.5) * 2.4, e.y + 0.3 + Math.random() * 1.2, e.z + (Math.random() - 0.5) * 2.4, (Math.random() - 0.5) * 4, 1 + Math.random() * 3, (Math.random() - 0.5) * 4, 0.6, 0.35 + Math.random() * 0.4, 0xffffff, 1.2, 3);
+      k.snowWait -= dt;
+      if (k.snowWait <= 0) {
+        k.snowWait = 0.3;
+        if (local) {
+          this.emit('snow', k, true);
+          this.shake = Math.max(this.shake, 0.22);
+        }
+      }
+      if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
+    } else k.snowWait = 0;
+    k.snowed = snowed;
+    // Mond: von einer Sprungplatte hochgeschleudert? (Abheben mit viel Steigen dicht hinter einer Platte)
+    if (!k.fresh && air && !wasAir && e.vy > 6 && this.track.launchers.length > 0) {
+      for (const l of this.track.launchers) {
+        const d = Math.hypot(e.x - this.track.px[l.seg], e.z - this.track.pz[l.seg]);
+        if (d < 14 + this.track.wh[l.seg]) {
+          this.pop('HUI!', e, 'warm', 3.4);
+          this.burst(e.x, e.y + 0.2, e.z, 12, 8, 0xff8a2a, true, 0.5, 0.5, 4);
+          k.visual.squash(-0.9);
+          this.emit('launch', k, local);
+          if (local) this.shake = Math.max(this.shake, 0.3);
+          break;
+        }
       }
     }
     if (!k.fresh) {
@@ -951,6 +1026,7 @@ export class RaceScene {
       pose.tow = e.tow > 0;
       pose.glide = (e.flags & FLAG_GLIDE) !== 0 && e.respawn === 0;
       pose.dive = (e.flags & FLAG_DIVE) !== 0 && e.respawn === 0;
+      pose.space = this.track.gravity < 1;
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
 
       // Hören: Entfernung und Richtung zur Kamera
@@ -1139,8 +1215,13 @@ export class RaceScene {
     }
     if (e.boost > 0 && Math.random() < 90 * budget * dt) {
       const ex = (Math.random() < 0.5 ? this.v1.copy(A.exhaustL) : this.v1.copy(A.exhaustR)).applyMatrix4(root.matrixWorld);
-      this.color.set(Math.random() < 0.5 ? 0xff8a2a : 0xffd23f);
-      this.sparks.emit(ex.x, ex.y, ex.z, e.vx * 0.55 + (Math.random() - 0.5) * 1.5, Math.random() * 1.2, e.vz * 0.55 + (Math.random() - 0.5) * 1.5, 0.16, 0.3, this.color, -1.2, 0, 1);
+      if (dive) {
+        // Unter Wasser sprüht kein Feuer: der Schub wirbelt Blasen auf.
+        this.fx.puff(ex.x, ex.y, ex.z, e.vx * 0.3 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.6, e.vz * 0.3 + (Math.random() - 0.5) * 2, 0.5 + Math.random() * 0.3, 0.12 + Math.random() * 0.16, 0xe8fbff, 0, -2.5);
+      } else {
+        this.color.set(Math.random() < 0.5 ? 0xff8a2a : 0xffd23f);
+        this.sparks.emit(ex.x, ex.y, ex.z, e.vx * 0.55 + (Math.random() - 0.5) * 1.5, Math.random() * 1.2, e.vz * 0.55 + (Math.random() - 0.5) * 1.5, 0.16, 0.3, this.color, -1.2, 0, 1);
+      }
     }
     if (e.stall > 0 && Math.random() < 14 * dt) {
       this.color.set(0x4a4654);
