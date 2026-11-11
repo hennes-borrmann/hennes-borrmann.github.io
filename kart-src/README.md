@@ -180,13 +180,14 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | `?laps=1` | Rundenzahl überschreiben, geht der Auswahl in der Lobby vor (zählt beim Host) |
 | `?track=2` / `?ai=0` | Strecke (ab 0 gezählt) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
 | `?alle=1` | auch Strecken anbieten, die noch in Arbeit sind (fahrbar, aber ohne eigene Welt und Ton) |
-
-Dazu gibt es die eigenständige Seite `grafiktest.html` (an die Adresse des Spiels anhängen): Sie probiert aus, mit welchen Einstellungen der Browser einen WebGL-Kontext hergibt, und zeigt das Ergebnis samt Gerätedaten als Tabelle – gedacht für den Fall, dass auf einem Gerät das 3D-Bild fehlt.
 | `?q=low` | Grafik: `low`, `medium`, `high`, `auto` |
 | `?mute=1` | ohne Ton starten |
 | `?auto=1` | das eigene Kart fährt von selbst – zum Ausprobieren ohne Controller |
 | `?signal=host:port` | eigener PeerJS-Server |
 | `?peerlog=3` | ausführliches Verbindungsprotokoll in der Browser-Konsole |
+| `?aufbau=behutsam` | das erste Bild einer Strecke Teil für Teil vorbereiten und festhalten, bei welchem Teil der Browser die 3D-Grafik beendet; beim nächsten Laden wird es ausgelassen und genannt (Suche nach Grafikfehlern auf einzelnen Geräten) |
+
+Dazu gibt es die eigenständige Seite `grafiktest.html` (an die Adresse des Spiels anhängen): Sie probiert aus, mit welchen Einstellungen der Browser einen WebGL-Kontext hergibt, und zeigt das Ergebnis samt Gerätedaten als Tabelle – gedacht für den Fall, dass auf einem Gerät das 3D-Bild fehlt.
 
 Die Schalter für Netz, Grafik und Ton wandern automatisch in den QR-Code und den Einladungslink.
 
