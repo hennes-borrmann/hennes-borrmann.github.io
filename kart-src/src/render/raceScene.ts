@@ -215,7 +215,8 @@ function wrapAngle(a: number): number {
 
 /**
  * Legt den WebGL-Renderer an. Gibt der Browser mit den Wunsch-Einstellungen keinen Grafikkontext her
- * (gesehen auf einem iPad), wird es mit sparsameren versucht. Scheitert alles, nennt der Fehler jeden Versuch.
+ * (gesehen auf einem iPad), wird es mit sparsameren versucht – zuletzt mit einem Kontext, den der Browser ganz
+ * nach seinen eigenen Vorgaben anlegt. Scheitert alles, nennt der Fehler jeden Versuch und die Begründung des Browsers.
  */
 function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
   const tries: [string, THREE.WebGLRendererParameters][] = [
@@ -224,14 +225,33 @@ function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
     ['sparsam', { canvas, antialias: false, stencil: false, powerPreference: 'low-power' }],
   ];
   const errors: string[] = [];
-  for (const [name, params] of tries) {
-    try {
-      return new THREE.WebGLRenderer(params);
-    } catch (err) {
-      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+  // Der Browser nennt seinen Grund in einem eigenen Ereignis.
+  let reason = '';
+  const onError = (e: Event): void => {
+    const msg = (e as WebGLContextEvent).statusMessage;
+    if (msg) reason = msg;
+  };
+  canvas.addEventListener('webglcontextcreationerror', onError);
+  try {
+    for (const [name, params] of tries) {
+      try {
+        return new THREE.WebGLRenderer(params);
+      } catch (err) {
+        errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+    // Letzter Versuch: den Kontext ohne jede Vorgabe selbst holen und übergeben.
+    try {
+      const context = canvas.getContext('webgl2');
+      if (context) return new THREE.WebGLRenderer({ canvas, context });
+      errors.push('Vorgabe des Browsers: kein Kontext');
+    } catch (err) {
+      errors.push(`Vorgabe des Browsers: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } finally {
+    canvas.removeEventListener('webglcontextcreationerror', onError);
   }
-  throw new Error(errors.join(' · '));
+  throw new Error(errors.join(' · ') + (reason ? ` · Begründung des Browsers: ${reason}` : ''));
 }
 
 function labelSprite(name: string, color: string): THREE.Sprite {
