@@ -43,6 +43,7 @@ import {
   tideLevel,
   vehicleAt,
 } from '../game/mechanics';
+import { ALL_AT_ONCE, clearStep, isKnownGood, markGood, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
@@ -271,6 +272,35 @@ function createRenderer(first: HTMLCanvasElement): THREE.WebGLRenderer {
 /** Ein Bildpunkt für die Stichprobe in checkFrame. */
 const PROBE = new Uint8Array(4);
 
+/** Ebene, auf der der behutsame Aufbau die Teile einzeln zeichnet. */
+const WARM_LAYER = 30;
+/** Sichtbarkeit der Kette vom Teil bis zur Wurzel, zum Zurücksetzen. */
+const WARM_KEEP: boolean[] = [];
+
+/**
+ * Alle zeichenbaren Teile einer Szene mit einem Namen, der zwischen zwei Seitenaufrufen gleich bleibt:
+ * Pfad der benannten Gruppen · Art · Material · Zahl der Ecken (bei Gleichstand durchgezählt).
+ */
+function labelRenderables(root: THREE.Object3D): { obj: THREE.Object3D; label: string }[] {
+  const out: { obj: THREE.Object3D; label: string }[] = [];
+  const counts = new Map<string, number>();
+  const walk = (o: THREE.Object3D, path: string): void => {
+    const here = o.name ? (path ? `${path}/${o.name}` : o.name) : path;
+    const r = o as THREE.Mesh & { isPoints?: boolean; isLine?: boolean; isSprite?: boolean };
+    if (r.isMesh || r.isPoints || r.isLine || r.isSprite) {
+      const mat = (Array.isArray(r.material) ? r.material[0] : r.material) as THREE.Material | undefined;
+      const verts = r.geometry?.attributes?.position?.count ?? 0;
+      const kind = `${here || 'ohne Namen'} · ${o.type} · ${mat?.name || mat?.type || '?'} · ${verts}`;
+      const n = (counts.get(kind) ?? 0) + 1;
+      counts.set(kind, n);
+      out.push({ obj: o, label: n > 1 ? `${kind} (${n})` : kind });
+    }
+    for (const c of o.children) walk(c, here);
+  };
+  walk(root, '');
+  return out;
+}
+
 function labelSprite(name: string, color: string): THREE.Sprite {
   const c = document.createElement('canvas');
   c.width = 256;
@@ -310,7 +340,28 @@ export class RaceScene {
    * Zustand der Grafik, für die Meldung auf dem Bildschirm, wenn der Browser nicht (mehr) zeichnet:
    * Kontextverluste (und wann der erste kam), abgelehnte Grafikprogramme, GL-Fehler und ob die ersten Bilder schwarz blieben.
    */
-  readonly gfx = { lost: 0, restored: 0, isLost: false, lostWhen: '', frames: 0, shaderErrors: [] as string[], glErrors: [] as string[], checked: 0, black: 0 };
+  readonly gfx = {
+    lost: 0,
+    restored: 0,
+    isLost: false,
+    lostWhen: '',
+    frames: 0,
+    shaderErrors: [] as string[],
+    glErrors: [] as string[],
+    checked: 0,
+    black: 0,
+    /** Behutsamer Aufbau: Anteil der vorbereiteten Teile (0 … 1), −1 = läuft nicht. */
+    warm: -1,
+    /** Teile, die auf diesem Gerät ausgelassen werden, weil sie die Grafik beendet haben. */
+    skipped: [] as string[],
+  };
+  /** Eine neue Welt steht: ihr erstes Bild wird Teil für Teil vorbereitet (siehe gfxGuard.ts). */
+  private stagedPending = false;
+  private warmList: { obj: THREE.Object3D; label: string }[] | null = null;
+  private warmIndex = 0;
+  private warmWhere = '';
+  /** Schneller Weg: so viele Bilder lang bleibt die Marke „alles auf einmal“ stehen. */
+  private fastGuard = 0;
   /** Was die Szene gerade tut – steht in der Meldung, falls der Kontext dabei verloren geht. */
   private phase = 'Aufbau';
 
@@ -389,6 +440,11 @@ export class RaceScene {
     // Verliert der Browser den Grafikkontext (Absturz seines Grafikprozesses, Speichernot, App im Hintergrund),
     // bleibt das Bild schwarz, ohne dass ein Fehler fällt. Mitschreiben, damit es gemeldet werden kann.
     canvas.addEventListener('webglcontextlost', () => {
+      // Auf dem schnellen Weg gestorben: diese Strecke gilt hier nicht mehr als unbedenklich.
+      if (this.fastGuard > 0) {
+        this.fastGuard = 0;
+        readCrash();
+      }
       this.gfx.lost++;
       this.gfx.isLost = true;
       if (!this.gfx.lostWhen) this.gfx.lostWhen = `${this.phase}, nach ${this.gfx.frames} Bildern`;
@@ -410,6 +466,14 @@ export class RaceScene {
     this.sparks = new Particles(Math.round(cap * 0.7), true);
     this.skids = new SkidMarks(520);
     this.scene.add(this.camera, this.puffs.points, this.sparks.points, this.skids.mesh, this.pops.group, this.shadows.mesh, this.bolts.group);
+    // Namen: unter ihnen meldet der behutsame Aufbau, bei welchem Teil die Grafik stirbt.
+    this.puffs.points.name = 'Staub';
+    this.sparks.points.name = 'Funken';
+    this.skids.mesh.name = 'Bremsspuren';
+    this.pops.group.name = 'Comic-Wörter';
+    this.shadows.mesh.name = 'Schatten';
+    this.bolts.group.name = 'Blitze';
+    this.speedLines.mesh.name = 'Tempostriche';
     const c = this.color;
     this.fx = {
       spark: (x, y, z, vx, vy, vz, life, size, color, gravity = 9) => this.sparks.emit(x, y, z, vx, vy, vz, life, size, c.set(color), -size * 0.8, gravity, 1),
@@ -451,6 +515,10 @@ export class RaceScene {
     this.mechanics = buildMechanics(TRACK, this.level > 0, this.world);
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
+    this.world.group.name = 'Welt';
+    this.things.group.name = 'Dinge';
+    this.mechanics.forEach((m, i) => (m.group.name = m.group.name || `Mechanik ${i + 1}`));
+    this.stagedPending = true;
     this.scene.fog = this.world.fog;
     this.scene.background = this.world.background;
     this.camReady = false;
@@ -576,6 +644,7 @@ export class RaceScene {
       this.karts.delete(slot);
     }
     const visual = new KartVisual(char, LEVELS[this.level].kart, slot);
+    visual.root.name = `Kart ${slot + 1}`;
     visual.root.rotation.order = 'YXZ';
     this.scene.add(visual.root);
     this.needsCompile = true;
@@ -1236,6 +1305,12 @@ export class RaceScene {
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
     this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx);
     if (this.needsCompile) {
+      // Neue Welt: ihr erstes Bild Teil für Teil vorbereiten. Solange das läuft, wird nichts gezeigt.
+      if (this.stagedPending) this.beginWarmup();
+      if (this.warmList) {
+        this.stepWarmup();
+        if (this.warmList) return;
+      }
       // Alle Shader jetzt übersetzen – auch die der noch unsichtbaren Effekte (Flammen,
       // Schutzring, Tempostriche). Sonst ruckelt es beim ersten Schub oder Treffer.
       this.needsCompile = false;
@@ -1247,8 +1322,111 @@ export class RaceScene {
     this.stats.calls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
     this.gfx.frames++;
+    // Schneller Weg: hat das Bild eine Weile gehalten, ist die Marke „alles auf einmal“ erledigt.
+    if (this.fastGuard > 0 && --this.fastGuard === 0 && !this.gfx.isLost) clearStep();
     // Stichprobe in den ersten Sekunden: meldet der Grafikkontext Fehler, bleibt das Bild schwarz?
     if (this.gfx.checked < 12 && this.gfx.frames % 10 === 5) this.checkFrame();
+  }
+
+  /**
+   * Behutsamer Aufbau, Beginn. Kennt das Gerät diese Strecke und Stufe schon als unbedenklich, geht es den
+   * schnellen Weg (alles auf einmal, mit Marke). Sonst entsteht die Liste aller zeichenbaren Teile; was hier
+   * schon einmal die Grafik beendet hat, wird aus der Szene genommen.
+   */
+  private beginWarmup(): void {
+    this.stagedPending = false;
+    this.warmWhere = `${this.track.def.name}, Stufe ${this.level}`;
+    this.gfx.skipped = skipList();
+    const all = labelRenderables(this.scene);
+    const skip = new Set(this.gfx.skipped);
+    if (skip.size > 0) for (const e of all) if (skip.has(e.label)) e.obj.removeFromParent();
+    if (isKnownGood(this.warmWhere)) {
+      markStep(ALL_AT_ONCE, '', this.warmWhere);
+      this.fastGuard = 150;
+      return;
+    }
+    this.warmList = all.filter((e) => !skip.has(e.label));
+    this.warmIndex = 0;
+    this.gfx.warm = 0;
+    this.canvas.style.visibility = 'hidden';
+    // Lichter wirken auch auf der Ebene, auf der die Teile einzeln gezeichnet werden.
+    this.scene.traverse((o) => {
+      if ((o as THREE.Light).isLight) o.layers.enable(WARM_LAYER);
+    });
+  }
+
+  /**
+   * Behutsamer Aufbau, ein Bildtakt: zeichnet so viele Teile einzeln, wie in ein paar Millisekunden passen. Vor
+   * jedem Teil wird festgehalten, welches an der Reihe ist; danach erzwingt ein ausgelesener Bildpunkt, dass der
+   * Browser wirklich gezeichnet hat. Geht der Kontext dabei verloren, bleibt die Marke stehen.
+   */
+  private stepWarmup(): void {
+    const list = this.warmList;
+    if (!list) return;
+    const gl = this.renderer.getContext();
+    const mask = this.camera.layers.mask;
+    const started = performance.now();
+    this.camera.layers.set(WARM_LAYER);
+    let lost = gl.isContextLost();
+    while (!lost && this.warmIndex < list.length && performance.now() - started < 9) {
+      const e = list[this.warmIndex];
+      markStep(e.label, this.warmIndex > 0 ? list[this.warmIndex - 1].label : '', this.warmWhere);
+      this.phase = `beim Vorbereiten von „${e.label}“ (Teil ${this.warmIndex + 1} von ${list.length})`;
+      // Das Teil und alles über ihm sichtbar machen; nichts wegen der Blickrichtung auslassen.
+      let n = 0;
+      for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) {
+        WARM_KEEP[n++] = o.visible;
+        o.visible = true;
+      }
+      const culled = e.obj.frustumCulled;
+      e.obj.frustumCulled = false;
+      e.obj.layers.enable(WARM_LAYER);
+      try {
+        this.renderer.render(this.scene, this.camera);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, PROBE);
+      } catch (err) {
+        console.error(err);
+      }
+      e.obj.layers.disable(WARM_LAYER);
+      e.obj.frustumCulled = culled;
+      n = 0;
+      for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) o.visible = WARM_KEEP[n++];
+      lost = gl.isContextLost();
+      if (!lost) this.warmIndex++;
+    }
+    this.camera.layers.mask = mask;
+    this.gfx.warm = list.length > 0 ? this.warmIndex / list.length : 1;
+    if (lost) {
+      // Gleich festhalten, welches Teil es war (die Seite lebt ja noch): ein Neuaufbau lässt es dann schon aus.
+      // Stirbt stattdessen der ganze Tab, steht die Marke noch im Speicher und wird beim nächsten Laden gelesen.
+      readCrash();
+      this.gfx.skipped = skipList();
+      this.gfx.isLost = true;
+      if (!this.gfx.lostWhen) this.gfx.lostWhen = this.phase;
+      this.warmList = null;
+      this.gfx.warm = -1;
+      this.needsCompile = false;
+      return;
+    }
+    if (this.warmIndex >= list.length) {
+      clearStep();
+      markGood(this.warmWhere);
+      this.warmList = null;
+      this.gfx.warm = -1;
+      this.canvas.style.visibility = '';
+    }
+  }
+
+  /** Das Rennen wird verlassen oder die Seite geschlossen: eine stehende Marke wäre kein Absturz. */
+  leave(): void {
+    if (!this.gfx.isLost) clearStep();
+    this.fastGuard = 0;
+    if (this.warmList) {
+      this.warmList = null;
+      this.gfx.warm = -1;
+      this.canvas.style.visibility = '';
+      this.stagedPending = true;
+    }
   }
 
   /** Prüft das eben gezeichnete Bild: GL-Fehler und fünf Bildpunkte (alle schwarz = es wurde nichts gezeichnet). */
