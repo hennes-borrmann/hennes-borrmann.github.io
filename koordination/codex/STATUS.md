@@ -1,4 +1,4 @@
-Zuletzt aktualisiert: 2026-11-11 01:16 UTC
+Zuletzt aktualisiert: 2026-11-11 01:33 UTC
 
 Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 01:15 UTC
 
@@ -9,7 +9,7 @@ Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 01:15 UTC
 | C-003 | fertig | codex/c-003-turn | 4a2e344e0c469bec49c121dff7c7c88f88bde674 | npm ci OK; tsc OK / 102 Tests OK; node --check OK; 24 lokale Worker-Prüfungen OK | Von Claude als Vorlage abgenommen. CORS, 30-Minuten-TTL, IP-Drosselung, Fehlerbehandlung und deutsche Anleitung; nicht ausgerollt. |
 | C-004 | fertig | codex/c-004-grenztests | ff8eae3ea83610d5c67874420ee6bd8e266a0570 | npm ci OK; tsc und 150 Tests dreimal nacheinander OK (12 Dateien, 23 neue Tests) | Von Claude abgenommen und als ac0189b übernommen. Eigene Prüfung auf Basis ce3e36e, Protokoll 8. |
 | C-005 | fertig | codex/koordination | 084785f28db47e1a7ef0dde154aa5b8120cbacf9 | npm ci OK; tsc OK / 145 Tests OK (12 Dateien); 13 Wegwerfproben OK | main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Von Claude abgenommen; Korrekturen laut Auftrag in a2fc907. Eigene Nachprüfung noch ungeprüft; nur Bericht. |
-| C-006 | in Arbeit | codex/koordination | noch keiner | main deac72f und Protokoll 9 bestätigt; Messungen offen | KI-Linie hinter Werkshof-Brücke; nur Bericht, Korrekturversuche ausschließlich in Wegwerfkopie. |
+| C-006 | fertig | codex/koordination | b7ec9a791670039afdd6fe47b6de8f21354551a3 | npm ci OK; tsc OK / 145 Tests OK; 128 Kombinationen je Basis/3 Varianten vollständig gemessen | Drift wird trotz entgegengesetzter Ziellenkung gehalten; Bericht mit 2.048 ausgewerteten Runden. Keine der drei Varianten erfüllt das Kriterium ohne Verschlechterung. Spielcode unverändert. |
 | C-007 | angenommen | codex/c-007-mechaniktests (noch nicht angelegt) | noch keiner | Startbedingung nicht erfüllt: main weiterhin Protokoll 9 | Nach C-006 beginnen, sobald main Protokoll 10 enthält; noch keine Änderungen. |
 
 ## C-002 · Stückbeschreibungen
@@ -65,13 +65,21 @@ Browserdarstellung/GPU, Ton, subjektives Fahrgefühl, echte Geräte/Netze und vo
 
 Claude hat beide Aufgaben abgenommen: C-004 als ac0189b übernommen (laut Claude alle 23 Tests auch auf neuerem Stand erfolgreich), C-005-Funde in a2fc907 behandelt. Item-Reihenfolge und von Bändern/Wasser unbeeinflusste Items bleiben ausdrücklich gewollt. Eigene C-004-Prüfungen bleiben auf Protokoll 8 bezogen; die neuen Korrekturen sind durch Codex noch nicht nachgeprüft. Neue Folgeaufgabe C-007 wartet auf die Veröffentlichung mit Protokoll 10.
 
-## C-006 · Untersuchung begonnen
+## C-006 · Prüfbericht abgeliefert
 
-Basis origin/main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Auftrag: Eintrittstempo und Linie hinter der Werkshof-Brücke erklären, alle Strecken/Wegkombinationen/Figuren auf mittlerer und starker KI messen, zwei bis drei kleine Korrekturen in einer Wegwerfkopie vergleichen und ausschließlich einen Bericht liefern. Ergebnisse noch ungeprüft; kein Spielcode wird verändert.
+Basis origin/main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Bericht koordination/codex/berichte/C-006.md, Commit b7ec9a791670039afdd6fe47b6de8f21354551a3. Nur Bericht, keine Änderung am Spielcode.
+
+- Ursache mit Tick-Traces reproduziert: Figuren 1/3 setzen nach kurzer Flugphase bei Abschnitt 537 erneut zum Linksdrift an; Figuren 0/2 landen später und beginnen erst bei 584 wieder zu driften. Ab 565 bzw. 562 verlangt die Ziellenkung bereits Rechtskorrektur, die Drift-Halteregel hält trotzdem links. Die Physik kann dann selbst mit voller Gegenlenkung nur links drehen; Steilkurvenhaftung 1.48 verstärkt dies. Erster Gras-Schritt bei 590 bzw. 587, Figur 3 trifft die Bande bei 593. Keine falschen Ast-Zielpunkte in der untersuchten Zone, kein Bremsbefehl zwischen 520 und 590.
+- Vollständige Matrix: vier Strecken, vier Wegmasken, zwei KI-Stufen, vier Figuren, KI-Slot 0 und skill 1. Basis und drei Varianten jeweils mit Aufwärmrunde plus vier ausgewerteten Runden: insgesamt 2.048 Messrunden. Alle beendet, keine Stürze. Auch auf der Glut-Lavahöhlenabzweigung tritt das zu lange Halten auf; Klippe/Nacht ohne Gras in der Basis. Rundenabhängigkeit derselben Figur ebenfalls reproduziert.
+- Variante A (Steilkurvenfaktor in Lenknormierung) verschlechtert neun Kombinationen beim Gras und erzeugt neue Ausfahrten. B (bei entgegengesetzter Ziellenkung lösen und normal lenken) beseitigt alle gemessenen Grasfahrten, aber 24 Kombinationen werden langsamer, davon 13 um mehr als 0.050 s; größter Verlust 0.458 s. C (B nur bei wirksamer Steilkurve) repariert den Werkshof, lässt Glut unverändert und verlangsamt zehn Kombinationen bis 0.279 s. Deshalb keine unveränderte Übernahme empfohlen; kein sauberer Gesamtfix unter dem vorgegebenen Kriterium nachgewiesen.
+- npm ci, npx tsc --noEmit und 12 Dateien / 145 Bestandstests erfolgreich. Messungen nur in Wegwerfkopie mit vorhandenen Abhängigkeiten; 79 kopierte Quelldateien gegen den Basis-Commit verglichen, abgesehen von Zeilenenden und ausdrücklich hinzugefügten Diagnosewerten unverändert. Berichtstabelle aus Messdaten erzeugt und auf vollständige Zuordnung der 128 Kombinationen je Variante geprüft.
+- Genau abgegrenzte Abweichung vom Auftrag: pro Runde gemessen 1.8375 s Gras für Figur 1 und 1.05 s/ein Bandenkontakt für Figur 3 auf Werkshof/Maske 0/stark. Die im Auftrag genannten ungefähr doppelten Gras-/Kontaktzahlen sind als Pro-Runde-Werte nicht reproduziert; ursprünglicher Zähler ungeprüft.
+
+Andere KI-Slots/Startplätze, mehr als vier ausgewertete Runden je Kombination, aktive Mechanik, Items, Mehrkart-Rennen, reale Geräte/Browser und Fahrgefühl **ungeprüft**. Varianten nur in Messläufen ausgeführt, nicht zusätzlich durch eine vollständige Typ-/Bestandstestsuite geprüft. Die nächste Aufgabe C-007 bleibt bis Protokoll 10 auf main vorgemerkt; letzter Abruf 01:15 UTC zeigt weiterhin Protokoll 9.
 
 ## Weiterer Aufgabenabruf
 
-Beim Aufgabenabruf am 2026-11-11 01:15 UTC nach git fetch origin alle vier Koordinationsdateien vollständig gelesen. Neue Abnahmen C-004/C-005 und Aufgaben C-006/C-007; kein STOPP. Claude-Stand d9e541aa218bf5927204a357c7aa7b0bacfb6fd0, main unverändert deac72f4aa71d1c964ddde34001f43627951d259. Der Zeitpunkt dieses Abrufs stammt von der hiesigen UTC-Uhr; Claudes Dateien tragen bereits die abweichende Datierung 01:40 UTC. C-001 bis C-005 fertig und abgenommen, C-006 in Arbeit, C-007 vorgemerkt.
+Beim Aufgabenabruf am 2026-11-11 01:15 UTC nach git fetch origin alle vier Koordinationsdateien vollständig gelesen. Neue Abnahmen C-004/C-005 und Aufgaben C-006/C-007; kein STOPP. Claude-Stand d9e541aa218bf5927204a357c7aa7b0bacfb6fd0, main unverändert deac72f4aa71d1c964ddde34001f43627951d259. Der Zeitpunkt dieses Abrufs stammt von der hiesigen UTC-Uhr; Claudes Dateien tragen bereits die abweichende Datierung 01:40 UTC. C-001 bis C-005 fertig und abgenommen, C-006 inzwischen als Bericht abgeliefert, C-007 vorgemerkt.
 
 Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 01:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
