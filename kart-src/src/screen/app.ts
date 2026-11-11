@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, planActive, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1150,6 +1150,21 @@ export class App {
       } else this.wrongWaySince = 0;
     } else this.wrongWaySince = 0;
     const names = new Map(this.drivers(state).map((d) => [d.slot, d.name]));
+    // Die Strecke verändert sich (ein Tor geht auf oder zu): drei Sekunden lang melden.
+    let trackNote: string | null = null;
+    let trackNoteBad = false;
+    if (race.phase === RACE_RUNNING && TRACK.gates.length > 0) {
+      const ticks = -race.untilGo * TICK_RATE;
+      for (const g of TRACK.gates) {
+        const shut = planActive(g.plan, ticks);
+        if (ticks < 180 || shut === planActive(g.plan, ticks - 180)) continue;
+        const note = shut ? g.noteShut : g.noteOpen;
+        if (note) {
+          trackNote = note;
+          trackNoteBad = shut;
+        }
+      }
+    }
 
     const count = this.ents.length;
     this.ui.renderRaceHud({
@@ -1170,8 +1185,8 @@ export class App {
         me: st.slot === view.localSlot,
         done: st.finished,
       })),
-      banner: wrongWay ? 'Falsch herum!' : threat > 0 ? 'Kreisel im Anflug!' : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
-      bannerTone: wrongWay || threat > 0 ? 'bad' : 'info',
+      banner: wrongWay ? 'Falsch herum!' : threat > 0 ? 'Kreisel im Anflug!' : trackNote ? trackNote : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
+      bannerTone: wrongWay || threat > 0 || (trackNote !== null && trackNoteBad) ? 'bad' : 'info',
       fps: this.showFps && this.scene ? this.scene.stats.fps : null,
       smoke: this.scene?.smoke ?? 0,
     });

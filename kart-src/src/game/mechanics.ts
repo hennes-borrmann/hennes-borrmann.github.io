@@ -491,6 +491,9 @@ export interface Gate {
   count: number;
   plan: Plan;
   warn: number;
+  /** Was die Anzeige meldet, wenn das Tor aufgeht bzw. zugeht ('' = nichts). */
+  noteOpen: string;
+  noteShut: string;
 }
 
 /** So lange vorher kündigt sich ein Bruch bzw. das Schließen eines Tors an (Ticks). */

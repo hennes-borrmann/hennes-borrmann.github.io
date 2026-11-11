@@ -59,6 +59,10 @@ export type SfxName =
   | 'meteor' // ein Meteorit schlägt ein (ortsfest): kurzes fallendes Heulen, ab 0,3 s dumpfer Einschlag, nachrieselndes Geröll (~1 s)
   | 'gust' // Sturmhafen: eine Böe setzt ein (ortsfest) – VORLÄUFIG
   | 'storm' // Sturmhafen: das eigene Kart steckt in der Böe (wird etwa alle 0,3 s aufgerufen) – VORLÄUFIG
+  | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest) – VORLÄUFIG
+  | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest) – VORLÄUFIG
+  | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
+  | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

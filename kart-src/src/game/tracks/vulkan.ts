@@ -115,8 +115,9 @@ export const VULKAN: TrackDef = {
     {
       from: 19.5,
       to: 24.6,
+      // erster Punkt: 40 m hinter der Gabelung, 14 m neben der Hauptstrecke
       points: [
-        [-76, 34, 25.4],
+        [-79.9, 27.9, 25.4],
         [-102, 42, 21.5],
         [-128, 36, 16.8],
         // letzter Punkt: 44 m vor der Einmündung, 13 m neben der Hauptstrecke – so läuft die Röhre flach ein
@@ -124,10 +125,11 @@ export const VULKAN: TrackDef = {
       ],
       roadHalf: 6.4,
       shoulder: 2,
-      widths: [[0.9, 4.2, 5.2, 0.8]],
-      surfaces: [[1.0, 4.0, 'gravel']],
-      tunnels: [[0.8, 4.3]],
-      gates: [{ opens: 50 }],
+      widths: [[1.2, 3.95, 5.2, 0.8]],
+      surfaces: [[1.3, 3.95, 'gravel']],
+      // die Röhre beginnt und endet erst dort, wo die Abzweigung frei neben der Hauptstrecke liegt
+      tunnels: [[1.35, 3.9]],
+      gates: [{ opens: 50, noteOpen: 'Die Lavaröhre ist frei!' }],
       boxRows: [2.6],
     },
     // b: die alte Hängebrücke quer über die Schlucht – schmal, ohne Geländer, und nach 84 Sekunden stürzt sie ein
@@ -146,7 +148,7 @@ export const VULKAN: TrackDef = {
       surfaces: [[1.0, 3.0, 'wood']],
       decks: [[1.05, 2.95]],
       open: [[1.1, 2.9, 0]],
-      gates: [{ closes: 84 }],
+      gates: [{ closes: 84, noteShut: 'Die Hängebrücke stürzt ein!' }],
       // Sie bricht von vorn nach hinten weg: wer beim Einsturz noch drauf ist, muss schneller sein als der Bruch.
       cracks: [
         { from: 1.1, to: 1.46, lat0: -7, lat1: 7, at: 84.5 },

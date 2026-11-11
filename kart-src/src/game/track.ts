@@ -153,7 +153,7 @@ export interface PathFeatures {
    * bis opens (Sekunden) und/oder ab closes (Sekunden). Mit every (Sekunden) wiederholt sich der Plan; dann
    * ist das Tor in [closes, opens) zu.
    */
-  gates?: { at?: number; opens?: number; closes?: number; every?: number }[];
+  gates?: { at?: number; opens?: number; closes?: number; every?: number; noteOpen?: string; noteShut?: string }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -1120,7 +1120,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         if (g.opens !== undefined) spans.push(-1e9, Math.round(g.opens * 60));
         if (g.closes !== undefined) spans.push(Math.round(g.closes * 60), Infinity);
       }
-      track.gates.push({ first, count, plan: { period, spans }, warn: GATE_WARN });
+      track.gates.push({ first, count, plan: { period, spans }, warn: GATE_WARN, noteOpen: g.noteOpen ?? '', noteShut: g.noteShut ?? '' });
     }
     for (const [from, to] of p.f.dives ?? []) spanU(p, from, to, (seg) => (track.deep[seg] = 1));
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));

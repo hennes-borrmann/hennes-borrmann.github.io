@@ -120,6 +120,11 @@ const LEVEL: Record<SfxName, number> = {
   // Sturmhafen (vorläufig)
   gust: 1.6,
   storm: 0.9,
+  // Vulkaninsel (vorläufig)
+  crumble: 1.2,
+  crack: 1.6,
+  collapse: 1.8,
+  drain: 1.6,
 };
 
 interface ToneOpts {
@@ -578,6 +583,9 @@ export class SfxPlayer {
           .tone('sine', 1100, 1600, 0.03, 0.05, { at: 0.375, attack: 0.003 });
         break;
       // --- Eis und Mond ---
+      // Vulkaninsel (vorläufig: bröckeln und einstürzen wie die Lawine)
+      case 'crumble':
+      case 'collapse':
       case 'avalanche': {
         // Lawine (läuft 140 Ticks ≈ 2,3 s): ein tiefes Grollen schwillt an und hält, darüber
         // rauscht der Schnee (breites Band, das langsam nach unten sinkt, und ein Hauch
@@ -680,6 +688,9 @@ export class SfxPlayer {
           .tone('sine', 377, 1508, 1.0, 0.04, { at: 0.12, attack: 0.25, sustain: 0.5, vibHz: 5.4, vibDepth: 0.02 })
           .tone('triangle', 500, 2000, 0.9, 0.025, { at: 0.16, attack: 0.3, sustain: 0.4 });
         break;
+      // Vulkaninsel (vorläufig: brechen und leerlaufen wie der Einschlag)
+      case 'crack':
+      case 'drain':
       case 'meteor': {
         // Meteorit: ein kurzes, fallendes Heulen (Sinus mit schnellem Flattern und ein
         // enges Rauschband, das mit hinabfährt – im Comic pfeift es auch ohne Luft), dann
