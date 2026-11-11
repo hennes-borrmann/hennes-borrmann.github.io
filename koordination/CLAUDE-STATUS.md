@@ -1,12 +1,12 @@
 # Stand Claude
 
-Zuletzt aktualisiert: 2026-11-11 10:50 UTC · geschrieben nur von Claude
+Zuletzt aktualisiert: 2026-11-11 19:50 UTC · geschrieben nur von Claude
 
 ## Woran gerade gearbeitet wird
 
 | Wer | Aufgabe | Bereich (für Codex gesperrt) |
 | --- | --- | --- |
-| Claude | Alle neun Schritte sind veröffentlicht. Offen: Funde aus C-009/C-010 einarbeiten, sobald Berichte vorliegen; Rückmeldungen von echten Geräten. | `kart-src/src/**`, `kart-src/tests/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
+| Claude | Turnier-Modus (3/5/10 Rennen, Auslosung der Strecke als durchlaufender Bilderstreifen, Sterne je Platz, Gesamtsieg) – Protokoll 13. Danach zehn weitere Strecken, siehe Plan. | `kart-src/src/**`, `kart-src/tests/**`, `kart-src/tools/**`, `kart-src/public/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
 
 ## Veröffentlicht
 
@@ -19,7 +19,21 @@ Zuletzt aktualisiert: 2026-11-11 10:50 UTC · geschrieben nur von Claude
 
 ## Plan
 
-Die Schritte 4 bis 9 sind veröffentlicht. Als Nächstes: Funde aus C-009/C-010 einarbeiten.
+Auftrag des Nutzers vom 2026-11-11 abends: Turnier-Modus und zehn weitere Strecken, jede mit eigener Mechanik; jede einzeln testen und veröffentlichen. Regeln: höchstens drei Agenten parallel; keine eigenen Shader mit Schleifen oder Uniform-Feldern (`tests/unit/shaderregeln.test.ts`), neue Darstellung möglichst nur mit Techniken, die der Werkshof schon nutzt (auf dem iPad des Nutzers bestätigt); keine Loopings.
+
+| Schritt | Inhalt | Stand |
+| --- | --- | --- |
+| T | Turnier-Modus | in Arbeit |
+| 10 | Sturmhafen – Wind (Böen, Windschatten hinter Containern), schwankende Pontons | offen |
+| 11 | Vulkaninsel im Ausbruch – die Fahrbahn bricht über das Rennen weg, Lava steigt, Lavatunnel für Nachzügler | offen |
+| 12 | Zeitriss-Ruine – die Strecke ändert sich jede Runde (Abzweigungen öffnen/schließen) | offen |
+| 13 | Gewitterkamm – Dunkelheit (Sicht über Nebel, kein neuer Shader), Blitze, Blitzableiter | offen |
+| 14 | Dschungel-Fluss – Flöße und Stämme, Strömung, Wasserfall-Sprung | offen |
+| 15 | Spiegelkabinett – Portale | offen |
+| 16 | Wüstenexpress – fahrender Zug, auf und neben den Waggons | offen |
+| 17 | Riesenkinderzimmer – Schrumpfen und Wachsen | offen |
+| 18 | Achterbahn-Rummel – Schienen mit Takt-Schub, Weichen, ohne Looping | offen |
+| 19 | Magnetwerk – Fahren an Wand und Decke (zuletzt) | offen |
 
 ## Für Codex frei
 

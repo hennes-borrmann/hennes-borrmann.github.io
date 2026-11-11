@@ -9,6 +9,7 @@ import { BUILD_ID } from '../build';
 import type { Link } from '../net/link';
 import {
   PROTOCOL_VERSION,
+  type CupState,
   type FxKind,
   type HostToScreen,
   type LobbyPlayer,
@@ -18,6 +19,7 @@ import {
   type ScreenToHost,
 } from '../net/protocol';
 import { MAX_PLAYERS } from '../game/sim';
+import { cleanCupRaces, cupOver, makeDraw, newCup, resetSlot, scoreRace } from './cup';
 
 /** In der Lobby wird ein getrennter Spieler nach dieser Zeit entfernt. */
 const LOBBY_GRACE_MS = 45_000;
@@ -55,6 +57,9 @@ export interface HostLobbySave {
   aiLevel?: number;
   track?: number;
   laps?: number;
+  cupRaces?: number;
+  /** Stand eines laufenden Turniers (ohne Auslosung – die beginnt nach dem Neuladen von vorn). */
+  cup?: CupState | null;
 }
 
 /** Gültige Figur 0..3; sonst der Rückfallwert (üblich: die Standardfigur des Platzes). */
@@ -81,6 +86,10 @@ export class HostLobby {
   track = 0;
   /** Rundenzahl des Rennens. */
   laps = DEFAULT_LAPS;
+  /** Einstellung: 0 = Einzelrennen, sonst die Zahl der Rennen eines Turniers. */
+  cupRaces = 0;
+  /** Das laufende (oder gerade beendete) Turnier. */
+  cup: CupState | null = null;
   readonly localSlot: number;
 
   /** Irgendetwas an der Lobby hat sich geändert (für die Anzeige). */
@@ -96,6 +105,9 @@ export class HostLobby {
   private readonly seats: (Seat | null)[] = new Array(MAX_PLAYERS).fill(null);
   private readonly timer: number;
   private closed = false;
+  private drawId = 0;
+  /** Im Turnier: Das laufende Rennen ist noch nicht gewertet. */
+  private cupRaceOpen = false;
 
   constructor(
     readonly code: string,
@@ -108,6 +120,8 @@ export class HostLobby {
       if (typeof saved.aiLevel === 'number') this.aiLevel = Math.max(0, Math.min(2, saved.aiLevel | 0));
       if (typeof saved.track === 'number') this.track = Math.max(0, saved.track | 0);
       if (typeof saved.laps === 'number') this.laps = cleanLaps(saved.laps);
+      this.cupRaces = cleanCupRaces(saved.cupRaces);
+      if (saved.cup && Array.isArray(saved.cup.stars) && cleanCupRaces(saved.cup.races) > 0) this.cup = { ...saved.cup, draw: null };
       // Nach einem Neuladen des Host-Bildschirms: Plätze wiederherstellen,
       // damit die anderen beim automatischen Wiederverbinden ihren Platz finden.
       for (const s of saved.seats) {
@@ -168,7 +182,82 @@ export class HostLobby {
         ping: s.isHost ? 0 : s.link ? Math.round(s.link.rtt) : -1,
       });
     }
-    return { code: this.code, phase: this.phase, players, bots: this.bots, aiLevel: this.aiLevel, track: this.track, laps: this.laps };
+    return {
+      code: this.code,
+      phase: this.phase,
+      players,
+      cupRaces: this.cupRaces,
+      cup: this.cup,
+      bots: this.bots,
+      aiLevel: this.aiLevel,
+      track: this.track,
+      laps: this.laps,
+    };
+  }
+
+  // --- Turnier -------------------------------------------------------------
+
+  /** Einzelrennen (0) oder Turnier über 3, 5 oder 10 Rennen – nur, solange keines läuft. */
+  setCupRaces(n: number): void {
+    const races = cleanCupRaces(n);
+    if (this.phase !== 'lobby' || (this.cup && !cupOver(this.cup)) || this.cupRaces === races) return;
+    this.cupRaces = races;
+    // Ein beendetes Turnier bleibt nur stehen, solange weiter Turnier eingestellt ist.
+    if (this.cup && races === 0) this.cup = null;
+    this.changed();
+  }
+
+  /** Läuft ein Turnier, das noch Rennen vor sich hat? */
+  cupRunning(): boolean {
+    return this.cup !== null && !cupOver(this.cup);
+  }
+
+  /** Beginnt ein neues Turnier mit der eingestellten Länge (ein altes wird ersetzt). */
+  startCup(): void {
+    if (this.cupRaces <= 0) return;
+    this.cup = newCup(this.cupRaces);
+    this.cupRaceOpen = false;
+    this.changed();
+  }
+
+  /**
+   * Lost die nächste Strecke aus und zeigt die Auslosung auf allen Bildschirmen.
+   * @returns die ausgeloste Strecke, oder −1, wenn kein Turnier läuft
+   */
+  beginDraw(offered: number, rnd: () => number): number {
+    if (!this.cup || cupOver(this.cup)) return -1;
+    const draw = makeDraw(this.cup, offered, rnd, ++this.drawId);
+    this.cup = { ...this.cup, draw };
+    this.changed();
+    return draw.strip[draw.stop];
+  }
+
+  /** Die Auslosung ist durchgelaufen: ihre Strecke gilt, das nächste Rennen kann beginnen. */
+  finishDraw(): boolean {
+    const draw = this.cup?.draw;
+    if (!this.cup || !draw) return false;
+    this.track = draw.strip[draw.stop];
+    this.cup = { ...this.cup, draw: null };
+    this.cupRaceOpen = true;
+    // Bewusst ohne eigene Meldung: Der Aufrufer schaltet gleich danach auf "Rennen" – so erfahren die
+    // Bildschirme beides zusammen und zeigen zwischen Auslosung und Rennen nicht kurz die Lobby.
+    return true;
+  }
+
+  /** Wertet das laufende Rennen des Turniers – genau einmal, egal wie oft es gemeldet wird. */
+  scoreCupRace(standings: { slot: number; place: number }[]): void {
+    if (!this.cup || !this.cupRaceOpen) return;
+    this.cupRaceOpen = false;
+    this.cup = scoreRace(this.cup, this.track, standings);
+    this.changed();
+  }
+
+  /** Beendet das Turnier (auch mittendrin): Es gilt wieder, was in der Lobby eingestellt ist. */
+  endCup(): void {
+    if (!this.cup) return;
+    this.cup = null;
+    this.cupRaceOpen = false;
+    this.changed();
   }
 
   setBots(bots: boolean): void {
@@ -194,7 +283,8 @@ export class HostLobby {
   }
 
   setTrack(track: number): void {
-    if (this.track === track) return;
+    // Im laufenden Turnier bestimmt die Auslosung die Strecke.
+    if (this.track === track || this.cupRunning()) return;
     this.track = track;
     this.changed();
   }
@@ -295,6 +385,8 @@ export class HostLobby {
       aiLevel: this.aiLevel,
       track: this.track,
       laps: this.laps,
+      cupRaces: this.cupRaces,
+      cup: this.cup ? { ...this.cup, draw: null } : null,
     };
   }
 
@@ -350,6 +442,8 @@ export class HostLobby {
       }
       seat = this.newSeat(free, token, cleanName(msg.name, `Spieler ${free + 1}`), false, msg.char);
       this.seats[free] = seat;
+      // Bisher fuhr auf diesem Platz die KI (oder jemand anderes): ihre Sterne erbt der Neue nicht.
+      if (this.cup) this.cup = resetSlot(this.cup, free);
       isNew = true;
     } else {
       seat.name = cleanName(msg.name, seat.name);
@@ -424,6 +518,7 @@ export class HostLobby {
     if (this.seats[seat.slot] !== seat) return;
     this.seats[seat.slot] = null;
     seat.link = null;
+    if (this.cup) this.cup = resetSlot(this.cup, seat.slot);
     this.onSeatsChanged?.();
     this.changed();
   }

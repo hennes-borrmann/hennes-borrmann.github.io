@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -77,10 +77,48 @@ export interface LobbyPlayer {
   character: number;
 }
 
+/**
+ * Auslosung der nächsten Strecke im Turnier: ein Streifen aus Streckenkarten läuft auf allen
+ * Bildschirmen von rechts nach links durch und bleibt mit der Karte an Stelle `stop` unter der
+ * Markierung stehen. Der Host würfelt, alle anderen spielen dieselbe Fahrt ab.
+ */
+export interface CupDraw {
+  /** Zählt je Auslosung hoch – daran erkennt ein Bildschirm eine neue. */
+  id: number;
+  /** Strecken (Index in TRACK_DEFS) in der Reihenfolge, in der sie durchlaufen. */
+  strip: number[];
+  /** Stelle im Streifen, die unter der Markierung stehen bleibt: die ausgeloste Strecke. */
+  stop: number;
+  /** Wo auf der Karte die Markierung zum Stehen kommt (−0,3 … 0,3 Kartenbreiten neben der Mitte). */
+  nudge: number;
+}
+
+/** Turnier: mehrere Rennen auf ausgelosten Strecken; je Rennen Sterne nach Platz, am Ende gewinnt die Summe. */
+export interface CupState {
+  /** Anzahl Rennen des Turniers. */
+  races: number;
+  /** Gewertete Rennen. */
+  done: number;
+  /** Sterne je Platz in der Lobby (Index = slot; auch für KI-Plätze). */
+  stars: number[];
+  /** Siege je Platz – entscheiden bei gleich vielen Sternen. */
+  wins: number[];
+  /** Sterne aus dem zuletzt gewerteten Rennen je Platz. */
+  last: number[];
+  /** Strecken der gewerteten Rennen, in ihrer Reihenfolge. */
+  played: number[];
+  /** Laufende Auslosung, sonst null. */
+  draw: CupDraw | null;
+}
+
 export interface LobbyState {
   code: string;
   phase: Phase;
   players: LobbyPlayer[];
+  /** Einstellung in der Lobby: 0 = Einzelrennen, sonst die Zahl der Rennen eines Turniers. */
+  cupRaces: number;
+  /** Das laufende (oder gerade beendete) Turnier, sonst null. */
+  cup: CupState | null;
   /** Freie Plätze im Rennen mit KI-Gegnern auffüllen. */
   bots: boolean;
   /** Stärke der KI-Gegner: 0 leicht, 1 mittel, 2 schwer. */

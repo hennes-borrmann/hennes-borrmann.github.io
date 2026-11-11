@@ -19,6 +19,7 @@ import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
 import { HostLobby } from '../lobby/hostLobby';
+import { cupOver, cupRanking } from '../lobby/cup';
 import { ROOM_CODE_LENGTH, isValidCode, normalizeCode, randomCode, randomToken } from '../net/codes';
 import { forwardDebugParams, readDebugParams } from '../net/debugParams';
 import { PeerEndpoint, type EndpointStatus } from '../net/endpoint';
@@ -56,7 +57,7 @@ import {
   saveSession,
   type Session,
 } from './session';
-import { ScreenUi, type LobbyModel, type ResultRow } from './ui';
+import { DRAW_HOLD_MS, DRAW_SPIN_MS, ScreenUi, type CupModel, type LobbyModel, type ResultRow } from './ui';
 
 /** Der Host schickt jeden zweiten Simulationsschritt einen Snapshot (30 pro Sekunde). */
 const SNAPSHOT_EVERY = 2;
@@ -177,6 +178,10 @@ export class App {
   private autoBrain: BotBrain | null = null;
   private shownRaceId = -1;
   private resultsShown = false;
+  /** Host, Turnier: Zeitgeber, der nach der Auslosung das Rennen startet (0 = keiner läuft). */
+  private drawTimer = 0;
+  /** Nummer der Auslosung, die dieser Bildschirm zuletzt gezeigt hat. */
+  private shownDrawId = -1;
   private lastHudJson = '';
   private lastHudAt = 0;
   private joinStartedAt = 0;
@@ -230,10 +235,33 @@ export class App {
       join: (code, name) => this.joinLobby(code, name, null),
       ready: (ready) => this.clientLobby?.setReady(ready),
       start: () => {
-        if (this.hostLobby?.canStart()) this.hostLobby.setPhase('game');
+        const lobby = this.hostLobby;
+        if (!lobby || !lobby.canStart() || this.drawTimer !== 0) return;
+        if (lobby.cupRaces > 0 || lobby.cupRunning()) {
+          // Turnier: erst die Strecke auslosen, das Rennen beginnt danach von selbst.
+          if (!lobby.cupRunning()) lobby.startCup();
+          this.beginDraw();
+        } else lobby.setPhase('game');
       },
+      setCupRaces: (races) => this.hostLobby?.setCupRaces(races),
+      nextRace: () => {
+        const lobby = this.hostLobby;
+        if (!lobby || !lobby.cupRunning() || this.drawTimer !== 0) return;
+        // Erst losen, dann zurück in die Lobby: so kommen Auslosung und Wechsel der Ansicht in einer Meldung an.
+        this.beginDraw();
+        lobby.setPhase('lobby');
+      },
+      endCup: () => {
+        const lobby = this.hostLobby;
+        if (!lobby) return;
+        this.cancelDraw();
+        lobby.endCup();
+        lobby.setPhase('lobby');
+      },
+      drawTick: () => this.sound.ui('click'),
+      drawStop: () => this.sound.ui('ready'),
       again: () => {
-        if (!this.hostGame || !this.hostLobby) return;
+        if (!this.hostGame || !this.hostLobby || this.hostLobby.cup) return;
         this.hostGame.setRoster(this.hostLobby.slots(), this.hostLobby.bots, this.hostLobby.characters());
         this.hostGame.newRace();
       },
@@ -583,6 +611,9 @@ export class App {
 
   /** Räumt alles ab, was zu einer Lobby gehört. */
   private teardown(): void {
+    this.cancelDraw();
+    this.ui.hideDraw();
+    this.shownDrawId = -1;
     this.exitGame();
     this.clientLobby?.dispose();
     this.clientLobby = null;
@@ -663,6 +694,8 @@ export class App {
       aiLevel: state.aiLevel,
       laps: state.laps,
       track: state.track,
+      cupRaces: state.cupRaces,
+      cup: this.cupModel(state),
       character: me?.character ?? Math.max(0, slot),
       quality: this.quality,
       waitingFor: state.players.filter((p) => !p.isHost && p.online && !p.ready).map((p) => p.name),
@@ -676,6 +709,56 @@ export class App {
     this.scene?.setRoster(this.drivers(state));
     this.pairing.pushInfo();
     this.syncPhase(state.phase);
+    this.syncDraw(state);
+    // Im Turnier trifft die Wertung bei Mitspielern etwas nach dem Rennende ein: Ergebnisliste nachziehen.
+    if (this.inGame && this.resultsShown) this.showResults();
+  }
+
+  /** Stand des Turniers mit Namen und Rängen, wie ihn Lobby und Ergebnisliste zeigen. */
+  private cupModel(state: LobbyState): CupModel | null {
+    const cup = state.cup;
+    if (!cup) return null;
+    const drivers = new Map(this.drivers(state).map((d) => [d.slot, d]));
+    const local = this.localSlot();
+    return {
+      races: cup.races,
+      done: cup.done,
+      over: cupOver(cup),
+      rows: cupRanking(cup, [...drivers.keys()]).map((r) => {
+        const d = drivers.get(r.slot)!;
+        return { rank: r.rank, slot: r.slot, name: d.name, bot: d.bot, me: r.slot === local, character: d.character, stars: r.stars, gain: cup.done > 0 ? r.last : 0 };
+      }),
+    };
+  }
+
+  /** Zeigt eine neue Auslosung (alle Bildschirme) und räumt sie weg, wenn sie abgesagt wurde. */
+  private syncDraw(state: LobbyState): void {
+    const draw = state.cup?.draw ?? null;
+    if (!draw) {
+      this.shownDrawId = -1;
+      if (!this.inGame) this.ui.hideDraw();
+      return;
+    }
+    if (state.phase !== 'lobby' || draw.id === this.shownDrawId) return;
+    this.shownDrawId = draw.id;
+    this.ui.showDraw(draw, (state.cup?.done ?? 0) + 1, state.cup?.races ?? 0);
+  }
+
+  /** Host: lost die nächste Strecke aus; ist der Streifen durchgelaufen, beginnt das Rennen. */
+  private beginDraw(): void {
+    const lobby = this.hostLobby;
+    if (!lobby || this.drawTimer !== 0) return;
+    if (lobby.beginDraw(OFFERED_TRACKS, Math.random) < 0) return;
+    this.drawTimer = window.setTimeout(() => {
+      this.drawTimer = 0;
+      if (this.hostLobby !== lobby || !lobby.finishDraw()) return;
+      lobby.setPhase('game');
+    }, DRAW_SPIN_MS + DRAW_HOLD_MS);
+  }
+
+  private cancelDraw(): void {
+    window.clearTimeout(this.drawTimer);
+    this.drawTimer = 0;
   }
 
   private updateBanner(): void {
@@ -731,6 +814,7 @@ export class App {
     const state = this.lobbyState();
     if (!state) return;
     this.ui.show('game');
+    this.ui.hideDraw();
     this.gfxRebuilt = false;
     this.gfxRebuilds = 0;
     this.gfxSkippedAtRebuild = 0;
@@ -1094,17 +1178,9 @@ export class App {
 
     if (race.phase === RACE_RESULTS && !this.resultsShown) {
       this.resultsShown = true;
-      const names = new Map(this.drivers(state).map((d) => [d.slot, d]));
-      const rows: ResultRow[] = view.standings().map((st) => ({
-        place: st.place,
-        slot: st.slot,
-        name: names.get(st.slot)?.name ?? `Fahrer ${st.slot + 1}`,
-        bot: st.bot,
-        me: st.slot === view.localSlot,
-        character: names.get(st.slot)?.character ?? st.slot,
-        timeSec: st.finished ? st.finishTicks / TICK_RATE : -1,
-      }));
-      this.ui.showResults(rows, this.role === 'host', TRACK.def.name);
+      // Turnier: der Host wertet das Rennen (genau einmal) – die Sterne gehen mit dem Stand der Lobby an alle.
+      this.hostLobby?.scoreCupRace(view.standings().map((st) => ({ slot: st.slot, place: st.place })));
+      const rows = this.showResults();
       this.sound.music('results');
       this.sound.results(me?.place ?? rows.find((r) => r.me)?.place ?? 0, rows.length);
     }
@@ -1113,6 +1189,29 @@ export class App {
       this.lastHudAt = nowMs;
       this.sendHud(false);
     }
+  }
+
+  /** Baut die Ergebnisliste aus dem aktuellen Stand (im Turnier samt Sternen und Gesamtstand). */
+  private showResults(): ResultRow[] {
+    const view = this.hostGame ?? this.clientGame;
+    const state = this.lobbyState();
+    if (!view || !state) return [];
+    const names = new Map(this.drivers(state).map((d) => [d.slot, d]));
+    // Sterne erst zeigen, wenn die Wertung dieses Rennens da ist (beim Host sofort, bei Mitspielern kurz danach).
+    const cup = this.cupModel(state);
+    const scored = cup !== null && state.cup !== null && state.cup.played.length > 0 && state.cup.played[state.cup.played.length - 1] === TRACK.index;
+    const rows: ResultRow[] = view.standings().map((st) => ({
+      place: st.place,
+      slot: st.slot,
+      name: names.get(st.slot)?.name ?? `Fahrer ${st.slot + 1}`,
+      bot: st.bot,
+      me: st.slot === view.localSlot,
+      character: names.get(st.slot)?.character ?? st.slot,
+      timeSec: st.finished ? st.finishTicks / TICK_RATE : -1,
+      ...(cup && scored ? { gain: state.cup!.last[st.slot] ?? 0 } : {}),
+    }));
+    this.ui.showResults(rows, this.role === 'host', TRACK.def.name, cup);
+    return rows;
   }
 
   /** Dem Handy mitteilen, was es anzeigen soll (nur bei Änderungen). */
@@ -1372,6 +1471,8 @@ export class App {
       buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
       place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),
+      // Nur Host, nur für Tests: das Rennen sofort beenden, Zieleinlauf in der genannten Reihenfolge der Plätze.
+      finish: (order?: number[]) => this.hostGame?.debugFinish(order),
       // Fotokamera für die Streckenbilder (tools/streckenbilder.cjs): Standort, Blickpunkt, Bildwinkel; ohne Angaben = aus.
       photo: (from?: number[], to?: number[], fov = 50) => {
         if (this.scene) this.scene.photo = from && to ? { from, to, fov } : null;
