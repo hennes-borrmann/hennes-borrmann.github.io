@@ -178,7 +178,7 @@ const LEVELS: { ratio: number; kart: KartDetail; world: number; particles: numbe
 const SPARK_COLORS = [0xcfd3e6, 0x3ff2e2, 0xffe04a, 0xff5ad2];
 
 /** Farbe der Staubfahne je Untergrund (0 = fester Boden, kein Staub); Reihenfolge wie SURFACES. */
-const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gravel: 0xb5aea4, grass: 0x8cc463, snow: 0xffffff } as Record<string, number>)[s.id] ?? 0);
+const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gravel: 0xb5aea4, grass: 0x8cc463, snow: 0xffffff, regolith: 0xc9c6d2 } as Record<string, number>)[s.id] ?? 0);
 
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= 2 * Math.PI;

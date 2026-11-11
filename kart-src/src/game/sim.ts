@@ -56,8 +56,10 @@ import {
   AVALANCHE_DRAG,
   AVALANCHE_PUSH,
   PULSE_AVALANCHE,
+  LOWG_STEER,
 } from './mechanics';
 import {
+  EDGE_GAP,
   EDGE_GLIDE,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
@@ -231,6 +233,8 @@ export const EV_SPLASH = 1 << 24;
 export const EV_BUBBLE = 1 << 25;
 /** In einer Lawine (wird alle paar Ticks gemeldet, solange das Kart darin steckt). */
 export const EV_SNOW = 1 << 26;
+/** Von einer Sprungplatte hochgeschleudert. */
+export const EV_LAUNCH = 1 << 27;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -787,7 +791,13 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // Ende: abgelaufen oder mit der Bremse gekappt – aber nie über einem Abgrund.
     const cut = (cmd.buttons & BTN_BRAKE) !== 0 && s.tow < TOW_TICKS - 30;
     if (s.tow === 0 || cut) {
-      if (groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
+      // Auch kurz vor einer Lücke lässt der Drache nicht los: ohne Anlauf (und ohne Sprungplatte) fiele das Kart hinein.
+      let gapSoon = false;
+      for (let k = 1, g = s.seg; k <= 26 && !gapSoon; k++) {
+        g = t.next[g];
+        if (t.edge[g] & EDGE_GAP) gapSoon = true;
+      }
+      if (gapSoon || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
       else {
         s.tow = 0;
         s.boost = Math.max(s.boost, 45);
@@ -850,7 +860,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const hold = A_LAT * ch.grip * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
   const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
-  const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? (diving ? DIVE_STEER : AIR_STEER) : 1);
+  const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? (diving ? DIVE_STEER : t.gravity < 1 ? LOWG_STEER : AIR_STEER) : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
@@ -1079,7 +1089,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     flags |= FLAG_DIVE;
     // Schubringe hängen auch unter Wasser – erreichbar im Sprung oder über einem Blasenschlot.
     if (wasAir && s.boost < PAD_TICKS - 8) ev |= ringBoost(t, s);
-  } else s.vy -= GRAVITY * DT;
+  } else {
+    // Geringe Schwerkraft (Mond): langsamer Fall, hohe Sprünge; in der Luft hängen dort Schubringe.
+    s.vy -= GRAVITY * t.gravity * DT;
+    if (wasAir && t.gravity < 1 && s.boost < PAD_TICKS - 8) ev |= ringBoost(t, s);
+  }
   s.y += s.vy * DT;
   if (s.y <= g) {
     if (wasAir && s.vy < -5) ev |= EV_LAND;
@@ -1187,6 +1201,23 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (d >= 0 && d <= pad.length && Math.abs(lat - pad.lat) < pad.halfWidth + 0.5) {
         s.boost = PAD_TICKS;
         ev |= EV_PAD;
+      }
+    }
+  }
+
+  // --- Sprungplatten ---
+  // Auch wer knapp über der Platte schwebt (nach einem Hüpfer, bei geringer Schwerkraft dauert das), wird erfasst –
+  // sonst flöge er ohne Schwung in die Lücke dahinter.
+  if ((!air || (g > NO_GROUND / 2 && s.y - g < 1.6 && s.vy < 4)) && vf > 4 && t.launchers.length > 0) {
+    for (const l of t.launchers) {
+      if (!samePath(t, l.seg, s.seg)) continue;
+      const d = segDelta(t, l.seg, s.seg);
+      if (d >= 0 && d <= l.length && Math.abs(lat - l.lat) < l.halfWidth + 0.5) {
+        s.vy = l.power;
+        s.y += AIR_EPS + 0.05;
+        flags |= FLAG_AIR;
+        ev |= EV_LAUNCH | EV_TAKEOFF;
+        break;
       }
     }
   }

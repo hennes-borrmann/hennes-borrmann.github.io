@@ -325,6 +325,10 @@ export class World {
           return { a: col(0x9a9186), b: col(0x857d73), c: col(0x6f685f), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x7a7268), detail: 'cobble', barrier: 'stone', wallA: col(0xa59c90), wallB: col(0x8d857a) };
         case 'neon':
           return { a: rgb(0x23263f), b: rgb(0x1c1f36), c: rgb(0x4ef0ff), band: 4, plain: true, lines: true, line: rgb(0x4ef0ff), center: rgb(0xff5ad1), kerbs: true, kerbA: rgb(0xff5ad1), kerbB: rgb(0x23263f), shoulder: rgb(0x15172b), detail: 'none', barrier: 'rail', wallA: rgb(0x2d3050), wallB: rgb(0x8f97b8), glow: rgb(0xff5ad1), glowB: rgb(0x4ef0ff) };
+        case 'regolith':
+          return { a: col(0xb9b6c2), b: col(0xaaa7b4), c: col(0x8a8796), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0x9d9aa8), detail: 'ruts', barrier: 'rock', wallA: col(0x8f8c9c), wallB: col(0x6f6c7c) };
+        case 'panel':
+          return { a: col(0xe6e9f2), b: col(0xd6dae6), c: col(0x8f96ab), band: 3, plain: false, lines: true, line: col(0xff8a2a), kerbs: false, shoulder: col(0xb9bfd0), detail: 'plates', barrier: 'rail', wallA: col(0x4b5268), wallB: col(0xff8a2a) };
         case 'snow':
           return { a: col(0xf3f7fc), b: col(0xe6eef7), c: col(0xc9d8e8), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdde8f3), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'ice':
