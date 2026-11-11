@@ -891,20 +891,15 @@ export class App {
   /**
    * Legt die Rennszene an – und mit ihr die eine 3D-Grafik der Seite, die auch die Porträts der Lobby zeichnet.
    * Sie entsteht beim Laden und bleibt bis zum Schließen der Seite: Auf einem iPad kam ein Kontext, der erst beim
-   * Rennstart angelegt wurde, schon verloren an. Zwei Anläufe: auf der vorhandenen Zeichenfläche, dann auf einer frischen.
-   * @returns die Fehler der gescheiterten Anläufe (leer, wenn es gleich klappt)
+   * Rennstart angelegt wurde, schon verloren an.
+   * @returns der Fehler, falls es nicht klappt (sonst leer)
    */
   private createScene(): unknown[] {
     const errors: unknown[] = [];
-    for (let attempt = 0; attempt < 2 && !this.scene; attempt++) {
+    if (!this.scene) {
       try {
-        let canvas = $<HTMLCanvasElement>('stage');
-        if (attempt === 1) {
-          const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
-          canvas.replaceWith(fresh);
-          canvas = fresh;
-        }
-        this.scene = new RaceScene(canvas, this.quality);
+        // (Die Szene probiert selbst mehrere Einstellungen durch, jede auf einer frischen Zeichenfläche.)
+        this.scene = new RaceScene($<HTMLCanvasElement>('stage'), this.quality);
       } catch (err) {
         console.error(err);
         errors.push(err);
@@ -1389,13 +1384,12 @@ function probeContext(kind: 'webgl2' | 'webgl'): string {
 
 /** Text für den Dialog, wenn die 3D-Szene nicht entsteht: was der Browser gemeldet hat, und was meist hilft. */
 function sceneFailure(errors: unknown[]): string[] {
-  const names = ['Vorhandene Zeichenfläche', 'Frische Zeichenfläche'];
   const texts = errors.map((e) => (e instanceof Error ? e.message : String(e)));
-  const lines = texts.map((t, i) => (i > 0 && t === texts[0] ? `${names[i] ?? 'Weiterer Anlauf'}: wie oben.` : `${names[i] ?? 'Weiterer Anlauf'}: ${t}`));
   return [
     'Der Browser hat dem Spiel keine 3D-Grafik bereitgestellt.',
-    ...lines,
+    ...texts.map((t) => `Anläufe (jeder auf frischer Fläche): ${t}`),
     `Prüfung auf frischer Fläche: WebGL 2 ${probeContext('webgl2')}, WebGL 1 ${probeContext('webgl')} · Version ${BUILD_ID}`,
     'Hilft meist: alle Tabs mit diesem Spiel schließen, den Browser ganz beenden und neu starten, dann nur diese Seite öffnen. Im Blockierungsmodus von iOS/iPadOS ist WebGL abgeschaltet.',
+    'Zur Eingrenzung gibt es eine Testseite: an die Adresse des Spiels „grafiktest.html“ anhängen.',
   ];
 }
