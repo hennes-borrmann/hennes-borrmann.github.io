@@ -6,6 +6,7 @@ import {
   FLAT_FACTOR,
   FLOOD_FROM,
   GLIDE_FALL,
+  GLIDE_EDGE,
   GLIDE_SINK,
   GLIDE_SPEED,
   PULSE_BOMB,
@@ -935,7 +936,9 @@ describe('Fliegen (Wolkenwerft)', () => {
     const th = t.thermals[0];
     // Kurz vor dem Aufwind, auf seiner Spur
     const before = airborne(th.seg - 12, 2, th.lat);
-    const plain = airborne(th.seg - 12, 2, th.lat + 22);
+    // Zum Vergleich: gleiche Höhe, aber neben der Säule (und noch im Korridor)
+    const plain = airborne(th.seg - 12, 2, th.lat + th.radius + 6);
+    expect(Math.abs(th.lat + th.radius + 6)).toBeLessThan(t.wh[th.seg] - 1);
     run(before, 0, 70);
     run(plain, 0, 70);
     const gain = before.y - t.py[before.seg] - (plain.y - t.py[plain.seg]);
@@ -950,6 +953,34 @@ describe('Fliegen (Wolkenwerft)', () => {
     // Wer unter dem Ring durchfliegt, bekommt nichts.
     const low = airborne(ring.seg - 6, dy - 6, ring.lat);
     expect(run(low, 0, 30) & EV_PAD).toBe(0);
+  });
+
+  it('neben dem Korridor trägt die Luft nicht: wer abdriftet, sackt durch', () => {
+    const t = setTrack(4);
+    const g = firstGlide();
+    const seg = g.first + 30;
+    const edge = t.wh[seg];
+    const sink = (lat: number): number => {
+      const s = airborne(seg, 3, lat);
+      const y0 = s.y - t.py[s.seg];
+      run(s, 0, 60);
+      return y0 - (s.y - t.py[s.seg]);
+    };
+    const inside = sink(edge - 2);
+    const justOut = sink(edge + GLIDE_EDGE / 2);
+    const farOut = sink(edge + GLIDE_EDGE + 2);
+    console.log(`Korridor ±${edge.toFixed(1)} m: in einer Sekunde ${inside.toFixed(1)} m gesunken, knapp draußen ${justOut.toFixed(1)} m, weit draußen ${farOut.toFixed(1)} m (jeweils gegenüber der Ideallinie)`);
+    // Drinnen hält das Kart etwa die Ideallinie, draußen geht es mit jedem Meter schneller abwärts.
+    expect(Math.abs(inside)).toBeLessThan(1.5);
+    expect(justOut).toBeGreaterThan(inside + 2);
+    expect(farOut).toBeGreaterThan(justOut + 1.5);
+    // Weit draußen ist nach gut zwei Sekunden Schluss: abgestürzt.
+    const lost = airborne(seg, 3, edge + GLIDE_EDGE + 2);
+    let ev = 0;
+    for (let i = 0; i < 170 && (ev & EV_FALL) === 0; i++) ev |= stepKart(lost, { steer: 0, buttons: BTN_GAS }, { canDrive: true, speedFactor: 1, time: i });
+    expect(ev & EV_FALL).not.toBe(0);
+    // Ein Aufwind außerhalb des Korridors hilft nicht (es gibt dort keinen – die Säulen stehen alle drinnen).
+    for (const th of t.thermals) expect(Math.abs(th.lat) + th.radius * 0.5).toBeLessThan(t.wh[th.seg]);
   });
 
   it('wer zu tief sinkt, stürzt ab und startet wieder vor der Kante', () => {

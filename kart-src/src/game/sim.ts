@@ -24,6 +24,8 @@ import {
   FLOOD_FROM,
   GLIDE_ACCEL,
   GLIDE_CEILING,
+  GLIDE_DROP,
+  GLIDE_EDGE,
   GLIDE_FALL,
   GLIDE_GRIP,
   GLIDE_RESPONSE,
@@ -1010,6 +1012,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
     // Oben ist Schluss: über der Decke geht es nur noch abwärts.
     if (s.y > t.py[s.seg] + GLIDE_CEILING) want = Math.min(want, -GLIDE_SINK);
+    // Neben dem Korridor trägt die Luft nicht mehr – auch kein Aufwind.
+    const out = Math.abs(lat) - t.wh[s.seg];
+    if (out > 0) want = -GLIDE_SINK - Math.min(1, out / GLIDE_EDGE) * GLIDE_DROP;
     s.vy += (want - s.vy) * Math.min(1, GLIDE_RESPONSE * DT);
     flags |= FLAG_GLIDE;
     // Schubringe

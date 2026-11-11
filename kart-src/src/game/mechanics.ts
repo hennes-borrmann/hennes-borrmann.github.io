@@ -248,6 +248,12 @@ export const GLIDE_GRIP = 2.6;
 /** So weit über der Ideallinie ist Schluss mit Steigen, so weit darunter ist das Kart abgestürzt (Meter). */
 export const GLIDE_CEILING = 13;
 export const GLIDE_FALL = 15;
+/**
+ * Neben dem Flugkorridor trägt die Luft nicht: GLIDE_EDGE Meter außerhalb sinkt das Kart
+ * um GLIDE_DROP m/s schneller (dazwischen anteilig) – wer abdriftet, fällt bald und wird zurückgesetzt.
+ */
+export const GLIDE_EDGE = 6;
+export const GLIDE_DROP = 10;
 
 /** Aufwind: eine Säule aufsteigender Luft. Wer hindurchfliegt, steigt. */
 export interface Thermal {
