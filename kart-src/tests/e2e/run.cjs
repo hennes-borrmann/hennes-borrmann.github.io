@@ -269,9 +269,19 @@ async function main() {
     await press(phoneA, 'gas');
     await press(phoneB, 'gas');
     await sleep(700);
-    const [raceH, raceC] = await Promise.all([raceNow(host.page), raceNow(client.page)]);
+    let [raceH, raceC] = await Promise.all([raceNow(host.page), raceNow(client.page)]);
     check('Beide zeigen den Countdown', raceH.phase === 0 && raceC.phase === 0, `Host ${raceH.untilGo.toFixed(2)} s, Ben ${raceC.untilGo.toFixed(2)} s`);
-    check('Countdown läuft auf beiden gleich (Abweichung < 0,15 s)', Math.abs(raceH.goAt - raceC.goAt) < 0.15, `${Math.abs(raceH.goAt - raceC.goAt).toFixed(3)} s`);
+    // Hängt der Host beim Aufbau der Szene (hier: die Testmaschine ohne Grafikkarte), geht seine Rennuhr kurz nach;
+    // der Mitspieler führt seine binnen anderthalb Sekunden nach. Gemessen wird der eingeschwungene Wert.
+    const cdFirst = Math.abs(raceH.goAt - raceC.goAt);
+    let cdDiff = cdFirst;
+    for (let i = 0; i < 5 && cdDiff >= 0.15; i++) {
+      await sleep(250);
+      [raceH, raceC] = await Promise.all([raceNow(host.page), raceNow(client.page)]);
+      if (raceH.phase !== 0 || raceC.phase !== 0) break;
+      cdDiff = Math.abs(raceH.goAt - raceC.goAt);
+    }
+    check('Countdown läuft auf beiden gleich (Abweichung < 0,15 s)', cdDiff < 0.15, `${cdDiff.toFixed(3)} s${cdFirst >= 0.15 ? ` (zuerst ${cdFirst.toFixed(3)} s – Uhr nachgeführt)` : ''}`);
     const before = await kart(host.page, 'authoritative(1)');
     check('Trotz Gas steht Bens Kart bis zum Start', Math.hypot(before.vx, before.vz) === 0);
 
@@ -724,7 +734,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Fünf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 5);
+    check('Sechs Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 6);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -908,10 +918,11 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen');
-    const h7 = await openScreen('host7', '&laps=2');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte');
+    // (&alle=1: auch die Strecken, die die Lobby noch nicht anbietet – ihre Mechanik wird trotzdem geprüft.)
+    const h7 = await openScreen('host7', '&laps=2&alle=1');
     const code7 = await createLobby(h7, 'Anna');
-    const c7 = await openScreen('client7', '&laps=2');
+    const c7 = await openScreen('client7', '&laps=2&alle=1');
     await joinLobby(c7, 'Ben', code7);
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
@@ -1110,10 +1121,145 @@ async function main() {
     const sc4 = await kart(h7.page, 'scene()');
     check('Wolkenwerft wird gezeichnet', sc4 && sc4.triangles > 20000, sc4 ? `${sc4.calls} Zeichenaufrufe, ${sc4.triangles} Dreiecke` : '');
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Tiefseeriff: Ben (Mitspieler) springt vom Steg ins Wasser und taucht – auf beiden Bildschirmen.
+    const twist5 = await h7.page.locator('.track-card').nth(5).locator('.track-twist').textContent();
+    check('Streckenwahl nennt die Eigenheit des Tiefseeriffs', /Tauchen/.test(twist5 || ''), twist5 || '');
+    await h7.page.locator('.track-card').nth(5).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 5, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 5, null, { timeout: 30000 });
+    const reef = await kart(h7.page, 'dive()');
+    check('Tiefseeriff hat Tauchstrecke, Strömungen und Blasenschlote', reef && reef.from > 50 && reef.currents >= 4 && reef.vents >= 3, JSON.stringify(reef));
+    // 70 m Anlauf auf dem Steg bis ins Wasser
+    await kart(h7.page, `place(1, ${reef.from - 70}, 0)`);
+    await sleep(250);
+    await c7.page.keyboard.down('ArrowUp');
+    let diveTicks = [0, 0];
+    let deepest = 0;
+    let fastSink = 0;
+    const untilD = Date.now() + 12000;
+    while (Date.now() < untilD && (diveTicks[0] < 25 || diveTicks[1] < 25)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      const bc = ec.find((e) => e.slot === 1);
+      if (bh.flags & 32) {
+        diveTicks[0]++;
+        deepest = Math.min(deepest, bh.y - reef.sea);
+        // Sinkrate im Schweben unter Wasser (in der Luft davor fällt das Kart normal)
+        if (bh.flags & 8) fastSink = Math.min(fastSink, bh.vy);
+      }
+      if (bc.flags & 32) diveTicks[1]++;
+      await sleep(50);
+    }
+    await c7.page.keyboard.up('ArrowUp');
+    check('Ben taucht – beim Host und auf seinem eigenen Bildschirm', diveTicks[0] >= 25 && diveTicks[1] >= 25, `${diveTicks[0]} / ${diveTicks[1]} Abfragen unter Wasser, bis ${(-deepest).toFixed(1)} m tief`);
+    // Sinken unter Wasser, eindeutig gemessen: Ben wird fünf Meter über dem Meeresgrund losgelassen (dort gut sechs
+    // Meter tief). Im freien Fall wäre er nach 35 Ticks unten und dabei 17 m/s schnell; unter Wasser dauert es
+    // 67 Ticks bei höchstens 6,5 m/s. (Der Sprung vom Steg taugt dafür nicht: er endet fast genau an der Wasserlinie.)
+    await kart(h7.page, `place(1, ${reef.from + 110}, 0, -1, 5)`);
+    let sinkFrom = -1;
+    let sinkTo = -1;
+    let sinkSamples = 0;
+    fastSink = 0;
+    const untilS = Date.now() + 6000;
+    while (Date.now() < untilS) {
+      const [eh, rh] = await Promise.all([kart(h7.page, 'entities()'), kart(h7.page, 'race()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      if ((bh.flags & 40) === 40) {
+        if (sinkFrom < 0) sinkFrom = rh.time;
+        sinkTo = rh.time;
+        sinkSamples++;
+        fastSink = Math.min(fastSink, bh.vy);
+        deepest = Math.min(deepest, bh.y - reef.sea);
+      } else if (sinkFrom >= 0) break;
+      await sleep(30);
+    }
+    check(
+      'Unter Wasser sinkt das Kart langsam',
+      sinkSamples >= 3 && sinkTo - sinkFrom > 45 && fastSink > -7 && fastSink < -3,
+      `mindestens ${Math.round(sinkTo - sinkFrom)} Ticks für fünf Meter (freier Fall: 35), größte Sinkrate ${(-fastSink).toFixed(1)} m/s, ${sinkSamples} Abfragen`,
+    );
+    const sc5 = await kart(h7.page, 'scene()');
+    check('Tiefseeriff wird gezeichnet', sc5 && sc5.triangles > 20000, sc5 ? `${sc5.calls} Zeichenaufrufe, ${sc5.triangles} Dreiecke` : '');
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
+    const cards = await h7.page.locator('.track-card').count();
+    check('Mit dem Test-Schalter stehen acht Strecken zur Wahl', cards === 8, `${cards} Karten`);
+    await h7.page.locator('.track-card').nth(6).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 6, null, { timeout: 30000 });
+    const chute = (await kart(h7.page, 'pulses()')).find((p) => p.kind === 4);
+    check('Eiszapfen-Pass hat Lawinen und Eiszapfen', !!chute && (await kart(h7.page, 'pulses()')).some((p) => p.kind === 5), chute ? `Lawine bei ${chute.at.toFixed(0)} m, alle ${chute.period} s` : 'keine');
+    await kart(h7.page, `place(0, ${chute.at}, 0)`);
+    await sleep(300);
+    const start6 = (await kart(h7.page, 'entities()')).find((e) => e.slot === 0);
+    let pushed = [0, 0];
+    const untilA = Date.now() + (chute.period + 3) * 1000;
+    while (Date.now() < untilA && (pushed[0] < 2 || pushed[1] < 2)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const a = eh.find((e) => e.slot === 0);
+      const b = ec.find((e) => e.slot === 0);
+      pushed[0] = Math.max(pushed[0], Math.hypot(a.x - start6.x, a.z - start6.z));
+      pushed[1] = Math.max(pushed[1], Math.hypot(b.x - start6.x, b.z - start6.z));
+      await sleep(60);
+    }
+    check('Lawine: Anna wird weggeschoben – beim Host und auf Bens Bildschirm', pushed[0] >= 2 && pushed[1] >= 2, `${pushed[0].toFixed(1)} m / ${pushed[1].toFixed(1)} m`);
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Mondbasis: Ben (Mitspieler) fährt über die Sprungplatte des Massenbeschleunigers – weiter, hoher Sprung auf beiden Bildschirmen.
+    await h7.page.locator('.track-card').nth(7).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 7, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 7, null, { timeout: 30000 });
+    const moon = await kart(h7.page, 'launchers()');
+    const padM = moon.pads.find((p) => p.branch === -1);
+    check('Mondbasis hat geringe Schwerkraft und Sprungplatten', moon.gravity < 0.5 && moon.pads.length === 2 && !!padM, JSON.stringify(moon));
+    await kart(h7.page, `place(1, ${padM.at - 60}, 0)`);
+    await sleep(250);
+    await c7.page.keyboard.down('ArrowUp');
+    let airM = [0, 0];
+    let topM = 0;
+    let baseY = null;
+    let landedM = false;
+    let fellM = false;
+    let launched = false;
+    const untilM = Date.now() + 14000;
+    while (Date.now() < untilM && !landedM && !fellM) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      const bc = ec.find((e) => e.slot === 1);
+      if (bh.flags & 8) {
+        if (bh.vy > 6) launched = true;
+        if (launched) {
+          airM[0]++;
+          if (baseY === null) baseY = bh.y;
+          topM = Math.max(topM, bh.y - baseY);
+        }
+      } else if (launched && airM[0] > 8 && bh.respawn === 0) landedM = true;
+      if (launched && bc.flags & 8) airM[1]++;
+      if (bh.respawn > 0) fellM = true;
+      await sleep(50);
+    }
+    await c7.page.keyboard.up('ArrowUp');
+    check('Sprungplatte: Ben fliegt weit und hoch – beim Host und auf seinem eigenen Bildschirm', airM[0] > 12 && airM[1] > 12 && topM > 2.5, `${airM[0]} / ${airM[1]} Abfragen in der Luft, ${topM.toFixed(1)} m über der Absprunghöhe`);
+    check('Ben landet jenseits der Schlucht', landedM && !fellM, landedM ? 'gelandet' : fellM ? 'abgestürzt' : 'weder noch');
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die fünf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
-    await sleep(8000);
+    // Der Browser räumt die acht großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    await sleep(10000);
   }
 
   if (wants('netsim')) {

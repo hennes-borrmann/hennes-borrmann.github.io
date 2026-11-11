@@ -44,8 +44,22 @@ import {
   tideLevel,
   vehicleAt,
   waterFactor,
+  BUBBLE_LIFT,
+  DIVE_ACCEL,
+  DIVE_COAST,
+  DIVE_GRAVITY,
+  DIVE_GRIP,
+  DIVE_SINK,
+  DIVE_SPEED,
+  DIVE_STEER,
+  PULSE_BUBBLE,
+  AVALANCHE_DRAG,
+  AVALANCHE_PUSH,
+  PULSE_AVALANCHE,
+  LOWG_STEER,
 } from './mechanics';
 import {
+  EDGE_GAP,
   EDGE_GLIDE,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
@@ -129,6 +143,8 @@ export const FLAG_WALL = 4;
 export const FLAG_AIR = 8;
 /** Das Kart gleitet über einer Flugstrecke (Flügel ausgeklappt). */
 export const FLAG_GLIDE = 16;
+/** Das Kart ist unter Wasser (Tauchstrecke). */
+export const FLAG_DIVE = 32;
 
 export interface KartState {
   x: number;
@@ -213,6 +229,12 @@ export const EV_BURN = 1 << 22;
 export const EV_FLAT = 1 << 23;
 /** Fährt durch Wasser (Flut). */
 export const EV_SPLASH = 1 << 24;
+/** Von einem Blasenschlot angehoben. */
+export const EV_BUBBLE = 1 << 25;
+/** In einer Lawine (wird alle paar Ticks gemeldet, solange das Kart darin steckt). */
+export const EV_SNOW = 1 << 26;
+/** Von einer Sprungplatte hochgeschleudert. */
+export const EV_LAUNCH = 1 << 27;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -242,7 +264,7 @@ const DRIFT_TIGHT = 1.55;
 /** Ladung, ab der Stufe 1, 2 und 3 des Mini-Turbos erreicht ist. */
 export const TURBO_AT = [50, 115, 190];
 const TURBO_TICKS = [30, 57, 90];
-const PAD_TICKS = 60;
+export const PAD_TICKS = 60;
 const ITEM_BOOST_TICKS = 100;
 export const SPIN_TICKS = 75;
 const SHIELD_TICKS = 130;
@@ -680,6 +702,45 @@ export function trafficBlocks(t: Track, x: number, y: number, z: number, radius:
   return false;
 }
 
+
+/**
+ * Liegt die Stelle (Kartmitte in Höhe y + 0.6) in einem Schubring? slack weitet die Kugel –
+ * für die Anzeige, die ein Kart erst einen Augenblick nach dem Durchflug zu sehen bekommt.
+ */
+export function ringAt(t: Track, x: number, y: number, z: number, slack = 0): boolean {
+  for (const r of t.rings) {
+    const dx = x - r.x;
+    const dy = y + 0.6 - r.y;
+    const dz = z - r.z;
+    const reach = r.radius + slack;
+    if (dx * dx + dy * dy + dz * dz < reach * reach) return true;
+  }
+  return false;
+}
+
+/** Fliegt oder schwebt das Kart durch einen Schubring? Dann Schub (wie ein Boost-Feld). */
+function ringBoost(t: Track, s: KartState): number {
+  if (!ringAt(t, s.x, s.y, s.z)) return 0;
+  s.boost = PAD_TICKS;
+  return EV_PAD;
+}
+
+/**
+ * Wirksamer Aufwind für ein gleitendes Kart: Steiggeschwindigkeit der Säule, sonst 0.
+ * Über der Flugdecke und neben dem Korridor trägt keine Säule mehr. Rechnung und Anzeige
+ * fragen dieselbe Funktion – sonst meldete der Bildschirm "Aufwind", während das Kart sinkt.
+ */
+export function thermalLift(t: Track, seg: number, lat: number, x: number, y: number, z: number): number {
+  if (y > t.py[seg] + GLIDE_CEILING || Math.abs(lat) > t.wh[seg]) return 0;
+  let lift = 0;
+  for (const th of t.thermals) {
+    const dx = x - th.x;
+    const dz = z - th.z;
+    if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(y - th.y) < GLIDE_FALL + GLIDE_CEILING) lift = th.lift;
+  }
+  return lift;
+}
+
 export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const t = TRACK;
   let ev = 0;
@@ -754,7 +815,13 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // Ende: abgelaufen oder mit der Bremse gekappt – aber nie über einem Abgrund.
     const cut = (cmd.buttons & BTN_BRAKE) !== 0 && s.tow < TOW_TICKS - 30;
     if (s.tow === 0 || cut) {
-      if (groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
+      // Auch kurz vor einer Lücke lässt der Drache nicht los: ohne Anlauf (und ohne Sprungplatte) fiele das Kart hinein.
+      let gapSoon = false;
+      for (let k = 1, g = s.seg; k <= 26 && !gapSoon; k++) {
+        g = t.next[g];
+        if (t.edge[g] & EDGE_GAP) gapSoon = true;
+      }
+      if (gapSoon || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
       else {
         s.tow = 0;
         s.boost = Math.max(s.boost, 45);
@@ -812,10 +879,12 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // Untergrund: Sand, Schotter und Co. halten weniger, Fels und Stadtasphalt mehr.
   const ground = SURFACES[t.surf[seg0]] ?? SURFACES[0];
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
-  const hold = A_LAT * ch.grip * ground.grip * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
+  // Tauchen: unter dem Meeresspiegel einer Tauchstrecke trägt das Wasser (siehe mechanics.ts).
+  const diving = t.deep[seg0] !== 0 && y0 < t.sea;
+  const hold = A_LAT * ch.grip * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
   const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
-  const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? AIR_STEER : 1);
+  const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? (diving ? DIVE_STEER : t.gravity < 1 ? LOWG_STEER : AIR_STEER) : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
     // Im Drift dreht das Kart immer in Driftrichtung; die Lenkung wählt nur
@@ -846,7 +915,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // (geringe Haftung) rutscht das Heck sichtbar nach außen.
     const speed = Math.hypot(vf, vl);
     // Auf losem Grund rutscht das Kart länger quer, bevor es wieder spurt.
-    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip;
+    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip * (diving ? DIVE_GRIP : 1);
     vl *= Math.exp(-grip * DT);
     vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
 
@@ -857,6 +926,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
     if (s.flat > 0) vmax *= FLAT_FACTOR;
+    if (diving) vmax *= DIVE_SPEED;
     // Flut: wo die Fahrbahn unter Wasser steht, bremst es – je tiefer, desto mehr.
     if (t.tide && t.tidal[seg0]) {
       const depth = tideLevel(t.tide, env.time) - y0;
@@ -894,13 +964,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
-      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (diving ? DIVE_ACCEL : 1) * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
       if (vf > 0.4) vf = Math.max(0, vf - BRAKE * ground.brake * DT);
       else vf = Math.max(-V_REVERSE, vf - 16 * DT);
     } else {
-      const d = (wasOffroad ? COAST + 12 : COAST) * DT;
+      // Auf glattem Grund (Eis) rollt das Kart länger aus.
+      const d = ((wasOffroad ? COAST + 12 : COAST) * Math.min(1, ground.brake * 2) + (diving ? DIVE_COAST : 0)) * DT;
       vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
     }
   }
@@ -918,11 +989,13 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.x += s.vx * DT;
   s.z += s.vz * DT;
   // Förderband: der Boden nimmt das Kart mit. Zu den Rändern hin läuft die Wirkung aus (siehe BELT_EDGE).
-  if (!wasAir && t.belts.length > 0) {
+  if ((!wasAir || diving) && t.belts.length > 0) {
     let carry = 0;
     let push = 0;
     for (const b of t.belts) {
       if (seg0 < b.first || seg0 >= b.first + b.count) continue;
+      // Ein Band wirkt nur am Boden, eine Strömung auch im Schweben – aber nur unter Wasser.
+      if (b.swim ? !diving : wasAir) continue;
       const side = Math.min(lat0 - b.lat0, b.lat1 - lat0) / BELT_EDGE;
       if (side <= 0) continue;
       // Lage längs des Bands in Metern ab seinem Anfang
@@ -1019,32 +1092,27 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
   if (gliding && g === NO_GROUND) {
     // Statt zu fallen, sinkt das Kart langsam – und steigt in einem Aufwind.
-    let want = -GLIDE_SINK;
-    for (const th of t.thermals) {
-      const dx = s.x - th.x;
-      const dz = s.z - th.z;
-      if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(s.y - th.y) < GLIDE_FALL + GLIDE_CEILING) want = th.lift;
-    }
-    // Oben ist Schluss: über der Decke geht es nur noch abwärts.
-    if (s.y > t.py[s.seg] + GLIDE_CEILING) want = Math.min(want, -GLIDE_SINK);
-    // Neben dem Korridor trägt die Luft nicht mehr – auch kein Aufwind.
+    // (Über der Decke und neben dem Korridor trägt kein Aufwind: thermalLift gibt dort 0.)
+    const up = thermalLift(t, s.seg, lat, s.x, s.y, s.z);
+    let want = up > 0 ? up : -GLIDE_SINK;
+    // Neben dem Korridor trägt die Luft nicht mehr.
     const out = Math.abs(lat) - t.wh[s.seg];
     if (out > 0) want = -GLIDE_SINK - Math.min(1, out / GLIDE_EDGE) * GLIDE_DROP;
     s.vy += (want - s.vy) * Math.min(1, GLIDE_RESPONSE * DT);
     flags |= FLAG_GLIDE;
     // Schubringe
-    if (s.boost < PAD_TICKS - 8) {
-      for (const r of t.rings) {
-        const dx = s.x - r.x;
-        const dy = s.y + 0.6 - r.y;
-        const dz = s.z - r.z;
-        if (dx * dx + dy * dy + dz * dz < r.radius * r.radius) {
-          s.boost = PAD_TICKS;
-          ev |= EV_PAD;
-        }
-      }
-    }
-  } else s.vy -= GRAVITY * DT;
+    if (s.boost < PAD_TICKS - 8) ev |= ringBoost(t, s);
+  } else if (diving) {
+    // Unter Wasser sinkt das Kart nur langsam: jeder Buckel wird zum weiten Schwebesprung.
+    s.vy = Math.max(-DIVE_SINK, s.vy - GRAVITY * DIVE_GRAVITY * DT);
+    flags |= FLAG_DIVE;
+    // Schubringe hängen auch unter Wasser – erreichbar im Sprung oder über einem Blasenschlot.
+    if (wasAir && s.boost < PAD_TICKS - 8) ev |= ringBoost(t, s);
+  } else {
+    // Geringe Schwerkraft (Mond): langsamer Fall, hohe Sprünge; in der Luft hängen dort Schubringe.
+    s.vy -= GRAVITY * t.gravity * DT;
+    if (wasAir && t.gravity < 1 && s.boost < PAD_TICKS - 8) ev |= ringBoost(t, s);
+  }
   s.y += s.vy * DT;
   if (s.y <= g) {
     if (wasAir && s.vy < -5) ev |= EV_LAND;
@@ -1088,9 +1156,22 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   for (const p of t.pulses) {
     if (!env.canDrive) break;
     const dy = s.y - p.y;
-    if (dy < -1.5 || dy > 2.5) continue;
+    if (dy < -1.5 || dy > (p.kind === PULSE_BUBBLE ? 5 : 2.5)) continue;
     const dx = s.x - p.x;
     const dz = s.z - p.z;
+    if (p.kind === PULSE_AVALANCHE) {
+      // Die Lawine läuft als Streifen quer über die ganze Bahn: sie schiebt talwärts und bremst.
+      if (Math.abs(dx * t.tx[p.seg] + dz * t.tz[p.seg]) > p.radius || pulseCycle(p, env.time) >= p.on) continue;
+      const down = p.lat > 0 ? -1 : 1;
+      s.x += rightX(t, p.seg) * down * AVALANCHE_PUSH * DT;
+      s.z += rightZ(t, p.seg) * down * AVALANCHE_PUSH * DT;
+      s.vx *= AVALANCHE_DRAG;
+      s.vz *= AVALANCHE_DRAG;
+      s.driftDir = 0;
+      s.driftCharge = 0;
+      if (((env.time % 12) + 12) % 12 === 0) ev |= EV_SNOW;
+      continue;
+    }
     if (p.kind === PULSE_PRESS) {
       // Die Platte ist quadratisch, wie gezeichnet – auch unter ihren Ecken wird man geplättet.
       const half = p.radius + KART_RADIUS * 0.5;
@@ -1100,6 +1181,19 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (dx * dx + dz * dz > reach * reach) continue;
     }
     if (pulseCycle(p, env.time) >= p.on) continue;
+    if (p.kind === PULSE_BUBBLE) {
+      // Der Blasenschlot hebt an: kein Treffer, sondern ein Sprungbrett (solange man in der Säule ist).
+      if (s.vy < BUBBLE_LIFT) {
+        if ((flags & FLAG_AIR) === 0) {
+          // vom Boden lösen (nur einmal – in der Säule hebt dann allein die Geschwindigkeit)
+          ev |= EV_BUBBLE;
+          s.y += AIR_EPS + 0.05;
+          flags |= FLAG_AIR;
+        }
+        s.vy = BUBBLE_LIFT;
+      }
+      continue;
+    }
     if (p.kind === PULSE_PRESS) {
       // Die Presse plättet: kein Dreher, aber das Kart ist eine Weile flach und langsam.
       const r = flattenKart(s);
@@ -1111,7 +1205,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (r === HIT_BLOCKED) ev |= EV_BLOCK;
     else if (r === HIT_SPIN) {
       ev |= EV_HIT;
-      // Der Geysir wirft das Kart hoch, die Bombe nur ein Stück.
+      // Der Geysir wirft das Kart hoch, Bombe und Eiszapfen nur ein Stück.
       s.vy = p.kind === PULSE_VENT ? VENT_LAUNCH : 4.5;
       s.y += AIR_EPS + 0.05;
       flags |= FLAG_AIR;
@@ -1126,6 +1220,23 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (d >= 0 && d <= pad.length && Math.abs(lat - pad.lat) < pad.halfWidth + 0.5) {
         s.boost = PAD_TICKS;
         ev |= EV_PAD;
+      }
+    }
+  }
+
+  // --- Sprungplatten ---
+  // Auch wer knapp über der Platte schwebt (nach einem Hüpfer, bei geringer Schwerkraft dauert das), wird erfasst –
+  // sonst flöge er ohne Schwung in die Lücke dahinter.
+  if ((!air || (g > NO_GROUND / 2 && s.y - g < 1.6 && s.vy < 4)) && vf > 4 && t.launchers.length > 0) {
+    for (const l of t.launchers) {
+      if (!samePath(t, l.seg, s.seg)) continue;
+      const d = segDelta(t, l.seg, s.seg);
+      if (d >= 0 && d <= l.length && Math.abs(lat - l.lat) < l.halfWidth + 0.5) {
+        s.vy = l.power;
+        s.y += AIR_EPS + 0.05;
+        flags |= FLAG_AIR;
+        ev |= EV_LAUNCH | EV_TAKEOFF;
+        break;
       }
     }
   }

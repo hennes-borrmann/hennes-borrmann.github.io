@@ -33,7 +33,7 @@ import {
   type Cmd,
   type KartState,
 } from './sim';
-import { FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -251,6 +251,9 @@ function edgesAhead(toM: number): number {
  * @param racing false während Countdown und nach dem Ziel
  */
 /** Nur zur Fehlersuche in Tests: was die KI im letzten Schritt über den Verkehr dachte. */
+/** So nah am Innenrand (Meter) löst die KI einen Drift, der sie weiter hineinzöge. */
+const DRIFT_INNER_MARGIN = 1.6;
+
 export const AI_TRACE = { here: 0, lat: 0, want: 0, jam: false, blocks: '' };
 
 export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: boolean, ctx: BotContext): Cmd {
@@ -353,6 +356,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
 
   // --- Verkehr, Geysire, Lavabomben: gesperrte Streifen voraus ---
   let jam = false;
+  /** Bis zu diesem Tempo wird im Stau gebremst. Vor einer Lawine sinkt es bis zum Stillstand – auf Eis rollte das Kart sonst hinein. */
+  let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
   if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide) && !air) {
@@ -396,6 +401,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         if (rear > 0 && rear < 5 + (vf - veh.speed) * 0.7 && Math.abs(here - (vl - offHere)) < veh.halfWidth + margin - 0.3) jam = true;
       }
     }
+    let bubbleAt = 60;
     for (const p of t.pulses) {
       let d = -1;
       for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
@@ -409,6 +415,28 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const eta = (d / Math.max(v, 8)) * 60;
       const c0 = pulseCycle(p, ctx.time + eta - 14);
       const c1 = pulseCycle(p, ctx.time + eta + 14);
+      if (p.kind === PULSE_AVALANCHE) {
+        // Eine Lawine sperrt die ganze Bahn: wer bei der Ankunft hineingeriete, nimmt vorher Tempo heraus
+        // (wer schon drinsteckt, fährt weiter).
+        const inSnow = d < p.radius;
+        const c = pulseCycle(p, ctx.time + ((d - p.radius) / Math.max(v, 8)) * 60);
+        const out = pulseCycle(p, ctx.time + ((d + p.radius) / Math.max(v, 8)) * 60);
+        if (!inSnow && (c < p.on + 6 || out < p.on || out < c)) {
+          jam = true;
+          // So schnell, dass es vor dem Schnee noch zum Stehen reicht (gerechnet mit dem schwachen Bremsen auf Eis).
+          haltSpeed = Math.min(haltSpeed, Math.sqrt(Math.max(0, 4.4 * (d - p.radius - 2.5))));
+        }
+        continue;
+      }
+      if (p.kind === PULSE_BUBBLE) {
+        // Ein Blasenschlot ist kein Hindernis, sondern ein Sprungbrett: wer aufpasst, hält auf den nächsten zu,
+        // der bei der Ankunft sicher bläst (darüber hängt ein Schubring).
+        if (b.level > 0 && d < bubbleAt && c0 < p.on && c1 < p.on && c1 > c0) {
+          bubbleAt = d;
+          lat = p.lat;
+        }
+        continue;
+      }
       if (c0 < p.on || c1 < p.on || c1 < c0) block(p.lat - p.radius - KART_HALF - 0.5, p.lat + p.radius + KART_HALF + 0.5, 1);
     }
     AI_TRACE.here = here;
@@ -476,10 +504,11 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   if (gapAhead || v < limit + 0.5) buttons |= BTN_GAS;
   else if (v > limit + 5) buttons |= BTN_BRAKE;
   // Kein Durchkommen im Verkehr: bremsen, bis sich eine Lücke auftut.
-  if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > 13 ? BTN_BRAKE : 0);
+  if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > haltSpeed ? BTN_BRAKE : 0);
 
   // --- Lenken und Driften ---
-  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (SURFACES[t.surf[s.seg]] ?? SURFACES[0]).grip) / v);
+  const here0 = SURFACES[t.surf[s.seg]] ?? SURFACES[0];
+  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (here0.turn ?? here0.grip)) / v);
   let steer: number;
   if (flying) {
     // Im Gleitflug lenkt es sich weich, aber wirksam.
@@ -492,9 +521,15 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const stillTurning = near * s.driftDir > 1 / 55;
     // Mindestens bis Stufe 1 halten, sofern die Kurve nicht schon vorbei ist.
     if (mayDrift && (stillTurning || (b.drifting < 40 && near * s.driftDir > 1 / 120))) buttons |= BTN_DRIFT;
+    const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
+    // Ein Drift dreht immer weiter nach innen. Will die Ziellinie weiter hinaus, als selbst der weiteste Driftbogen
+    // erlaubt, und ist der Innenrand schon nah, hilft nur loslassen – sonst zieht es das Kart in den Seitenstreifen
+    // (so geschehen in der Steilkurve hinter der Werkshof-Brücke; Ursache gefunden in Codex' Bericht C-006).
+    const inner = ((s.x - t.px[s.seg]) * rightX(t, s.seg) + (s.z - t.pz[s.seg]) * rightZ(t, s.seg)) * s.driftDir;
+    // (Auf schmaler Bahn – Bobbahn, Steg – ist der Spielraum kleiner: dort erst dichter am Rand.)
+    if (k < DRIFT_WIDE && inner > t.rh[s.seg] - DRIFT_INNER_MARGIN * Math.min(1, (t.rh[s.seg] - 3) / 3.5)) buttons &= ~BTN_DRIFT;
     // Hinter einem Fahrzeug eingeklemmt: Drift halten – loslassen würde den Mini-Turbo zünden.
     if (jam) buttons |= BTN_DRIFT;
-    const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
     const into = ((k - DRIFT_WIDE) / (DRIFT_TIGHT - DRIFT_WIDE)) * 2 - 1;
     steer = Math.max(-1, Math.min(1, into)) * s.driftDir;
   } else {

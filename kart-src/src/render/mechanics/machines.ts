@@ -164,7 +164,8 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
   // ============================== Förderbänder ==============================
 
   const floor = new MeshBuilder();
-  const beltDefs = t.belts;
+  // (Strömungen unter Wasser sind keine Bänder: die zeichnet mechanics/dive.ts.)
+  const beltDefs = t.belts.filter((b) => !b.swim);
   /** Kachellänge in Laufrichtung je Band (für das Wandern des Musters). */
   const beltTile = beltDefs.map((b) => (b.along === 0 && b.across !== 0 ? TILE_X : TILE));
   beltDefs.forEach((b, k) => buildBelt(floor, b, k));

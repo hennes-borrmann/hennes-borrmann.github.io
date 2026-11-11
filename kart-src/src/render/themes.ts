@@ -49,6 +49,22 @@ export interface Theme {
   farY: number;
   /** Buckel im Gelände abseits der Strecke (Meter). */
   rough: number;
+  /**
+   * Unterwasserwelt (Tauchstrecken): das Gelände wird auch unter dem Meeresspiegel
+   * gezeichnet (Meeresboden), die Wasserfläche bekommt eine Unterseite, und sobald
+   * die Kamera abtaucht, wechseln Dunst und Licht auf diese Werte.
+   */
+  under?: {
+    fog: number;
+    fogNear: number;
+    fogFar: number;
+    sunColor: number;
+    sunIntensity: number;
+    hemiSky: number;
+    hemiGround: number;
+    /** Wasseroberfläche von unten gesehen: dunkel, mittel, Lichtflecken. */
+    surface: [number, number, number];
+  };
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
@@ -232,5 +248,124 @@ export const THEMES: Record<ThemeId, Theme> = {
     liquidGlow: false,
     farY: -40,
     rough: 0,
+  },
+  // Tropisches Riff: oben Lagune im Vormittagslicht, unten Türkis und Blau mit Korallenfarben.
+  riff: {
+    sky: [0x1689e0, 0x79d2f7, 0xe6fbff],
+    fog: 0xd2f3fb,
+    fogNear: 170,
+    fogFar: 640,
+    sunDir: [0.35, 0.86, 0.3],
+    sunColor: 0xfffbea,
+    sunIntensity: 2.6,
+    hemiSky: 0xcdeeff,
+    hemiGround: 0xe8d9a0,
+    hemiIntensity: 1.3,
+    disc: 0xfffbe0,
+    discSize: 32,
+    clouds: 0xffffff,
+    cloudShade: 0xbfe3f2,
+    stars: false,
+    road: 0x6c6480,
+    roadAlt: 0x756c8a,
+    line: 0xfff6d6,
+    kerbA: 0xff6f91,
+    kerbB: 0xfff6d6,
+    shoulder: 0xe6d6a0,
+    wallA: 0xff7a8f,
+    wallB: 0xffe9c2,
+    wallCap: 0x7a3f6b,
+    deck: 0xc08a52,
+    deckDark: 0x8a5c33,
+    pillar: 0x7a5230,
+    ground: [0xead9a2, 0x58c79b, 0x8d76a8, 0xf4ead0],
+    liquidY: 0,
+    liquid: [0x16a6d8, 0x38c8e6, 0xcdf6ff],
+    liquidGlow: false,
+    farY: -22,
+    rough: 3,
+    under: {
+      fog: 0x1f8fb5,
+      fogNear: 24,
+      fogFar: 230,
+      sunColor: 0xbfefff,
+      sunIntensity: 1.9,
+      hemiSky: 0x8fe0ff,
+      hemiGround: 0x2f7f9c,
+      surface: [0x2aa5cf, 0x63d3ef, 0xe9fdff],
+    },
+  },
+  // Verschneiter Gebirgspass am späten Nachmittag: kaltes Blau im Schatten, warmes Licht auf dem Schnee.
+  // Das "Meer" ist hier ein Nebelmeer tief im Tal – so wächst das Gelände als Bergmassiv aus der Strecke.
+  eis: {
+    sky: [0x2a66c8, 0x9ccdf3, 0xffe3cc],
+    fog: 0xe4eefa,
+    fogNear: 180,
+    fogFar: 700,
+    sunDir: [-0.5, 0.5, 0.45],
+    sunColor: 0xfff0dc,
+    sunIntensity: 2.5,
+    hemiSky: 0xcfe4ff,
+    hemiGround: 0xbfd2ec,
+    hemiIntensity: 1.35,
+    disc: 0xfff4d6,
+    discSize: 38,
+    clouds: 0xffffff,
+    cloudShade: 0xc6d9ef,
+    stars: false,
+    road: 0x5d6276,
+    roadAlt: 0x666b80,
+    line: 0xffffff,
+    kerbA: 0xe8483f,
+    kerbB: 0xffffff,
+    shoulder: 0xe3ecf6,
+    wallA: 0xe8483f,
+    wallB: 0xffffff,
+    wallCap: 0x2c3550,
+    deck: 0xa9825a,
+    deckDark: 0x74573a,
+    pillar: 0x6b6f80,
+    ground: [0xf5f9fe, 0xe7eff9, 0x8b98b0, 0xffffff],
+    liquidY: -30,
+    liquid: [0xdbe7f5, 0xeef4fb, 0xffffff],
+    liquidGlow: false,
+    farY: -26,
+    rough: 5,
+  },
+  // Mond: schwarzer Himmel mit Sternen und der Erde, hartes weißes Sonnenlicht, grauer Staub, orange Signalfarbe der Basis.
+  mond: {
+    sky: [0x02030a, 0x070a18, 0x10142a],
+    fog: 0x0c0f1f,
+    fogNear: 260,
+    fogFar: 900,
+    sunDir: [0.55, 0.6, -0.35],
+    sunColor: 0xffffff,
+    sunIntensity: 2.9,
+    hemiSky: 0x6f7fb0,
+    hemiGround: 0x9a98a8,
+    hemiIntensity: 0.95,
+    disc: 0x6fb7ff,
+    discSize: 54,
+    clouds: 0x10142a,
+    cloudShade: 0x0a0d1c,
+    stars: true,
+    road: 0x4d5063,
+    roadAlt: 0x565a6e,
+    line: 0xff8a2a,
+    kerbA: 0xff8a2a,
+    kerbB: 0xe6e9f2,
+    shoulder: 0x9d9aa8,
+    wallA: 0xe6e9f2,
+    wallB: 0xff8a2a,
+    wallCap: 0x23263a,
+    deck: 0xc9cede,
+    deckDark: 0x7d8398,
+    pillar: 0x5b6076,
+    ground: [0xb9b6c2, 0xaaa7b4, 0x7d7a8a, 0xcfccd8],
+    liquidY: null,
+    liquid: [0, 0, 0],
+    liquidGlow: false,
+    farY: 0,
+    rough: 3,
   },
 };

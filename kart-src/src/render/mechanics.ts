@@ -7,10 +7,13 @@ import type * as THREE from 'three';
 import type { Track } from '../game/track';
 import type { FxSink } from './fxApi';
 import type { World } from './world';
-import { PULSE_PRESS } from '../game/mechanics';
+import { PULSE_AVALANCHE, PULSE_BOMB, PULSE_BUBBLE, PULSE_ICICLE, PULSE_METEOR, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
+import { buildDive } from './mechanics/dive';
 import { buildFlight, hasGlide } from './mechanics/flight';
 import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
+import { buildMoon } from './mechanics/moon';
+import { buildSnow } from './mechanics/snow';
 import { buildTide } from './mechanics/tide';
 import { buildTraffic } from './mechanics/traffic';
 
@@ -35,9 +38,12 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   const out: MechanicView[] = [];
   if (track.vehicles.length > 0) out.push(buildTraffic(track, detail));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
-  if (track.pulses.some((p) => p.kind !== PULSE_PRESS) || track.floods.length > 0) out.push(buildLava(track, detail));
-  if (track.belts.length > 0 || presses) out.push(buildMachines(track, detail));
+  if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
+  if (track.belts.some((b) => !b.swim) || presses) out.push(buildMachines(track, detail));
   if (track.tide) out.push(buildTide(track, detail, world));
   if (track.thermals.length > 0 || track.rings.length > 0 || hasGlide(track)) out.push(buildFlight(track, detail));
+  if (track.belts.some((b) => b.swim) || track.pulses.some((p) => p.kind === PULSE_BUBBLE)) out.push(buildDive(track, detail));
+  if (track.pulses.some((p) => p.kind === PULSE_AVALANCHE || p.kind === PULSE_ICICLE)) out.push(buildSnow(track, detail));
+  if (track.launchers.length > 0 || track.pulses.some((p) => p.kind === PULSE_METEOR)) out.push(buildMoon(track, detail));
   return out;
 }

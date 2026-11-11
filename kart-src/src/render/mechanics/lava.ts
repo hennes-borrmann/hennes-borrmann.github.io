@@ -322,6 +322,8 @@ export function buildLava(track: Track, detail: boolean): MechanicView {
   const bombs: BombState[] = [];
 
   for (const p of t.pulses) {
+    // Nur Geysire und Bomben gehören hierher (Pressen und Blasenschlote zeichnen andere).
+    if (p.kind !== PULSE_VENT && p.kind !== 1) continue;
     const s = siteAt(t, p.seg, p.x, p.y, p.z);
     const R = p.radius;
     if (p.kind === PULSE_VENT) {

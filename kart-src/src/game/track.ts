@@ -21,6 +21,7 @@
 
 import {
   PULSE_BOMB,
+  PULSE_BUBBLE,
   PULSE_PRESS,
   PULSE_VENT,
   VEHICLE_SPECS,
@@ -33,11 +34,15 @@ import {
   type Tide,
   type TrafficDef,
   type Vehicle,
+  PULSE_AVALANCHE,
+  PULSE_ICICLE,
+  LAUNCH_SPEED,
+  PULSE_METEOR,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -103,6 +108,20 @@ export interface PathFeatures {
   thermals?: { at: number; lat: number; radius?: number; lift?: number }[];
   /** Schubringe in der Luft: up = Höhe der Ringmitte über der Ideallinie (Meter). */
   rings?: { at: number; lat: number; up?: number }[];
+  /** Tauchstrecken: [von, bis] liegt unter Wasser (siehe mechanics.ts und TrackDef.sea). */
+  dives?: [number, number][];
+  /** Strömungen unter Wasser: wie Förderbänder, wirken aber auch auf schwebende Karts. */
+  currents?: { from: number; to: number; lat0: number; lat1: number; along?: number; across?: number }[];
+  /** Blasenschlote: heben im Takt an, was über ihnen ist (period, phase in Sekunden). */
+  bubbles?: { at: number; lat: number; period: number; phase: number }[];
+  /** Lawinen: gehen im Takt quer über die Bahn nieder; lat = Bergseite (Vorzeichen: von dort kommt sie). */
+  avalanches?: { at: number; lat: number; period: number; phase: number }[];
+  /** Eiszapfen: fallen im Takt von der Decke. */
+  icicles?: { at: number; lat: number; period: number; phase: number }[];
+  /** Meteoriten: schlagen im Takt ein. */
+  meteors?: { at: number; lat: number; period: number; phase: number }[];
+  /** Sprungplatten: schleudern das Kart hoch (power = Steiggeschwindigkeit in m/s, ohne Angabe LAUNCH_SPEED). */
+  launchers?: { at: number; lat?: number; halfWidth?: number; power?: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -152,6 +171,10 @@ export interface TrackDef extends PathFeatures {
   twist?: string;
   /** Ebbe und Flut: Wasserhöhe bei Ebbe und Flut (Meter), Periode und Versatz in Sekunden. */
   tide?: { low: number; high: number; period: number; phase: number };
+  /** Höhe des Meeresspiegels für Tauchstrecken (PathFeatures.dives); ohne Angabe 0. */
+  sea?: number;
+  /** Anteil der Schwerkraft auf dieser Strecke (Mond: etwa 0,38); ohne Angabe 1. */
+  gravity?: number;
 }
 
 export interface BoostPad {
@@ -159,6 +182,16 @@ export interface BoostPad {
   length: number;
   lat: number;
   halfWidth: number;
+}
+
+/** Sprungplatte: wer darüberfährt, wird hochgeschleudert. */
+export interface Launcher {
+  seg: number;
+  length: number;
+  lat: number;
+  halfWidth: number;
+  /** Steiggeschwindigkeit in m/s. */
+  power: number;
 }
 
 export interface Hazard {
@@ -267,6 +300,9 @@ export interface Track {
   /** Abschnitt der Hauptstrecke, neben dem das Wahrzeichen der Welt steht. */
   landmark: number;
   pads: BoostPad[];
+  launchers: Launcher[];
+  /** Anteil der Schwerkraft (1 = Erde). */
+  gravity: number;
   boxes: { x: number; y: number; z: number; seg: number }[];
   hazards: Hazard[];
   /** Streckenmechanik (mechanics.ts): Verkehr, Geysire und Lavabomben, steigende Lava. */
@@ -280,6 +316,9 @@ export interface Track {
   /** Ebbe und Flut (null = keine) und je Abschnitt, ob sie dort gilt. */
   tide: Tide | null;
   tidal: Uint8Array;
+  /** Tauchstrecken: 1 je Abschnitt, der unter Wasser liegt; sea = Höhe des Meeresspiegels. */
+  deep: Uint8Array;
+  sea: number;
   laps: number;
 }
 
@@ -764,7 +803,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         edge[seg] |= EDGE_GAP | EDGE_GLIDE | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
         respawn[seg] = back;
       });
-      // Kurz vor der Kante und hinter der Landung keine Bande; auch dort führt ein Sturz zurück zum Anlauf.
+      // Kurz vor der Kante und hinter der Landung keine Bande. Wer vor der Kante seitlich fällt, bekommt den
+      // Anlauf; wer hinter der Landung fällt, wird an der Landung wieder aufgesetzt – den Flug hat er geschafft.
       const first = segAt(p, from);
       const last = segAt(p, to);
       for (const g of [prev[first], prev[prev[first]], next[last], next[next[last]]]) {
@@ -855,6 +895,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     fallDepth: def.fallDepth ?? 5,
     landmark: def.landmarkAt !== undefined ? mainSeg(def.landmarkAt) : Math.round(n * 0.845) % n,
     pads: [],
+    launchers: [],
+    gravity: def.gravity ?? 1,
     boxes: [],
     hazards: [],
     vehicles: [],
@@ -874,6 +916,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         }
       : null,
     tidal: new Uint8Array(total),
+    deep: new Uint8Array(total),
+    sea: def.sea ?? 0,
     laps: def.laps,
   };
   for (const p of paths) {
@@ -881,6 +925,11 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       const seg = segAt(p, pad.at);
       const half = pad.halfWidth === 0 ? rh[seg] - 0.4 : (pad.halfWidth ?? PAD_HALF_WIDTH);
       track.pads.push({ seg, length: Math.round(PAD_LENGTH / step), lat: pad.lat, halfWidth: half });
+    }
+    for (const l of p.f.launchers ?? []) {
+      const seg = segAt(p, l.at);
+      const half = l.halfWidth === 0 || l.halfWidth === undefined ? rh[seg] - 0.4 : l.halfWidth;
+      track.launchers.push({ seg, length: Math.round(5 / step), lat: l.lat ?? 0, halfWidth: half, power: l.power ?? LAUNCH_SPEED });
     }
     for (const at of p.f.boxRows ?? []) {
       const seg = segAt(p, at);
@@ -917,11 +966,21 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const v of p.f.vents ?? []) pulse(PULSE_VENT, v);
     for (const b of p.f.bombs ?? []) pulse(PULSE_BOMB, b);
     for (const b of p.f.presses ?? []) pulse(PULSE_PRESS, b);
+    for (const b of p.f.bubbles ?? []) pulse(PULSE_BUBBLE, b);
+    for (const b of p.f.avalanches ?? []) pulse(PULSE_AVALANCHE, b);
+    for (const b of p.f.icicles ?? []) pulse(PULSE_ICICLE, b);
+    for (const b of p.f.meteors ?? []) pulse(PULSE_METEOR, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
-      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0 });
+      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0, swim: false });
     }
+    for (const b of p.f.currents ?? []) {
+      const first = segAt(p, b.from);
+      const last = segAt(p, b.to);
+      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0, swim: true });
+    }
+    for (const [from, to] of p.f.dives ?? []) spanU(p, from, to, (seg) => (track.deep[seg] = 1));
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
     for (const th of p.f.thermals ?? []) {
       const seg = segAt(p, th.at);
@@ -984,6 +1043,14 @@ const PULSE_KINDS = [
   { radius: 2.1, on: 66, warn: 78 },
   { radius: 2.6, on: 150, warn: 110 },
   { radius: 2.0, on: 34, warn: 60 },
+  // Blasenschlot: lange aktiv, kurze Pause
+  { radius: 2.8, on: 150, warn: 40 },
+  // Lawine: Streifen von 9 m vor bis 9 m hinter der Stelle, gut zwei Sekunden lang; lange Vorwarnung
+  { radius: 9, on: 140, warn: 150 },
+  // Eiszapfen: schlägt ein und lässt kurz Splitter liegen
+  { radius: 1.7, on: 80, warn: 85 },
+  // Meteorit: großer Einschlag, der Krater glüht nach; lange Vorwarnung (Schatten wächst)
+  { radius: 2.8, on: 110, warn: 130 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;
@@ -1082,6 +1149,35 @@ export function segDelta(t: Track, from: number, to: number): number {
   if (d > half) d -= t.n;
   else if (d < -half) d += t.n;
   return d;
+}
+
+/**
+ * Rennfortschritt von from nach to, überall im Maß der Hauptstrecke (−n/2 … n/2).
+ *
+ * segDelta zählt innerhalb einer Abzweigung deren eigene Abschnitte – richtig für
+ * Abstände auf der Fahrbahn, aber falsch zum Aufsummieren: eine Abzweigung hat
+ * selten genau so viele Abschnitte wie das Stück Hauptstrecke, das sie ersetzt.
+ * Wer Runden zählt oder Plätze vergleicht, summiert deshalb diese Differenz.
+ */
+export function progDelta(t: Track, from: number, to: number): number {
+  let d = t.prog[to] - t.prog[from];
+  const half = t.n / 2;
+  if (d > half) d -= t.n;
+  else if (d < -half) d += t.n;
+  return d;
+}
+
+/**
+ * Aufsummierten Rennfortschritt um den Schritt von from nach to fortschreiben.
+ *
+ * Bis auf ganze Runden ist der Fortschritt immer der Fortschrittswert des Abschnitts.
+ * Darauf wird die Summe nach jedem Schritt gezogen: Auf Abzweigungen sind die Werte
+ * gebrochen, und ein aufsummierter Rundungsrest ließe die Summe an der Ziellinie um
+ * ein Haar unter der vollen Runde liegen – das Ziel käme einen Abschnitt zu spät.
+ */
+export function addProgress(t: Track, progress: number, from: number, to: number): number {
+  const p = progress + progDelta(t, from, to);
+  return Math.round((p - t.prog[to]) / t.n) * t.n + t.prog[to];
 }
 
 /** Liegen beide Abschnitte auf demselben Weg (beide Hauptstrecke oder dieselbe Abzweigung)? */

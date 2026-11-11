@@ -44,6 +44,8 @@ export class GameAudio {
   private readonly state: Stored = load();
   private wantMusic: MusicId | null = null;
   private finalLap = false;
+  /** Unter Wasser 0..1 (siehe setUnderwater); gilt auch, wenn der Kontext erst später entsteht. */
+  private underwater = 0;
   private timer = 0;
   private paused = false;
   private failed = false;
@@ -61,6 +63,7 @@ export class GameAudio {
         this.music = new MusicPlayer(this.mx);
         this.sfxPlayer = new SfxPlayer(this.mx);
         this.music.setFinalLap(this.finalLap);
+        if (this.underwater > 0) this.mx.setUnderwater(this.underwater);
         // Der Sequenzer plant unabhängig von der Bildrate voraus.
         this.timer = window.setInterval(() => {
           if (!this.paused) this.music?.pump();
@@ -106,11 +109,15 @@ export class GameAudio {
 
   /** Musik wechseln (überblendet weich); dieselbe ID erneut = nichts tun. */
   playMusic(id: MusicId): void {
+    // Musikwechsel heißt: neues Rennen, Ergebnis oder Menü – dort ist man nie abgetaucht.
+    // Sicherheitshalber öffnen, falls das Auftauchen nicht gemeldet wurde.
+    this.setUnderwater(0);
     this.wantMusic = id;
     if (this.mx?.canPlay()) this.music?.play(id);
   }
 
   stopMusic(fadeSec = 0.7): void {
+    this.setUnderwater(0);
     this.wantMusic = null;
     this.music?.play(null, fadeSec);
   }
@@ -119,6 +126,18 @@ export class GameAudio {
   setFinalLap(on: boolean): void {
     this.finalLap = on;
     this.music?.setFinalLap(on);
+  }
+
+  /**
+   * Unter Wasser: 1 = Motoren, Geräusche und Musik klingen dumpf (Tiefpass, leises
+   * Rauschbett), 0 = wie an der Luft. Gleitet in etwa 0,25 s. Wird es nie
+   * aufgerufen, bleibt der Klang Abtastwert für Abtastwert wie bisher.
+   */
+  setUnderwater(k: number): void {
+    const kk = Number.isFinite(k) ? Math.max(0, Math.min(1, k)) : 0;
+    if (kk === this.underwater) return;
+    this.underwater = kk;
+    this.mx?.setUnderwater(kk);
   }
 
   /** Musik kurz wegducken, z. B. unter einem Jingle. */

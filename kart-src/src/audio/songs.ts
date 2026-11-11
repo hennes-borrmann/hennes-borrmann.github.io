@@ -412,6 +412,9 @@ export const SONGS: Record<MusicId, SongDef> = {
   nacht: NACHT,
   // Die Stücke der neueren Welten stehen in songs-neu.ts; eingebunden wird jedes mit seiner Welt.
   wolken: NEUE_STUECKE.wolken,
+  riff: NEUE_STUECKE.riff,
+  eis: NEUE_STUECKE.eis,
+  mond: NEUE_STUECKE.mond,
   results: RESULTS,
 };
 

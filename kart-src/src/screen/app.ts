@@ -13,8 +13,9 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
-import { EDGE_GLIDE, TRACK, TRACK_COUNT, newVehiclePose, setTrack, vehiclePose } from '../game/track';
+import { PULSE_BUBBLE, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { EDGE_GLIDE, TRACK, newVehiclePose, setTrack, vehiclePose } from '../game/track';
+import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
 import { HostLobby } from '../lobby/hostLobby';
@@ -238,7 +239,7 @@ export class App {
       setBots: (bots) => this.hostLobby?.setBots(bots),
       setAiLevel: (level) => this.hostLobby?.setAiLevel(level),
       setLaps: (laps) => this.hostLobby?.setLaps(laps),
-      setTrack: (track) => this.hostLobby?.setTrack(Math.max(0, Math.min(TRACK_COUNT - 1, track))),
+      setTrack: (track) => this.hostLobby?.setTrack(Math.max(0, Math.min(OFFERED_TRACKS - 1, track))),
       setCharacter: (character) => {
         this.character = character;
         try {
@@ -424,10 +425,10 @@ export class App {
     this.roomPeerToken = roomPeerToken;
     const lobby = new HostLobby(code, playerToken, name, saved);
     if (!saved) {
-      if (this.debug.track >= 0) lobby.track = Math.min(TRACK_COUNT - 1, this.debug.track);
+      if (this.debug.track >= 0) lobby.track = Math.min(OFFERED_TRACKS - 1, this.debug.track);
       if (this.debug.ai >= 0) lobby.aiLevel = this.debug.ai;
     }
-    lobby.track = Math.min(TRACK_COUNT - 1, lobby.track);
+    lobby.track = Math.min(OFFERED_TRACKS - 1, lobby.track);
     if (!saved && this.character >= 0) lobby.setLocalCharacter(this.character);
     this.hostLobby = lobby;
 
@@ -1187,6 +1188,14 @@ export class App {
         }
         return { glides, thermals: TRACK.thermals.length, rings: TRACK.rings.length };
       },
+      // Mond: Sprungplatten (Meter ab Start, Abzweigung oder −1) und Schwerkraft der Strecke.
+      launchers: () => ({ gravity: TRACK.gravity, pads: TRACK.launchers.map((l) => ({ at: TRACK.prog[l.seg] * TRACK.step, branch: TRACK.branchOf[l.seg], power: l.power })) }),
+      // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
+      dive: () => {
+        let from = -1;
+        for (let i = 0; i < TRACK.n && from < 0; i++) if (TRACK.deep[i] && TRACK.py[i] < TRACK.sea - 1) from = i * TRACK.step;
+        return { sea: TRACK.sea, from, currents: TRACK.belts.filter((b) => b.swim).length, vents: TRACK.pulses.filter((p) => p.kind === PULSE_BUBBLE).length };
+      },
       // Gezeit zur Rennzeit dieses Bildschirms: Stand 0 (Ebbe) … 1 (Flut) und Höhe des Wasserspiegels.
       tide: () => {
         const view = this.hostGame ?? this.clientGame;
@@ -1198,7 +1207,7 @@ export class App {
       tree: () => this.scene?.debugTree() ?? [],
       buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
-      place: (slot: number, meters: number, lat = 0, branch = -1) => this.hostGame?.debugPlace(slot, meters, lat, branch),
+      place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
       debugHit: (slot: number) => this.hostGame?.debugHit(slot),
