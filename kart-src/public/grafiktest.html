@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schräglage – Grafiktest</title>
+<style>
+  body { margin: 0; padding: 18px 22px; background: #111318; color: #f4f1e8; font: 15px/1.4 system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  p { margin: 4px 0; color: #b9bcc6; }
+  table { border-collapse: collapse; margin: 12px 0; width: 100%; max-width: 980px; }
+  th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid #2a2e38; vertical-align: top; }
+  th { color: #ffd23f; font-weight: 600; }
+  .ok { color: #5fe0a0; }
+  .bad { color: #ff7b6e; font-weight: 600; }
+  .warn { color: #ffb347; }
+  #info td:first-child { color: #b9bcc6; white-space: nowrap; }
+  button { font: inherit; padding: 8px 16px; background: #ffd23f; color: #111; border: 0; font-weight: 700; }
+  #stage-box { position: fixed; right: 8px; bottom: 8px; opacity: 0.6; }
+  #stage-box canvas { width: 20px; height: 20px; margin-left: 2px; }
+</style>
+</head>
+<body>
+<h1>Grafiktest</h1>
+<p>Probiert aus, mit welchen Einstellungen dieser Browser eine 3D-Grafik (WebGL) hergibt. Bitte warten, bis unten „Fertig“ steht, und dann einen Screenshot der ganzen Seite schicken.</p>
+<table id="sets"><thead><tr><th>Einstellung</th><th>WebGL 2</th><th>WebGL 1</th></tr></thead><tbody></tbody></table>
+<table id="seq"><thead><tr><th>Ablauf</th><th>Ergebnis</th></tr></thead><tbody></tbody></table>
+<table id="info"><tbody></tbody></table>
+<p id="state">Läuft …</p>
+<button id="again" hidden>Noch einmal</button>
+<div id="stage-box"></div>
+<script>
+(function () {
+  'use strict';
+  var GAME = { alpha: false, depth: true, stencil: false, antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false };
+  function withPower(p) { var o = {}; for (var k in GAME) o[k] = GAME[k]; o.powerPreference = p; return o; }
+  // [Name, Einstellungen, auch WebGL 1 prüfen, große Fläche]
+  var SETS = [
+    ['ohne Vorgaben (wie die Testseite get.webgl.org)', undefined, true, false],
+    ['nur: Kantenglättung aus', { antialias: false }, false, false],
+    ['nur: hohe Leistung', { powerPreference: 'high-performance' }, false, false],
+    ['wie das Spiel (hohe Leistung, Glättung aus, undurchsichtig)', GAME, true, false],
+    ['wie das Spiel, aber Leistung „normal“', withPower('default'), false, false],
+    ['wie das Spiel, aber Leistung „sparsam“', withPower('low-power'), false, false],
+    ['wie die alten Porträts (durchsichtig, Glättung, Bild behalten)', { alpha: true, antialias: true, preserveDrawingBuffer: true }, false, false],
+    ['wie das Spiel, Fläche in voller Bildschirmgröße', GAME, false, true]
+  ];
+  var box = document.getElementById('stage-box');
+  var events = [];
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function cell(tr, text, cls) { var td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; }
+
+  /** Legt auf einer frischen Fläche einen Kontext an und zeichnet einmal. */
+  function make(kind, attrs, big, label) {
+    var c = document.createElement('canvas');
+    if (big) { c.width = Math.round(window.innerWidth * (window.devicePixelRatio || 1)); c.height = Math.round(window.innerHeight * (window.devicePixelRatio || 1)); }
+    else { c.width = 64; c.height = 64; }
+    box.appendChild(c);
+    var r = { canvas: c, gl: null, text: '', cls: 'ok', lostLater: false };
+    c.addEventListener('webglcontextlost', function () { r.lostLater = true; events.push(label + ' (' + kind + '): Kontext verloren'); });
+    c.addEventListener('webglcontextrestored', function () { events.push(label + ' (' + kind + '): Kontext wiederhergestellt'); });
+    c.addEventListener('webglcontextcreationerror', function (e) { events.push(label + ' (' + kind + '): Anlegen gescheitert – ' + (e.statusMessage || 'ohne Begründung')); });
+    var gl = null;
+    try { gl = attrs === undefined ? c.getContext(kind) : c.getContext(kind, attrs); } catch (err) { r.text = 'Fehler: ' + err.message; r.cls = 'bad'; return r; }
+    if (!gl) { r.text = 'kein Kontext'; r.cls = 'bad'; return r; }
+    r.gl = gl;
+    if (gl.isContextLost()) { r.text = 'schon verloren geliefert'; r.cls = 'bad'; return r; }
+    try {
+      gl.clearColor(0.2, 0.8, 0.4, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      var px = new Uint8Array(4);
+      gl.readPixels(1, 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      var prec = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER, gl.HIGH_FLOAT);
+      if (!prec) { r.text = 'Kontext da, aber Abfragen liefern nichts (verloren)'; r.cls = 'bad'; }
+      else if (px[1] < 150) { r.text = 'Kontext da, zeichnet aber nicht (Bildpunkt ' + px[0] + ',' + px[1] + ',' + px[2] + ')'; r.cls = 'bad'; }
+      else r.text = 'in Ordnung';
+      var err = gl.getError();
+      if (err) { r.text += ' · Fehler 0x' + err.toString(16); r.cls = 'bad'; }
+    } catch (err2) { r.text = 'Fehler beim Zeichnen: ' + err2.message; r.cls = 'bad'; }
+    return r;
+  }
+  function later(r) {
+    if (!r.gl) return;
+    if (r.gl.isContextLost() || r.lostLater) { r.text += ' → kurz darauf verloren'; r.cls = 'bad'; }
+  }
+
+  async function run() {
+    var sets = document.querySelector('#sets tbody');
+    var seq = document.querySelector('#seq tbody');
+    var info = document.querySelector('#info tbody');
+    sets.textContent = ''; seq.textContent = ''; info.textContent = ''; box.textContent = ''; events = [];
+    document.getElementById('state').textContent = 'Läuft …';
+    document.getElementById('again').hidden = true;
+    var first = null;
+    for (var i = 0; i < SETS.length; i++) {
+      var s = SETS[i];
+      var tr = document.createElement('tr');
+      cell(tr, s[0]);
+      var a = make('webgl2', s[1], s[3], s[0]);
+      if (!first && a.gl && !a.gl.isContextLost()) first = a.gl;
+      var b = s[2] ? make('webgl', s[1], s[3], s[0]) : null;
+      await sleep(350);
+      later(a); if (b) later(b);
+      cell(tr, a.text, a.cls);
+      cell(tr, b ? b.text : '–', b ? b.cls : '');
+      sets.appendChild(tr);
+    }
+    // Abläufe
+    async function sequence(name, fn) {
+      var tr = document.createElement('tr');
+      cell(tr, name);
+      var res;
+      try { res = await fn(); } catch (err) { res = { text: 'Fehler: ' + err.message, cls: 'bad' }; }
+      cell(tr, res.text, res.cls);
+      seq.appendChild(tr);
+    }
+    await sequence('Einen Kontext zwangsweise beenden, sofort danach einen neuen anlegen (so machte es das Spiel bis heute früh)', async function () {
+      var a = make('webgl2', { alpha: true, antialias: true, preserveDrawingBuffer: true }, false, 'Ablauf 1a');
+      if (!a.gl || a.cls === 'bad') return { text: 'erster Kontext: ' + a.text, cls: 'bad' };
+      var ext = a.gl.getExtension('WEBGL_lose_context');
+      if (ext) ext.loseContext();
+      var b = make('webgl2', GAME, false, 'Ablauf 1b');
+      await sleep(600);
+      later(b);
+      return { text: 'neuer Kontext: ' + b.text, cls: b.cls };
+    });
+    await sequence('Kontext anlegen, Fläche danach auf Bildschirmgröße bringen, zeichnen (so macht es das Spiel)', async function () {
+      var a = make('webgl2', GAME, false, 'Ablauf 2');
+      if (!a.gl || a.cls === 'bad') return { text: a.text, cls: 'bad' };
+      a.canvas.width = Math.round(window.innerWidth * (window.devicePixelRatio || 1));
+      a.canvas.height = Math.round(window.innerHeight * (window.devicePixelRatio || 1));
+      var gl = a.gl;
+      gl.viewport(0, 0, a.canvas.width, a.canvas.height);
+      gl.clearColor(0.2, 0.8, 0.4, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      var px = new Uint8Array(4);
+      gl.readPixels(5, 5, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      await sleep(600);
+      if (gl.isContextLost() || a.lostLater) return { text: 'nach dem Vergrößern verloren', cls: 'bad' };
+      if (px[1] < 150) return { text: 'zeichnet nicht (Bildpunkt ' + px[0] + ',' + px[1] + ',' + px[2] + ')', cls: 'bad' };
+      return { text: 'in Ordnung (' + a.canvas.width + ' × ' + a.canvas.height + ')', cls: 'ok' };
+    });
+    // Angaben zum Gerät
+    function row(k, v) { var tr = document.createElement('tr'); cell(tr, k); cell(tr, v); info.appendChild(tr); }
+    row('Browser', navigator.userAgent);
+    row('Fenster', window.innerWidth + ' × ' + window.innerHeight + ' · Pixeldichte ' + (window.devicePixelRatio || 1) + ' · sichtbar: ' + document.visibilityState);
+    if (first) {
+      try {
+        var dbg = first.getExtension('WEBGL_debug_renderer_info');
+        row('Grafik', (dbg ? first.getParameter(dbg.UNMASKED_VENDOR_WEBGL) + ' · ' + first.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : first.getParameter(first.VENDOR) + ' · ' + first.getParameter(first.RENDERER)) + ' · ' + first.getParameter(first.VERSION));
+        row('Grenzen', 'Textur ' + first.getParameter(first.MAX_TEXTURE_SIZE) + ' · Renderbuffer ' + first.getParameter(first.MAX_RENDERBUFFER_SIZE) + ' · Glättung bis ' + first.getParameter(first.MAX_SAMPLES) + '-fach');
+      } catch (err) { row('Grafik', 'nicht abfragbar: ' + err.message); }
+    } else row('Grafik', 'kein einziger brauchbarer Kontext');
+    row('Ereignisse', events.length ? events.join(' | ') : 'keine');
+    row('Zeit', new Date().toLocaleString('de-DE') + ' · Testseite Fassung 1');
+    document.getElementById('state').textContent = 'Fertig. Bitte einen Screenshot dieser Seite schicken.';
+    document.getElementById('again').hidden = false;
+  }
+  document.getElementById('again').addEventListener('click', run);
+  run();
+})();
+</script>
+</body>
+</html>

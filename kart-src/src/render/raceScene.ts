@@ -214,51 +214,58 @@ function wrapAngle(a: number): number {
 }
 
 /**
- * Legt den WebGL-Renderer an. Gibt der Browser mit den Wunsch-Einstellungen keinen Grafikkontext her
- * (gesehen auf einem iPad), wird es mit sparsameren versucht – zuletzt mit einem Kontext, den der Browser ganz
- * nach seinen eigenen Vorgaben anlegt. Scheitert alles, nennt der Fehler jeden Versuch und die Begründung des Browsers.
+ * Legt den WebGL-Renderer an. Ein iPad lieferte mit den Wunsch-Einstellungen einen Kontext, der schon verloren war.
+ * Deshalb mehrere Anläufe mit anderen Einstellungen – jeder auf einer frischen Zeichenfläche, denn eine Fläche
+ * behält ihren ersten Kontext (weitere getContext-Aufrufe liefern nur wieder denselben). Der zweite Anlauf lässt
+ * dem Browser alle Vorgaben, wie es die schlichtesten Testseiten tun. Scheitert alles, nennt der Fehler jeden Anlauf.
  */
-function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
-  const tries: [string, THREE.WebGLRendererParameters][] = [
-    ['Wunsch', { canvas, antialias: window.devicePixelRatio < 1.5, powerPreference: 'high-performance' }],
-    ['schlicht', { canvas, antialias: false }],
-    ['sparsam', { canvas, antialias: false, stencil: false, powerPreference: 'low-power' }],
+function createRenderer(first: HTMLCanvasElement): THREE.WebGLRenderer {
+  const tries: [string, THREE.WebGLRendererParameters | null][] = [
+    ['Wunsch', { antialias: window.devicePixelRatio < 1.5, powerPreference: 'high-performance' }],
+    ['Vorgaben des Browsers', null],
+    ['schlicht', { antialias: false }],
+    ['sparsam', { antialias: false, stencil: false, powerPreference: 'low-power' }],
   ];
   const errors: string[] = [];
-  // Der Browser nennt seinen Grund in einem eigenen Ereignis.
-  let reason = '';
-  const onError = (e: Event): void => {
-    const msg = (e as WebGLContextEvent).statusMessage;
-    if (msg) reason = msg;
-  };
-  canvas.addEventListener('webglcontextcreationerror', onError);
-  try {
-    for (const [name, params] of tries) {
-      try {
-        return new THREE.WebGLRenderer(params);
-      } catch (err) {
-        errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
-      }
+  let canvas = first;
+  for (let i = 0; i < tries.length; i++) {
+    const [name, params] = tries[i];
+    if (i > 0) {
+      // An der alten Fläche hängt der gescheiterte Kontext: eine gleiche neue an ihre Stelle setzen.
+      const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
+      canvas.replaceWith(fresh);
+      canvas = fresh;
     }
-    // Letzter Versuch: den Kontext ohne jede Vorgabe selbst holen und übergeben.
+    // Der Browser nennt seinen Grund in einem eigenen Ereignis.
+    let reason = '';
+    const onError = (e: Event): void => {
+      reason = (e as WebGLContextEvent).statusMessage || reason;
+    };
+    canvas.addEventListener('webglcontextcreationerror', onError);
     try {
-      const context = canvas.getContext('webgl2');
-      if (context) return new THREE.WebGLRenderer({ canvas, context });
-      errors.push('Vorgabe des Browsers: kein Kontext');
+      let renderer: THREE.WebGLRenderer;
+      if (params) renderer = new THREE.WebGLRenderer({ canvas, ...params });
+      else {
+        const context = canvas.getContext('webgl2');
+        if (!context) throw new Error('kein Kontext');
+        if (context.isContextLost()) throw new Error('Kontext kam schon verloren an');
+        renderer = new THREE.WebGLRenderer({ canvas, context });
+      }
+      if (renderer.getContext().isContextLost()) {
+        renderer.dispose();
+        throw new Error('Kontext kam schon verloren an');
+      }
+      return renderer;
     } catch (err) {
-      errors.push(`Vorgabe des Browsers: ${err instanceof Error ? err.message : String(err)}`);
+      let text = err instanceof Error ? err.message : String(err);
+      // Abfragen an einen verlorenen Kontext liefern null – three.js stolpert dann über die erste davon.
+      if (/getShaderPrecisionFormat|getContextAttributes/.test(text)) text = 'Kontext kam schon verloren an';
+      errors.push(`${name}: ${text}${reason ? ` (Browser: ${reason})` : ''}`);
+    } finally {
+      canvas.removeEventListener('webglcontextcreationerror', onError);
     }
-  } finally {
-    canvas.removeEventListener('webglcontextcreationerror', onError);
   }
-  // Häufigster Fall auf dem iPad: Der Browser gibt einen Kontext her, der schon verloren ist.
-  let lost = false;
-  try {
-    lost = canvas.getContext('webgl2')?.isContextLost() === true;
-  } catch {
-    // dann eben ohne diese Auskunft
-  }
-  throw new Error((lost ? 'Der Browser liefert eine bereits verlorene Grafik. ' : '') + errors.join(' · ') + (reason ? ` · Begründung des Browsers: ${reason}` : ''));
+  throw new Error(errors.join(' · '));
 }
 
 /** Ein Bildpunkt für die Stichprobe in checkFrame. */
@@ -372,10 +379,12 @@ export class RaceScene {
   private readonly flat = new THREE.Quaternion();
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    private canvas: HTMLCanvasElement,
     quality: Quality = 'auto',
   ) {
     this.renderer = createRenderer(canvas);
+    // (Der Renderer kann auf einer frischen Fläche entstanden sein, die an die Stelle der übergebenen getreten ist.)
+    this.canvas = canvas = this.renderer.domElement;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // Verliert der Browser den Grafikkontext (Absturz seines Grafikprozesses, Speichernot, App im Hintergrund),
     // bleibt das Bild schwarz, ohne dass ein Fehler fällt. Mitschreiben, damit es gemeldet werden kann.
