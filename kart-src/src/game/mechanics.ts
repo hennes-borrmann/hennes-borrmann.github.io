@@ -83,6 +83,17 @@ export const PULSE_PRESS = 2;
 /** Blasenschlot (unter Wasser): hebt im Takt an, was über ihm ist – ein Sprungbrett, kein Treffer. */
 export const PULSE_BUBBLE = 3;
 /**
+ * Lawine: geht im Takt quer über die Fahrbahn nieder. Solange sie läuft, schiebt sie alles im
+ * Streifen (radius Meter vor und hinter der Stelle, über die ganze Breite) talwärts und bremst
+ * stark – kein Dreher. lat nennt die Bergseite: von dort kommt sie.
+ */
+export const PULSE_AVALANCHE = 4;
+/** Eiszapfen: fällt im Takt von der Höhlendecke – trifft wie eine Lavabombe, lässt Splitter liegen. */
+export const PULSE_ICICLE = 5;
+/** Lawine: seitlicher Schub (m/s) und Bremsfaktor je Tick. */
+export const AVALANCHE_PUSH = 6.5;
+export const AVALANCHE_DRAG = 0.962;
+/**
  * Ablauf einer Presse, gemeinsam für Physik und Bild: in den letzten PRESS_STRIKE Ticks
  * vor Zyklus 0 fällt der Stempel und schlägt bei 0 auf – genau dann beginnt die Gefahr
  * (on Ticks lang). Er hebt sich schon PRESS_LEAD Ticks vor deren Ende wieder, so dass er

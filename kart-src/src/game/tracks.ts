@@ -4,6 +4,7 @@
 // Stützpunkt 12 und 13.
 
 import type { TrackDef } from './track';
+import { EIS } from './tracks/eis';
 import { GLUT } from './tracks/glut';
 import { KLIPPE } from './tracks/klippe';
 import { NACHT } from './tracks/nacht';
@@ -11,4 +12,4 @@ import { RIFF } from './tracks/riff';
 import { WERKSHOF } from './tracks/werkshof';
 import { WOLKEN } from './tracks/wolken';
 
-export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF];
+export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS];

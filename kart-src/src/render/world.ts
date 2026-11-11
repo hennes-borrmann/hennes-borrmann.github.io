@@ -325,6 +325,10 @@ export class World {
           return { a: col(0x9a9186), b: col(0x857d73), c: col(0x6f685f), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x7a7268), detail: 'cobble', barrier: 'stone', wallA: col(0xa59c90), wallB: col(0x8d857a) };
         case 'neon':
           return { a: rgb(0x23263f), b: rgb(0x1c1f36), c: rgb(0x4ef0ff), band: 4, plain: true, lines: true, line: rgb(0x4ef0ff), center: rgb(0xff5ad1), kerbs: true, kerbA: rgb(0xff5ad1), kerbB: rgb(0x23263f), shoulder: rgb(0x15172b), detail: 'none', barrier: 'rail', wallA: rgb(0x2d3050), wallB: rgb(0x8f97b8), glow: rgb(0xff5ad1), glowB: rgb(0x4ef0ff) };
+        case 'snow':
+          return { a: col(0xf3f7fc), b: col(0xe6eef7), c: col(0xc9d8e8), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdde8f3), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'ice':
+          return { a: col(0xbfe6f5), b: col(0xa9dbef), c: col(0xf2fdff), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xd7edf8), detail: 'cracks', barrier: 'rock', wallA: col(0xd9eef8), wallB: col(0xa7cde4) };
         default:
           return { a: cRoad, b: cRoadAlt, c: cInk, band: 4, plain: true, lines: true, kerbs: true, shoulder: null, detail: 'none', barrier: 'block' };
       }

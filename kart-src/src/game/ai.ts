@@ -33,7 +33,7 @@ import {
   type Cmd,
   type KartState,
 } from './sim';
-import { PULSE_BUBBLE, FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -410,6 +410,15 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const eta = (d / Math.max(v, 8)) * 60;
       const c0 = pulseCycle(p, ctx.time + eta - 14);
       const c1 = pulseCycle(p, ctx.time + eta + 14);
+      if (p.kind === PULSE_AVALANCHE) {
+        // Eine Lawine sperrt die ganze Bahn: wer bei der Ankunft hineingeriete, nimmt vorher Tempo heraus
+        // (wer schon drinsteckt, fährt weiter).
+        const inSnow = d < p.radius + 2;
+        const c = pulseCycle(p, ctx.time + ((d - p.radius) / Math.max(v, 8)) * 60);
+        const out = pulseCycle(p, ctx.time + ((d + p.radius) / Math.max(v, 8)) * 60);
+        if (!inSnow && (c < p.on + 6 || out < p.on || out < c)) jam = true;
+        continue;
+      }
       if (p.kind === PULSE_BUBBLE) {
         // Ein Blasenschlot ist kein Hindernis, sondern ein Sprungbrett: wer aufpasst, hält auf den nächsten zu,
         // der bei der Ankunft sicher bläst (darüber hängt ein Schubring).
@@ -489,7 +498,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > 13 ? BTN_BRAKE : 0);
 
   // --- Lenken und Driften ---
-  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (SURFACES[t.surf[s.seg]] ?? SURFACES[0]).grip) / v);
+  const here0 = SURFACES[t.surf[s.seg]] ?? SURFACES[0];
+  const yawMax = v < 0.3 ? 0 : Math.min(v / R_MIN, (A_LAT * (here0.turn ?? here0.grip)) / v);
   let steer: number;
   if (flying) {
     // Im Gleitflug lenkt es sich weich, aber wirksam.

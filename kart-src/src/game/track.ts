@@ -34,6 +34,8 @@ import {
   type Tide,
   type TrafficDef,
   type Vehicle,
+  PULSE_AVALANCHE,
+  PULSE_ICICLE,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
@@ -110,6 +112,10 @@ export interface PathFeatures {
   currents?: { from: number; to: number; lat0: number; lat1: number; along?: number; across?: number }[];
   /** Blasenschlote: heben im Takt an, was über ihnen ist (period, phase in Sekunden). */
   bubbles?: { at: number; lat: number; period: number; phase: number }[];
+  /** Lawinen: gehen im Takt quer über die Bahn nieder; lat = Bergseite (Vorzeichen: von dort kommt sie). */
+  avalanches?: { at: number; lat: number; period: number; phase: number }[];
+  /** Eiszapfen: fallen im Takt von der Decke. */
+  icicles?: { at: number; lat: number; period: number; phase: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -932,6 +938,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const b of p.f.bombs ?? []) pulse(PULSE_BOMB, b);
     for (const b of p.f.presses ?? []) pulse(PULSE_PRESS, b);
     for (const b of p.f.bubbles ?? []) pulse(PULSE_BUBBLE, b);
+    for (const b of p.f.avalanches ?? []) pulse(PULSE_AVALANCHE, b);
+    for (const b of p.f.icicles ?? []) pulse(PULSE_ICICLE, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
@@ -1007,6 +1015,10 @@ const PULSE_KINDS = [
   { radius: 2.0, on: 34, warn: 60 },
   // Blasenschlot: lange aktiv, kurze Pause
   { radius: 2.8, on: 150, warn: 40 },
+  // Lawine: Streifen von 9 m vor bis 9 m hinter der Stelle, gut zwei Sekunden lang; lange Vorwarnung
+  { radius: 9, on: 140, warn: 150 },
+  // Eiszapfen: schlägt ein und lässt kurz Splitter liegen
+  { radius: 1.7, on: 80, warn: 85 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;

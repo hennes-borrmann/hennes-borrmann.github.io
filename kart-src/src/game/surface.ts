@@ -3,7 +3,7 @@
 // und laden den Drift schnell, Stahl ist schnell und glatt, Fels und der
 // Stadtasphalt kleben. Die KI plant mit denselben Werten.
 
-export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon';
+export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice';
 
 export interface Surface {
   id: SurfaceId;
@@ -18,6 +18,11 @@ export interface Surface {
   brake: number;
   /** Zusätzliche Drift-Ladung: Anteil der Ticks, in denen der Mini-Turbo doppelt lädt (loser Grund driftet sich gut). */
   charge: number;
+  /**
+   * Wie gut sich die Nase drehen lässt (ohne Angabe wie grip). Auf Eis ist das viel mehr als der Halt:
+   * das Kart zeigt schon in die Kurve, rutscht aber noch geradeaus weiter – man fährt mit dem Heck voraus.
+   */
+  turn?: number;
 }
 
 /** Reihenfolge = Nummer im Feld Track.surf. */
@@ -41,6 +46,10 @@ export const SURFACES: Surface[] = [
   { id: 'cobble', name: 'Pflaster', grip: 0.9, speed: 0.95, accel: 0.95, brake: 0.9, charge: 0 },
   // Glatter Stadtasphalt mit Leuchtmarkierung: griffig und schnell.
   { id: 'neon', name: 'Neon-Asphalt', grip: 1.08, speed: 1.03, accel: 1.05, brake: 1.1, charge: 0 },
+  // Festgefahrener Schnee: etwas weich, das Heck arbeitet leicht.
+  { id: 'snow', name: 'Schnee', grip: 0.86, speed: 0.96, accel: 0.92, brake: 0.85, charge: 0.25 },
+  // Blankes Eis: schnell, kaum Halt, kaum Bremse – die Nase dreht, das Kart rutscht.
+  { id: 'ice', name: 'Eis', grip: 0.45, speed: 1.05, accel: 0.66, brake: 0.3, charge: 0.6, turn: 0.95 },
 ];
 
 export const SURFACE_INDEX = Object.fromEntries(SURFACES.map((s, i) => [s.id, i])) as Record<SurfaceId, number>;
