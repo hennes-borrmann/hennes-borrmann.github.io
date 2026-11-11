@@ -40,6 +40,15 @@ describe('Eigene Shader', () => {
     expect(hits(/\b(for|while)\s*\(\s*(int|float|uint)\b/)).toEqual([]);
   });
 
+  it('kommen in neuen Dateien nicht mehr hinzu', () => {
+    // Auf dem iPad des Auftraggebers bestätigt ist nur, was der Werkshof zeichnet: Flächen mit
+    // Eckenfarben, Toon-Körper mit Kontur, Instanzen, bewegte Ecken, Teilchen. Eigene Shader gibt es
+    // nur noch dort, wo sie schon vor dieser Regel standen – neue Darstellung kommt ohne aus.
+    const allowed = new Set(['toon.ts', 'world.ts', 'effects.ts', 'life/eis.ts', 'life/riff.ts', 'mechanics/dive.ts', 'mechanics/flight.ts', 'mechanics/tide.ts', 'mechanics/traffic.ts']);
+    const withShader = new Set(hits(/\bShaderMaterial\b|\bonBeforeCompile\b|\bRawShaderMaterial\b/).map((h) => h.split(':')[0].replace(/\\/g, '/')));
+    expect([...withShader].filter((f) => !allowed.has(f))).toEqual([]);
+  });
+
   it('haben keine Uniform-Felder', () => {
     expect(hits(/\buniform\s+(lowp\s+|mediump\s+|highp\s+)?\w+\s+\w+\s*\[/)).toEqual([]);
   });
