@@ -10,7 +10,8 @@
 //   npm run build && npm run preview -- --port 4173
 //   node tests/e2e/run.cjs                 braucht ein installiertes Playwright
 //
-// Umgebungsvariablen: BASE, SIGNAL, SHOT_DIR (Ordner für Screenshots), ONLY (Teilmenge, z. B. "sync,reconnect,phase3,mechanics")
+// Umgebungsvariablen: BASE, SIGNAL, SHOT_DIR (Ordner für Screenshots), ONLY (Teilmenge, z. B. "sync,reconnect,phase3,mechanics"),
+// DIAG=1 (nach einem Abbruch: wo steht das JavaScript jeder Seite, in welchem Zustand ist sie; mit DIAG_SHOTS=<Ordner> auch Bilder)
 
 const { chromium, devices } = require('playwright');
 
@@ -612,7 +613,12 @@ async function main() {
       await client.page.click('#btn-ready');
     }
     await host.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 5000 });
-    await host.page.click('#btn-start');
+    // Großzügige Frist: Der Host wurde oben neu geladen und übersetzt hier alle Grafikprogramme zum ersten
+    // Mal, während der Mitspieler (schon warm) sofort rendert. Ohne Grafikkarte teilen sich beide Seiten
+    // einen Grafikprozess, und jede Rückfrage des Hosts wartet hinter einem Bild des Mitspielers – gemessen
+    // rund 30 s für das erste Bild (mit DIAG=1 und CPU-Profil: alles in onFirstUse von three.js). Auf
+    // getrennten Geräten gibt es diese Konkurrenz nicht.
+    await host.page.click('#btn-start', { timeout: 120000 });
     await host.page.waitForSelector('#app[data-view="game"]');
     const late = await openScreen('spaet');
     await joinLobby(late, 'Gero', code);
@@ -734,7 +740,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Sechs Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 6);
+    check('Acht Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 8);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1328,10 +1334,46 @@ async function main() {
   }
 }
 
+/**
+ * Nur mit DIAG=1: hält nach einem Abbruch jede offene Seite im Debugger an und nennt, wo ihr
+ * JavaScript gerade steht – so zeigt sich, ob eine Seite in einer Schleife festhängt.
+ */
+async function whereAreThePages() {
+  for (const ctx of browser?.contexts() ?? []) {
+    for (const page of ctx.pages()) {
+      try {
+        const cdp = await ctx.newCDPSession(page);
+        const paused = new Promise((resolve) => cdp.once('Debugger.paused', resolve));
+        await cdp.send('Debugger.enable');
+        await cdp.send('Debugger.pause');
+        const hit = await Promise.race([paused, sleep(4000).then(() => null)]);
+        const where = hit ? hit.callFrames.slice(0, 14).map((f) => `${f.functionName || '(anonym)'} @${f.url.split('/').pop()}:${f.location.lineNumber + 1}:${f.location.columnNumber + 1}`) : ['hält nicht an (kein JavaScript unterwegs oder Seite blockiert)'];
+        console.log(`   [diag] ${page.url().slice(0, 90)}\n      ` + where.join('\n      '));
+        if (hit) await cdp.send('Debugger.resume').catch(() => {});
+        await cdp.send('Debugger.disable').catch(() => {});
+        // Zustand der Seite, falls sie noch antwortet
+        const state = await Promise.race([
+          page.evaluate(() => {
+            const k = window.__kart;
+            const el = document.getElementById('app');
+            return JSON.stringify({ view: el && el.dataset.view, race: k && k.race ? k.race() : null, scene: k && k.scene ? k.scene() : null, start: !!document.getElementById('btn-start'), modal: document.getElementById('modal') ? !document.getElementById('modal').hidden : null });
+          }),
+          sleep(5000).then(() => 'antwortet nicht binnen 5 s'),
+        ]).catch((err) => 'Fehler: ' + err.message);
+        console.log('      Zustand: ' + state);
+        if (process.env.DIAG_SHOTS) await Promise.race([page.screenshot({ path: `${process.env.DIAG_SHOTS}/diag-${Date.now()}.png` }), sleep(6000)]).catch(() => {});
+      } catch (err) {
+        console.log(`   [diag] ${page.url().slice(0, 90)}: ${err.message}`);
+      }
+    }
+  }
+}
+
 main().catch(async (e) => {
   console.error('\nABBRUCH:', e.message);
   const failed = results.filter((r) => !r.ok);
   console.log(`${results.length - failed.length} von ${results.length} Prüfungen bis zum Abbruch bestanden.`);
+  if (process.env.DIAG) await whereAreThePages();
   try {
     await browser?.close();
   } catch {

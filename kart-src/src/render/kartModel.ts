@@ -1198,8 +1198,8 @@ const SPECS: Spec[] = [
     spaceHelm: [0, 0.3, 0.03],
     spaceHelmR: [0.43, 0.43, 0.43],
     spaceCut: 2.4,
-    spacePack: [0, 0.33, -0.25],
-    spaceAnt: [-0.08, 0.14, -0.02],
+    spacePack: [0.1, 0.33, -0.25],
+    spaceAnt: [0.06, 0.14, -0.02],
     spaceJetF: [0.2, 0.27, 0.99],
     spaceJetR: [0.42, 0.56, -0.98],
     spaceLamp: [0, 0.67, -0.99],
@@ -2868,11 +2868,11 @@ function spaceThrusters(c: Ctx, nozzle: number): void {
   const L = sp.spaceLamp;
   b.put(sphere(0.042, 0.05, 0.042, 4, 2), { bone: S, color: 0xc0392b, pos: [L[0], L[1] + 0.05, L[2]], outline: 0.5 });
   b.put(sphere(0.054, 0.062, 0.054, 4, 2), { bone: B.sLamp, color: 0xfff1d6, outline: 0 });
-  // Düsenstöße: kurzer heller Kern, warmer Saum – Spitze bei x = 0.3 (Knochen skaliert die Länge)
+  // Düsenstöße: kurzer heller Kern, warmer Saum – Spitze bei x = 0.42 (Knochen skaliert die Länge)
   const jet: LP[] = [
     [0, 0, JET_HOT],
-    [0.06, 0.05, JET_WARM],
-    [0, 0.3],
+    [0.085, 0.06, JET_WARM],
+    [0, 0.42],
   ];
   for (const [bone, mirror] of [
     [B.sJet0, B.sJet1],
@@ -2931,7 +2931,7 @@ function spaceZoe(c: Ctx): void {
   const b = c.b;
   spaceHelmet(c, { ws: 7, hs: 4, flat: true, ring: c.p.accent, glints: [[0.55, 0.65, 0.5], [-0.55, 0.6, -0.55]] });
   const P = B.sPack;
-  b.put(prism([-0.15, -0.14, 0.15, -0.14, 0.11, 0.15, -0.11, 0.15], 0.13), { bone: P, color: c.p.dark, outline: 0.8 });
+  b.put(prism([-0.15, -0.14, 0.15, -0.14, 0.11, 0.15, -0.11, 0.15], 0.13), { bone: P, color: c.p.light, outline: 0.8 });
   if (b.fine) b.put(prism(BOLT, 0.012), { bone: P, color: c.p.accent, pos: [0, 0, -0.068], rot: [0, Math.PI, 0], scale: [0.4, 0.22, 1], outline: 0 });
   spaceAntenna(b, 0.32, c.p.accent);
   spaceThrusters(c, c.p.deeper);

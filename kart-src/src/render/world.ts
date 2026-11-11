@@ -55,7 +55,8 @@ interface SurfaceLook {
 }
 
 /** Tunnel und Höhlen: lichte Höhe über der Fahrbahn und Dicke des Felsmantels. */
-const TUNNEL_H = 7.4;
+/** Scheitelhöhe der Tunnel und Höhlen über der Fahrbahn (auch für das, was an der Decke hängt: Eiszapfen). */
+export const TUNNEL_H = 7.4;
 const TUNNEL_ROCK = 5;
 
 const FOG_VERT = /* glsl */ `
@@ -1167,7 +1168,7 @@ export class World {
 
     // Comic-Wolken: ein paar zusammengeschobene Kugeln mit Tuschekontur
     const rnd = seeded(31 + this.track.index);
-    const count = this.detail === 0 ? 7 : 12;
+    const count = th.noClouds ? 0 : this.detail === 0 ? 7 : 12;
     const puff = new THREE.IcosahedronGeometry(1, 1);
     const cb = new MeshBuilder();
     const cTop = rgb(th.clouds);
@@ -1191,18 +1192,20 @@ export class World {
       }
     }
     puff.dispose();
-    const cg = addSmoothNormals(cb.build());
-    const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
-    const cloudMesh = new THREE.Mesh(cg, cloudMat);
-    this.clouds.add(cloudMesh);
-    if (this.detail > 0) {
-      const ol = new THREE.Mesh(cg, outlineMaterial(1.1));
-      (ol.material as THREE.ShaderMaterial).fog = false;
-      ol.name = 'outline';
-      this.clouds.add(ol);
+    if (count > 0) {
+      const cg = addSmoothNormals(cb.build());
+      const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
+      const cloudMesh = new THREE.Mesh(cg, cloudMat);
+      this.clouds.add(cloudMesh);
+      if (this.detail > 0) {
+        const ol = new THREE.Mesh(cg, outlineMaterial(1.1));
+        (ol.material as THREE.ShaderMaterial).fog = false;
+        ol.name = 'outline';
+        this.clouds.add(ol);
+      }
+      this.disposables.push(cg, cloudMat);
     }
     this.skyGroup.add(this.clouds);
-    this.disposables.push(cg, cloudMat);
     this.group.add(this.skyGroup);
   }
 

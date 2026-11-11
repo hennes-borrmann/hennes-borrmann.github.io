@@ -36,6 +36,7 @@ import { MeshBuilder, noise, seeded, smooth, type RGB, type V3 } from '../build'
 import type { FxSink } from '../fxApi';
 import type { MechanicView } from '../mechanics';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from '../toon';
+import { TUNNEL_H } from '../world';
 
 // --- Farben ------------------------------------------------------------------------
 
@@ -236,7 +237,7 @@ const N_PEBBLE = 7;
 const NU = 16;
 const NW = 10;
 /** Eiszapfen: lichte Höhe der Höhle (wie TUNNEL_H in world.ts) und Querschnitt ihrer Decke. */
-const CAVE_H = 7.4;
+const CAVE_H = TUNNEL_H;
 const CAVE_IN: [number, number][] = [
   [0, 1],
   [0.38, 0.95],
@@ -489,13 +490,20 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
         const a1 = P(s1, sw * wEdge);
         const t0 = P(s0, sw * (wEdge + 1.2), h0);
         const t1 = P(s1, sw * (wEdge + 1.2), h1);
-        const [ox0, oz0] = at(side * (E + s0), sw * (wEdge + 2.6));
-        const [ox1, oz1] = at(side * (E + s1), sw * (wEdge + 2.6));
-        const b0: V3 = [ox0, gridY(side * E, sw * R) - 1.5, oz0];
-        const b1: V3 = [ox1, gridY(side * E, sw * R) - 1.5, oz1];
+        // Flanke: erst steiler Fels, dann eine breite verschneite Schulter bis unter das Gelände.
+        const foot = gridY(side * E, sw * R) - 1.5;
+        const spread0 = 2.6 + 1.05 * slope * s0;
+        const spread1 = 2.6 + 1.05 * slope * s1;
+        const m0 = P(s0, sw * (wEdge + 1.2 + spread0 * 0.3), h0 - slope * s0 * 0.4 - 0.6);
+        const m1 = P(s1, sw * (wEdge + 1.2 + spread1 * 0.3), h1 - slope * s1 * 0.4 - 0.6);
+        const [ox0, oz0] = at(side * (E + s0), sw * (wEdge + 1.2 + spread0));
+        const [ox1, oz1] = at(side * (E + s1), sw * (wEdge + 1.2 + spread1));
+        const b0: V3 = [ox0, foot, oz0];
+        const b1: V3 = [ox1, foot, oz1];
         const cRock = i % 2 === 0 ? ROCK : ROCK_D;
         quadUp(a0, a1, t1, t0, cRock);
-        quadUp(t0, t1, b1, b0, i % 2 === 0 ? ROCK_D : ROCK);
+        quadUp(t0, t1, m1, m0, i % 2 === 0 ? ROCK_D : ROCK);
+        quadUp(m0, m1, b1, b0, i % 3 === 0 ? SNOW_S : SNOW_B);
         // Schneekappe auf dem Grat der Rippe
         const k0 = P(s0, sw * (wEdge + 1.2), h0 + 0.25);
         const k1 = P(s1, sw * (wEdge + 1.2), h1 + 0.25);
@@ -509,10 +517,9 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
       const w1 = -wEdge + (2 * wEdge * (j + 1)) / cols;
       const top0 = P(L, w0);
       const top1 = P(L, w1);
-      const [bx0, bz0] = at(side * (E + L + 0.5), w0);
-      const [bx1, bz1] = at(side * (E + L + 0.5), w1);
-      solid.quad(top0, top1, [bx1, top1[1] - L * slope - 2, bz1], [bx0, top0[1] - L * slope - 2, bz0], ROCK_D);
-      solid.quad(top1, top0, [bx0, top0[1] - L * slope - 2, bz0], [bx1, top1[1] - L * slope - 2, bz1], ROCK_D);
+      const [bx0, bz0] = at(side * (E + L + 1 + L * slope * 0.9), w0 * 1.6);
+      const [bx1, bz1] = at(side * (E + L + 1 + L * slope * 0.9), w1 * 1.6);
+      solid.quad(top0, top1, [bx1, top1[1] - L * slope - 2, bz1], [bx0, top0[1] - L * slope - 2, bz0], j % 2 === 0 ? SNOW_B : SNOW_S);
       const lo0 = P(0, w0);
       const lo1 = P(0, w1);
       solid.quad(lo0, lo1, [lo1[0], lo1[1] - 1.2, lo1[2]], [lo0[0], lo0[1] - 1.2, lo0[2]], SNOW_S);
@@ -658,8 +665,8 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
       const rr = k === 0 ? 0 : p.radius * (0.25 + 0.6 * rnd());
       sh[k * 7] = Math.cos(ang) * rr;
       sh[k * 7 + 1] = Math.sin(ang) * rr;
-      sh[k * 7 + 2] = k === 0 ? 0.95 : 0.35 + rnd() * 0.45;
-      sh[k * 7 + 3] = k === 0 ? 0.36 : 0.12 + rnd() * 0.12;
+      sh[k * 7 + 2] = k === 0 ? 1.35 : 0.55 + rnd() * 0.6;
+      sh[k * 7 + 3] = k === 0 ? 0.45 : 0.17 + rnd() * 0.15;
       sh[k * 7 + 4] = Math.cos(ang) * (0.25 + rnd() * 0.35);
       sh[k * 7 + 5] = Math.sin(ang) * (0.25 + rnd() * 0.35);
       sh[k * 7 + 6] = rnd() * 6.28;
@@ -727,7 +734,7 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
   const haze = new Dyn(2500, 4);
   const flatMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   const bodyMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.FrontSide });
-  const hazeMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  const hazeMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   const flatMesh = new THREE.Mesh(flat.geo, flatMat);
   const bodyMesh = new THREE.Mesh(body.geo, bodyMat);
   const hazeMesh = new THREE.Mesh(haze.geo, hazeMat);
@@ -867,7 +874,7 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
       if (on > 0) {
         // Lichthof: wächst mit der Entfernung, damit er aus 80 m noch zu sehen ist.
         const ld = Math.hypot(lx - cam.x, lz - cam.z);
-        const hr = 1.1 + Math.min(2.6, ld * 0.022);
+        const hr = (1.1 + Math.min(2.6, ld * 0.022)) * (active ? 1.35 : 1);
         blob(haze, lx - av.fx * 0.3, ly, lz - av.fz * 0.3, cam, hr, LAMP_RED, LAMP_RED, 0.62 * on, 0, 0);
       }
     }
@@ -963,10 +970,23 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
         const ww = av.dust[k * 4] + (k < 3 ? (k - 1) * R * 0.6 : 0);
         pathAt(av, d, ww);
         const grow = Math.min(1, d / 8);
-        const r = av.dust[k * 4 + 2] * (0.6 + 0.4 * grow) * (0.4 + 0.6 * fade);
+        const r = 1.25 * av.dust[k * 4 + 2] * (0.6 + 0.4 * grow) * (0.4 + 0.6 * fade);
         // Dichte: an der Front kräftig, über der Bahn dünn genug, dass man die Karts sieht.
         const a = (0.42 * fade) * (active ? 1 : 0.6);
         blob(haze, px, py + 0.9 + r * 0.55, pz, cam, r, SNOW, SNOW_B, a, a * 0.55, seconds * 3 + av.dust[k * 4 + 3]);
+      }
+    }
+
+    // --- Staubfahne über der Rinne, solange sie läuft: auch aus der Ferne zu sehen ---
+    if (active || (after >= 0 && after < 0.3)) {
+      const k = active ? Math.min(1, c / 20) * (1 - smooth((c - p.on + 30) / 30)) + (active ? 0 : 0) : 0;
+      const a = active ? 0.4 * Math.max(0.25, k) : 0.3 * (1 - after / 0.3);
+      for (let j = 0; j < 4; j++) {
+        const d = av.L * (0.15 + 0.22 * j);
+        const ww = (j % 2 === 0 ? -0.35 : 0.35) * R + Math.sin(seconds * 0.9 + j) * 0.8;
+        pathAt(av, d, ww);
+        const rr = 2.6 + 0.9 * j * 0.5 + 0.4 * Math.sin(seconds * 2.1 + j * 1.3);
+        blob(haze, px, py + rr * 0.7, pz, cam, rr, SNOW, SNOW_B, a, a * 0.5, seconds * 2.5 + j);
       }
     }
 
@@ -1095,12 +1115,12 @@ export function buildSnow(track: Track, detail: boolean): MechanicView {
         // Schatten wächst bis an den Radius, roter Ring zeigt die Grenze (blinkt zum Ende).
         const rs = R * (0.3 + 0.7 * Math.pow(w, 0.8));
         for (let i = 0; i < SEG; i++) {
-          iv(haze, s, 0, 0, 0.04, SHADOW, 0.35 + 0.4 * w);
-          iv(haze, s, COS[i] * rs, SIN[i] * rs, 0.04, SHADOW, 0.18 + 0.35 * w);
-          iv(haze, s, COS[i + 1] * rs, SIN[i + 1] * rs, 0.04, SHADOW, 0.18 + 0.35 * w);
+          iv(haze, s, 0, 0, 0.04, SHADOW, 0.45 + 0.45 * w);
+          iv(haze, s, COS[i] * rs, SIN[i] * rs, 0.04, SHADOW, 0.3 + 0.4 * w);
+          iv(haze, s, COS[i + 1] * rs, SIN[i + 1] * rs, 0.04, SHADOW, 0.3 + 0.4 * w);
         }
         const blinkOn = w < 0.55 || (seconds * 7) % 1 < 0.6;
-        ringAt(flat, s, R - 0.22, R, 0.05, blinkOn ? LAMP_RED : YEL);
+        ringAt(flat, s, R - 0.32, R, 0.05, blinkOn ? LAMP_RED : YEL);
         ringAt(flat, s, R, R + 0.07, 0.05, C_INK);
         if (near) {
           // Es knackt: feine Splitter rieseln von der Decke – dichter, je näher der Fall.

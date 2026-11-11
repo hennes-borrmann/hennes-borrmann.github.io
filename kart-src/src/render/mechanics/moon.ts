@@ -71,6 +71,7 @@ const GLOW_ORANGE = rgb(0xff6a1a);
 const GLOW_YELLOW = rgb(0xffc050);
 const GLOW_WHITE = rgb(0xfff4e0);
 const GLOW_GREEN = rgb(0x2aff6a);
+const GLOW_RED = rgb(0xff2a1a);
 const BLACK: RGB = [0, 0, 0];
 /** Schweif: Breite, Länge und Farbe der drei Flammenzungen (außen → innen). */
 const TAIL_W = [0.95, 0.7, 0.42];
@@ -539,7 +540,7 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
         const along = 0.3 - k * 2.4;
         for (const sd of [-1, 1]) {
           const p = A(e, along, sd * (t.rh[e] + t.wh[e]) * 0.5, 0.24);
-          lamps.push({ x: p[0], y: p[1], z: p[2], r: 0.3, kind: K_TAKE, k: run - 1 - k });
+          lamps.push({ x: p[0], y: p[1], z: p[2], r: 0.24, kind: K_TAKE, k: run - 1 - k });
         }
       }
       // Kantenlichter an der Stirn.
@@ -792,14 +793,14 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
     // Federpakete: Balg und Deckel heben und senken sich (atmen) – eine Welle läuft nach vorn.
     for (const ps of pd.pistons) {
       const b = 0.5 + 0.5 * Math.sin(rs * Math.PI * 2 * 1.3 - ps.ph);
-      const h = 0.22 + 0.42 * b;
+      const h = 0.35 + 0.65 * b;
       const n = near ? 4 : 2;
       const lh = h / n;
       for (let k = 0; k < n; k++) {
         const wide = k % 2 === 0;
-        boxD(glow, ps.x, ps.z, ps.rx, ps.rz, ps.fx, ps.fz, wide ? 0.3 : 0.22, wide ? 0.42 : 0.32, ps.y + k * lh, ps.y + (k + 1) * lh, wide ? C_INK : C_ORANGE);
+        boxD(glow, ps.x, ps.z, ps.rx, ps.rz, ps.fx, ps.fz, wide ? 0.34 : 0.25, wide ? 0.52 : 0.4, ps.y + k * lh, ps.y + (k + 1) * lh, wide ? C_INK : C_ORANGE);
       }
-      boxD(glow, ps.x, ps.z, ps.rx, ps.rz, ps.fx, ps.fz, 0.36, 0.5, ps.y + h, ps.y + h + 0.12, b > 0.7 ? C_YEL : C_ORANGE_D);
+      boxD(glow, ps.x, ps.z, ps.rx, ps.rz, ps.fx, ps.fz, 0.4, 0.6, ps.y + h, ps.y + h + 0.14, b > 0.7 ? C_YEL : C_ORANGE_D);
     }
     // Baken: „Pfeil hoch“ aus drei Winkeln, die von unten nach oben aufleuchten.
     for (const bc of pd.beacons) {
@@ -893,7 +894,7 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
       const rr = R * (0.18 + 0.82 * g);
       disc(glow, s, rr, 0.045, w > 0.75 && Math.floor(rs * 8) % 2 === 0 ? TARGET_HI : TARGET);
       const spin = Math.floor((ws * 6 + ws * ws * 5) * 1.5);
-      const rw = 0.16 + 0.14 * g;
+      const rw = 0.24 + 0.2 * g;
       for (let i = 0; i < SEG; i += st) {
         const on = ((i / st + spin) & 3) < 2;
         quadRing(glow, s, i, rr, rr + rw, 0.05, on ? TARGET_RIM : C_INK);
@@ -910,7 +911,7 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
         gv(glow, s, ca * rr - pa, sa * rr - pb, 0.055, TARGET_RIM);
         gv(glow, s, ca * rr * 0.62, sa * rr * 0.62, 0.055, TARGET_RIM);
       }
-      curtain(light, s, rr + 0.1, 0.25 + 0.6 * w, GLOW_ORANGE, (0.12 + 0.3 * w) * ff);
+      curtain(light, s, rr + 0.1, 0.15 + 0.45 * w, GLOW_RED, (0.1 + 0.25 * w) * ff);
 
       // Der Feuerball: vom Himmelspunkt schräg herab, schneller werdend; Einschlag genau bei Zyklus 0.
       const k = Math.pow(w, 1.7);
@@ -1054,7 +1055,7 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
         const e = c / FLASH;
         const fl = (1 - e) * (1 - e);
         glowBlob(light, s.x, s.y + 1.5, s.z, cam, R * (2.2 + 2 * e), R * (2 + 1.6 * e), GLOW_WHITE, 1.2 * fl * Math.max(ff, 0.4));
-        glowBlob(light, s.x, s.y + 1, s.z, cam, R * 5, R * 3, GLOW_YELLOW, 0.5 * fl * Math.max(ff, 0.4));
+        glowBlob(light, s.x, s.y + 1, s.z, cam, R * 3.5, R * 2.4, GLOW_YELLOW, 0.4 * fl * Math.max(ff, 0.4));
         const rw = R * (0.4 + 0.6 * Math.min(1, e * 1.6));
         if (e < 0.6) ring(glow, s, rw - 0.35, rw, 0.06, e < 0.3 ? WHITE_HOT : HOT_Y);
       }
@@ -1064,10 +1065,10 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
           m.lastCycle = cyc;
           // Staub in Zeitlupe: hoch hinauf und langsam wieder herab (geringe Schwerkraft).
           const gd = G * 0.3;
-          for (let k2 = 0; k2 < 16; k2++) {
-            const a = (k2 / 16) * Math.PI * 2 + Math.random() * 0.4;
+          for (let k2 = 0; k2 < 10; k2++) {
+            const a = (k2 / 10) * Math.PI * 2 + Math.random() * 0.4;
             const sp = 1.8 + Math.random() * 2.8;
-            fx.puff(s.x + Math.cos(a) * R * 0.4, s.y + 0.3, s.z + Math.sin(a) * R * 0.4, Math.cos(a) * sp, 4 + Math.random() * 5, Math.sin(a) * sp, 2.4 + Math.random() * 0.8, 0.7 + Math.random() * 0.5, k2 % 3 === 0 ? 0x8d8a9a : 0xc4c1cd, 0.5, gd);
+            fx.puff(s.x + Math.cos(a) * R * 0.4, s.y + 0.3, s.z + Math.sin(a) * R * 0.4, Math.cos(a) * sp, 4 + Math.random() * 5, Math.sin(a) * sp, 2.0 + Math.random() * 0.6, 0.7 + Math.random() * 0.5, k2 % 3 === 0 ? 0x8d8a9a : 0xc4c1cd, 0.5, gd);
           }
           // Gesteinsbrocken und Funken im hohen Bogen.
           for (let k2 = 0; k2 < 14; k2++) {
@@ -1083,12 +1084,12 @@ export function buildMoon(track: Track, detail: boolean): MechanicView {
         }
         if (active && c < p.on - 30) {
           // Rauch über dem Krater, steigt langsam.
-          m.acc -= dt * 4;
+          m.acc -= dt * 2;
           while (m.acc <= 0) {
             m.acc += 1;
             const a = Math.random() * Math.PI * 2;
             const r = Math.random() * R * 0.35;
-            fx.puff(s.x + Math.cos(a) * r, s.y + 0.2, s.z + Math.sin(a) * r, 0, 1.1, 0, 1.6, 0.5, 0x6a6476, 0.5, -0.6);
+            fx.puff(s.x + Math.cos(a) * r, s.y + 0.2, s.z + Math.sin(a) * r, 0, 1.1, 0, 1.2, 0.45, 0x6a6476, 0.4, -0.6);
           }
         }
       }

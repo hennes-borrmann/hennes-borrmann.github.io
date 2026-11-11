@@ -130,9 +130,17 @@ export function buildDive(track: Track, detail: boolean): MechanicView {
   const kd: number[] = [];
   const aa: number[] = [];
   const ab: number[] = [];
+  /**
+   * Je Ecke: woher ihr Zustand kommt, der sich je Bild ändert – −1 keiner, 2·Schlot = Säule des
+   * Schlots, 2·Schlot + 1 = sein Rand. Der Zustand reist als Eckenattribut (aS) zum Shader: Ein
+   * Uniform-Feld mit Auswahlschleife im Shader, wie es hier zuerst stand, ist dieselbe Technik, mit
+   * der die Förderbänder im Werkshof auf einem iPad der 10. Generation die 3D-Grafik beendet haben.
+   */
+  const sel: number[] = [];
   const vert = (p: V3, k: number, a0: number, a1: number, a2: number, a3: number, b0: number, b1: number, b2: number, b3: number): void => {
     pos.push(p[0], p[1], p[2]);
     kd.push(k);
+    sel.push(k === K_COLUMN ? a2 * 2 : k === K_RIM ? a0 * 2 + 1 : -1);
     aa.push(a0, a1, a2, a3);
     ab.push(b0, b1, b2, b3);
   };
@@ -595,15 +603,16 @@ export function buildDive(track: Track, detail: boolean): MechanicView {
     tris += gPos.length / 9;
   }
 
-  const uV: THREE.Vector4[] = [];
-  const uG: THREE.Vector4[] = [];
+  /** Zustand je Schlot in diesem Bild: Säule und Rand (siehe update). */
+  const stV: THREE.Vector4[] = [];
+  const stG: THREE.Vector4[] = [];
   for (let i = 0; i < NV; i++) {
-    uV.push(new THREE.Vector4());
-    uG.push(new THREE.Vector4());
+    stV.push(new THREE.Vector4());
+    stG.push(new THREE.Vector4());
   }
   const flowMat = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uSec: { value: 0 } }]),
-    vertexShader: FLOW_VERT.replace(/NV/g, String(NV)),
+    vertexShader: FLOW_VERT,
     fragmentShader: FLOW_FRAG,
     transparent: true,
     depthWrite: false,
@@ -613,15 +622,34 @@ export function buildDive(track: Track, detail: boolean): MechanicView {
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -4,
   });
-  // Die Felder nicht durch merge() kopieren lassen: update() schreibt in genau diese Vektoren.
-  flowMat.uniforms.uV = { value: uV };
-  flowMat.uniforms.uG = { value: uG };
-  if (pos.length > 0) {
+  // Zwei Netze mit demselben Material: was stillsteht (Strömungen, Lampen), und die Schlote, deren
+  // Zustand je Bild neu in aS geschrieben wird – so wandert je Bild nur ein kleiner Puffer zur Grafikkarte.
+  /** Schlote: Quelle je Ecke (wie sel) und das Attribut, in das update() schreibt. */
+  let ventSrc: Int16Array | null = null;
+  let ventState: THREE.BufferAttribute | null = null;
+  for (const moving of [false, true]) {
+    const pick: number[] = [];
+    for (let v = 0; v < sel.length; v++) if (sel[v] >= 0 === moving) pick.push(v);
+    if (pick.length === 0) continue;
+    const take = (from: number[], size: number): Float32Array => {
+      const out = new Float32Array(pick.length * size);
+      pick.forEach((v, i) => {
+        for (let c = 0; c < size; c++) out[i * size + c] = from[v * size + c];
+      });
+      return out;
+    };
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('aK', new THREE.Float32BufferAttribute(kd, 1));
-    geo.setAttribute('aA', new THREE.Float32BufferAttribute(aa, 4));
-    geo.setAttribute('aB', new THREE.Float32BufferAttribute(ab, 4));
+    geo.setAttribute('position', new THREE.BufferAttribute(take(pos, 3), 3));
+    geo.setAttribute('aK', new THREE.BufferAttribute(take(kd, 1), 1));
+    geo.setAttribute('aA', new THREE.BufferAttribute(take(aa, 4), 4));
+    geo.setAttribute('aB', new THREE.BufferAttribute(take(ab, 4), 4));
+    const state = new THREE.BufferAttribute(new Float32Array(pick.length * 4), 4);
+    geo.setAttribute('aS', state);
+    if (moving) {
+      state.setUsage(THREE.DynamicDrawUsage);
+      ventState = state;
+      ventSrc = Int16Array.from(pick.map((v) => sel[v]));
+    }
     geo.computeBoundingSphere();
     const mesh = new THREE.Mesh(geo, flowMat);
     // Ecken werden im Shader verschoben (Tafeln, Ringe): nicht nach der Kugel aussortieren.
@@ -629,7 +657,7 @@ export function buildDive(track: Track, detail: boolean): MechanicView {
     mesh.renderOrder = 3;
     group.add(mesh);
     disposables.push(geo);
-    tris += pos.length / 9;
+    tris += pick.length / 3;
   }
   disposables.push(flowMat);
   group.userData.triangles = tris;
@@ -645,8 +673,8 @@ export function buildDive(track: Track, detail: boolean): MechanicView {
         const p = vents[i];
         const c = pulseCycle(p, time);
         const w = pulseWarning(p, time);
-        const V = uV[i];
-        const Gs = uG[i];
+        const V = stV[i];
+        const Gs = stG[i];
         if (c < p.on) {
           // Bläst: die Säule schießt in gut einer halben Sekunde bis oben.
           const top = Math.min(COLUMN_H, 0.4 + (c / 60) * 9);
@@ -681,6 +709,20 @@ export function buildDive(track: Track, detail: boolean): MechanicView {
             }
           }
         }
+      }
+
+      // Zustand der Schlote an ihre Ecken schreiben.
+      if (ventState && ventSrc) {
+        const out = ventState.array as Float32Array;
+        for (let v = 0; v < ventSrc.length; v++) {
+          const src = ventSrc[v];
+          const q = (src & 1) === 0 ? stV[src >> 1] : stG[src >> 1];
+          out[v * 4] = q.x;
+          out[v * 4 + 1] = q.y;
+          out[v * 4 + 2] = q.z;
+          out[v * 4 + 3] = q.w;
+        }
+        ventState.needsUpdate = true;
       }
 
       // Mittreibende Teilchen in den Strömungen nahe der Kamera (nur detail).
@@ -731,15 +773,13 @@ const FLOW_VERT = /* glsl */ `
 attribute float aK;
 attribute vec4 aA;
 attribute vec4 aB;
+// Zustand des Schlots, zu dem die Ecke gehört (Säule bzw. Rand), je Bild neu geschrieben.
+attribute vec4 aS;
 uniform float uSec;
-uniform vec4 uV[NV];
-uniform vec4 uG[NV];
 varying float vK;
 varying vec4 vA;
 varying vec4 vB;
 varying vec4 vS;
-vec4 pickV(float i) { vec4 r = vec4(0.0); for (int k = 0; k < NV; k++) if (abs(float(k) - i) < 0.5) r = uV[k]; return r; }
-vec4 pickG(float i) { vec4 r = vec4(0.0); for (int k = 0; k < NV; k++) if (abs(float(k) - i) < 0.5) r = uG[k]; return r; }
 void main() {
   vK = aK;
   vA = aA;
@@ -767,12 +807,12 @@ void main() {
     float R = aB.x;
     float lay = aA.w;
     p = position + right * aA.x * R * (1.0 - 0.18 * lay) + vec3(0.0, aA.y * aB.y, 0.0) + vec3(h.x, 0.0, h.y) * (lay * 0.8);
-    vS = pickV(aA.z);
+    vS = aS;
     // Entfernung: aus der Ferne wird der Kern breiter (sonst bliebe nur Blasengeriesel).
     vB.w = length(tc.xz);
     mv = modelViewMatrix * vec4(p, 1.0);
   } else if (aK < 4.5) {
-    vS = pickG(aA.x);
+    vS = aS;
     mv = modelViewMatrix * vec4(p, 1.0);
   } else {
     // Lampe: Tafel ganz zur Kamera gedreht.
@@ -800,6 +840,21 @@ vec4 hash4(vec2 p) {
 // Farben der Strömung: Füllung, Spitze
 vec3 flowFill(float c) { return c < 0.5 ? vec3(0.80, 1.0, 1.0) : c < 1.5 ? vec3(1.0, 0.20, 0.62) : vec3(1.0, 0.86, 0.20); }
 vec3 flowHead(float c) { return c < 0.5 ? vec3(0.25, 0.95, 1.0) : c < 1.5 ? vec3(1.0, 0.55, 0.10) : vec3(1.0, 0.97, 0.6); }
+// Ein aufsteigender Ring der Blasensäule, um shift (0…1) gegen die anderen versetzt.
+void ring(float shift, float x, float y, float R, float H, vec4 s, inout vec3 col, inout float a) {
+  float ph = fract(uSec * 0.55 + shift);
+  float yc = 0.3 + ph * (H - 0.9);
+  if (yc >= s.z && yc <= s.y) {
+    float rx = R * (0.4 + 0.55 * sqrt(ph));
+    vec2 e = vec2(x / rx, (y - yc) / (rx * 0.26));
+    float d = length(e);
+    if (d > 0.8 && d < 1.12) {
+      float k2 = (1.0 - ph * ph) * s.x;
+      if (d < 1.0) { col = vec3(1.0); a = max(a, 0.95 * k2); }
+      else { col = vec3(0.04, 0.2, 0.28); a = max(a, 0.6 * k2); }
+    }
+  }
+}
 void main() {
   vec3 col = vec3(1.0);
   float a = 0.0;
@@ -854,20 +909,10 @@ void main() {
       }
     }
     if (lay < 0.5 && s.x > 0.5) {
-      // Ringe, die mit den Blasen aufsteigen und sich weiten (gezeichnet als Ellipse)
-      for (int k = 0; k < 3; k++) {
-        float ph = fract(uSec * 0.55 + float(k) / 3.0);
-        float yc = 0.3 + ph * (H - 0.9);
-        if (yc < s.z || yc > s.y) continue;
-        float rx = R * (0.4 + 0.55 * sqrt(ph));
-        vec2 e = vec2(x / rx, (y - yc) / (rx * 0.26));
-        float d = length(e);
-        if (d > 0.8 && d < 1.12) {
-          float k2 = (1.0 - ph * ph) * s.x;
-          if (d < 1.0) { col = vec3(1.0); a = max(a, 0.95 * k2); }
-          else { col = vec3(0.04, 0.2, 0.28); a = max(a, 0.6 * k2); }
-        }
-      }
+      // Ringe, die mit den Blasen aufsteigen und sich weiten (gezeichnet als Ellipse) – drei, ohne Schleife
+      ring(0.0, x, y, R, H, s, col, a);
+      ring(1.0 / 3.0, x, y, R, H, s, col, a);
+      ring(2.0 / 3.0, x, y, R, H, s, col, a);
     }
     float sp = 3.2 + lay * 1.3;
     vec2 q = vec2(x + 0.14 * sin(y * 1.9 + seed + uSec * 2.0), y - uSec * sp);

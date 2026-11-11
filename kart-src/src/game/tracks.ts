@@ -17,7 +17,7 @@ export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RI
 
 /**
  * So viele Strecken (von vorn gezählt) stehen in der Lobby zur Wahl. Was dahinter
- * steht, ist noch in Arbeit: fahrbar und getestet, aber ohne eigene Welt – zu
- * erreichen nur mit dem Test-Schalter ?alle=1.
+ * stünde, wäre noch in Arbeit – zu erreichen nur mit dem Test-Schalter ?alle=1.
+ * Zurzeit sind alle acht freigegeben.
  */
-export const RELEASED_TRACKS = 6;
+export const RELEASED_TRACKS = 8;
