@@ -162,6 +162,19 @@ const SHOTS = {
       [2, 1236, 1],
     ],
   },
+  // Sturmhafen: die Pontonbrücke über die Hafeneinfahrt (914–1070 m) in der Böe, von schräg vorn;
+  // drei Karts auf den schwankenden Pontons, Windsäcke waagrecht, dahinter die Krane.
+  hafen: {
+    from: [1052, -15, 7.5],
+    to: [1000, 0, 1.2],
+    fov: 48,
+    karts: [
+      [1, 1012, 2.5],
+      [2, 992, -2],
+      [3, 1026, -1],
+    ],
+    when: "window.__kart.harbor().winds.some((w) => w.branch === -1 && w.at > 880 && w.at < 960 && w.strength > 0.95)",
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

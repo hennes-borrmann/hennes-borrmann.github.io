@@ -14,6 +14,7 @@ import {
   EDGE_OPEN_R,
   EDGE_RAMP,
   EDGE_TUNNEL,
+  heaveAt,
   rightX,
   rightZ,
   segDelta,
@@ -1256,7 +1257,8 @@ export class World {
 
   // --- Pro Bild --------------------------------------------------------------
 
-  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink): void {
+  /** raceTime: Rennzeit in Ticks – für das Wenige, was hier mit der Strecke mitgeht (Kisten auf schwankenden Pontons). */
+  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink, raceTime = 0): void {
     for (const m of this.timed) m.uniforms.time.value = time;
     this.life?.update(time, dt, camera, fx);
     // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund.
@@ -1294,7 +1296,8 @@ export class World {
         const k = this.boxScale[i];
         const pop = k < 1 ? k * (1 + 0.35 * Math.sin(k * Math.PI)) : 1;
         const b = boxes[i];
-        this.v.set(b.x, b.y + 1.15 + Math.sin(time * 2.2 + i * 1.7) * 0.14, b.z);
+        const heave = this.track.edge[b.seg] & EDGE_FLOAT ? heaveAt(this.track, b.seg, 0, raceTime) : 0;
+        this.v.set(b.x, b.y + heave + 1.15 + Math.sin(time * 2.2 + i * 1.7) * 0.14, b.z);
         this.euler.set(0.5, time * 1.4 + i, 0.35);
         this.q.setFromEuler(this.euler);
         this.s.setScalar(pop);

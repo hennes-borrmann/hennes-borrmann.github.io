@@ -1962,7 +1962,8 @@ export function buildHafenLife(world: World): Life {
     return hashN / 2147483647;
   };
 
-  // Gischt-Takt je Punkt
+  // Gischt-Takt je Punkt. (Punkte ohne gültigen Ort – eine Kaikante außerhalb ihres Bereichs – fallen weg.)
+  for (let k = gischt.length - 6; k >= 0; k -= 6) if (!Number.isFinite(gischt[k] + gischt[k + 2] + gischt[k + 3] + gischt[k + 4])) gischt.splice(k, 6);
   const NG = gischt.length / 6;
   const gCycle = new Int32Array(Math.max(1, NG)).fill(-1);
 
