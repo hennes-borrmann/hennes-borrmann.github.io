@@ -12,15 +12,25 @@
 // liegt genau während der on-Ticks unten. Davor blinkt die Lampe rot, der
 // Stempel senkt sich an und ein dunkler Schatten erscheint am Boden.
 //
-// Zeichenaufrufe: Bänder samt Bodenteilen 1, Portale 1 (+1 Kontur), Stempel 1
-// (+1), Kolben 1 (+1), Lampen 1, Schatten 1 – höchstens 9.
+// Zeichentechnik: bewusst nur das, was die Welt schon vor den Maschinen benutzt hat –
+// eingefärbte Flächen (MeshBasicMaterial mit Eckenfarben), Toon-Körper mit Kontur und
+// einfarbige Flächen. Kein eigener Shader, keine Textur, keine Instanzen. Grund: Seit
+// der ersten Fassung der Maschinen (ein Shader mit Feld-Uniform und Kacheltextur für die
+// Bänder, Instanzen mit eigener Farbe für Pressen, Lampen und Schatten) verlor ein iPad
+// der 10. Generation (A14, Safari 26) im Werkshof nach wenigen Bildern die 3D-Grafik –
+// die Fassung davor lief dort. Welcher der Bausteine es war, ließ sich von außen nicht
+// klären; gemessen ist nur (Aufzeichnung aller WebGL-Aufrufe), dass diese Fassung der
+// Maschinen keinen Aufruf und kein Grafikprogramm braucht, das es ohne sie nicht gäbe.
+//
+// Das Muster der Bänder wandert deshalb als Geometrie: je Bild werden die Ecken der
+// Pfeile neu gesetzt (ein Netz für alle Bänder, eine Pufferaktualisierung).
 
 import * as THREE from 'three';
 import { PULSE_PRESS, pulseCycle, pulseWarning, type Belt, type Pulse, PRESS_LEAD, PRESS_STRIKE, pressOpen } from '../../game/mechanics';
 import { rightX, rightZ, type Track } from '../../game/track';
 import { MeshBuilder, smooth, type RGB, type V3 } from '../build';
 import type { MechanicView } from '../mechanics';
-import { addSmoothNormals, outlineMaterial, rgb, toonMaterial, withOutline } from '../toon';
+import { rgb, toonMaterial, withOutline } from '../toon';
 import { boxT, cylT, face, stripedFace, type Xform } from './machineKit';
 
 // --- Farben ---------------------------------------------------------------------
@@ -65,87 +75,66 @@ const RAM_H = 1.4;
 const REST = BEAM_LO - CYL_LEN - RAM_H - 0.12;
 const DIP = 0.75;
 
-// --- Musterstruktur der Bänder ----------------------------------------------------
-
-/** Kachel des Bandes: dunkle Gummibahn mit Lamellen und einem großen Winkelpfeil (Spitze nach +v). */
-function beltTexture(): THREE.CanvasTexture {
-  const S = 128;
-  const c = document.createElement('canvas');
-  c.width = S;
-  c.height = S;
-  const g = c.getContext('2d')!;
-  g.fillStyle = 'rgb(58,58,58)';
-  g.fillRect(0, 0, S, S);
-  // Lamellen: Fugen mit Lichtkante
-  for (let k = 0; k < 4; k++) {
-    const y = k * 32;
-    g.fillStyle = 'rgb(22,22,22)';
-    g.fillRect(0, y, S, 5);
-    g.fillStyle = 'rgb(92,92,92)';
-    g.fillRect(0, y + 5, S, 2);
-  }
-  // Winkelpfeil mit Tuschekante; Spitze oben (Canvas oben = v groß)
-  // steil, damit er auch im flachen Blick (stark verkürzt) noch als Spitze zu lesen ist
-  const t = 32;
-  g.beginPath();
-  g.moveTo(64, 4);
-  g.lineTo(120, 90);
-  g.lineTo(120, 90 + t);
-  g.lineTo(64, 4 + t);
-  g.lineTo(8, 90 + t);
-  g.lineTo(8, 90);
-  g.closePath();
-  g.fillStyle = '#ffffff';
-  g.fill();
-  g.lineWidth = 5;
-  g.lineJoin = 'miter';
-  g.strokeStyle = 'rgb(16,14,20)';
-  g.stroke();
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 8;
-  return tex;
-}
+// --- Muster der Bänder ----------------------------------------------------------------
 
 /**
- * Material der Bänder und der flachen Bodenteile in einem Zeichenaufruf. Die
- * Nummer des Bands steckt im ganzzahligen Teil von u (u + 1000·(Nummer + 1);
- * die Wiederholung der Textur ignoriert ihn), u = 0 heißt "ohne Textur".
- * uOff[k] verschiebt das Muster von Band k in Laufrichtung.
+ * Eine Kachel des Musters, in Laufrichtung gestapelt: [Anteil der Kachellänge, Helligkeit].
+ * Die Helligkeit wird mit der Farbe des Bands malgenommen: 1 = Pfeil, fast 0 = Tuschekante,
+ * dazwischen das dunkle Gummi mit einer Lamellenfuge samt Lichtkante.
  */
-function beltMaterial(tex: THREE.Texture, n: number): { mat: THREE.MeshBasicMaterial; off: Float32Array } {
-  const off = new Float32Array(Math.max(1, n));
-  // Etwas stärker nach vorn gezogen als die Fahrbahnfarbe (world.ts: −2/−4), sonst scheinen deren Linien durch.
-  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, map: tex, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
-  const N = Math.max(1, n);
-  mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uOff = { value: off };
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nuniform float uOff[${N}];\nvarying float vTexOn;`)
-      .replace(
-        '#include <uv_vertex>',
-        `#include <uv_vertex>
-        {
-          float bi = floor(uv.x / 1000.0 + 0.0001);
-          vTexOn = bi > 0.5 ? 1.0 : 0.0;
-          int k = int(bi) - 1;
-          float o = 0.0;
-          for (int i = 0; i < ${N}; i++) if (i == k) o = uOff[i];
-          vMapUv = vec2(uv.x - bi * 1000.0, uv.y - o);
-        }`,
-      );
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vTexOn;').replace(
-      '#include <map_fragment>',
-      `#ifdef USE_MAP
-        vec4 sampledDiffuseColor = texture2D( map, vMapUv );
-        diffuseColor.rgb *= mix( vec3( 1.0 ), sampledDiffuseColor.rgb, vTexOn );
-      #endif`,
-    );
-  };
-  mat.customProgramCacheKey = () => `werkshof-belt-${N}`;
-  return { mat, off };
+const INK = 0.005;
+const RUBBER = 0.042;
+const BANDS: readonly (readonly [number, number])[] = [
+  [0.04, INK],
+  [0.17, 1],
+  [0.04, INK],
+  [0.3, RUBBER],
+  [0.035, 0.008],
+  [0.015, 0.107],
+  [0.4, RUBBER],
+];
+/** Ende jedes Streifens ab Kachelanfang (aufsummierte Dicken). */
+const BAND_END: readonly number[] = BANDS.map((_, i) => (i + 1 === BANDS.length ? 1 : BANDS.slice(0, i + 1).reduce((sum, b) => sum + b[0], 0)));
+/** So weit eilt die Pfeilspitze (Bandmitte) den Rändern voraus, in Kachellängen. */
+const PEAK = 0.672;
+/** Rand ohne Pfeil links und rechts (Anteil der Breite): so bleiben benachbarte Pfeile getrennte Pfeile statt eines Zickzacks. */
+const MARGIN = 0.0625;
+/**
+ * Musterstücke je Kachel: jeder Streifen in vier Stücken – Rand, steigender Arm, fallender Arm, Rand.
+ * Die Ränder sind mit unterteilt, damit an ihrer Naht zu den Armen jede Ecke eine Gegenecke hat
+ * (sonst klaffen auf gebogenen Bändern Spalte).
+ */
+const PIECES = BANDS.length * 4;
+/** Ecken je Musterstück: ein Viereck wird an den Bandenden beschnitten – höchstens ein Sechseck, also vier Dreiecke als Fächer. */
+const CORNERS = 6;
+
+/** Ein Band, wie es das Muster braucht. */
+interface BeltLane {
+  /** Laufrichtung des Musters entlang der Laufachse (+1 / −1). */
+  dir: number;
+  /** true: das Band schiebt quer – Laufachse ist die Seite, Querachse die Strecke. */
+  quer: boolean;
+  /** Kachellänge in Laufrichtung (Meter) und Tempo in Kacheln pro Sekunde. */
+  tile: number;
+  rate: number;
+  /** Laufachse in Kacheln: von … bis (in Musterrichtung gemessen). */
+  g0: number;
+  g1: number;
+  /** Anzahl Kacheln hintereinander und Reihen nebeneinander. */
+  tiles: number;
+  rows: number;
+  /** Länge einer Reihe längs der Strecke (nur quer). */
+  rowLen: number;
+  lat0: number;
+  lat1: number;
+  /** Stützpunkte längs der Strecke: Weg, Mitte der Fahrbahn (schon um BELT_Y gehoben), Richtung nach rechts samt Querneigung. */
+  dist: Float64Array;
+  base: Float64Array;
+  right: Float64Array;
+  /** Erste Ecke dieses Bands im gemeinsamen Netz. */
+  first: number;
+  /** Dreiecke andersherum schreiben, damit die Fläche nach oben zeigt. */
+  flip: boolean;
 }
 
 export function buildMachines(track: Track, detail: boolean): MechanicView {
@@ -166,11 +155,12 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
   const floor = new MeshBuilder();
   // (Strömungen unter Wasser sind keine Bänder: die zeichnet mechanics/dive.ts.)
   const beltDefs = t.belts.filter((b) => !b.swim);
-  /** Kachellänge in Laufrichtung je Band (für das Wandern des Musters). */
-  const beltTile = beltDefs.map((b) => (b.along === 0 && b.across !== 0 ? TILE_X : TILE));
-  beltDefs.forEach((b, k) => buildBelt(floor, b, k));
+  /** Je Band: was das wandernde Muster braucht (Netz und Farben entstehen weiter unten). */
+  const lanes: BeltLane[] = [];
+  const laneCol: RGB[] = [];
+  beltDefs.forEach((b) => buildBelt(floor, b));
 
-  function buildBelt(mb: MeshBuilder, b: Belt, k: number): void {
+  function buildBelt(mb: MeshBuilder, b: Belt): void {
     // Abschnitte first … first+count−1, das letzte reicht bis zu seinem Nachfolger.
     const segs: number[] = [];
     for (let i = 0; i < b.count; i++) segs.push(b.first + i);
@@ -182,29 +172,52 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
       dist.push(dist[i - 1] + Math.hypot(t.px[c] - t.px[a], t.pz[c] - t.pz[a]));
     }
     const length = dist[dist.length - 1];
-    const tag = 1000 * (k + 1);
     const { lat0, lat1 } = b;
     const quer = b.along === 0 && b.across !== 0;
     const speed = quer ? b.across : b.along;
     const col = quer ? C_SIDE : speed > 0 ? C_FWD : C_BACK;
     const dir = speed >= 0 ? 1 : -1;
 
-    // Bahn
-    if (!quer) {
-      for (let i = 0; i + 1 < segs.length; i++) {
-        const s = segs[i];
-        const n = segs[i + 1];
-        mb.quadUv(P(s, lat0, BELT_Y), P(s, lat1, BELT_Y), P(n, lat1, BELT_Y), P(n, lat0, BELT_Y), col, tag, (dir * dist[i]) / TILE, tag + 1, (dir * dist[i + 1]) / TILE);
-      }
-    } else {
-      const rows = Math.max(1, Math.round(length / ROW_ACROSS));
-      const tu = length / rows;
-      for (let i = 0; i + 1 < segs.length; i++) {
-        const s = segs[i];
-        const n = segs[i + 1];
-        // a→b läuft rückwärts, b→c nach rechts: so liegt u längs und v quer, und die Fläche zeigt nach oben.
-        mb.quadUv(P(n, lat0, BELT_Y), P(s, lat0, BELT_Y), P(s, lat1, BELT_Y), P(n, lat1, BELT_Y), col, tag + dist[i + 1] / tu, (dir * lat0) / TILE_X, tag + dist[i] / tu, (dir * lat1) / TILE_X);
-      }
+    // Bahn: das Muster wandert (update), hier nur seine Lage.
+    {
+      const tile = quer ? TILE_X : TILE;
+      // Laufachse in Metern: längs der Weg auf dem Band, quer die seitliche Lage.
+      const f0 = quer ? lat0 : 0;
+      const f1 = quer ? lat1 : length;
+      const g0 = (dir > 0 ? f0 : -f1) / tile;
+      const g1 = (dir > 0 ? f1 : -f0) / tile;
+      const rows = quer ? Math.max(1, Math.round(length / ROW_ACROSS)) : 1;
+      const base = new Float64Array(segs.length * 3);
+      const right = new Float64Array(segs.length * 3);
+      segs.forEach((s, i) => {
+        base[i * 3] = t.px[s];
+        base[i * 3 + 1] = t.py[s] + BELT_Y;
+        base[i * 3 + 2] = t.pz[s];
+        right[i * 3] = rightX(t, s);
+        right[i * 3 + 1] = t.bank[s];
+        right[i * 3 + 2] = rightZ(t, s);
+      });
+      lanes.push({
+        dir,
+        quer,
+        tile,
+        rate: Math.abs(speed) / tile,
+        g0,
+        g1,
+        // Mehr Kacheln, als auf das Band passen: das Muster ist gegen die Bandenden um bis zu eine Kachel
+        // verschoben, und die Pfeilspitze reicht um PEAK über den Anfang ihrer Kachel hinaus.
+        tiles: Math.ceil(g1 - g0 + PEAK) + 2,
+        rows,
+        rowLen: length / rows,
+        lat0,
+        lat1,
+        dist: Float64Array.from(dist),
+        base,
+        right,
+        first: 0,
+        flip: false,
+      });
+      laneCol.push(col);
     }
 
     // Seitenschienen und Rollen längs der Strecke: in Stücken zu ~3 m.
@@ -381,16 +394,223 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
 
   let tris = 0;
 
-  // --- Boden und Bänder: ein Netz -------------------------------------------------
-  const tex = beltTexture();
-  const { mat: beltMat, off: beltOff } = beltMaterial(tex, beltDefs.length);
-  disposables.push(tex, beltMat);
+  // --- Boden: Schienen, Rollen, Kammbleche, Markierungen (steht) ---------------------------
+  // Etwas stärker nach vorn gezogen als die Fahrbahnfarbe (world.ts: −2/−4), sonst scheinen deren Linien durch.
+  const floorMat = new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+  disposables.push(floorMat);
   if (!floor.empty) {
     tris += floor.triangles;
     const geo = floor.build();
     disposables.push(geo);
-    const mesh = new THREE.Mesh(geo, beltMat);
-    group.add(mesh);
+    group.add(new THREE.Mesh(geo, floorMat));
+  }
+
+  // --- Bänder: ein Netz für alle, die Ecken des Musters werden je Bild neu gesetzt ----------
+  //
+  // Jedes Musterstück hat sechs Ecken und vier Dreiecke als Fächer: unbeschnitten ist es ein
+  // Viereck (zwei Ecken fallen zusammen), an den Bandenden schneidet piece() es ab – dabei
+  // entstehen höchstens sechs Ecken.
+  let beltPos: Float32Array | null = null;
+  let beltAttr: THREE.BufferAttribute | null = null;
+  /** Mitte und Halbmesser je Band (für "zu weit weg, Muster nicht bewegen"). */
+  const laneMid: number[] = [];
+
+  // Zwischenspeicher für das Beschneiden eines Musterstücks (u, g; höchstens sechs Ecken).
+  const pu = new Float64Array(8);
+  const pg = new Float64Array(8);
+  const qu = new Float64Array(8);
+  const qg = new Float64Array(8);
+  /** Punkt auf Band l: Weg d längs der Strecke, seitlich lat – nach out ab Stelle o. */
+  function onBelt(l: BeltLane, d: number, lat: number, out: Float32Array | Float64Array, o: number): void {
+    const D = l.dist;
+    const last = D.length - 2;
+    let i = Math.max(0, Math.min(last, Math.floor((d / D[last + 1]) * (last + 1))));
+    while (i > 0 && D[i] > d) i--;
+    while (i < last && D[i + 1] < d) i++;
+    const span = D[i + 1] - D[i];
+    const k = span > 0 ? Math.max(0, Math.min(1, (d - D[i]) / span)) : 0;
+    const a = i * 3;
+    const B = l.base;
+    const R = l.right;
+    for (let c = 0; c < 3; c++) {
+      const p0 = B[a + c] + R[a + c] * lat;
+      const p1 = B[a + 3 + c] + R[a + 3 + c] * lat;
+      out[o + c] = p0 + (p1 - p0) * k;
+    }
+  }
+  /** Musterkoordinaten (u quer 0…1, g längs in Kacheln) der Reihe row → Punkt in der Welt. */
+  function onPattern(l: BeltLane, row: number, u: number, g: number, out: Float32Array | Float64Array, o: number): void {
+    const f = l.dir * g * l.tile;
+    if (l.quer) onBelt(l, (row + u) * l.rowLen, f, out, o);
+    else onBelt(l, f, l.lat0 + u * (l.lat1 - l.lat0), out, o);
+  }
+
+  if (lanes.length > 0) {
+    let count = 0;
+    const box = new THREE.Box3();
+    const probe = new Float64Array(9);
+    const v3 = new THREE.Vector3();
+    for (const l of lanes) {
+      l.first = count;
+      count += l.rows * l.tiles * PIECES * CORNERS;
+      // Drehsinn: zeigt ein Stück in der Reihenfolge (uA,g) → (uB,g) → (uB,g+) nach oben?
+      const gm = (l.g0 + l.g1) / 2;
+      onPattern(l, 0, 0, gm, probe, 0);
+      onPattern(l, 0, 0.5, gm, probe, 3);
+      onPattern(l, 0, 0.5, gm + 0.05, probe, 6);
+      const ny = (probe[5] - probe[2]) * (probe[6] - probe[0]) - (probe[3] - probe[0]) * (probe[8] - probe[2]);
+      l.flip = ny < 0;
+      // Hülle und Mitte
+      const own = new THREE.Box3();
+      for (let i = 0; i < l.dist.length; i++)
+        for (const lat of [l.lat0, l.lat1]) {
+          onBelt(l, l.dist[i], lat, probe, 0);
+          own.expandByPoint(v3.set(probe[0], probe[1], probe[2]));
+        }
+      box.union(own);
+      const mid = own.getCenter(v3);
+      laneMid.push(mid.x, mid.z, own.getSize(new THREE.Vector3()).length() / 2);
+    }
+    beltPos = new Float32Array(count * 3);
+    const cols = new Float32Array(count * 3);
+    const index = count > 65535 ? new Uint32Array((count / CORNERS) * 12) : new Uint16Array((count / CORNERS) * 12);
+    lanes.forEach((l, k) => {
+      const c = laneCol[k];
+      let v = l.first;
+      for (let tile = l.rows * l.tiles; tile > 0; tile--)
+        for (let piece = 0; piece < PIECES; piece++) {
+          // je Streifen: Rand, Arm, Arm, Rand. Am Rand läuft nur die Lamellenfuge durch, der Pfeil nicht.
+          const band = BANDS[piece >> 2][1];
+          const arm = (piece & 3) === 1 || (piece & 3) === 2;
+          const lum = arm || (band !== 1 && band !== INK) ? band : RUBBER;
+          for (let q = CORNERS; q > 0; q--) {
+            cols[v * 3] = c[0] * lum;
+            cols[v * 3 + 1] = c[1] * lum;
+            cols[v * 3 + 2] = c[2] * lum;
+            v++;
+          }
+        }
+      for (let slot = l.first / CORNERS; slot < v / CORNERS; slot++)
+        for (let f = 0; f < 4; f++) {
+          const o = slot * 12 + f * 3;
+          index[o] = slot * CORNERS;
+          index[o + 1] = slot * CORNERS + f + (l.flip ? 2 : 1);
+          index[o + 2] = slot * CORNERS + f + (l.flip ? 1 : 2);
+        }
+    });
+    const geo = new THREE.BufferGeometry();
+    beltAttr = new THREE.BufferAttribute(beltPos, 3);
+    beltAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', beltAttr);
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    // Normalen braucht das Material nicht – mit ihnen nimmt three.js aber genau das Grafikprogramm,
+    // das auch die Fahrbahnfarbe zeichnet, statt ein weiteres zu übersetzen.
+    const up = new Float32Array(count * 3);
+    for (let i = 1; i < up.length; i += 3) up[i] = 1;
+    geo.setAttribute('normal', new THREE.BufferAttribute(up, 3));
+    geo.setIndex(new THREE.BufferAttribute(index, 1));
+    // Das Muster verlässt die Bänder nie: Hülle einmal aus deren Ecken.
+    geo.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+    group.add(new THREE.Mesh(geo, floorMat));
+    disposables.push(geo);
+    // sichtbar sind je Stück zwei Dreiecke (die übrigen fallen zusammen)
+    tris += (count / CORNERS) * 2;
+    writeBelts(0, null);
+  }
+
+  /** Behält vom Vieleck (pu, pg)[0…m) den Teil mit sign·(g − bound) ≥ 0; gibt die neue Eckenzahl zurück. */
+  function clip(m: number, bound: number, sign: number): number {
+    let k = 0;
+    for (let i = 0; i < m; i++) {
+      const j = i + 1 === m ? 0 : i + 1;
+      const a = sign * (pg[i] - bound);
+      const b = sign * (pg[j] - bound);
+      if (a >= 0) {
+        qu[k] = pu[i];
+        qg[k++] = pg[i];
+      }
+      if (a >= 0 !== b >= 0) {
+        qu[k] = pu[i] + ((pu[j] - pu[i]) * a) / (a - b);
+        qg[k++] = bound;
+      }
+    }
+    for (let i = 0; i < k; i++) {
+      pu[i] = qu[i];
+      pg[i] = qg[i];
+    }
+    return k;
+  }
+
+  /**
+   * Ein Musterstück: Viereck (uA, gA) – (uB, gB) – (uB, hB) – (uA, hA), an den Bandenden
+   * abgeschnitten, in die sechs Ecken ab Ecke v des Netzes.
+   */
+  function piece(l: BeltLane, row: number, v: number, uA: number, gA: number, uB: number, gB: number, hA: number, hB: number): void {
+    const out = beltPos!;
+    const lo = Math.min(gA, gB);
+    const hi = Math.max(hA, hB);
+    let m = 0;
+    if (hi > l.g0 && lo < l.g1) {
+      pu[0] = uA;
+      pg[0] = gA;
+      pu[1] = uB;
+      pg[1] = gB;
+      pu[2] = uB;
+      pg[2] = hB;
+      pu[3] = uA;
+      pg[3] = hA;
+      m = 4;
+      if (lo < l.g0) m = clip(m, l.g0, 1);
+      if (m > 0 && hi > l.g1) m = clip(m, l.g1, -1);
+    }
+    const o = v * 3;
+    if (m < 3) {
+      // nichts zu sehen: alle Ecken auf einen Punkt des Bands
+      onBelt(l, 0, l.lat0, out, o);
+      m = 1;
+    } else for (let i = 0; i < m; i++) onPattern(l, row, pu[i], pg[i], out, o + i * 3);
+    for (let i = m; i < CORNERS; i++) {
+      out[o + i * 3] = out[o + (m - 1) * 3];
+      out[o + i * 3 + 1] = out[o + (m - 1) * 3 + 1];
+      out[o + i * 3 + 2] = out[o + (m - 1) * 3 + 2];
+    }
+  }
+
+  /**
+   * Setzt die Ecken des Musters für die Zeit seconds: je Band wandern die Kacheln mit dem Tempo des
+   * Bands (wie in der Physik) und werden an den Bandenden abgeschnitten. cam: Bänder weit weg von
+   * der Kamera bleiben stehen (null = alle schreiben). Gibt zurück, ob etwas geschrieben wurde.
+   */
+  function writeBelts(seconds: number, cam: THREE.Vector3 | null): boolean {
+    if (!beltPos) return false;
+    let wrote = false;
+    for (let li = 0; li < lanes.length; li++) {
+      const l = lanes[li];
+      if (cam && Math.hypot(cam.x - laneMid[li * 3], cam.z - laneMid[li * 3 + 1]) > laneMid[li * 3 + 2] + 240) continue;
+      wrote = true;
+      const turn = seconds * l.rate;
+      const off = turn - Math.floor(turn);
+      // Kachel n belegt g von n + off (Rand) bis n + off + 1 + PEAK (Spitze in der Mitte).
+      const nBase = Math.ceil(l.g0 - off - 1 - PEAK);
+      let v = l.first;
+      for (let row = 0; row < l.rows; row++)
+        for (let j = 0; j < l.tiles; j++) {
+          const g0 = nBase + j + off;
+          let g = g0;
+          for (let band = 0; band < BANDS.length; band++) {
+            // Obere Grenze aus derselben Rechnung wie die untere des nächsten Streifens: gleiche Zahl, gleiche Ecke.
+            const h = g0 + BAND_END[band];
+            // Rand – linker Arm steigt zur Mitte an – rechter fällt wieder ab – Rand
+            piece(l, row, v, 0, g, MARGIN, g, h, h);
+            piece(l, row, v + CORNERS, MARGIN, g, 0.5, g + PEAK, h, h + PEAK);
+            piece(l, row, v + 2 * CORNERS, 0.5, g + PEAK, 1 - MARGIN, g, h + PEAK, h);
+            piece(l, row, v + 3 * CORNERS, 1 - MARGIN, g, 1, g, h, h);
+            v += 4 * CORNERS;
+            g = h;
+          }
+        }
+    }
+    return wrote;
   }
 
   // --- Portale --------------------------------------------------------------------
@@ -405,16 +625,17 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
     group.add(mesh);
   }
 
-  // --- Stempel, Kolben, Lampen, Schatten (instanziert) ----------------------------
+  // --- Stempel, Kolben, Lampen, Schatten: je Presse eigene Körper ----------------------
+  interface PressView {
+    ram: THREE.Mesh;
+    rods: THREE.Mesh;
+    /** Farbe der beiden Lampen dieser Presse. */
+    lamp: THREE.MeshBasicMaterial;
+    shadow: THREE.Mesh;
+    shade: THREE.MeshBasicMaterial;
+  }
+  const views: PressView[] = [];
   const n = presses.length;
-  const ramParts: THREE.InstancedMesh[] = [];
-  let ram: THREE.InstancedMesh | null = null;
-  let rods: THREE.InstancedMesh | null = null;
-  let lamps: THREE.InstancedMesh | null = null;
-  let shadows: THREE.InstancedMesh | null = null;
-  const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-  const shadowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.62, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
-  disposables.push(lampMat, shadowMat);
 
   if (n > 0) {
     // Stempel: Unterkante bei y = 0, Kantenlänge 2·radius (alle Pressen gleich groß).
@@ -424,75 +645,51 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
     boxT(rb, I, -R, R, 0, 0.36, -R, R, rgb(0x4a4755), { top: C_STEEL });
     boxT(rb, I, -R + 0.16, R - 0.16, 0.36, 1.12, -R + 0.16, R - 0.16, C_YEL, { stripes: [C_INK, 0.42], noBottom: true, top: C_STEEL });
     boxT(rb, I, -R + 0.55, R - 0.55, 1.12, RAM_H, -R + 0.55, R - 0.55, C_STEEL, { noBottom: true, top: rgb(0x55525f) });
-    // Augen für die Kolben
     const ramGeo = rb.build();
+    // Kolben: Länge 1, wird je Bild auf den Abstand zwischen Stempel und Zylinder gestreckt
     const rodB = new MeshBuilder();
     for (const o of [-CYL_OFF, CYL_OFF]) cylT(rodB, I, o, 0, 0.15, 0, 1, C_CHROME, undefined, 6);
     const rodGeo = rodB.build();
-    disposables.push(ramGeo, rodGeo);
-
-    ram = new THREE.InstancedMesh(ramGeo, toon, n);
-    rods = new THREE.InstancedMesh(rodGeo, toon, n);
-    ramParts.push(ram, rods);
-    tris += (rb.triangles + rodB.triangles) * n * (detail ? 2 : 1);
-    if (detail) {
-      for (const [im, geo, th] of [
-        [ram, ramGeo, 0.05],
-        [rods, rodGeo, 0.035],
-      ] as [THREE.InstancedMesh, THREE.BufferGeometry, number][]) {
-        addSmoothNormals(geo);
-        const ol = new THREE.InstancedMesh(geo, outlineMaterial(th), n);
-        ol.instanceMatrix = im.instanceMatrix;
-        ol.frustumCulled = false;
-        ramParts.push(ol);
-      }
-    }
-
-    // Lampen: Würfel, je Presse zwei (oben, vorn)
+    // Lampen: Würfel, je Presse zwei (oben, vorn); Schatten: Quadrat flach auf der Fahrbahn
     const lampGeo = new THREE.BoxGeometry(1, 1, 1);
-    disposables.push(lampGeo);
-    lamps = new THREE.InstancedMesh(lampGeo, lampMat, lampSpots.length);
-    tris += 12 * lampSpots.length;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const sc = new THREE.Vector3();
-    const pv = new THREE.Vector3();
-    lampSpots.forEach((l, i) => {
-      const p = presses[l.press];
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(t.tx[p.seg], t.tz[p.seg]));
-      m.compose(pv.set(l.pos[0], l.pos[1], l.pos[2]), q, sc.set(l.size[0], l.size[1], l.size[2]));
-      lamps!.setMatrixAt(i, m);
-      lamps!.setColorAt(i, new THREE.Color(0x30ff70));
-    });
-    lamps.instanceMatrix.needsUpdate = true;
-    lamps.computeBoundingSphere();
-
-    // Schatten: Quadrat 2·radius, flach auf der Fahrbahn
     const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-    disposables.push(shadowGeo);
-    shadows = new THREE.InstancedMesh(shadowGeo, shadowMat, n);
-    shadows.frustumCulled = false;
-    shadows.renderOrder = 1;
-    tris += 2 * n;
-    for (let i = 0; i < n; i++) shadows.setColorAt(i, new THREE.Color(0x000000));
+    disposables.push(ramGeo, rodGeo, lampGeo, shadowGeo);
+    tris += (rb.triangles + rodB.triangles) * n * (detail ? 2 : 1) + 12 * lampSpots.length + 2 * n;
 
-    for (const im of ramParts) {
-      im.frustumCulled = false;
-      group.add(im);
-    }
-    group.add(lamps, shadows);
-    disposables.push(...ramParts, lamps, shadows);
+    presses.forEach((p, i) => {
+      const head = Math.atan2(t.tx[p.seg], t.tz[p.seg]);
+      const ram = new THREE.Mesh(ramGeo, toon);
+      const rods = new THREE.Mesh(rodGeo, toon);
+      ram.rotation.y = head;
+      rods.rotation.y = head;
+      if (detail) {
+        withOutline(ram, 0.05);
+        withOutline(rods, 0.035);
+      }
+      const lamp = new THREE.MeshBasicMaterial({ color: 0x34ff74 });
+      for (const li of pressLamps[i]) {
+        const spot = lampSpots[li];
+        const box = new THREE.Mesh(lampGeo, lamp);
+        box.position.set(spot.pos[0], spot.pos[1], spot.pos[2]);
+        box.rotation.y = head;
+        box.scale.set(spot.size[0], spot.size[1], spot.size[2]);
+        group.add(box);
+      }
+      // Wie die Schatten der Karts (effects.ts) über alles gezogen, was flach auf der Fahrbahn liegt.
+      const shade = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.62, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -10 });
+      const shadow = new THREE.Mesh(shadowGeo, shade);
+      shadow.position.set(p.x, p.y + 0.06, p.z);
+      shadow.rotation.y = head;
+      shadow.renderOrder = 1;
+      shadow.visible = false;
+      group.add(ram, rods, shadow);
+      disposables.push(lamp, shade);
+      views.push({ ram, rods, lamp, shadow, shade });
+    });
   }
 
   // Stand je Presse (für den Aufschlag-Effekt)
   const lastC = new Float64Array(n).fill(NaN);
-  const heading = presses.map((p) => Math.atan2(t.tx[p.seg], t.tz[p.seg]));
-  const mat4 = new THREE.Matrix4();
-  const quat = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  const pos = new THREE.Vector3();
-  const yAxis = new THREE.Vector3(0, 1, 0);
-  const col = new THREE.Color();
 
   /** Unterkante des Stempels über der Fahrbahn zur Rennzeit time. */
   function ramLift(p: Pulse, time: number, seconds: number): number {
@@ -525,41 +722,32 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
   return {
     group,
     update(time, seconds, _dt, cam, fx) {
-      // Bänder: Muster wandert mit dem Tempo des Bands (Kacheln pro Sekunde)
-      for (let k = 0; k < beltDefs.length; k++) {
-        const b = beltDefs[k];
-        const v = Math.abs(b.along !== 0 ? b.along : b.across);
-        const o = (seconds * v) / beltTile[k];
-        beltOff[k] = o - Math.floor(o);
-      }
+      // Bänder: Muster wandert mit dem Tempo des Bands
+      if (beltAttr && writeBelts(seconds, cam)) beltAttr.needsUpdate = true;
 
-      if (!ram || !rods || !lamps || !shadows) return;
       for (let i = 0; i < n; i++) {
         const p = presses[i];
+        const view = views[i];
         const c = pulseCycle(p, time);
         const w = pulseWarning(p, time);
         const h = ramLift(p, time, seconds);
-        quat.setFromAxisAngle(yAxis, heading[i]);
         // Die Kamera folgt dem Kart durch die Presse. Steht sie dabei im noch gesenkten Stempel, wäre das
         // Bild schwarz – dann wird dieser eine Stempel nicht gezeichnet (Schatten und Lampe bleiben).
         const inside = Math.hypot(cam.x - p.x, cam.z - p.z) < p.radius * 1.42 + 0.9 && cam.y > p.y + h - 0.5 && cam.y < p.y + h + RAM_H + 0.6;
         // Stempel
-        mat4.compose(pos.set(p.x, p.y + 0.012 + h, p.z), quat, inside ? scale.set(0, 0, 0) : scale.set(1, 1, 1));
-        ram.setMatrixAt(i, mat4);
+        view.ram.visible = !inside;
+        view.ram.position.set(p.x, p.y + 0.012 + h, p.z);
         // Kolben: von der Oberseite des Stempels bis in die Zylinder
         const top = p.y + 0.012 + h + RAM_H;
-        const len = Math.max(0.05, (cylBottom.get(p) ?? top) - top);
-        mat4.compose(pos.set(p.x, top, p.z), quat, scale.set(1, len, 1));
-        rods.setMatrixAt(i, mat4);
+        view.rods.position.set(p.x, top, p.z);
+        view.rods.scale.y = Math.max(0.05, (cylBottom.get(p) ?? top) - top);
 
         // Lampe: grün in Ruhe, rot blinkend bei der Warnung (immer schneller), rot während der Gefahr
         const danger = c < p.on || c >= p.period - PRESS_STRIKE;
-        if (danger) col.setHex(0xff2414);
-        else if (w > 0) {
-          const hz = 3 + 7 * w;
-          col.setHex(Math.floor(seconds * hz * 2) % 2 === 0 ? 0xff2414 : 0x3a0806);
-        } else col.setHex(0x34ff74);
-        for (const li of pressLamps[i]) lamps.setColorAt(li, col);
+        const blink = Math.floor(seconds * (3 + 7 * w) * 2) % 2 === 0;
+        if (danger) view.lamp.color.setHex(0xff2414);
+        else if (w > 0) view.lamp.color.setHex(blink ? 0xff2414 : 0x3a0806);
+        else view.lamp.color.setHex(0x34ff74);
 
         // Schatten: wächst während der Warnung auf die volle Fläche und pulsiert dunkelrot
         let sh = 0;
@@ -567,11 +755,9 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
         else if (w > 0) sh = 0.5 + 0.5 * smooth(w * 1.5);
         else if (c < p.on + 20) sh = 1 - (c - p.on) / 20;
         const S = 2 * p.radius * sh;
-        mat4.compose(pos.set(p.x, p.y + 0.06, p.z), quat, scale.set(Math.max(1e-4, S), 1, Math.max(1e-4, S)));
-        shadows.setMatrixAt(i, mat4);
-        if (danger) col.setHex(0x000000);
-        else col.setHex(Math.floor(seconds * (3 + 7 * w) * 2) % 2 === 0 ? 0x2a0000 : 0x000000);
-        shadows.setColorAt(i, col);
+        view.shadow.visible = S > 0.01;
+        view.shadow.scale.set(S, 1, S);
+        view.shade.color.setHex(!danger && blink ? 0x2a0000 : 0x000000);
 
         // Aufschlag: Staub und Funken (nur mit Zierde und in Kameranähe)
         const prev = lastC[i];
@@ -601,11 +787,6 @@ export function buildMachines(track: Track, detail: boolean): MechanicView {
           }
         }
       }
-      ram.instanceMatrix.needsUpdate = true;
-      rods.instanceMatrix.needsUpdate = true;
-      shadows.instanceMatrix.needsUpdate = true;
-      if (lamps.instanceColor) lamps.instanceColor.needsUpdate = true;
-      if (shadows.instanceColor) shadows.instanceColor.needsUpdate = true;
     },
     dispose() {
       for (const d of disposables) d.dispose();
