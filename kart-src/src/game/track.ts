@@ -34,6 +34,10 @@ import {
   type Tide,
   type TrafficDef,
   type Vehicle,
+  PULSE_AVALANCHE,
+  PULSE_ICICLE,
+  LAUNCH_SPEED,
+  PULSE_METEOR,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
@@ -110,6 +114,14 @@ export interface PathFeatures {
   currents?: { from: number; to: number; lat0: number; lat1: number; along?: number; across?: number }[];
   /** Blasenschlote: heben im Takt an, was über ihnen ist (period, phase in Sekunden). */
   bubbles?: { at: number; lat: number; period: number; phase: number }[];
+  /** Lawinen: gehen im Takt quer über die Bahn nieder; lat = Bergseite (Vorzeichen: von dort kommt sie). */
+  avalanches?: { at: number; lat: number; period: number; phase: number }[];
+  /** Eiszapfen: fallen im Takt von der Decke. */
+  icicles?: { at: number; lat: number; period: number; phase: number }[];
+  /** Meteoriten: schlagen im Takt ein. */
+  meteors?: { at: number; lat: number; period: number; phase: number }[];
+  /** Sprungplatten: schleudern das Kart hoch (power = Steiggeschwindigkeit in m/s, ohne Angabe LAUNCH_SPEED). */
+  launchers?: { at: number; lat?: number; halfWidth?: number; power?: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -161,6 +173,8 @@ export interface TrackDef extends PathFeatures {
   tide?: { low: number; high: number; period: number; phase: number };
   /** Höhe des Meeresspiegels für Tauchstrecken (PathFeatures.dives); ohne Angabe 0. */
   sea?: number;
+  /** Anteil der Schwerkraft auf dieser Strecke (Mond: etwa 0,38); ohne Angabe 1. */
+  gravity?: number;
 }
 
 export interface BoostPad {
@@ -168,6 +182,16 @@ export interface BoostPad {
   length: number;
   lat: number;
   halfWidth: number;
+}
+
+/** Sprungplatte: wer darüberfährt, wird hochgeschleudert. */
+export interface Launcher {
+  seg: number;
+  length: number;
+  lat: number;
+  halfWidth: number;
+  /** Steiggeschwindigkeit in m/s. */
+  power: number;
 }
 
 export interface Hazard {
@@ -276,6 +300,9 @@ export interface Track {
   /** Abschnitt der Hauptstrecke, neben dem das Wahrzeichen der Welt steht. */
   landmark: number;
   pads: BoostPad[];
+  launchers: Launcher[];
+  /** Anteil der Schwerkraft (1 = Erde). */
+  gravity: number;
   boxes: { x: number; y: number; z: number; seg: number }[];
   hazards: Hazard[];
   /** Streckenmechanik (mechanics.ts): Verkehr, Geysire und Lavabomben, steigende Lava. */
@@ -867,6 +894,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     fallDepth: def.fallDepth ?? 5,
     landmark: def.landmarkAt !== undefined ? mainSeg(def.landmarkAt) : Math.round(n * 0.845) % n,
     pads: [],
+    launchers: [],
+    gravity: def.gravity ?? 1,
     boxes: [],
     hazards: [],
     vehicles: [],
@@ -895,6 +924,11 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       const seg = segAt(p, pad.at);
       const half = pad.halfWidth === 0 ? rh[seg] - 0.4 : (pad.halfWidth ?? PAD_HALF_WIDTH);
       track.pads.push({ seg, length: Math.round(PAD_LENGTH / step), lat: pad.lat, halfWidth: half });
+    }
+    for (const l of p.f.launchers ?? []) {
+      const seg = segAt(p, l.at);
+      const half = l.halfWidth === 0 || l.halfWidth === undefined ? rh[seg] - 0.4 : l.halfWidth;
+      track.launchers.push({ seg, length: Math.round(5 / step), lat: l.lat ?? 0, halfWidth: half, power: l.power ?? LAUNCH_SPEED });
     }
     for (const at of p.f.boxRows ?? []) {
       const seg = segAt(p, at);
@@ -932,6 +966,9 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const b of p.f.bombs ?? []) pulse(PULSE_BOMB, b);
     for (const b of p.f.presses ?? []) pulse(PULSE_PRESS, b);
     for (const b of p.f.bubbles ?? []) pulse(PULSE_BUBBLE, b);
+    for (const b of p.f.avalanches ?? []) pulse(PULSE_AVALANCHE, b);
+    for (const b of p.f.icicles ?? []) pulse(PULSE_ICICLE, b);
+    for (const b of p.f.meteors ?? []) pulse(PULSE_METEOR, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
@@ -1007,6 +1044,12 @@ const PULSE_KINDS = [
   { radius: 2.0, on: 34, warn: 60 },
   // Blasenschlot: lange aktiv, kurze Pause
   { radius: 2.8, on: 150, warn: 40 },
+  // Lawine: Streifen von 9 m vor bis 9 m hinter der Stelle, gut zwei Sekunden lang; lange Vorwarnung
+  { radius: 9, on: 140, warn: 150 },
+  // Eiszapfen: schlägt ein und lässt kurz Splitter liegen
+  { radius: 1.7, on: 80, warn: 85 },
+  // Meteorit: großer Einschlag, der Krater glüht nach; lange Vorwarnung (Schatten wächst)
+  { radius: 2.8, on: 110, warn: 130 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;
