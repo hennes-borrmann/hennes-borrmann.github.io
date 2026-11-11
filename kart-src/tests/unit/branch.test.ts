@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import { AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { HostGame } from '../../src/game/hostGame';
 import { BTN_GAS, BTN_ITEM, EV_FALL, EV_WALL, ITEM_TOP, V_MAX, gridState, stepKart, type Cmd } from '../../src/game/sim';
 import {
@@ -10,6 +11,7 @@ import {
   TRACK,
   TRACK_COUNT,
   pathAhead,
+  progDelta,
   proj,
   projectOnTrack,
   rightX,
@@ -235,6 +237,89 @@ describe('Gabelung und Einmündung auf allen Strecken', () => {
         }
       }
       expect(worst).toBeLessThan(0.15);
+    });
+  }
+});
+
+// Fund aus dem Prüfbericht C-008: Der Host summierte den Rennfortschritt mit segDelta. Das zählt
+// innerhalb einer Abzweigung deren eigene Abschnitte, an Gabelung und Einmündung aber das Maß der
+// Hauptstrecke – wer abbog, bekam je nach Länge der Abzweigung zu wenig oder zu viel gutgeschrieben
+// (Möwenklippe: 84 Abschnitte zu wenig je Runde) und kam erst hinter oder schon vor der Linie ins Ziel.
+describe('Rennfortschritt über Abzweigungen (alle Strecken)', () => {
+  for (let ti = 0; ti < TRACK_COUNT; ti++) {
+    it(`Strecke ${ti + 1}: über jede Abzweigung summiert sich genau das Stück Hauptstrecke, das sie ersetzt`, () => {
+      setTrack(ti);
+      const t = TRACK;
+      for (const b of t.branches) {
+        const covered = (b.to - b.from + t.n) % t.n;
+        let sum = 0;
+        let at = b.from;
+        for (let j = 0; j <= b.count; j++) {
+          const to = j === b.count ? b.to : b.first + j;
+          const d = progDelta(t, at, to);
+          expect(d).toBeGreaterThan(0);
+          sum += d;
+          at = to;
+        }
+        expect(sum).toBeCloseTo(covered, 6);
+      }
+    });
+
+    it(`Strecke ${ti + 1}: der Host schreibt über die Abzweigung genauso viel gut wie über die Hauptstrecke`, () => {
+      setTrack(ti);
+      const t = TRACK;
+      const host = new HostGame(0);
+      host.setRoster([0], false);
+      host.newRace();
+      const progress = (): number => (host as unknown as { karts: Map<number, { progress: number }> }).karts.get(0)!.progress;
+      t.branches.forEach((b, k) => {
+        const covered = (b.to - b.from + t.n) % t.n;
+        host.debugPlace(0, ((b.from - 3 + t.n) % t.n) * t.step);
+        const p0 = progress();
+        host.debugPlace(0, b.from * t.step);
+        for (let j = 0; j < b.count; j++) host.debugPlace(0, (j + 1) * t.step, 0, k);
+        host.debugPlace(0, b.to * t.step);
+        host.debugPlace(0, ((b.to + 3) % t.n) * t.step);
+        expect(progress() - p0).toBeCloseTo(covered + 6, 6);
+      });
+    });
+
+    it(`Strecke ${ti + 1}: wer überall abbiegt, kommt genau an der Ziellinie ins Ziel`, () => {
+      setTrack(ti);
+      const t = TRACK;
+      const host = new HostGame(0);
+      host.setRoster([0], false);
+      host.newRace();
+      const brain = newBrain(0, AI_MEDIUM);
+      brain.route = (1 << t.branches.length) - 1;
+      brain.routeLock = true;
+      let crossings = 0;
+      let back = 0;
+      let lineTick = -1;
+      let finishTick = -1;
+      for (let i = 0; i < 60 * 300 && finishTick < 0; i++) {
+        const s = host.authoritative(0)!;
+        const before = s.seg;
+        const running = host.phase === RACE_RUNNING;
+        const time = host.tick - host.goTick;
+        host.step(running ? botCmd(s, brain, [], true, { tick: time, time, place: 1, smoke: false }) : { steer: 0, buttons: 0 });
+        const now = host.authoritative(0)!.seg;
+        // echte Linienquerung: vom letzten Viertel der Runde ins erste
+        if (t.prog[before] > 0.75 * t.n && t.prog[now] < 0.25 * t.n) {
+          crossings++;
+          // die erste Querung ist nur der Weg von der Startaufstellung über die Linie
+          if (crossings === 4 && lineTick < 0) lineTick = host.tick;
+        } else if (t.prog[before] < 0.25 * t.n && t.prog[now] > 0.75 * t.n) {
+          // kurz zurück über die Linie (die Zuordnung zum Abschnitt kann an der Linie einen Schritt zurückspringen)
+          crossings--;
+          back++;
+          if (crossings < 4) lineTick = -1;
+        }
+        if (host.standings()[0].finished) finishTick = host.tick;
+      }
+      expect(lineTick).toBeGreaterThan(0);
+      if (back > 0) console.log(`Strecke ${ti + 1}: ${back}-mal kurz zurück über die Linie`);
+      expect(finishTick).toBe(lineTick);
     });
   }
 });

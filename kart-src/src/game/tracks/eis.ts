@@ -113,9 +113,15 @@ export const EIS: TrackDef = {
       widths: [[1.3, 4.3, 10, 2]],
       surface: 'ice',
       boxRows: [2.9],
+      // Schubbahn über den See: der Weg ist länger – wer auf dem blanken Eis die Linie hält, holt das fast auf.
+      // (Streifen über die ganze Breite: auf dem Eis hält niemand die Mitte.)
       pads: [
-        { at: 1.7, lat: 0 },
-        { at: 4.0, lat: 0 },
+        { at: 0.9, lat: 0, halfWidth: 0 },
+        { at: 1.65, lat: 0, halfWidth: 0 },
+        { at: 2.4, lat: 0, halfWidth: 0 },
+        { at: 3.15, lat: 0, halfWidth: 0 },
+        { at: 3.9, lat: 0, halfWidth: 0 },
+        { at: 4.6, lat: 0, halfWidth: 0 },
       ],
     },
   ],

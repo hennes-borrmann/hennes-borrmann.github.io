@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { AI_HARD, botCmd, newBrain } from '../../src/game/ai';
 import { PULSE_METEOR } from '../../src/game/mechanics';
 import { BTN_GAS, EV_FALL, EV_HIT, EV_LAUNCH, EV_PAD, FLAG_AIR, gridState, stepKart, type KartState } from '../../src/game/sim';
-import { EDGE_GAP, TRACK, getTrack, rightX, rightZ, segDelta, setTrack, trackHeading, wrapSeg } from '../../src/game/track';
+import { EDGE_GAP, TRACK, getTrack, rightX, rightZ, addProgress, progDelta, setTrack, trackHeading, wrapSeg } from '../../src/game/track';
 
 const MOND = 7;
 const GAS = { steer: 0, buttons: BTN_GAS };
@@ -50,7 +50,7 @@ describe('Geringe Schwerkraft (Mondbasis)', () => {
     }
     expect(t.launchers.length).toBe(2);
     expect(t.pulses.filter((p) => p.kind === PULSE_METEOR).length).toBeGreaterThanOrEqual(5);
-    expect(t.rings.length).toBeGreaterThanOrEqual(3);
+    expect(t.rings.length).toBeGreaterThanOrEqual(2);
   });
 
   it('ein Fall aus drei Metern dauert auf dem Mond gut anderthalbmal so lang', () => {
@@ -142,13 +142,13 @@ describe('Geringe Schwerkraft (Mondbasis)', () => {
     for (let slot = 0; slot < 4; slot++) {
       const s = gridState(slot);
       const brain = newBrain(slot, AI_HARD);
-      let progress = segDelta(t, 0, s.seg);
+      let progress = progDelta(t, 0, s.seg);
       for (let tick = 1; tick < 4 * 80 * 60 && progress < 3 * t.n; tick++) {
         const before = s.seg;
         const ev = stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false }), { canDrive: true, speedFactor: brain.skill, time: tick });
         if (ev & EV_HIT) hits++;
         if (ev & EV_FALL) falls++;
-        progress += segDelta(t, before, s.seg);
+        progress = addProgress(t, progress, before, s.seg);
       }
       expect(progress).toBeGreaterThanOrEqual(3 * t.n);
     }

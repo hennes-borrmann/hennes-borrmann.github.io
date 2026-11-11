@@ -52,11 +52,11 @@ export type SfxName =
   | 'surface' // das Kart durchbricht die Oberfläche nach oben: Schwappen, Aufrauschen, hauchiges „Luft!", abperlende Tropfen (~0,5 s)
   | 'bubbles' // ein Blasenschlot beginnt zu blasen: Brodeln, immer dichter aufsteigende kleine Blasen (~0,9 s; ortsfest, auch aus der Ferne leise)
   | 'blubb' // vom Blasenschlot angehoben: flatterndes „Bl…", runder steigender Grundton, Plopp am Ende (~0,45 s)
-  | 'avalanche' // eine Lawine geht nieder (ortsfest): tiefes Grollen, das anschwillt, Rauschen von Schnee, gut zwei Sekunden
-  | 'snow' // das eigene Kart steckt in der Lawine: dumpfes Wummern und Prasseln (wird etwa alle 0,3 s aufgerufen)
-  | 'icicle' // ein Eiszapfen schlägt ein (ortsfest): helles Knacken und Klirren
-  | 'launch' // eine Sprungplatte schleudert das Kart hoch: Federschlag mit Zischen, dann ein aufsteigender Ton
-  | 'meteor' // ein Meteorit schlägt ein (ortsfest): kurzes Heulen, dumpfer Einschlag, Geröll
+  | 'avalanche' // eine Lawine geht nieder (ortsfest, auch aus der Ferne leise): Grollen schwillt an und hält bis ~2 s, Schneerauschen, polternde Brocken, weicher Ausklang (~3 s)
+  | 'snow' // das eigene Kart steckt in der Lawine: dumpfes Wummern und Prasseln (wird etwa alle 0,3 s aufgerufen und verschmilzt zu einem Dröhnen)
+  | 'icicle' // ein Eiszapfen schlägt ein (ortsfest): scharfes Knacken, glasiges Nachklingen, klirrende Splitter (~0,4 s)
+  | 'launch' // eine Sprungplatte schleudert das Kart hoch (Mond): satter Federschlag, Druckluft-Zischen, dann ein schwebend aufsteigender Ton (~1 s)
+  | 'meteor' // ein Meteorit schlägt ein (ortsfest): kurzes fallendes Heulen, ab 0,3 s dumpfer Einschlag, nachrieselndes Geröll (~1 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

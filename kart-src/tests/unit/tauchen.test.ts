@@ -14,7 +14,7 @@ import {
   stepKart,
   type KartState,
 } from '../../src/game/sim';
-import { EDGE_GAP, TRACK, getTrack, rightX, rightZ, segDelta, setTrack, trackHeading, wrapSeg } from '../../src/game/track';
+import { EDGE_GAP, TRACK, getTrack, rightX, rightZ, addProgress, progDelta, segDelta, setTrack, trackHeading, wrapSeg } from '../../src/game/track';
 
 const RIFF = 5;
 const GAS = { steer: 0, buttons: BTN_GAS };
@@ -274,7 +274,7 @@ describe('Tauchen (Tiefseeriff)', () => {
     for (let slot = 0; slot < 4; slot++) {
       const s = gridState(slot);
       const brain = newBrain(slot, AI_HARD);
-      let progress = segDelta(t, 0, s.seg);
+      let progress = progDelta(t, 0, s.seg);
       let wasBoost = 0;
       for (let tick = 1; tick < 3 * 80 * 60 && progress < 2 * t.n; tick++) {
         const before = s.seg;
@@ -284,7 +284,7 @@ describe('Tauchen (Tiefseeriff)', () => {
         // Ring: Schub beginnt im Schweben
         if (ev & EV_PAD && s.flags & FLAG_AIR && s.boost > wasBoost) rings++;
         wasBoost = s.boost;
-        progress += segDelta(t, before, s.seg);
+        progress = addProgress(t, progress, before, s.seg);
       }
       expect(progress).toBeGreaterThanOrEqual(2 * t.n);
     }

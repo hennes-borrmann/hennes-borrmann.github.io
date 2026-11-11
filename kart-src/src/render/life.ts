@@ -10,6 +10,7 @@ import type { FxSink } from './fxApi';
 import { buildGlutLife } from './life/glut';
 import { buildKlippeLife } from './life/klippe';
 import { buildNachtLife } from './life/nacht';
+import { buildRiffLife } from './life/riff';
 import { buildWerkshofLife } from './life/werkshof';
 import { buildWolkenLife } from './life/wolken';
 import type { World } from './world';
@@ -36,6 +37,8 @@ export function buildLife(world: World): Life | null {
       return buildNachtLife(world);
     case 'wolken':
       return buildWolkenLife(world);
+    case 'riff':
+      return buildRiffLife(world);
     default:
       return null;
   }

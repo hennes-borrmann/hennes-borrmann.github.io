@@ -14,7 +14,7 @@ import {
   gridState,
   stepKart,
 } from '../../src/game/sim';
-import { EDGE_GAP, EDGE_OPEN_L, EDGE_OPEN_R, NO_GROUND, TRACK, TRACK_COUNT, getTrack, groundAt, segDelta, setTrack } from '../../src/game/track';
+import { EDGE_GAP, EDGE_OPEN_L, EDGE_OPEN_R, NO_GROUND, TRACK, TRACK_COUNT, getTrack, groundAt, addProgress, progDelta, setTrack } from '../../src/game/track';
 import { withoutMechanics } from './helpers';
 
 afterAll(() => {
@@ -30,7 +30,7 @@ function soloRun(slot: number, laps: number, level: number, route = -1) {
     brain.routeLock = true;
   }
   const onBranch = [0, 0];
-  let progress = segDelta(TRACK, 0, s.seg);
+  let progress = progDelta(TRACK, 0, s.seg);
   const lapTimes: number[] = [];
   let lapStart = 0;
   let tick = 0;
@@ -51,7 +51,7 @@ function soloRun(slot: number, laps: number, level: number, route = -1) {
     const cmd = botCmd(s, brain, [], true, { tick, time: tick, place: 1, smoke: false });
     const before = s.seg;
     const ev = stepKart(s, cmd, { canDrive: true, speedFactor: brain.skill, time: tick });
-    progress += segDelta(TRACK, before, s.seg);
+    progress = addProgress(TRACK, progress, before, s.seg);
     if (ev & EV_FALL) falls++;
     if (ev & EV_HIT) hits++;
     if (ev & EV_FLAT) flats++;

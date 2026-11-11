@@ -264,7 +264,7 @@ const DRIFT_TIGHT = 1.55;
 /** Ladung, ab der Stufe 1, 2 und 3 des Mini-Turbos erreicht ist. */
 export const TURBO_AT = [50, 115, 190];
 const TURBO_TICKS = [30, 57, 90];
-const PAD_TICKS = 60;
+export const PAD_TICKS = 60;
 const ITEM_BOOST_TICKS = 100;
 export const SPIN_TICKS = 75;
 const SHIELD_TICKS = 130;
@@ -703,18 +703,42 @@ export function trafficBlocks(t: Track, x: number, y: number, z: number, radius:
 }
 
 
+/**
+ * Liegt die Stelle (Kartmitte in Höhe y + 0.6) in einem Schubring? slack weitet die Kugel –
+ * für die Anzeige, die ein Kart erst einen Augenblick nach dem Durchflug zu sehen bekommt.
+ */
+export function ringAt(t: Track, x: number, y: number, z: number, slack = 0): boolean {
+  for (const r of t.rings) {
+    const dx = x - r.x;
+    const dy = y + 0.6 - r.y;
+    const dz = z - r.z;
+    const reach = r.radius + slack;
+    if (dx * dx + dy * dy + dz * dz < reach * reach) return true;
+  }
+  return false;
+}
+
 /** Fliegt oder schwebt das Kart durch einen Schubring? Dann Schub (wie ein Boost-Feld). */
 function ringBoost(t: Track, s: KartState): number {
-  for (const r of t.rings) {
-    const dx = s.x - r.x;
-    const dy = s.y + 0.6 - r.y;
-    const dz = s.z - r.z;
-    if (dx * dx + dy * dy + dz * dz < r.radius * r.radius) {
-      s.boost = PAD_TICKS;
-      return EV_PAD;
-    }
+  if (!ringAt(t, s.x, s.y, s.z)) return 0;
+  s.boost = PAD_TICKS;
+  return EV_PAD;
+}
+
+/**
+ * Wirksamer Aufwind für ein gleitendes Kart: Steiggeschwindigkeit der Säule, sonst 0.
+ * Über der Flugdecke und neben dem Korridor trägt keine Säule mehr. Rechnung und Anzeige
+ * fragen dieselbe Funktion – sonst meldete der Bildschirm "Aufwind", während das Kart sinkt.
+ */
+export function thermalLift(t: Track, seg: number, lat: number, x: number, y: number, z: number): number {
+  if (y > t.py[seg] + GLIDE_CEILING || Math.abs(lat) > t.wh[seg]) return 0;
+  let lift = 0;
+  for (const th of t.thermals) {
+    const dx = x - th.x;
+    const dz = z - th.z;
+    if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(y - th.y) < GLIDE_FALL + GLIDE_CEILING) lift = th.lift;
   }
-  return 0;
+  return lift;
 }
 
 export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
@@ -1068,15 +1092,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
   if (gliding && g === NO_GROUND) {
     // Statt zu fallen, sinkt das Kart langsam – und steigt in einem Aufwind.
-    let want = -GLIDE_SINK;
-    for (const th of t.thermals) {
-      const dx = s.x - th.x;
-      const dz = s.z - th.z;
-      if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(s.y - th.y) < GLIDE_FALL + GLIDE_CEILING) want = th.lift;
-    }
-    // Oben ist Schluss: über der Decke geht es nur noch abwärts.
-    if (s.y > t.py[s.seg] + GLIDE_CEILING) want = Math.min(want, -GLIDE_SINK);
-    // Neben dem Korridor trägt die Luft nicht mehr – auch kein Aufwind.
+    // (Über der Decke und neben dem Korridor trägt kein Aufwind: thermalLift gibt dort 0.)
+    const up = thermalLift(t, s.seg, lat, s.x, s.y, s.z);
+    let want = up > 0 ? up : -GLIDE_SINK;
+    // Neben dem Korridor trägt die Luft nicht mehr.
     const out = Math.abs(lat) - t.wh[s.seg];
     if (out > 0) want = -GLIDE_SINK - Math.min(1, out / GLIDE_EDGE) * GLIDE_DROP;
     s.vy += (want - s.vy) * Math.min(1, GLIDE_RESPONSE * DT);

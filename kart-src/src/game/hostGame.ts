@@ -82,6 +82,8 @@ import {
   projectOnTrack,
   rightX,
   rightZ,
+  addProgress,
+  progDelta,
   segDelta,
   sideLimit,
   walk,
@@ -253,7 +255,7 @@ export class HostGame implements GameView {
     for (const k of this.karts.values()) {
       copyState(k.state, gridState(k.slot, this.charOf(k.slot, k.bot)));
       copyState(k.prev, k.state);
-      k.progress = segDelta(TRACK, 0, k.state.seg);
+      k.progress = progDelta(TRACK, 0, k.state.seg);
       k.lap = 1;
       k.finished = false;
       k.finishTicks = 0;
@@ -520,7 +522,7 @@ export class HostGame implements GameView {
     k.state.y = t.py[seg] + lat * t.bank[seg];
     k.state.heading = Math.atan2(t.tx[seg], t.tz[seg]);
     k.state.vx = k.state.vy = k.state.vz = 0;
-    k.progress += segDelta(t, before, seg);
+    k.progress = addProgress(t, k.progress, before, seg);
     copyState(k.prev, k.state);
   }
 
@@ -550,7 +552,7 @@ export class HostGame implements GameView {
       interp: new EntityInterp(HOST_INTERP_DELAY),
       cmdsIn: 0,
       cmdsDropped: 0,
-      progress: segDelta(TRACK, 0, state.seg),
+      progress: progDelta(TRACK, 0, state.seg),
       lap: 1,
       place: 1,
       finished: false,
@@ -568,7 +570,7 @@ export class HostGame implements GameView {
     const before = k.state.seg;
     const ev = stepKart(k.state, cmd, this.env);
     k.ptick++;
-    k.progress += segDelta(TRACK, before, k.state.seg);
+    k.progress = addProgress(TRACK, k.progress, before, k.state.seg);
 
     if (ev & EV_USE_TIRE) this.spawnTire(k);
     if (ev & EV_USE_OIL) this.spawnDrop(k, THING_OIL);
