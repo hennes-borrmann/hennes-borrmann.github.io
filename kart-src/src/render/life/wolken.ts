@@ -928,7 +928,7 @@ export function buildWolkenLife(world: World): Life {
       const lim = wolkenDach(x, z, Rc * 1.1);
       const turm = lim === Infinity;
       if (turm && tuerme >= 3) continue;
-      const top = turm ? SEA + 55 + rnd() * 45 : Math.min(lim - 0.9, SEA + Rc * 0.75);
+      const top = turm ? SEA + 42 + rnd() * 35 : Math.min(lim - 0.9, SEA + Rc * 0.75);
       if (top < SEA + 4) continue;
       const hp = haufen.length / 3;
       haufen.push(x, z, Rc);
@@ -937,7 +937,7 @@ export function buildWolkenLife(world: World): Life {
         tuerme++;
         // Quellwolke: unten drei breite Bäusche, darüber zwei, dann ein runder Kopf –
         // dicht überlappend, damit es ein Körper wird und kein Stapel.
-        const R0 = Math.max(Rc, 22);
+        const R0 = Math.max(Rc * 1.2, 26);
         const SY = 0.8;
         const stufen: [number, number][] = [
           [3, 1],
@@ -1483,7 +1483,8 @@ export function buildWolkenLife(world: World): Life {
       setL(mastLampe, mastTop[0], mastTop[1] + 1.6, mastTop[2], Math.sin(time * 2.5) > 0 ? 1.5 : 0.3);
 
       // --- Doppeldecker ---
-      for (const f of flieger) {
+      for (let fi = 0; fi < flieger.length; fi++) {
+        const f = flieger[fi];
         const a = f.ph + (f.dir * time * 22) / f.r;
         const x = f.x + Math.cos(a) * f.r;
         const z = f.z + Math.sin(a) * f.r;
@@ -1527,7 +1528,8 @@ export function buildWolkenLife(world: World): Life {
       }
 
       // --- Windsäcke ---
-      for (const w of windsaecke) {
+      for (let wi = 0; wi < windsaecke.length; wi++) {
+        const w = windsaecke[wi];
         const yaw = WIND + Math.sin(time * 1.3 + w.phase) * 0.25;
         const droop = 0.18 + Math.sin(time * 2.1 + w.phase) * 0.08;
         e.set(droop, yaw, Math.sin(time * 5 + w.phase) * 0.1);
@@ -1545,7 +1547,10 @@ export function buildWolkenLife(world: World): Life {
       klein.instanceMatrix.needsUpdate = true;
 
       // --- Leuchten ---
-      for (const m of masten) setL(m.lampe, m.x, m.y, m.z, Math.sin(time * 3.2 + m.phase) > 0.2 ? 1.5 : 0);
+      for (let mi = 0; mi < masten.length; mi++) {
+        const m = masten[mi];
+        setL(m.lampe, m.x, m.y, m.z, Math.sin(time * 3.2 + m.phase) > 0.2 ? 1.5 : 0);
+      }
       for (let k = 0; k < gantryLampen.length; k++) {
         const g = gantryLampen[k];
         setL(g.l, g.x, g.y, g.z, Math.sin(time * 2 + k) > 0 ? 1.2 : 0);
