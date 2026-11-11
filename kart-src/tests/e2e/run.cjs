@@ -1072,7 +1072,8 @@ async function main() {
     await h7.page.click('#btn-start');
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 4, null, { timeout: 30000 });
     const flight = await kart(h7.page, 'flight()');
-    check('Wolkenwerft hat Flugstrecken, Aufwinde und Schubringe', flight && flight.glides.length >= 3 && flight.thermals >= 3 && flight.rings >= 3, JSON.stringify(flight));
+    // (flight() nennt nur die Flugstrecken der Hauptstrecke; die dritte liegt auf der Abzweigung.)
+    check('Wolkenwerft hat Flugstrecken, Aufwinde und Schubringe', flight && flight.glides.length >= 2 && flight.thermals >= 3 && flight.rings >= 3, JSON.stringify(flight));
     // 45 m Anlauf bis zur ersten Kante der Hauptstrecke
     await kart(h7.page, `place(1, ${flight.glides[0].from - 45}, 0)`);
     await sleep(250);
@@ -1091,8 +1092,12 @@ async function main() {
       if (bh.flags & 16) {
         glideTicks[0]++;
         if (y0 === null) y0 = bh.y;
-        sunk = y0 - bh.y;
-        minVy = Math.min(minVy, bh.vy);
+        // Sinkrate nur am Anfang des Flugs messen: Ben lenkt nicht, treibt später aus dem Korridor und sackt dort
+        // absichtlich durch (neben dem Korridor trägt die Luft nicht).
+        if (glideTicks[0] <= 20) {
+          sunk = y0 - bh.y;
+          minVy = Math.min(minVy, bh.vy);
+        }
       } else if (glideTicks[0] > 5 && (bh.flags & 8) === 0 && bh.respawn === 0) landed = true;
       if (bc.flags & 16) glideTicks[1]++;
       if (bh.respawn > 0) fell = true;
@@ -1100,7 +1105,7 @@ async function main() {
     }
     await c7.page.keyboard.up('ArrowUp');
     check('Ben gleitet über die Lücke – beim Host und auf seinem eigenen Bildschirm', glideTicks[0] > 10 && glideTicks[1] > 10, `${glideTicks[0]} / ${glideTicks[1]} Abfragen im Gleitflug`);
-    check('Im Gleitflug sinkt das Kart langsam statt zu fallen', minVy > -6, `größte Sinkrate ${(-minVy).toFixed(1)} m/s, insgesamt ${sunk.toFixed(1)} m gesunken`);
+    check('Im Gleitflug sinkt das Kart langsam statt zu fallen', minVy > -6, `größte Sinkrate ${(-minVy).toFixed(1)} m/s, ${sunk.toFixed(1)} m gesunken (erste 20 Abfragen im Korridor)`);
     check('Der Flug endet auf der Landebahn oder mit einem Absturz samt Rücksetzen (ohne zu lenken)', landed || fell, landed ? 'gelandet' : fell ? 'abgestürzt und zurückgesetzt' : 'weder noch');
     const sc4 = await kart(h7.page, 'scene()');
     check('Wolkenwerft wird gezeichnet', sc4 && sc4.triangles > 20000, sc4 ? `${sc4.calls} Zeichenaufrufe, ${sc4.triangles} Dreiecke` : '');

@@ -8,6 +8,7 @@ import type { Track } from '../game/track';
 import type { FxSink } from './fxApi';
 import type { World } from './world';
 import { PULSE_BOMB, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
+import { buildFlight, hasGlide } from './mechanics/flight';
 import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
 import { buildTide } from './mechanics/tide';
@@ -37,5 +38,6 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
   if (track.belts.some((b) => !b.swim) || presses) out.push(buildMachines(track, detail));
   if (track.tide) out.push(buildTide(track, detail, world));
+  if (track.thermals.length > 0 || track.rings.length > 0 || hasGlide(track)) out.push(buildFlight(track, detail));
   return out;
 }

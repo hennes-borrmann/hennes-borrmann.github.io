@@ -11,6 +11,7 @@ import { buildGlutLife } from './life/glut';
 import { buildKlippeLife } from './life/klippe';
 import { buildNachtLife } from './life/nacht';
 import { buildWerkshofLife } from './life/werkshof';
+import { buildWolkenLife } from './life/wolken';
 import type { World } from './world';
 
 export interface Life {
@@ -33,6 +34,8 @@ export function buildLife(world: World): Life | null {
       return buildGlutLife(world);
     case 'nacht':
       return buildNachtLife(world);
+    case 'wolken':
+      return buildWolkenLife(world);
     default:
       return null;
   }

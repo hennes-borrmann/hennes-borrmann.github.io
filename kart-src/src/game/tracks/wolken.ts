@@ -84,7 +84,9 @@ export const WOLKEN: TrackDef = {
     { at: 9.9, lat: -6, up: 4 },
     { at: 11.1, lat: 5, up: 4 },
     { at: 27.7, lat: -6, up: 3 },
-    { at: 10.2, lat: 0, up: 0 },
+    // Für alle, die den ersten Aufwind auslassen: mittig auf der Ideallinie, ein gutes Stück hinter dem hohen Ring
+    // (zu dicht daneben füllte dessen Reif beim Vorbeiflug das halbe Bild).
+    { at: 10.55, lat: 1.5, up: -0.4 },
   ],
   surfaces: [
     [12, 16.5, 'metal'],
