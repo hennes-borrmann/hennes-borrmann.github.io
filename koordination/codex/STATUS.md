@@ -1,15 +1,16 @@
-Zuletzt aktualisiert: 2026-11-11 00:45 UTC
+Zuletzt aktualisiert: 2026-11-11 01:16 UTC
 
-Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 00:45 UTC
+Zuletzt nach neuen Aufgaben gesehen: 2026-11-11 01:15 UTC
 
 | Aufgabe | Zustand | Zweig | Commit | geprüft (tsc / Tests) | Notiz |
 | --- | --- | --- | --- | --- | --- |
 | C-001 | fertig | codex/koordination | 94453f98616dccbb669647d5755e13e557109d17 | tsc OK / 123 Tests OK; 9 Wegwerfproben OK | Prüfung des Claude-Stands `326bd88167b7e1e1974d3f3992cfe744c9827714`; nur Bericht. Von Claude abgenommen; Nachprüfung als C-004 beauftragt. |
-| C-002 | fertig | codex/c-002-musik | 0c23f20b78160a0647de63d60452ab38a5dde814 | npm ci OK; tsc OK / 112 Tests OK (10 neu) | Von Claude als Notendaten abgenommen und übernommen. Nicht angehört, noch nicht eingebunden; Musikzweig bleibt unverändert. |
+| C-002 | fertig | codex/c-002-musik | 0c23f20b78160a0647de63d60452ab38a5dde814 | npm ci OK; tsc OK / 112 Tests OK (10 neu) | Von Claude als Notendaten abgenommen und übernommen. Nicht angehört; wolken laut Claude inzwischen eingebunden. Musikzweig bleibt unverändert. |
 | C-003 | fertig | codex/c-003-turn | 4a2e344e0c469bec49c121dff7c7c88f88bde674 | npm ci OK; tsc OK / 102 Tests OK; node --check OK; 24 lokale Worker-Prüfungen OK | Von Claude als Vorlage abgenommen. CORS, 30-Minuten-TTL, IP-Drosselung, Fehlerbehandlung und deutsche Anleitung; nicht ausgerollt. |
-| C-004 | fertig | codex/c-004-grenztests | ff8eae3ea83610d5c67874420ee6bd8e266a0570 | npm ci OK; tsc und 150 Tests dreimal nacheinander OK (12 Dateien, 23 neue Tests) | Nur neue netzgrenzen.test.ts; Basis ce3e36e, Protokoll 8. Keine zusätzlichen bestätigten Spielcodefehler. |
-| C-005 | fertig | codex/koordination | 084785f28db47e1a7ef0dde154aa5b8120cbacf9 | npm ci OK; tsc OK / 145 Tests OK (12 Dateien); 13 Wegwerfproben OK | main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Zwei Fehler in Pressendarstellung/Trefferprüfung, abgegrenzte Risiken; nur Bericht. |
-
+| C-004 | fertig | codex/c-004-grenztests | ff8eae3ea83610d5c67874420ee6bd8e266a0570 | npm ci OK; tsc und 150 Tests dreimal nacheinander OK (12 Dateien, 23 neue Tests) | Von Claude abgenommen und als ac0189b übernommen. Eigene Prüfung auf Basis ce3e36e, Protokoll 8. |
+| C-005 | fertig | codex/koordination | 084785f28db47e1a7ef0dde154aa5b8120cbacf9 | npm ci OK; tsc OK / 145 Tests OK (12 Dateien); 13 Wegwerfproben OK | main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Von Claude abgenommen; Korrekturen laut Auftrag in a2fc907. Eigene Nachprüfung noch ungeprüft; nur Bericht. |
+| C-006 | in Arbeit | codex/koordination | noch keiner | main deac72f und Protokoll 9 bestätigt; Messungen offen | KI-Linie hinter Werkshof-Brücke; nur Bericht, Korrekturversuche ausschließlich in Wegwerfkopie. |
+| C-007 | angenommen | codex/c-007-mechaniktests (noch nicht angelegt) | noch keiner | Startbedingung nicht erfüllt: main weiterhin Protokoll 9 | Nach C-006 beginnen, sobald main Protokoll 10 enthält; noch keine Änderungen. |
 
 ## C-002 · Stückbeschreibungen
 
@@ -60,11 +61,19 @@ Die Startbedingung wurde beim Abruf am 2026-11-10 23:15 UTC erfüllt. Geprüfter
 
 Browserdarstellung/GPU, Ton, subjektives Fahrgefühl, echte Geräte/Netze und vollständige Mehrkart-Rempler bleiben **ungeprüft**. Reproduktionsabläufe, Vorschläge und genauere Prüfgrenzen stehen im Bericht.
 
+## C-004 / C-005 · Abnahme beim Abruf am 2026-11-11 01:15 UTC
+
+Claude hat beide Aufgaben abgenommen: C-004 als ac0189b übernommen (laut Claude alle 23 Tests auch auf neuerem Stand erfolgreich), C-005-Funde in a2fc907 behandelt. Item-Reihenfolge und von Bändern/Wasser unbeeinflusste Items bleiben ausdrücklich gewollt. Eigene C-004-Prüfungen bleiben auf Protokoll 8 bezogen; die neuen Korrekturen sind durch Codex noch nicht nachgeprüft. Neue Folgeaufgabe C-007 wartet auf die Veröffentlichung mit Protokoll 10.
+
+## C-006 · Untersuchung begonnen
+
+Basis origin/main deac72f4aa71d1c964ddde34001f43627951d259, Protokoll 9. Auftrag: Eintrittstempo und Linie hinter der Werkshof-Brücke erklären, alle Strecken/Wegkombinationen/Figuren auf mittlerer und starker KI messen, zwei bis drei kleine Korrekturen in einer Wegwerfkopie vergleichen und ausschließlich einen Bericht liefern. Ergebnisse noch ungeprüft; kein Spielcode wird verändert.
+
 ## Weiterer Aufgabenabruf
 
-C-001 bis C-003 sind von Claude abgenommen. C-004 und C-005 sind abgeliefert und warten auf seine Prüfung. Beim Aufgabenabruf am 2026-11-11 00:45 UTC wurden nach git fetch origin Auftrag, Regeln, Aufgaben und Claude-Status vollständig gelesen: alle vier Koordinationsdateien unverändert, keine neue Aufgabe, Nacharbeit, Abnahme oder STOPP. Claude-Stand bleibt `8b339df6416ab6fd0e45f17e96ff4f98eabd501a`, main bleibt `deac72f4aa71d1c964ddde34001f43627951d259`. Der Wolkenwerft-Zwischenstand ist weiterhin fachlich ungeprüft. Keine Tests erneut ausgeführt, bisherige Prüfresultate unverändert. Bereits gelieferte Aufgaben nicht erneut bearbeiten; auf neue Aufgaben oder Nacharbeit warten.
+Beim Aufgabenabruf am 2026-11-11 01:15 UTC nach git fetch origin alle vier Koordinationsdateien vollständig gelesen. Neue Abnahmen C-004/C-005 und Aufgaben C-006/C-007; kein STOPP. Claude-Stand d9e541aa218bf5927204a357c7aa7b0bacfb6fd0, main unverändert deac72f4aa71d1c964ddde34001f43627951d259. Der Zeitpunkt dieses Abrufs stammt von der hiesigen UTC-Uhr; Claudes Dateien tragen bereits die abweichende Datierung 01:40 UTC. C-001 bis C-005 fertig und abgenommen, C-006 in Arbeit, C-007 vorgemerkt.
 
-Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 00:45 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
+Der wiederkehrende Lauf „Kart-Aufgaben von Claude prüfen“ ist in diesem Chat aktiv eingerichtet: alle 30 Minuten, begrenzt bis **2026-11-11 08:43 UTC**, bei STOPP früher beenden. Er liest Koordinationsregeln und Aufgaben neu und berücksichtigt diesen Status, damit noch als „offen“ gelistete, bereits gelieferte Aufgaben nicht doppelt bearbeitet werden. Letzter erfolgreicher automatischer Abruf: 2026-11-11 01:15 UTC. Weitere zukünftige Ausführungen hängen vom lokalen Scheduler ab und sind noch **ungeprüft**.
 
 
 Abschlusskontrolle: alle vier Codex-Remote-Zweige und ihr erlaubter Dateiumfang verifiziert; Arbeitsbaum sauber, keine Änderungen unter "kart/". Es wurde kein Spiel-Build ausgeführt und nichts zusammengeführt.
