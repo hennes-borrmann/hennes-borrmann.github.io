@@ -390,7 +390,7 @@ export class ScreenUi {
    * Meldung über dem Rennen, wenn der Browser die 3D-Grafik nicht (mehr) zeichnet: was gemessen wurde, und ein
    * Knopf zum Neuaufbau. null blendet sie aus. Das Element entsteht erst, wenn es gebraucht wird.
    */
-  setGfxNote(lines: string[] | null, onRebuild?: () => void, onHide?: () => void): void {
+  setGfxNote(lines: string[] | null, onRebuild?: () => void, onHide?: () => void, heading = 'Grafikproblem erkannt'): void {
     let box = document.getElementById('gfx-note');
     if (!lines) {
       if (box) box.hidden = true;
@@ -403,7 +403,7 @@ export class ScreenUi {
         'background:#1b1e25;color:#f4f1e8;border-top:5px solid #ffd23f;box-shadow:6px 6px 0 #000;font:14px/1.45 system-ui,sans-serif;';
       document.body.append(box);
     }
-    const title = h('strong', { text: 'Grafikproblem erkannt' });
+    const title = h('strong', { text: heading });
     title.style.cssText = 'display:block;font-size:17px;margin-bottom:6px;';
     const btn = h('button', { class: 'btn', type: 'button', text: 'Grafik neu aufbauen' });
     btn.style.cssText = 'margin-top:10px;';
@@ -411,7 +411,8 @@ export class ScreenUi {
     const hide = h('button', { class: 'btn', type: 'button', text: 'Ausblenden' });
     hide.style.cssText = 'margin:10px 0 0 10px;';
     hide.addEventListener('click', () => onHide?.());
-    box.replaceChildren(title, ...lines.map((l) => h('p', { text: l })), btn, hide);
+    // Ohne Rückruf (reine Auskunft, etwa „wird vorbereitet“) keine Knöpfe.
+    box.replaceChildren(title, ...lines.map((l) => h('p', { text: l })), ...(onRebuild ? [btn, hide] : []));
     for (const el of Array.from(box.querySelectorAll('p'))) (el as HTMLElement).style.cssText = 'margin:4px 0;overflow-wrap:anywhere;';
     box.hidden = false;
   }
