@@ -80,6 +80,8 @@ export const PULSE_VENT = 0;
 export const PULSE_BOMB = 1;
 /** Stampfpresse: schlägt im Takt herunter und plättet, was darunter steht. */
 export const PULSE_PRESS = 2;
+/** Blasenschlot (unter Wasser): hebt im Takt an, was über ihm ist – ein Sprungbrett, kein Treffer. */
+export const PULSE_BUBBLE = 3;
 /**
  * Ablauf einer Presse, gemeinsam für Physik und Bild: in den letzten PRESS_STRIKE Ticks
  * vor Zyklus 0 fällt der Stempel und schlägt bei 0 auf – genau dann beginnt die Gefahr
@@ -202,6 +204,8 @@ export interface Belt {
   /** Tempo des Bands in m/s: längs (vorwärts positiv) und quer (nach rechts positiv). */
   along: number;
   across: number;
+  /** Strömung unter Wasser statt Förderband: nimmt das Kart auch mit, wenn es schwebt. */
+  swim?: boolean;
 }
 /**
  * Zum Rand eines Bands hin läuft seine Wirkung aus: seitlich über BELT_EDGE Meter, an
@@ -315,3 +319,23 @@ export interface Ring {
   z: number;
   radius: number;
 }
+
+// --- Tauchen -----------------------------------------------------------------------
+// Unter Wasser (Abschnitte mit track.deep, Kart unter dem Meeresspiegel track.sea) trägt
+// das Wasser: das Kart sinkt nur langsam und springt deshalb weit, es rollt schneller
+// aus und rutscht in Kurven mehr. Strömungen (Belt.swim) nehmen es mit, auch im
+// Schweben. Blasenschlote (PULSE_BUBBLE) heben es im Takt an – oben hängen Schubringe.
+
+/** Anteil der Schwerkraft unter Wasser und die höchste Sinkgeschwindigkeit (m/s). */
+export const DIVE_GRAVITY = 0.3;
+export const DIVE_SINK = 6.5;
+/** Faktoren unter Wasser: Höchsttempo, Antritt, Seitenhalt. */
+export const DIVE_SPEED = 0.94;
+export const DIVE_ACCEL = 0.88;
+export const DIVE_GRIP = 0.86;
+/** So viel zusätzliche Verzögerung beim Ausrollen (m/s²) – Wasser bremst. */
+export const DIVE_COAST = 7;
+/** Im Schweben lenkt es sich unter Wasser besser als in der Luft (Anteil der Lenkung am Boden). */
+export const DIVE_STEER = 0.75;
+/** Ein Blasenschlot hebt mit dieser Geschwindigkeit (m/s). */
+export const BUBBLE_LIFT = 6.5;

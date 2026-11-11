@@ -21,6 +21,7 @@
 
 import {
   PULSE_BOMB,
+  PULSE_BUBBLE,
   PULSE_PRESS,
   PULSE_VENT,
   VEHICLE_SPECS,
@@ -37,7 +38,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -103,6 +104,12 @@ export interface PathFeatures {
   thermals?: { at: number; lat: number; radius?: number; lift?: number }[];
   /** Schubringe in der Luft: up = Höhe der Ringmitte über der Ideallinie (Meter). */
   rings?: { at: number; lat: number; up?: number }[];
+  /** Tauchstrecken: [von, bis] liegt unter Wasser (siehe mechanics.ts und TrackDef.sea). */
+  dives?: [number, number][];
+  /** Strömungen unter Wasser: wie Förderbänder, wirken aber auch auf schwebende Karts. */
+  currents?: { from: number; to: number; lat0: number; lat1: number; along?: number; across?: number }[];
+  /** Blasenschlote: heben im Takt an, was über ihnen ist (period, phase in Sekunden). */
+  bubbles?: { at: number; lat: number; period: number; phase: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -152,6 +159,8 @@ export interface TrackDef extends PathFeatures {
   twist?: string;
   /** Ebbe und Flut: Wasserhöhe bei Ebbe und Flut (Meter), Periode und Versatz in Sekunden. */
   tide?: { low: number; high: number; period: number; phase: number };
+  /** Höhe des Meeresspiegels für Tauchstrecken (PathFeatures.dives); ohne Angabe 0. */
+  sea?: number;
 }
 
 export interface BoostPad {
@@ -280,6 +289,9 @@ export interface Track {
   /** Ebbe und Flut (null = keine) und je Abschnitt, ob sie dort gilt. */
   tide: Tide | null;
   tidal: Uint8Array;
+  /** Tauchstrecken: 1 je Abschnitt, der unter Wasser liegt; sea = Höhe des Meeresspiegels. */
+  deep: Uint8Array;
+  sea: number;
   laps: number;
 }
 
@@ -874,6 +886,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         }
       : null,
     tidal: new Uint8Array(total),
+    deep: new Uint8Array(total),
+    sea: def.sea ?? 0,
     laps: def.laps,
   };
   for (const p of paths) {
@@ -917,11 +931,18 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const v of p.f.vents ?? []) pulse(PULSE_VENT, v);
     for (const b of p.f.bombs ?? []) pulse(PULSE_BOMB, b);
     for (const b of p.f.presses ?? []) pulse(PULSE_PRESS, b);
+    for (const b of p.f.bubbles ?? []) pulse(PULSE_BUBBLE, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
-      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0 });
+      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0, swim: false });
     }
+    for (const b of p.f.currents ?? []) {
+      const first = segAt(p, b.from);
+      const last = segAt(p, b.to);
+      track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0, swim: true });
+    }
+    for (const [from, to] of p.f.dives ?? []) spanU(p, from, to, (seg) => (track.deep[seg] = 1));
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
     for (const th of p.f.thermals ?? []) {
       const seg = segAt(p, th.at);
@@ -984,6 +1005,8 @@ const PULSE_KINDS = [
   { radius: 2.1, on: 66, warn: 78 },
   { radius: 2.6, on: 150, warn: 110 },
   { radius: 2.0, on: 34, warn: 60 },
+  // Blasenschlot: lange aktiv, kurze Pause
+  { radius: 2.8, on: 150, warn: 40 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;

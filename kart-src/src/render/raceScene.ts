@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import {
   FLAG_AIR,
+  FLAG_DIVE,
   FLAG_GLIDE,
   FLAG_OFFROAD,
   FLAG_WALL,
@@ -24,7 +25,7 @@ import {
   turboStage,
   lavaAt,
 } from '../game/sim';
-import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, GLIDE_CEILING, GLIDE_FALL, PULSE_PRESS, PULSE_VENT, WATER_FROM, pulseCycle, tideLevel, vehicleAt } from '../game/mechanics';
+import { DRAFT_FULL, DRAFT_PULL_FROM, FLOOD_FROM, GLIDE_CEILING, GLIDE_FALL, PULSE_BUBBLE, PULSE_PRESS, PULSE_VENT, WATER_FROM, pulseCycle, tideLevel, vehicleAt } from '../game/mechanics';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
@@ -92,7 +93,12 @@ export interface SceneEvent {
     | 'wings'
     | 'ring'
     | 'lift'
-    | 'wind';
+    | 'wind'
+    /** Tauchen: ins Wasser eingetaucht, wieder aufgetaucht, ein Blasenschlot beginnt zu blasen (slot −1), vom Schlot angehoben. */
+    | 'dive'
+    | 'surface'
+    | 'bubbles'
+    | 'blubb';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -145,6 +151,9 @@ interface KartView {
   glide: boolean;
   lift: boolean;
   windWait: number;
+  /** Unter Wasser im letzten Bild, über einem blasenden Schlot im letzten Bild. */
+  dive: boolean;
+  blown: boolean;
   roulette: number;
   item: number;
   flags: number;
@@ -314,7 +323,7 @@ export class RaceScene {
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
     this.scene.fog = this.world.fog;
-    this.scene.background = new THREE.Color(this.world.theme.sky[2]);
+    this.scene.background = this.world.background;
     this.camReady = false;
     this.needsCompile = true;
     this.pops.prewarm(this.renderer, [
@@ -461,6 +470,7 @@ export class RaceScene {
         held: 0,
         tow: false,
         glide: false,
+        dive: false,
       },
       seen: true,
       fresh: true,
@@ -481,6 +491,8 @@ export class RaceScene {
       glide: false,
       lift: false,
       windWait: 0,
+      dive: false,
+      blown: false,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -533,6 +545,11 @@ export class RaceScene {
       for (const p of t.pulses) {
         // Der Zyklus ist seit dem letzten Bild über null gelaufen: Ausbruch bzw. Einschlag.
         if (pulseCycle(p, time) < pulseCycle(p, before)) {
+          if (p.kind === PULSE_BUBBLE) {
+            // Ein Blasenschlot beginnt zu blasen: harmlos, nur zu hören.
+            this.emitAt('bubbles', p.x, p.y, p.z);
+            continue;
+          }
           const vent = p.kind === PULSE_VENT;
           this.emitAt(vent ? 'geyser' : p.kind === PULSE_PRESS ? 'press' : 'bomb', p.x, p.y, p.z);
           if (p.kind === PULSE_PRESS) this.burst(p.x, p.y + 0.2, p.z, 10, 7, 0xbfb8ae, false, 0.7, 0.5, 1);
@@ -655,7 +672,31 @@ export class RaceScene {
         if (dx * dx + dz * dz < th.radius * th.radius && Math.abs(e.y - th.y) < GLIDE_FALL + GLIDE_CEILING) lift = true;
       }
     }
+    // Tauchen: unter Wasser? Über einem blasenden Schlot?
+    const dive = (e.flags & FLAG_DIVE) !== 0 && e.respawn === 0;
+    let blown = false;
+    if (dive && air) {
+      for (const p of this.track.pulses) {
+        if (p.kind !== PULSE_BUBBLE) continue;
+        const dx = e.x - p.x;
+        const dz = e.z - p.z;
+        if (dx * dx + dz * dz < (p.radius + 0.6) * (p.radius + 0.6) && e.y - p.y < 5.5 && pulseCycle(p, this.mechTime) < p.on) blown = true;
+      }
+    }
     if (!k.fresh) {
+      if (dive !== k.dive && e.respawn === 0 && k.respawn === 0) {
+        // Durch die Wasseroberfläche: es spritzt – hinein mit einem Platscher, hinaus mit einer Fontäne.
+        const sea = this.track.sea;
+        this.burst(e.x, sea + 0.2, e.z, dive ? 22 : 14, dive ? 9 : 7, 0xeafaff, false, 0.6, 0.55, 9);
+        if (dive) this.pop('PLATSCH!', e, 'cool', 3.6);
+        this.emit(dive ? 'dive' : 'surface', k, local);
+        if (local) this.shake = Math.max(this.shake, dive ? 0.3 : 0.15);
+      }
+      if (blown && !k.blown) {
+        this.pop('BLUBB!', e, 'cool', 3);
+        k.visual.squash(-0.7);
+        this.emit('blubb', k, local);
+      }
       if (glide && !k.glide) {
         this.pop('ABFLUG!', e, 'cool', 3.4);
         k.visual.squash(-0.6);
@@ -800,6 +841,8 @@ export class RaceScene {
     }
     k.glide = glide;
     k.lift = lift;
+    k.dive = dive;
+    k.blown = blown;
     k.airTime = air ? k.airTime + dt : 0;
     k.spin = e.spin;
     k.boost = e.boost;
@@ -906,6 +949,7 @@ export class RaceScene {
       pose.held = e.roulette > 0 ? 0 : e.item;
       pose.tow = e.tow > 0;
       pose.glide = (e.flags & FLAG_GLIDE) !== 0 && e.respawn === 0;
+      pose.dive = (e.flags & FLAG_DIVE) !== 0 && e.respawn === 0;
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
 
       // Hören: Entfernung und Richtung zur Kamera
@@ -1034,8 +1078,14 @@ export class RaceScene {
     const drifting = e.driftDir !== 0 && !air;
     const seg = e.seg < this.track.total ? e.seg : 0;
     // Im Wasser staubt nichts – dort spritzt es (mechanicEvents).
-    const wet = this.track.tidal[seg] !== 0 && this.waterLevel - e.y > WATER_FROM;
+    const dive = (e.flags & FLAG_DIVE) !== 0;
+    const wet = dive || (this.track.tidal[seg] !== 0 && this.waterLevel - e.y > WATER_FROM);
     const dust = wet ? 0 : DUST[this.track.surf[seg]];
+    // Unter Wasser zieht das Kart eine Blasenspur hinter sich her.
+    if (dive && speed > 5 && Math.random() < dt * (6 + speed * 0.5)) {
+      const w = Math.random() < 0.5 ? rl : rr;
+      this.fx.puff(w.x, w.y + 0.3, w.z, (Math.random() - 0.5) * 1.2, 1.6 + Math.random() * 1.8, (Math.random() - 0.5) * 1.2, 0.7 + Math.random() * 0.5, 0.1 + Math.random() * 0.14, 0xe8fbff, 0, -2.5);
+    }
     const lv = LEVELS[this.level];
     const budget = lv.particles / LEVELS[2].particles;
 

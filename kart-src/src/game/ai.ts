@@ -33,7 +33,7 @@ import {
   type Cmd,
   type KartState,
 } from './sim';
-import { FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_BUBBLE, FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -396,6 +396,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         if (rear > 0 && rear < 5 + (vf - veh.speed) * 0.7 && Math.abs(here - (vl - offHere)) < veh.halfWidth + margin - 0.3) jam = true;
       }
     }
+    let bubbleAt = 60;
     for (const p of t.pulses) {
       let d = -1;
       for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
@@ -409,6 +410,15 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const eta = (d / Math.max(v, 8)) * 60;
       const c0 = pulseCycle(p, ctx.time + eta - 14);
       const c1 = pulseCycle(p, ctx.time + eta + 14);
+      if (p.kind === PULSE_BUBBLE) {
+        // Ein Blasenschlot ist kein Hindernis, sondern ein Sprungbrett: wer aufpasst, hält auf den nächsten zu,
+        // der bei der Ankunft sicher bläst (darüber hängt ein Schubring).
+        if (b.level > 0 && d < bubbleAt && c0 < p.on && c1 < p.on && c1 > c0) {
+          bubbleAt = d;
+          lat = p.lat;
+        }
+        continue;
+      }
       if (c0 < p.on || c1 < p.on || c1 < c0) block(p.lat - p.radius - KART_HALF - 0.5, p.lat + p.radius + KART_HALF + 0.5, 1);
     }
     AI_TRACE.here = here;

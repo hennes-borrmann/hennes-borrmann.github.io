@@ -134,6 +134,12 @@ export class World {
   readonly floating = new THREE.Group();
   /** Die große Wasser- bzw. Lavafläche bis zum Horizont (null, wo es keine gibt). */
   water: THREE.Mesh | null = null;
+  /** Hintergrundfarbe der Szene (unter Wasser wechselt sie mit dem Dunst). */
+  readonly background: THREE.Color;
+  /** Unterwasserwelt: wie weit die Kamera gerade abgetaucht ist (0 über, 1 unter Wasser; geglättet). */
+  depth = 0;
+  private readonly depthFrom = { fog: new THREE.Color(), sun: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), bg: new THREE.Color() };
+  private readonly depthTo = { fog: new THREE.Color(), sun: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color() };
 
   private readonly skyGroup = new THREE.Group();
   private readonly clouds = new THREE.Group();
@@ -182,6 +188,18 @@ export class World {
     this.radius = Math.hypot(maxX - minX, maxZ - minZ) / 2;
 
     this.fog = new THREE.Fog(th.fog, th.fogNear, th.fogFar);
+    this.background = new THREE.Color(th.sky[2]);
+    this.depthFrom.fog.set(th.fog);
+    this.depthFrom.sun.set(th.sunColor);
+    this.depthFrom.hemiSky.set(th.hemiSky);
+    this.depthFrom.hemiGround.set(th.hemiGround);
+    this.depthFrom.bg.set(th.sky[2]);
+    if (th.under) {
+      this.depthTo.fog.set(th.under.fog);
+      this.depthTo.sun.set(th.under.sunColor);
+      this.depthTo.hemiSky.set(th.under.hemiSky);
+      this.depthTo.hemiGround.set(th.under.hemiGround);
+    }
     this.sun = new THREE.DirectionalLight(th.sunColor, th.sunIntensity);
     this.sun.position.set(th.sunDir[0], th.sunDir[1], th.sunDir[2]).multiplyScalar(100);
     this.hemi = new THREE.HemisphereLight(th.hemiSky, th.hemiGround, th.hemiIntensity);
@@ -658,7 +676,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0 }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -966,7 +984,8 @@ export class World {
       const liquid = th.liquidY ?? -Infinity;
       const tri = (a: V3, bb: V3, c: V3): void => {
         const top = Math.max(a[1], bb[1], c[1]);
-        if (top < liquid - 2.5) return;
+        // Was tief unter Wasser liegt, sieht man nicht – außer in einer Unterwasserwelt: dort ist es der Meeresboden.
+        if (!th.under && top < liquid - 2.5) return;
         const ux = bb[0] - a[0];
         const uy = bb[1] - a[1];
         const uz = bb[2] - a[2];
@@ -1052,6 +1071,21 @@ export class World {
     this.group.add(base);
     if (th.liquidY !== null) this.water = base;
     this.disposables.push(plane, mat);
+    if (th.under && th.liquidY !== null) {
+      // Dieselbe Fläche von unten: helle, wandernde Lichtflecken auf der Wasseroberfläche.
+      const below = fogShader(LIQUID_FRAG, {
+        time: { value: 0 },
+        c0: { value: new THREE.Color(th.under.surface[0]) },
+        c1: { value: new THREE.Color(th.under.surface[1]) },
+        c2: { value: new THREE.Color(th.under.surface[2]) },
+      });
+      below.side = THREE.BackSide;
+      this.timed.push(below);
+      const under = new THREE.Mesh(plane, below);
+      under.position.set(this.center.x, th.liquidY - 0.04, this.center.z);
+      this.group.add(under);
+      this.disposables.push(below);
+    }
   }
 
   // --- Himmel ----------------------------------------------------------------
@@ -1208,6 +1242,26 @@ export class World {
   update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink): void {
     for (const m of this.timed) m.uniforms.time.value = time;
     this.life?.update(time, dt, camera, fx);
+    // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund.
+    const un = this.theme.under;
+    if (un && this.theme.liquidY !== null) {
+      const want = camera.y < this.theme.liquidY - 0.15 ? 1 : 0;
+      const k = this.depth + (want - this.depth) * Math.min(1, dt * 9);
+      if (k !== this.depth) {
+        this.depth = Math.abs(k - want) < 0.002 ? want : k;
+        const d = this.depth;
+        this.fog.color.copy(this.depthFrom.fog).lerp(this.depthTo.fog, d);
+        this.fog.near = this.theme.fogNear + (un.fogNear - this.theme.fogNear) * d;
+        this.fog.far = this.theme.fogFar + (un.fogFar - this.theme.fogFar) * d;
+        this.sun.color.copy(this.depthFrom.sun).lerp(this.depthTo.sun, d);
+        this.sun.intensity = this.theme.sunIntensity + (un.sunIntensity - this.theme.sunIntensity) * d;
+        this.hemi.color.copy(this.depthFrom.hemiSky).lerp(this.depthTo.hemiSky, d);
+        this.hemi.groundColor.copy(this.depthFrom.hemiGround).lerp(this.depthTo.hemiGround, d);
+        this.background.copy(this.depthFrom.bg).lerp(this.depthTo.fog, d);
+        // Von unten ist der Himmel nicht zu sehen (die Wasseroberfläche liegt davor).
+        this.skyGroup.visible = d < 0.5;
+      }
+    }
     this.skyGroup.position.set(camera.x, 0, camera.z);
     this.clouds.rotation.y = time * 0.004;
     const rays = this.skyGroup.getObjectByName('rays');

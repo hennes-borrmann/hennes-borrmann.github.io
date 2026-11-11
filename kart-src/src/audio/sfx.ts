@@ -74,6 +74,10 @@ const LEVEL: Record<SfxName, number> = {
   ring: 2.2,
   lift: 1.8,
   wind: 0.8,
+  dive: 2.4,
+  surface: 2,
+  bubbles: 1.6,
+  blubb: 2,
 };
 
 interface ToneOpts {
@@ -440,6 +444,19 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Tauchen (vorläufig, wird ausgearbeitet) ---
+      case 'dive':
+        v.noise(1800, 300, 0.5, 0.3, { q: 0.7, attack: 0.01 }).tone('sine', 140, 60, 0.3, 0.3);
+        break;
+      case 'surface':
+        v.noise(900, 3200, 0.4, 0.22, { q: 0.7, attack: 0.05 });
+        break;
+      case 'bubbles':
+        v.tone('sine', 300, 520, 0.12, 0.1).tone('sine', 380, 640, 0.12, 0.1, { at: 0.14 }).tone('sine', 340, 600, 0.12, 0.1, { at: 0.3 });
+        break;
+      case 'blubb':
+        v.tone('sine', 220, 660, 0.28, 0.22).noise(700, 1500, 0.3, 0.08, { q: 1 });
+        break;
       // --- Fliegen ---
       case 'wings':
         // Ausklappen: zwei schnelle Stoff-Schnapper (enges Rauschen, der zweite tiefer),

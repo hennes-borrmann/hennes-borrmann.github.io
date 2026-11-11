@@ -49,6 +49,22 @@ export interface Theme {
   farY: number;
   /** Buckel im Gelände abseits der Strecke (Meter). */
   rough: number;
+  /**
+   * Unterwasserwelt (Tauchstrecken): das Gelände wird auch unter dem Meeresspiegel
+   * gezeichnet (Meeresboden), die Wasserfläche bekommt eine Unterseite, und sobald
+   * die Kamera abtaucht, wechseln Dunst und Licht auf diese Werte.
+   */
+  under?: {
+    fog: number;
+    fogNear: number;
+    fogFar: number;
+    sunColor: number;
+    sunIntensity: number;
+    hemiSky: number;
+    hemiGround: number;
+    /** Wasseroberfläche von unten gesehen: dunkel, mittel, Lichtflecken. */
+    surface: [number, number, number];
+  };
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
@@ -232,5 +248,51 @@ export const THEMES: Record<ThemeId, Theme> = {
     liquidGlow: false,
     farY: -40,
     rough: 0,
+  },
+  // Tropisches Riff: oben Lagune im Vormittagslicht, unten Türkis und Blau mit Korallenfarben.
+  riff: {
+    sky: [0x1689e0, 0x79d2f7, 0xe6fbff],
+    fog: 0xd2f3fb,
+    fogNear: 170,
+    fogFar: 640,
+    sunDir: [0.35, 0.86, 0.3],
+    sunColor: 0xfffbea,
+    sunIntensity: 2.6,
+    hemiSky: 0xcdeeff,
+    hemiGround: 0xe8d9a0,
+    hemiIntensity: 1.3,
+    disc: 0xfffbe0,
+    discSize: 32,
+    clouds: 0xffffff,
+    cloudShade: 0xbfe3f2,
+    stars: false,
+    road: 0x6c6480,
+    roadAlt: 0x756c8a,
+    line: 0xfff6d6,
+    kerbA: 0xff6f91,
+    kerbB: 0xfff6d6,
+    shoulder: 0xe6d6a0,
+    wallA: 0xff7a8f,
+    wallB: 0xffe9c2,
+    wallCap: 0x7a3f6b,
+    deck: 0xc08a52,
+    deckDark: 0x8a5c33,
+    pillar: 0x7a5230,
+    ground: [0xead9a2, 0x58c79b, 0x8d76a8, 0xf4ead0],
+    liquidY: 0,
+    liquid: [0x16a6d8, 0x38c8e6, 0xcdf6ff],
+    liquidGlow: false,
+    farY: -22,
+    rough: 3,
+    under: {
+      fog: 0x1f8fb5,
+      fogNear: 24,
+      fogFar: 230,
+      sunColor: 0xbfefff,
+      sunIntensity: 1.9,
+      hemiSky: 0x8fe0ff,
+      hemiGround: 0x2f7f9c,
+      surface: [0x2aa5cf, 0x63d3ef, 0xe9fdff],
+    },
   },
 };

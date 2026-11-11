@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
@@ -20,6 +20,8 @@ export interface AudioEngine {
   setFinalLap(on: boolean): void;
   duck(amount: number, seconds: number): void;
   sfx(name: string, opts?: { pan?: number; gain?: number }): void;
+  /** Unter Wasser klingt alles dumpf (Motor, Geräusche, Musik); k = 0 an der Luft … 1 abgetaucht. */
+  setUnderwater?(k: number): void;
   update(dtSec: number, karts: KartAudio[]): void;
   suspend(): void;
   resume(): void;
@@ -51,6 +53,7 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'pass',
   'press',
   'ring',
+  'bubbles',
 ]);
 
 export class Sound {
@@ -91,6 +94,9 @@ export class Sound {
   /** Was die 3D-Szene meldet (Treffer, Schub, Landung …). */
   sceneEvent(e: SceneEvent): void {
     if (!this.engine) return;
+    // Abgetaucht klingt die Welt dumpf – bis das eigene Kart wieder auftaucht.
+    if (e.local && e.kind === 'dive') this.engine.setUnderwater?.(1);
+    else if (e.local && (e.kind === 'surface' || e.kind === 'respawn' || e.kind === 'finish')) this.engine.setUnderwater?.(0);
     if (e.local) this.engine.sfx(e.kind);
     else if (HEARD_FROM_OTHERS.has(e.kind)) this.engine.sfx(e.kind, { pan: e.pan, gain: e.gain * 0.55 });
   }
