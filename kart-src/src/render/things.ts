@@ -327,6 +327,25 @@ export class ThingVisuals {
       // Glutbrocken
       put(b, new THREE.IcosahedronGeometry(1.45, 0), 0x2a2030);
       put(b, new THREE.IcosahedronGeometry(1.2, 0), 0xff7a1f, 0, 0, 0, 1.08, 1.08, 1.08, 0.6, 0.4, 0.2);
+    } else if (this.theme === 'riff') {
+      // Qualle: Schirm mit hellem Saum, Tupfen, Augen und Fangarmen
+      put(b, new THREE.IcosahedronGeometry(1.25, 1), 0xff8fc8, 0, 1.55, 0, 1, 0.72, 1);
+      put(b, new THREE.TorusGeometry(1.08, 0.2, 5, 12), 0xffd3ec, 0, 1.08, 0, 1, 1, 1, Math.PI / 2);
+      put(b, new THREE.IcosahedronGeometry(0.75, 1), 0xffb3dc, 0, 0.95, 0, 1, 0.5, 1);
+      for (const [x, y, z] of [
+        [0.45, 2.28, 0.2],
+        [-0.5, 2.2, -0.15],
+        [0.05, 2.36, -0.45],
+      ]) put(b, new THREE.IcosahedronGeometry(0.2, 0), 0xfff2a8, x, y, z, 1, 0.6, 1);
+      for (const sgn of [-1, 1]) {
+        put(b, new THREE.IcosahedronGeometry(0.24, 1), 0xffffff, sgn * 0.45, 1.5, -1.05);
+        put(b, new THREE.IcosahedronGeometry(0.12, 0), 0x16131c, sgn * 0.45, 1.5, -1.25);
+      }
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + 0.3;
+        const len = 0.8 + (k % 3) * 0.22;
+        put(b, new THREE.CylinderGeometry(0.1, 0.05, len, 5), k % 2 === 0 ? 0xc46ad6 : 0xff8fc8, Math.cos(a) * 0.7, 0.9 - len / 2, Math.sin(a) * 0.7);
+      }
     } else {
       // Kehrroboter mit Warnlicht
       b.box(0, 0.75, 0, 2.3, 1.0, 1.9, rgb(0x1fd6c8), 0, rgb(0x16a79c));
@@ -686,6 +705,12 @@ export class ThingVisuals {
       } else if (this.theme === 'klippe') {
         inner.position.y = Math.abs(Math.sin(time * 14)) * 0.12;
         inner.rotation.z = Math.sin(time * 14) * 0.06;
+      } else if (this.theme === 'riff') {
+        // Die Qualle schwebt und pumpt: der Schirm zieht sich zusammen und weitet sich.
+        const pump = Math.sin(time * 3.4 + i * 1.7);
+        inner.position.y = 0.45 + 0.3 * Math.sin(time * 1.7 + i);
+        inner.scale.set(1 + 0.09 * pump, 1 - 0.12 * pump, 1 + 0.09 * pump);
+        inner.rotation.z = Math.sin(time * 1.1 + i) * 0.12;
       } else {
         inner.position.y = 0.04 * Math.sin(time * 20);
       }

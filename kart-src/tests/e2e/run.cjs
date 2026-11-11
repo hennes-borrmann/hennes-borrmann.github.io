@@ -724,7 +724,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Fünf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 5);
+    check('Sechs Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 6);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -908,7 +908,7 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen');
     const h7 = await openScreen('host7', '&laps=2');
     const code7 = await createLobby(h7, 'Anna');
     const c7 = await openScreen('client7', '&laps=2');
@@ -1110,9 +1110,49 @@ async function main() {
     const sc4 = await kart(h7.page, 'scene()');
     check('Wolkenwerft wird gezeichnet', sc4 && sc4.triangles > 20000, sc4 ? `${sc4.calls} Zeichenaufrufe, ${sc4.triangles} Dreiecke` : '');
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Tiefseeriff: Ben (Mitspieler) springt vom Steg ins Wasser und taucht – auf beiden Bildschirmen.
+    const twist5 = await h7.page.locator('.track-card').nth(5).locator('.track-twist').textContent();
+    check('Streckenwahl nennt die Eigenheit des Tiefseeriffs', /Tauchen/.test(twist5 || ''), twist5 || '');
+    await h7.page.locator('.track-card').nth(5).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 5, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 5, null, { timeout: 30000 });
+    const reef = await kart(h7.page, 'dive()');
+    check('Tiefseeriff hat Tauchstrecke, Strömungen und Blasenschlote', reef && reef.from > 50 && reef.currents >= 4 && reef.vents >= 3, JSON.stringify(reef));
+    // 70 m Anlauf auf dem Steg bis ins Wasser
+    await kart(h7.page, `place(1, ${reef.from - 70}, 0)`);
+    await sleep(250);
+    await c7.page.keyboard.down('ArrowUp');
+    let diveTicks = [0, 0];
+    let deepest = 0;
+    let fastSink = 0;
+    const untilD = Date.now() + 12000;
+    while (Date.now() < untilD && (diveTicks[0] < 25 || diveTicks[1] < 25)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      const bc = ec.find((e) => e.slot === 1);
+      if (bh.flags & 32) {
+        diveTicks[0]++;
+        deepest = Math.min(deepest, bh.y - reef.sea);
+        // Sinkrate im Schweben unter Wasser (in der Luft davor fällt das Kart normal)
+        if (bh.flags & 8) fastSink = Math.min(fastSink, bh.vy);
+      }
+      if (bc.flags & 32) diveTicks[1]++;
+      await sleep(50);
+    }
+    await c7.page.keyboard.up('ArrowUp');
+    check('Ben taucht – beim Host und auf seinem eigenen Bildschirm', diveTicks[0] >= 25 && diveTicks[1] >= 25, `${diveTicks[0]} / ${diveTicks[1]} Abfragen unter Wasser, bis ${(-deepest).toFixed(1)} m tief`);
+    check('Unter Wasser sinkt das Kart langsam', fastSink > -7.5 && deepest < -2, `größte Sinkrate ${(-fastSink).toFixed(1)} m/s`);
+    const sc5 = await kart(h7.page, 'scene()');
+    check('Tiefseeriff wird gezeichnet', sc5 && sc5.triangles > 20000, sc5 ? `${sc5.calls} Zeichenaufrufe, ${sc5.triangles} Dreiecke` : '');
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die fünf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die sechs großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(8000);
   }
 

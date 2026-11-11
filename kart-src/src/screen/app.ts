@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, TRACK_COUNT, newVehiclePose, setTrack, vehiclePose } from '../game/track';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -1186,6 +1186,12 @@ export class App {
           }
         }
         return { glides, thermals: TRACK.thermals.length, rings: TRACK.rings.length };
+      },
+      // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
+      dive: () => {
+        let from = -1;
+        for (let i = 0; i < TRACK.n && from < 0; i++) if (TRACK.deep[i] && TRACK.py[i] < TRACK.sea - 1) from = i * TRACK.step;
+        return { sea: TRACK.sea, from, currents: TRACK.belts.filter((b) => b.swim).length, vents: TRACK.pulses.filter((p) => p.kind === PULSE_BUBBLE).length };
       },
       // Gezeit zur Rennzeit dieses Bildschirms: Stand 0 (Ebbe) … 1 (Flut) und Höhe des Wasserspiegels.
       tide: () => {
