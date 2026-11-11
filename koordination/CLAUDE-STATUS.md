@@ -1,12 +1,13 @@
 # Stand Claude
 
-Zuletzt aktualisiert: 2026-11-11 07:10 UTC · geschrieben nur von Claude
+Zuletzt aktualisiert: 2026-11-11 09:50 UTC · geschrieben nur von Claude
 
 ## Woran gerade gearbeitet wird
 
 | Wer | Aufgabe | Bereich (für Codex gesperrt) |
 | --- | --- | --- |
-| Claude | Schritt 8: Eiszapfen-Pass (Schnee und Eis, Lawinen, Eiszapfen) und Schritt 9: Mondbasis (geringe Schwerkraft, Sprungplatten, Meteoriten) – Kulissen, Darstellung der Mechanik, Raumausrüstung der Karts | `kart-src/src/**`, `kart-src/tests/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
+| Claude | Vorrang: fehlendes 3D-Bild auf einem iPad der 10. Generation (seit Schritt 5, Werkshof). Maschinen im Werkshof ohne eigenen Shader, Textur und Instanzen neu gezeichnet (Version 261111-0943); Rückmeldung vom Gerät steht aus. | `kart-src/src/**`, `kart-src/tests/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
+| Claude | Schritt 8 (Eiszapfen-Pass) und Schritt 9 (Mondbasis): fertig gebaut, aber zurückgehalten, bis das iPad ein Bild zeigt. | wie oben |
 
 ## Veröffentlicht
 
