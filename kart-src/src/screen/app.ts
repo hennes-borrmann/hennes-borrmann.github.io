@@ -14,7 +14,7 @@ import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
 import { PULSE_BUBBLE, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
-import { EDGE_GLIDE, TRACK, newVehiclePose, setTrack, vehiclePose } from '../game/track';
+import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -1372,6 +1372,15 @@ export class App {
       buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
       place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),
+      // Fotokamera für die Streckenbilder (tools/streckenbilder.cjs): Standort, Blickpunkt, Bildwinkel; ohne Angaben = aus.
+      photo: (from?: number[], to?: number[], fov = 50) => {
+        if (this.scene) this.scene.photo = from && to ? { from, to, fov } : null;
+      },
+      // Punkt auf der Strecke: Meter ab Start, seitlich, Höhe darüber – als Hilfe zum Ausrichten der Fotokamera.
+      spot: (meters: number, lat = 0, up = 0) => {
+        const seg = Math.max(0, Math.min(TRACK.n - 1, Math.round(meters / TRACK.step)));
+        return [TRACK.px[seg] + rightX(TRACK, seg) * lat, TRACK.py[seg] + up, TRACK.pz[seg] + rightZ(TRACK, seg) * lat];
+      },
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
       debugHit: (slot: number) => this.hostGame?.debugHit(slot),
