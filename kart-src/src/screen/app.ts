@@ -712,6 +712,9 @@ export class App {
     const state = this.lobbyState();
     if (!state) return;
     this.ui.show('game');
+    this.gfxRebuilt = false;
+    this.gfxHistory.length = 0;
+    this.gfxHidden = '';
     setTrack(state.track);
     // Die Porträts der Lobby werden nicht mehr gebraucht; ihr Grafikkontext wird erst freigegeben, wenn das Rennen
     // seinen eigenen hat (ein iPad verweigerte den neuen Kontext, wenn der alte unmittelbar davor zwangsweise endete).
@@ -845,6 +848,14 @@ export class App {
     }
   }
 
+  /** Grafik-Meldung: zuletzt gezeigter Text, seit wann der Kontext fehlt, ob schon von selbst neu aufgebaut wurde, was vorher war. */
+  private gfxShown = '';
+  /** Befund, den der Spieler ausgeblendet hat – er kommt erst wieder, wenn sich etwas ändert. */
+  private gfxHidden = '';
+  private gfxLostSince = 0;
+  private gfxRebuilt = false;
+  private readonly gfxHistory: string[] = [];
+
   private readonly frame = (): void => {
     requestAnimationFrame(this.frame);
     const now = performance.now();
@@ -874,8 +885,94 @@ export class App {
     if (now - this.lastOverlay > 250) {
       this.lastOverlay = now;
       if (this.overlay.visible) this.overlay.setSections(this.collectDebug());
+      this.checkGraphics(now);
     }
   };
+
+  /** Zeichnet der Browser die Szene nicht (Kontext verloren, Programme abgelehnt, Bild schwarz), steht es auf dem Bildschirm. */
+  private checkGraphics(now: number): void {
+    const scene = this.scene;
+    if (!scene || !this.inGame) {
+      if (this.gfxShown) {
+        this.gfxShown = '';
+        this.ui.setGfxNote(null);
+      }
+      return;
+    }
+    const g = scene.gfx;
+    // Bleibt der Kontext länger verloren, einmal von selbst auf einer frischen Zeichenfläche neu aufbauen.
+    if (g.isLost) {
+      if (!this.gfxLostSince) this.gfxLostSince = now;
+      else if (now - this.gfxLostSince > 1500 && !this.gfxRebuilt) {
+        this.gfxRebuilt = true;
+        this.rebuildScene('von selbst');
+        return;
+      }
+    } else this.gfxLostSince = 0;
+    const lines = [...this.gfxHistory];
+    if (g.lost > 0) lines.push(`Der Browser hat die 3D-Grafik beendet: ${g.lost}× (zuerst ${g.lostWhen}), wiederhergestellt ${g.restored}×.`);
+    if (g.shaderErrors.length > 0) lines.push(`Grafikprogramm abgelehnt (${g.shaderErrors.length}): ${g.shaderErrors[0]}`);
+    if (g.glErrors.length > 0) lines.push(`Grafikfehler: ${g.glErrors.join(', ')}`);
+    if (g.checked >= 6 && g.black === g.checked) lines.push(`Das Bild bleibt schwarz (${g.black} von ${g.checked} Proben).`);
+    if (lines.length === 0) {
+      if (this.gfxShown) {
+        this.gfxShown = '';
+        this.ui.setGfxNote(null);
+      }
+      return;
+    }
+    // Nur neu aufbauen, wenn sich am Befund etwas ändert (die Zahlen darunter wechseln mit jedem Bild).
+    const text = lines.join('\n');
+    if (text === this.gfxShown || text === this.gfxHidden) return;
+    this.gfxShown = text;
+    this.gfxHidden = '';
+    const st = scene.stats;
+    lines.push(`Version ${BUILD_ID} · ${TRACK.def.name} · Stufe ${st.level} · ${st.calls} Zeichenaufrufe, ${st.triangles} Dreiecke · ${g.frames} Bilder`);
+    lines.push('Bitte einen Screenshot dieser Meldung schicken.');
+    this.ui.setGfxNote(
+      lines,
+      () => this.rebuildScene('auf Knopfdruck'),
+      () => {
+        this.gfxHidden = text;
+        this.gfxShown = '';
+        this.ui.setGfxNote(null);
+      },
+    );
+  }
+
+  /** Baut die 3D-Szene des laufenden Rennens auf einer frischen Zeichenfläche neu auf (das Rennen selbst läuft weiter). */
+  private rebuildScene(how: string): void {
+    const state = this.lobbyState();
+    const old = this.scene;
+    if (!state || !old) return;
+    const g = old.gfx;
+    this.gfxHistory.push(
+      `Neuaufbau ${how} nach ${g.frames} Bildern` +
+        (g.lost > 0 ? ` – Grafik beendet ${g.lost}× (zuerst ${g.lostWhen}), wiederhergestellt ${g.restored}×` : '') +
+        (g.shaderErrors.length > 0 ? ` – abgelehnt: ${g.shaderErrors[0]}` : '') +
+        (g.glErrors.length > 0 ? ` – Fehler: ${g.glErrors.join(', ')}` : '') +
+        (g.checked > 0 ? ` – schwarz ${g.black} von ${g.checked}` : '') +
+        '.',
+    );
+    if (this.gfxHistory.length > 4) this.gfxHistory.shift();
+    try {
+      const canvas = $<HTMLCanvasElement>('stage');
+      const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
+      canvas.replaceWith(fresh);
+      const scene = new RaceScene(fresh, this.quality);
+      scene.setTrack();
+      scene.reset();
+      scene.onEvent = (e) => this.sound.sceneEvent(e);
+      scene.setRoster(this.drivers(state));
+      this.scene = scene;
+      old.release();
+    } catch (err) {
+      console.error(err);
+      this.gfxHistory.push(`Neuaufbau gescheitert: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    this.gfxLostSince = 0;
+    this.gfxShown = '';
+  }
 
   /** Anzeige über dem Rennen: Countdown, Platz, Runde, Item, Ergebnisliste. */
   private updateRaceUi(race: { raceId: number; phase: number; laps: number; untilGo: number }, nowMs: number): void {
