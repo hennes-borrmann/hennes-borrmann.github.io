@@ -254,6 +254,9 @@ function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
   throw new Error(errors.join(' · ') + (reason ? ` · Begründung des Browsers: ${reason}` : ''));
 }
 
+/** Ein Bildpunkt für die Stichprobe in checkFrame. */
+const PROBE = new Uint8Array(4);
+
 function labelSprite(name: string, color: string): THREE.Sprite {
   const c = document.createElement('canvas');
   c.width = 256;
@@ -289,6 +292,13 @@ export class RaceScene {
   onEvent: ((e: SceneEvent) => void) | null = null;
   /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
   readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
+  /**
+   * Zustand der Grafik, für die Meldung auf dem Bildschirm, wenn der Browser nicht (mehr) zeichnet:
+   * Kontextverluste (und wann der erste kam), abgelehnte Grafikprogramme, GL-Fehler und ob die ersten Bilder schwarz blieben.
+   */
+  readonly gfx = { lost: 0, restored: 0, isLost: false, lostWhen: '', frames: 0, shaderErrors: [] as string[], glErrors: [] as string[], checked: 0, black: 0 };
+  /** Was die Szene gerade tut – steht in der Meldung, falls der Kontext dabei verloren geht. */
+  private phase = 'Aufbau';
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -360,6 +370,23 @@ export class RaceScene {
   ) {
     this.renderer = createRenderer(canvas);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Verliert der Browser den Grafikkontext (Absturz seines Grafikprozesses, Speichernot, App im Hintergrund),
+    // bleibt das Bild schwarz, ohne dass ein Fehler fällt. Mitschreiben, damit es gemeldet werden kann.
+    canvas.addEventListener('webglcontextlost', () => {
+      this.gfx.lost++;
+      this.gfx.isLost = true;
+      if (!this.gfx.lostWhen) this.gfx.lostWhen = `${this.phase}, nach ${this.gfx.frames} Bildern`;
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.gfx.restored++;
+      this.gfx.isLost = false;
+      this.needsCompile = true;
+    });
+    this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
+      const text = `${gl.getProgramInfoLog(program) ?? ''} ${gl.getShaderInfoLog(vs) ?? ''} ${gl.getShaderInfoLog(fs) ?? ''}`.replace(/\s+/g, ' ').trim();
+      console.error('Grafikprogramm abgelehnt:', text);
+      if (this.gfx.shaderErrors.length < 3) this.gfx.shaderErrors.push(text.slice(0, 220) || 'ohne Begründung');
+    };
     this.quality = quality;
     this.level = quality === 'low' ? 0 : quality === 'high' ? 2 : 1;
     const cap = LEVELS[2].particles;
@@ -375,6 +402,16 @@ export class RaceScene {
     this.camera.add(this.speedLines.mesh);
     window.addEventListener('resize', () => this.resize());
     this.resize();
+  }
+
+  /** Gibt Welt und Renderer frei – für den Fall, dass die Szene auf einer frischen Zeichenfläche neu entsteht. */
+  release(): void {
+    try {
+      this.disposeWorld();
+      this.renderer.dispose();
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   // --- Aufbau ----------------------------------------------------------------
@@ -1181,11 +1218,37 @@ export class RaceScene {
       // Alle Shader jetzt übersetzen – auch die der noch unsichtbaren Effekte (Flammen,
       // Schutzring, Tempostriche). Sonst ruckelt es beim ersten Schub oder Treffer.
       this.needsCompile = false;
+      this.phase = 'beim Übersetzen der Grafikprogramme';
       this.renderer.compile(this.scene, this.camera);
     }
+    this.phase = 'beim Zeichnen';
     this.renderer.render(this.scene, this.camera);
     this.stats.calls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
+    this.gfx.frames++;
+    // Stichprobe in den ersten Sekunden: meldet der Grafikkontext Fehler, bleibt das Bild schwarz?
+    if (this.gfx.checked < 12 && this.gfx.frames % 10 === 5) this.checkFrame();
+  }
+
+  /** Prüft das eben gezeichnete Bild: GL-Fehler und fünf Bildpunkte (alle schwarz = es wurde nichts gezeichnet). */
+  private checkFrame(): void {
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) return;
+    this.gfx.checked++;
+    const err = gl.getError();
+    if (err !== gl.NO_ERROR && this.gfx.glErrors.length < 4) {
+      const name = err === gl.OUT_OF_MEMORY ? 'Speicher erschöpft' : err === gl.INVALID_OPERATION ? 'ungültiger Aufruf' : err === gl.INVALID_FRAMEBUFFER_OPERATION ? 'Zeichenfläche unvollständig' : err === gl.INVALID_VALUE ? 'ungültiger Wert' : err === gl.INVALID_ENUM ? 'ungültige Kennung' : 'unbekannt';
+      const text = `${name} (0x${err.toString(16)})`;
+      if (!this.gfx.glErrors.includes(text)) this.gfx.glErrors.push(text);
+    }
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    let lit = false;
+    for (let i = 0; i < 5 && !lit; i++) {
+      gl.readPixels(Math.floor((w * (i + 1)) / 6), Math.floor((h * (i + 1)) / 6), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, PROBE);
+      if (PROBE[0] + PROBE[1] + PROBE[2] > 0) lit = true;
+    }
+    if (!lit) this.gfx.black++;
   }
 
   /** Funken, Staub, Flammen und Bremsspuren eines Karts. */
