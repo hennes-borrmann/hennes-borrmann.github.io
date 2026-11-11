@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, gustStrength, gustWarning, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1453,6 +1453,29 @@ export class App {
       },
       // Mond: Sprungplatten (Meter ab Start, Abzweigung oder −1) und Schwerkraft der Strecke.
       launchers: () => ({ gravity: TRACK.gravity, pads: TRACK.launchers.map((l) => ({ at: TRACK.prog[l.seg] * TRACK.step, branch: TRACK.branchOf[l.seg], power: l.power })) }),
+      // Sturmhafen, zur Rennzeit dieses Bildschirms: Böen (Meter ab Start bzw. ab Gabelung, Schub, Stärke und Vorwarnung
+      // jetzt, Windschatten) und Pontons (Hub jetzt).
+      harbor: () => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = view ? view.race(performance.now() / 1000).time : 0;
+        const where = (seg: number) => {
+          const branch = TRACK.branchOf[seg];
+          return { branch, at: (branch < 0 ? seg : seg - TRACK.branches[branch].first) * TRACK.step };
+        };
+        return {
+          time,
+          winds: TRACK.winds.map((w) => ({
+            ...where(w.first),
+            length: w.count * TRACK.step,
+            push: w.push,
+            period: w.period / 60,
+            strength: gustStrength(w, time),
+            warning: gustWarning(w, time),
+            lee: w.lee.map((l) => ({ from: where(l.first).at, to: where(l.last).at, lat0: l.lat0, lat1: l.lat1 })),
+          })),
+          pontoons: TRACK.pontoons.map((p) => ({ ...where(p.first), length: p.count * TRACK.step, amp: p.amp, period: p.period / 60, lift: pontoonLift(p, time) })),
+        };
+      },
       // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
       dive: () => {
         let from = -1;

@@ -682,7 +682,7 @@ export class World {
     const id = t.def.theme;
     // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
     // Wänden, die Naturstrecken eine Höhle im Fels.
-    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken';
+    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen';
     const H = TUNNEL_H;
     const R = hall ? 0.9 : TUNNEL_ROCK;
     const cRock = rgb(th.ground[2]);
@@ -960,8 +960,10 @@ export class World {
     let h = roadY + (base + bumps - roadY) * k;
     // Unter Brücken und Stegen bleibt das Gelände unter der Fahrbahn – auch wenn
     // gleich daneben eine höhere Fahrbahn am Boden verläuft.
+    // Sturmhafen: die Lücke hinter der Schanze ist eine Ladeluke – das Gelände darunter liegt tief (über dem Meeresspiegel).
+    const gapPit = t.def.theme === 'hafen' ? 3.4 : 0;
     for (const i of this.deckSegs) {
-      const cap = t.py[i] - DECK_D - 0.8;
+      const cap = t.py[i] - (gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
       if (h <= cap) continue;
       const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
       if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
