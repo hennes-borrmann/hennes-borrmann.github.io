@@ -7,7 +7,7 @@ import type * as THREE from 'three';
 import type { Track } from '../game/track';
 import type { FxSink } from './fxApi';
 import type { World } from './world';
-import { PULSE_PRESS } from '../game/mechanics';
+import { PULSE_BOMB, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
 import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
 import { buildTide } from './mechanics/tide';
@@ -34,8 +34,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   const out: MechanicView[] = [];
   if (track.vehicles.length > 0) out.push(buildTraffic(track, detail));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
-  if (track.pulses.some((p) => p.kind !== PULSE_PRESS) || track.floods.length > 0) out.push(buildLava(track, detail));
-  if (track.belts.length > 0 || presses) out.push(buildMachines(track, detail));
+  if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
+  if (track.belts.some((b) => !b.swim) || presses) out.push(buildMachines(track, detail));
   if (track.tide) out.push(buildTide(track, detail, world));
   return out;
 }
