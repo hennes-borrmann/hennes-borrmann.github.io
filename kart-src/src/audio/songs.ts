@@ -415,6 +415,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   riff: NEUE_STUECKE.riff,
   eis: NEUE_STUECKE.eis,
   mond: NEUE_STUECKE.mond,
+  // (vorläufig das Stück des Werkshofs, bis das eigene da ist)
+  hafen: WERKSHOF,
   results: RESULTS,
 };
 

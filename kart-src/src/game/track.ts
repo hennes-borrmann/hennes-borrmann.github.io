@@ -38,11 +38,15 @@ import {
   PULSE_ICICLE,
   LAUNCH_SPEED,
   PULSE_METEOR,
+  PONTOON_LINK,
+  pontoonLift,
+  type Pontoon,
+  type Wind,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -122,6 +126,17 @@ export interface PathFeatures {
   meteors?: { at: number; lat: number; period: number; phase: number }[];
   /** Sprungplatten: schleudern das Kart hoch (power = Steiggeschwindigkeit in m/s, ohne Angabe LAUNCH_SPEED). */
   launchers?: { at: number; lat?: number; halfWidth?: number; power?: number }[];
+  /**
+   * Böen: fegen im Takt quer über [from, to]. push = seitlicher Schub in m/s (nach rechts positiv),
+   * period und phase in Sekunden, gust = Dauer einer Böe in Sekunden (ohne Angabe 2,6).
+   * lee = Windschatten: [von, bis, lat0, lat1] – dort kommt die Böe nicht an.
+   */
+  winds?: { from: number; to: number; push: number; period: number; phase: number; gust?: number; lee?: [number, number, number, number][] }[];
+  /**
+   * Pontons: [from, to] schwimmt und hebt und senkt sich mit dem Seegang – amp Meter (ohne Angabe 0,7),
+   * period und phase in Sekunden (ohne Angabe 3,4 und 0). Die Enden sind gelenkige Übergänge.
+   */
+  pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -212,6 +227,11 @@ export const EDGE_RAMP = 16;
 export const EDGE_TUNNEL = 32;
 /** Flugstrecke: Lücke, über der das Kart gleitet statt zu fallen. */
 export const EDGE_GLIDE = 256;
+/**
+ * Schwimmendes Stück (Ponton samt Übergängen): die Höhe ändert sich mit der Zeit (heaveAt).
+ * Die stehende Welt zeichnet hier keine Fahrbahn – das übernimmt die Darstellung der Pontons.
+ */
+export const EDGE_FLOAT = 512;
 /**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
@@ -319,6 +339,17 @@ export interface Track {
   /** Tauchstrecken: 1 je Abschnitt, der unter Wasser liegt; sea = Höhe des Meeresspiegels. */
   deep: Uint8Array;
   sea: number;
+  /** Böen (mechanics.ts). */
+  winds: Wind[];
+  /**
+   * Pontons und je Abschnitt, welche (höchstens zwei) seine Höhe bestimmen und mit welchem Gewicht:
+   * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
+   */
+  pontoons: Pontoon[];
+  floatA: Int16Array;
+  floatB: Int16Array;
+  floatWA: Float32Array;
+  floatWB: Float32Array;
   laps: number;
 }
 
@@ -918,6 +949,12 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     tidal: new Uint8Array(total),
     deep: new Uint8Array(total),
     sea: def.sea ?? 0,
+    winds: [],
+    pontoons: [],
+    floatA: new Int16Array(total).fill(-1),
+    floatB: new Int16Array(total).fill(-1),
+    floatWA: new Float32Array(total),
+    floatWB: new Float32Array(total),
     laps: def.laps,
   };
   for (const p of paths) {
@@ -979,6 +1016,47 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
       track.belts.push({ first, count: Math.max(1, last - first + 1), lat0: Math.min(b.lat0, b.lat1), lat1: Math.max(b.lat0, b.lat1), along: b.along ?? 0, across: b.across ?? 0, swim: true });
+    }
+    for (const w of p.f.winds ?? []) {
+      const first = segAt(p, w.from);
+      const last = segAt(p, w.to);
+      const period = Math.round(w.period * 60);
+      track.winds.push({
+        first,
+        count: Math.max(1, last - first + 1),
+        push: w.push,
+        period,
+        phase: Math.round(w.phase * 60),
+        on: Math.min(period - 30, Math.round((w.gust ?? 2.6) * 60)),
+        warn: Math.min(90, Math.max(30, period - Math.round((w.gust ?? 2.6) * 60))),
+        lee: (w.lee ?? []).map(([a, b, l0, l1]) => ({ first: segAt(p, a), last: segAt(p, b), lat0: Math.min(l0, l1), lat1: Math.max(l0, l1) })),
+      });
+    }
+    for (const po of p.f.pontoons ?? []) {
+      const first = segAt(p, po.from);
+      const last = segAt(p, po.to);
+      const count = Math.max(1, last - first + 1);
+      const id = track.pontoons.length;
+      track.pontoons.push({ first, count, amp: po.amp ?? 0.7, period: Math.round((po.period ?? 3.4) * 60), phase: Math.round((po.phase ?? 0) * 60) });
+      // Gewicht je Abschnitt: 1 auf dem Ponton, über den Übergang (halb auf ihm, halb davor) auf 0 fallend.
+      // Liegt der nächste Ponton direkt dahinter, ergänzen sich beide Gewichte im Übergang zu 1.
+      const half = Math.max(1, Math.round(PONTOON_LINK / 2 / step));
+      let seg = first;
+      for (let k = 0; k < half; k++) seg = prev[seg];
+      for (let k = -half; k < count + half; k++, seg = next[seg]) {
+        // Abstand der Abschnittsmitte zum nächsten Ende des Pontons, nach außen negativ
+        const inside = Math.min(k + 0.5, count - k - 0.5);
+        const w = Math.max(0, Math.min(1, inside / (2 * half) + 0.5));
+        if (w <= 0) continue;
+        edge[seg] |= EDGE_FLOAT;
+        if (track.floatA[seg] < 0) {
+          track.floatA[seg] = id;
+          track.floatWA[seg] = w;
+        } else if (track.floatB[seg] < 0) {
+          track.floatB[seg] = id;
+          track.floatWB[seg] = w;
+        }
+      }
     }
     for (const [from, to] of p.f.dives ?? []) spanU(p, from, to, (seg) => (track.deep[seg] = 1));
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
@@ -1283,6 +1361,33 @@ export function groundAt(t: Track, seg: number, along: number, lat: number): num
     if (lat > t.wh[seg] && e & EDGE_OPEN_R) return NO_GROUND;
   }
   return centerHeight(t, seg, along) + lat * t.bank[seg];
+}
+
+/** Hub des Seegangs an einem Abschnitt (Mitte) zur Rennzeit time. */
+function nodeHeave(t: Track, seg: number, time: number): number {
+  const a = t.floatA[seg];
+  if (a < 0) return 0;
+  const b = t.floatB[seg];
+  return t.floatWA[seg] * pontoonLift(t.pontoons[a], time) + (b < 0 ? 0 : t.floatWB[seg] * pontoonLift(t.pontoons[b], time));
+}
+
+/**
+ * Seegang: so weit liegt die Fahrbahn an dieser Stelle zur Rennzeit time über (oder unter) ihrer
+ * Ruhelage. Außerhalb der Pontons 0. Zwischen zwei Abschnitten wird wie bei der Höhe gemittelt.
+ */
+export function heaveAt(t: Track, seg: number, along: number, time: number): number {
+  if (t.pontoons.length === 0) return 0;
+  const j = along >= 0 ? t.next[seg] : t.prev[seg];
+  if (t.floatA[seg] < 0 && t.floatA[j] < 0) return 0;
+  const f = Math.min(1, Math.abs(along) / t.step);
+  const h = nodeHeave(t, seg, time);
+  return h + (nodeHeave(t, j, time) - h) * f;
+}
+
+/** Höhe des Bodens zur Rennzeit time: wie groundAt, auf Pontons samt Seegang. */
+export function groundNow(t: Track, seg: number, along: number, lat: number, time: number): number {
+  const g = groundAt(t, seg, along, lat);
+  return g === NO_GROUND || t.pontoons.length === 0 ? g : g + heaveAt(t, seg, along, time);
 }
 
 /** Seitliche Lage eines pendelnden Hindernisses zum Host-Tick tick. */

@@ -46,7 +46,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { NO_GROUND, TRACK, groundNow, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -1200,7 +1200,7 @@ export class RaceScene {
       // Boden unter dem Kart und dessen Neigung
       projectOnTrack(t, e.x, e.z, e.seg);
       const seg = proj.seg;
-      const ground = groundAt(t, seg, proj.along, proj.lat);
+      const ground = groundNow(t, seg, proj.along, proj.lat, this.mechTime);
       const slope = (t.py[t.next[seg]] - t.py[t.prev[seg]]) / (2 * t.step);
       const gx = slope * t.tx[seg] + t.bank[seg] * rightX(t, seg);
       const gz = slope * t.tz[seg] + t.bank[seg] * rightZ(t, seg);
@@ -1700,7 +1700,7 @@ export class RaceScene {
     let py = me.y + height - rise * 0.25;
     // Nie unter die Fahrbahn rutschen.
     projectOnTrack(t, px, pz, me.seg);
-    const g = groundAt(t, proj.seg, proj.along, proj.lat);
+    const g = groundNow(t, proj.seg, proj.along, proj.lat, this.mechTime);
     if (g !== NO_GROUND && py < g + 1.3) py = g + 1.3;
 
     if (!this.camReady) {

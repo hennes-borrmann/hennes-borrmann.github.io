@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { SURFACES } from '../game/surface';
 import {
   EDGE_DECK,
+  EDGE_FLOAT,
   EDGE_FREE_L,
   EDGE_FREE_R,
   EDGE_GAP,
@@ -379,8 +380,10 @@ export class World {
 
     for (let i = 0; i < t.total; i++) {
       const j = t.next[i];
-      const gapI = (t.edge[i] & EDGE_GAP) !== 0;
-      const gapJ = (t.edge[j] & EDGE_GAP) !== 0;
+      // Wie eine Lücke gezeichnet wird auch, was schwimmt (EDGE_FLOAT): Pontons und ihre Übergänge
+      // zeichnet die Darstellung der Mechanik (sie bewegen sich), hier endet die feste Fahrbahn.
+      const gapI = (t.edge[i] & (EDGE_GAP | EDGE_FLOAT)) !== 0;
+      const gapJ = (t.edge[j] & (EDGE_GAP | EDGE_FLOAT)) !== 0;
       if (gapI && gapJ) continue;
       // Die Fahrbahn endet genau dort, wo für die Physik der Boden endet: auf halbem Weg zum Lückenabschnitt.
       const f0 = gapI ? 0.5 : 0;
@@ -686,7 +689,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall

@@ -32,8 +32,9 @@ import {
   forwardSpeed,
   type Cmd,
   type KartState,
+  windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, gustStrength, gustWarning, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -352,6 +353,17 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const hl = hazardLat(h, ctx.tick + (d / Math.max(v, 8)) * 60);
     lat = hl > 0 ? Math.min(lat, hl - 4.6) : Math.max(lat, hl + 4.6);
   }
+  // Böen: wer aufpasst, zieht schon zur Windseite, während sie sich ankündigt (im Windschatten ist das nicht nötig).
+  if (b.level > 0) {
+    for (const w of t.winds) {
+      if (target < w.first || target >= w.first + w.count) continue;
+      const k = Math.max(gustStrength(w, ctx.time + 12), gustWarning(w, ctx.time) * 0.7);
+      if (k <= 0) continue;
+      let sheltered = false;
+      for (const l of w.lee) if (target >= l.first && target <= l.last && lat > l.lat0 && lat < l.lat1) sheltered = true;
+      if (!sheltered) lat -= Math.sign(w.push) * Math.min(2.5, Math.abs(w.push) * 0.4) * k;
+    }
+  }
   lat = Math.max(-maxLat, Math.min(maxLat, lat));
 
   // --- Verkehr, Geysire, Lavabomben: gesperrte Streifen voraus ---
@@ -476,7 +488,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   AI_TRACE.jam = jam;
   const txp = t.px[target] + rightX(t, target) * lat;
   const tzp = t.pz[target] + rightZ(t, target) * lat;
-  const err = wrapAngle(Math.atan2(txp - s.x, tzp - s.z) - s.heading);
+  let err = wrapAngle(Math.atan2(txp - s.x, tzp - s.z) - s.heading);
+  // In der Böe schräg gegen den Wind stellen, so dass die Fahrt unterm Strich geradeaus geht.
+  if (t.winds.length > 0) {
+    projectOnTrack(t, s.x, s.z, s.seg);
+    const blow = windPush(t, proj.seg, proj.along, proj.lat, ctx.time);
+    if (blow !== 0) err += Math.atan2(blow * (air ? 1.4 : 1), Math.max(v, 10)) * (b.level > 0 ? 1 : 0.7);
+  }
   // Rechts lenken verkleinert die Blickrichtung → Vorzeichen umdrehen.
   const wantYaw = -err * 4.2;
 

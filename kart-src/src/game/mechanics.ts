@@ -353,6 +353,77 @@ export const DIVE_STEER = 0.75;
 /** Ein Blasenschlot hebt mit dieser Geschwindigkeit (m/s). */
 export const BUBBLE_LIFT = 6.5;
 
+// --- Wind ----------------------------------------------------------------------------
+// Im Sturmhafen fegen Böen quer über die Fahrbahn. Jede Böe schiebt alles in ihrem Bereich
+// zur Seite – am Boden wie in der Luft –, kündigt sich an (Windsäcke, Gischt) und lässt
+// wieder nach. Hinter Containern liegt Windschatten: dort kommt nichts an.
+
+/** Ein Bereich, über den im Takt eine Böe fegt. */
+export interface Wind {
+  /** Erster Abschnitt und Anzahl (zusammenhängend auf einem Weg). */
+  first: number;
+  count: number;
+  /** Seitlicher Schub bei voller Böe in m/s (nach rechts positiv). */
+  push: number;
+  /** Alles in Ticks: die Böe weht on Ticks lang, die letzten warn Ticks davor kündigt sie sich an. */
+  period: number;
+  phase: number;
+  on: number;
+  warn: number;
+  /** Windschatten: Abschnitte first … last, seitlich lat0 … lat1 (Meter). */
+  lee: { first: number; last: number; lat0: number; lat1: number }[];
+}
+
+/** So viele Ticks braucht eine Böe, um auf volle Stärke anzuschwellen (und wieder abzuflauen). */
+export const WIND_RISE = 26;
+/** Übergang am Rand eines Windschattens (Meter seitlich) und an Anfang und Ende von Böe und Windschatten (Meter längs). */
+export const WIND_EDGE = 1.2;
+export const WIND_ENDS = 5;
+/** In der Luft hat das Kart dem Wind nichts entgegenzusetzen: dort schiebt er um diesen Faktor stärker. */
+export const WIND_AIR = 1.4;
+
+/** Stand im Zyklus einer Böe: 0 ≤ c < period; c < on = sie weht. */
+function gustCycle(w: Wind, time: number): number {
+  const c = (time + w.phase) % w.period;
+  return c < 0 ? c + w.period : c;
+}
+
+/** Stärke der Böe zur Rennzeit time: 0 = Flaute … 1 = voll. Sie schwillt an und ab – nirgends ein Sprung. */
+export function gustStrength(w: Wind, time: number): number {
+  const c = gustCycle(w, time);
+  return c >= w.on ? 0 : Math.min(1, c / WIND_RISE, (w.on - c) / WIND_RISE);
+}
+
+/** 0 = Ruhe … 1 = die Böe setzt gleich ein. */
+export function gustWarning(w: Wind, time: number): number {
+  const c = gustCycle(w, time);
+  return c >= w.period - w.warn ? (c - (w.period - w.warn)) / w.warn : 0;
+}
+
+// --- Pontons -------------------------------------------------------------------------
+// Schwimmende Stücke der Fahrbahn heben und senken sich mit dem Seegang, jedes in seinem
+// eigenen Takt. Zwischen zwei Pontons und zum festen Kai hin liegen gelenkige Übergänge:
+// dort läuft die Höhe gleichmäßig vom einen zum anderen. Wer auf dem Kamm ankommt, hebt ab.
+
+/** Ein schwimmendes Stück Fahrbahn. */
+export interface Pontoon {
+  /** Erster Abschnitt und Anzahl (zusammenhängend auf einem Weg). */
+  first: number;
+  count: number;
+  /** Ausschlag in Metern, Periode und Versatz in Ticks. */
+  amp: number;
+  period: number;
+  phase: number;
+}
+
+/** Länge des Übergangs an jedem Ende eines Pontons (Meter): je zur Hälfte auf ihm und davor. */
+export const PONTOON_LINK = 6;
+
+/** So weit liegt der Ponton zur Rennzeit time über (oder unter) seiner Ruhelage. */
+export function pontoonLift(p: Pontoon, time: number): number {
+  return p.amp * Math.sin(((time + p.phase) / p.period) * 2 * Math.PI);
+}
+
 // --- Geringe Schwerkraft -------------------------------------------------------------
 // Auf dem Mond (Track.gravity < 1) fällt alles langsam: jeder Buckel wird zum hohen,
 // weiten Sprung – anders als unter Wasser ohne Bremse und ohne Grenze beim Sinken.

@@ -76,7 +76,7 @@ import {
   NO_GROUND,
   TRACK,
   centerHeight,
-  groundAt,
+  groundNow,
   hazardLat,
   proj,
   projectOnTrack,
@@ -710,7 +710,7 @@ export class HostGame implements GameView {
     const x = k.state.x - Math.sin(k.state.heading) * back;
     const z = k.state.z - Math.cos(k.state.heading) * back;
     projectOnTrack(t, x, z, k.state.seg);
-    const g = groundAt(t, proj.seg, proj.along, proj.lat);
+    const g = groundNow(t, proj.seg, proj.along, proj.lat, this.tick - this.goTick);
     // Öl braucht Boden; Rauch hängt auch in der Luft.
     if (g === NO_GROUND && kind === THING_OIL) return;
     const drop = this.addThing(kind, k, x, g === NO_GROUND ? k.state.y : g, z, kind === THING_OIL ? OIL_LIFE_TICKS : SMOKE_LIFE_TICKS);
@@ -836,7 +836,7 @@ export class HostGame implements GameView {
             }
           }
         }
-        const g = groundAt(t, th.seg, proj.along, proj.lat);
+        const g = groundNow(t, th.seg, proj.along, proj.lat, this.tick - this.goTick);
         if (g === NO_GROUND) {
           // Über eine Kante oder Lücke hinaus: kurz weiterfliegen, dann ist er weg.
           th.y -= 0.12;
