@@ -221,6 +221,7 @@ export class World {
     /** Aufbauzeiten in ms: Fahrbahn, Gelände und Himmel, Kulisse, Leben. */
     this.buildTimes = [t1 - t0, t2 - t1, t3 - t2, performance.now() - t3].map(Math.round);
     if (this.life) {
+      this.life.group.name = 'Leben';
       this.group.add(this.life.group);
       this.disposables.push(this.life);
     }
