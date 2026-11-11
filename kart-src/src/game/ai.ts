@@ -251,6 +251,9 @@ function edgesAhead(toM: number): number {
  * @param racing false während Countdown und nach dem Ziel
  */
 /** Nur zur Fehlersuche in Tests: was die KI im letzten Schritt über den Verkehr dachte. */
+/** So nah am Innenrand (Meter) löst die KI einen Drift, der sie weiter hineinzöge. */
+const DRIFT_INNER_MARGIN = 1.6;
+
 export const AI_TRACE = { here: 0, lat: 0, want: 0, jam: false, blocks: '' };
 
 export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: boolean, ctx: BotContext): Cmd {
@@ -512,9 +515,15 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const stillTurning = near * s.driftDir > 1 / 55;
     // Mindestens bis Stufe 1 halten, sofern die Kurve nicht schon vorbei ist.
     if (mayDrift && (stillTurning || (b.drifting < 40 && near * s.driftDir > 1 / 120))) buttons |= BTN_DRIFT;
+    const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
+    // Ein Drift dreht immer weiter nach innen. Will die Ziellinie weiter hinaus, als selbst der weiteste Driftbogen
+    // erlaubt, und ist der Innenrand schon nah, hilft nur loslassen – sonst zieht es das Kart in den Seitenstreifen
+    // (so geschehen in der Steilkurve hinter der Werkshof-Brücke; Ursache gefunden in Codex' Bericht C-006).
+    const inner = ((s.x - t.px[s.seg]) * rightX(t, s.seg) + (s.z - t.pz[s.seg]) * rightZ(t, s.seg)) * s.driftDir;
+    // (Auf schmaler Bahn – Bobbahn, Steg – ist der Spielraum kleiner: dort erst dichter am Rand.)
+    if (k < DRIFT_WIDE && inner > t.rh[s.seg] - DRIFT_INNER_MARGIN * Math.min(1, (t.rh[s.seg] - 3) / 3.5)) buttons &= ~BTN_DRIFT;
     // Hinter einem Fahrzeug eingeklemmt: Drift halten – loslassen würde den Mini-Turbo zünden.
     if (jam) buttons |= BTN_DRIFT;
-    const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
     const into = ((k - DRIFT_WIDE) / (DRIFT_TIGHT - DRIFT_WIDE)) * 2 - 1;
     steer = Math.max(-1, Math.min(1, into)) * s.driftDir;
   } else {

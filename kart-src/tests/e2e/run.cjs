@@ -908,10 +908,11 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen');
-    const h7 = await openScreen('host7', '&laps=2');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte');
+    // (&alle=1: auch die Strecken, die die Lobby noch nicht anbietet – ihre Mechanik wird trotzdem geprüft.)
+    const h7 = await openScreen('host7', '&laps=2&alle=1');
     const code7 = await createLobby(h7, 'Anna');
-    const c7 = await openScreen('client7', '&laps=2');
+    const c7 = await openScreen('client7', '&laps=2&alle=1');
     await joinLobby(c7, 'Ben', code7);
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
@@ -1150,10 +1151,80 @@ async function main() {
     const sc5 = await kart(h7.page, 'scene()');
     check('Tiefseeriff wird gezeichnet', sc5 && sc5.triangles > 20000, sc5 ? `${sc5.calls} Zeichenaufrufe, ${sc5.triangles} Dreiecke` : '');
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
+    const cards = await h7.page.locator('.track-card').count();
+    check('Mit dem Test-Schalter stehen acht Strecken zur Wahl', cards === 8, `${cards} Karten`);
+    await h7.page.locator('.track-card').nth(6).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 6, null, { timeout: 30000 });
+    const chute = (await kart(h7.page, 'pulses()')).find((p) => p.kind === 4);
+    check('Eiszapfen-Pass hat Lawinen und Eiszapfen', !!chute && (await kart(h7.page, 'pulses()')).some((p) => p.kind === 5), chute ? `Lawine bei ${chute.at.toFixed(0)} m, alle ${chute.period} s` : 'keine');
+    await kart(h7.page, `place(0, ${chute.at}, 0)`);
+    await sleep(300);
+    const start6 = (await kart(h7.page, 'entities()')).find((e) => e.slot === 0);
+    let pushed = [0, 0];
+    const untilA = Date.now() + (chute.period + 3) * 1000;
+    while (Date.now() < untilA && (pushed[0] < 2 || pushed[1] < 2)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const a = eh.find((e) => e.slot === 0);
+      const b = ec.find((e) => e.slot === 0);
+      pushed[0] = Math.max(pushed[0], Math.hypot(a.x - start6.x, a.z - start6.z));
+      pushed[1] = Math.max(pushed[1], Math.hypot(b.x - start6.x, b.z - start6.z));
+      await sleep(60);
+    }
+    check('Lawine: Anna wird weggeschoben – beim Host und auf Bens Bildschirm', pushed[0] >= 2 && pushed[1] >= 2, `${pushed[0].toFixed(1)} m / ${pushed[1].toFixed(1)} m`);
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Mondbasis: Ben (Mitspieler) fährt über die Sprungplatte des Massenbeschleunigers – weiter, hoher Sprung auf beiden Bildschirmen.
+    await h7.page.locator('.track-card').nth(7).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 7, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 7, null, { timeout: 30000 });
+    const moon = await kart(h7.page, 'launchers()');
+    const padM = moon.pads.find((p) => p.branch === -1);
+    check('Mondbasis hat geringe Schwerkraft und Sprungplatten', moon.gravity < 0.5 && moon.pads.length === 2 && !!padM, JSON.stringify(moon));
+    await kart(h7.page, `place(1, ${padM.at - 60}, 0)`);
+    await sleep(250);
+    await c7.page.keyboard.down('ArrowUp');
+    let airM = [0, 0];
+    let topM = 0;
+    let baseY = null;
+    let landedM = false;
+    let fellM = false;
+    let launched = false;
+    const untilM = Date.now() + 14000;
+    while (Date.now() < untilM && !landedM && !fellM) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      const bc = ec.find((e) => e.slot === 1);
+      if (bh.flags & 8) {
+        if (bh.vy > 6) launched = true;
+        if (launched) {
+          airM[0]++;
+          if (baseY === null) baseY = bh.y;
+          topM = Math.max(topM, bh.y - baseY);
+        }
+      } else if (launched && airM[0] > 8 && bh.respawn === 0) landedM = true;
+      if (launched && bc.flags & 8) airM[1]++;
+      if (bh.respawn > 0) fellM = true;
+      await sleep(50);
+    }
+    await c7.page.keyboard.up('ArrowUp');
+    check('Sprungplatte: Ben fliegt weit und hoch – beim Host und auf seinem eigenen Bildschirm', airM[0] > 12 && airM[1] > 12 && topM > 2.5, `${airM[0]} / ${airM[1]} Abfragen in der Luft, ${topM.toFixed(1)} m über der Absprunghöhe`);
+    check('Ben landet jenseits der Schlucht', landedM && !fellM, landedM ? 'gelandet' : fellM ? 'abgestürzt' : 'weder noch');
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die sechs großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
-    await sleep(8000);
+    // Der Browser räumt die acht großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    await sleep(10000);
   }
 
   if (wants('netsim')) {
