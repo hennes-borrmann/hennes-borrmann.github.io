@@ -314,6 +314,8 @@ function createRenderer(first: HTMLCanvasElement): THREE.WebGLRenderer {
 /** Ein Bildpunkt zum Auslesen: erzwingt beim behutsamen Aufbau, dass der Browser wirklich gezeichnet hat. */
 const PROBE = new Uint8Array(4);
 
+/** Marke für den Abschnitt „leere Fläche anzeigen“ des behutsamen Aufbaus. */
+const SHOW_EMPTY = 'Anzeigen der leeren Zeichenfläche';
 /** Ebene, auf der der behutsame Aufbau die Teile einzeln zeichnet. */
 const WARM_LAYER = 30;
 /** Sichtbarkeit der Kette vom Teil bis zur Wurzel, zum Zurücksetzen. */
@@ -401,6 +403,10 @@ export class RaceScene {
   private stagedPending = false;
   private warmList: { obj: THREE.Object3D; label: string }[] | null = null;
   private warmIndex = 0;
+  /** Abschnitt des behutsamen Aufbaus: 0 einzeln, 1 leere Fläche zeigen, 2 gemeinsam (siehe stepWarmup). */
+  private warmPhase = 0;
+  private readonly warmVisible = new Map<THREE.Object3D, boolean>();
+  private readonly warmCulled: THREE.Object3D[] = [];
   private warmWhere = '';
 
   /** Was die Szene gerade tut – steht in der Meldung, falls der Kontext dabei verloren geht. */
@@ -1380,6 +1386,7 @@ export class RaceScene {
     if (skip.size > 0) for (const e of all) if (skip.has(e.label)) e.obj.removeFromParent();
     this.warmList = all.filter((e) => !skip.has(e.label));
     this.warmIndex = 0;
+    this.warmPhase = 0;
     this.gfx.warm = 0;
     this.canvas.style.visibility = 'hidden';
     // Lichter wirken auch auf der Ebene, auf der die Teile einzeln gezeichnet werden.
@@ -1389,9 +1396,12 @@ export class RaceScene {
   }
 
   /**
-   * Behutsamer Aufbau, ein Bildtakt: zeichnet so viele Teile einzeln, wie in ein paar Millisekunden passen. Vor
-   * jedem Teil wird festgehalten, welches an der Reihe ist; danach erzwingt ein ausgelesener Bildpunkt, dass der
-   * Browser wirklich gezeichnet hat. Geht der Kontext dabei verloren, bleibt die Marke stehen.
+   * Behutsamer Aufbau, ein Bildtakt. Drei Abschnitte, jeder mit Marke im Speicher des Browsers (gfxGuard.ts):
+   *  0  jedes Teil einzeln zeichnen, Fläche noch verborgen – findet ein Teil, dessen Grafikprogramm die Grafik beendet;
+   *  1  die Fläche zeigen und eine halbe Sekunde lang nur den leeren Hintergrund zeichnen – prüft das bloße Anzeigen;
+   *  2  die Teile nacheinander dazunehmen, ein Bild je Teil, alle bisherigen bleiben im Bild – findet das Teil,
+   *     ab dem das gemeinsame Zeichnen kippt (oder zeigt, dass es an der Menge liegt).
+   * Nach jedem Zeichnen erzwingt ein ausgelesener Bildpunkt, dass der Browser wirklich gezeichnet hat.
    */
   private stepWarmup(): void {
     const list = this.warmList;
@@ -1401,61 +1411,106 @@ export class RaceScene {
     const started = performance.now();
     this.camera.layers.set(WARM_LAYER);
     let lost = gl.isContextLost();
-    while (!lost && this.warmIndex < list.length && performance.now() - started < 9) {
-      const e = list[this.warmIndex];
-      markStep(e.label, this.warmIndex > 0 ? list[this.warmIndex - 1].label : '', this.warmWhere);
-      this.phase = `beim Vorbereiten von „${e.label}“ (Teil ${this.warmIndex + 1} von ${list.length})`;
-      // Das Teil und alles über ihm sichtbar machen; nichts wegen der Blickrichtung auslassen.
-      let n = 0;
-      for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) {
-        WARM_KEEP[n++] = o.visible;
-        o.visible = true;
-      }
-      const culled = e.obj.frustumCulled;
-      e.obj.frustumCulled = false;
-      e.obj.layers.enable(WARM_LAYER);
+    const draw = (): void => {
       try {
         this.renderer.render(this.scene, this.camera);
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, PROBE);
       } catch (err) {
         console.error(err);
       }
-      e.obj.layers.disable(WARM_LAYER);
-      e.obj.frustumCulled = culled;
-      n = 0;
-      for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) o.visible = WARM_KEEP[n++];
       lost = gl.isContextLost();
+    };
+    if (this.warmPhase === 0) {
+      while (!lost && this.warmIndex < list.length && performance.now() - started < 9) {
+        const e = list[this.warmIndex];
+        markStep(e.label, this.warmIndex > 0 ? list[this.warmIndex - 1].label : '', `${this.warmWhere}, einzeln`);
+        this.phase = `beim Vorbereiten von „${e.label}“ (einzeln, Teil ${this.warmIndex + 1} von ${list.length})`;
+        // Das Teil und alles über ihm sichtbar machen; nichts wegen der Blickrichtung auslassen.
+        let n = 0;
+        for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) {
+          WARM_KEEP[n++] = o.visible;
+          o.visible = true;
+        }
+        const culled = e.obj.frustumCulled;
+        e.obj.frustumCulled = false;
+        e.obj.layers.enable(WARM_LAYER);
+        draw();
+        e.obj.layers.disable(WARM_LAYER);
+        e.obj.frustumCulled = culled;
+        n = 0;
+        for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) o.visible = WARM_KEEP[n++];
+        if (!lost) this.warmIndex++;
+      }
+      this.gfx.warm = list.length > 0 ? (0.4 * this.warmIndex) / list.length : 0.4;
+      if (!lost && this.warmIndex >= list.length) {
+        this.warmPhase = 1;
+        this.warmIndex = 0;
+        this.canvas.style.visibility = '';
+      }
+    } else if (this.warmPhase === 1) {
+      // Kein Teil liegt auf der Ebene: es entsteht nur der Hintergrund – aber er wird jetzt wirklich angezeigt.
+      markStep(SHOW_EMPTY, '', `${this.warmWhere}, Bild ${this.warmIndex + 1}`);
+      this.phase = `beim Anzeigen der leeren Zeichenfläche (Bild ${this.warmIndex + 1} von 30)`;
+      draw();
+      if (!lost && ++this.warmIndex >= 30) {
+        this.warmPhase = 2;
+        this.warmIndex = 0;
+      }
+      this.gfx.warm = 0.4 + (0.1 * this.warmIndex) / 30;
+    } else {
+      // Ein Teil mehr je Bild; alle bisherigen bleiben sichtbar und auf der Ebene.
+      const e = list[this.warmIndex];
+      markStep(e.label, '', `${this.warmWhere}, zusammen mit den ${this.warmIndex} Teilen davor`);
+      this.phase = `beim gemeinsamen Zeichnen, neu dazu „${e.label}“ (Teil ${this.warmIndex + 1} von ${list.length})`;
+      for (let o: THREE.Object3D | null = e.obj; o; o = o.parent) {
+        if (!this.warmVisible.has(o)) this.warmVisible.set(o, o.visible);
+        o.visible = true;
+      }
+      if (e.obj.frustumCulled) {
+        this.warmCulled.push(e.obj);
+        e.obj.frustumCulled = false;
+      }
+      e.obj.layers.enable(WARM_LAYER);
+      draw();
       if (!lost) this.warmIndex++;
+      this.gfx.warm = 0.5 + (0.5 * this.warmIndex) / Math.max(1, list.length);
     }
     this.camera.layers.mask = mask;
-    this.gfx.warm = list.length > 0 ? this.warmIndex / list.length : 1;
     if (lost) {
-      // Gleich festhalten, welches Teil es war (die Seite lebt ja noch): ein Neuaufbau lässt es dann schon aus.
+      // Gleich festhalten, wobei es war (die Seite lebt ja noch): ein Neuaufbau lässt das Teil dann schon aus.
       // Stirbt stattdessen der ganze Tab, steht die Marke noch im Speicher und wird beim nächsten Laden gelesen.
       readCrash();
       this.gfx.skipped = skipList();
       this.gfx.isLost = true;
       if (!this.gfx.lostWhen) this.gfx.lostWhen = this.phase;
-      this.warmList = null;
-      this.gfx.warm = -1;
+      this.endWarmup();
       this.needsCompile = false;
       return;
     }
-    if (this.warmIndex >= list.length) {
+    if (this.warmPhase === 2 && this.warmIndex >= list.length) {
       clearStep();
-      this.warmList = null;
-      this.gfx.warm = -1;
-      this.canvas.style.visibility = '';
+      this.endWarmup();
     }
+  }
+
+  /** Behutsamer Aufbau, Ende: Sichtbarkeit, Ebenen und Blickprüfung der Teile wie vorher. */
+  private endWarmup(): void {
+    for (const e of this.warmList ?? []) e.obj.layers.disable(WARM_LAYER);
+    for (const [o, v] of this.warmVisible) o.visible = v;
+    for (const o of this.warmCulled) o.frustumCulled = true;
+    this.warmVisible.clear();
+    this.warmCulled.length = 0;
+    this.warmList = null;
+    this.warmPhase = 0;
+    this.gfx.warm = -1;
+    this.canvas.style.visibility = '';
   }
 
   /** Das Rennen wird verlassen oder die Seite geschlossen: eine stehende Marke wäre kein Absturz. */
   leave(): void {
     if (!this.gfx.isLost && isCareful()) clearStep();
     if (this.warmList) {
-      this.warmList = null;
-      this.gfx.warm = -1;
-      this.canvas.style.visibility = '';
+      this.endWarmup();
       this.stagedPending = true;
     }
   }
