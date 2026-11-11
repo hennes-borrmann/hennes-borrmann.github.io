@@ -338,4 +338,4 @@ export const DIVE_COAST = 7;
 /** Im Schweben lenkt es sich unter Wasser besser als in der Luft (Anteil der Lenkung am Boden). */
 export const DIVE_STEER = 0.75;
 /** Ein Blasenschlot hebt mit dieser Geschwindigkeit (m/s). */
-export const BUBBLE_LIFT = 8.5;
+export const BUBBLE_LIFT = 6.5;

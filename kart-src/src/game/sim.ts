@@ -1132,10 +1132,13 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (p.kind === PULSE_BUBBLE) {
       // Der Blasenschlot hebt an: kein Treffer, sondern ein Sprungbrett (solange man in der Säule ist).
       if (s.vy < BUBBLE_LIFT) {
-        if ((flags & FLAG_AIR) === 0) ev |= EV_BUBBLE;
+        if ((flags & FLAG_AIR) === 0) {
+          // vom Boden lösen (nur einmal – in der Säule hebt dann allein die Geschwindigkeit)
+          ev |= EV_BUBBLE;
+          s.y += AIR_EPS + 0.05;
+          flags |= FLAG_AIR;
+        }
         s.vy = BUBBLE_LIFT;
-        s.y += AIR_EPS + 0.05;
-        flags |= FLAG_AIR;
       }
       continue;
     }

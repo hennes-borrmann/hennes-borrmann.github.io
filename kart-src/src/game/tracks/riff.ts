@@ -19,7 +19,7 @@ export const RIFF: TrackDef = {
   grade: 2,
   surface: 'rock',
   sea: 0,
-  scale: 1.25,
+  scale: 1.2,
   points: [
     // 0–3: Steg (Start) nach Osten
     [-120, -150, 1.6],
@@ -42,16 +42,16 @@ export const RIFF: TrackDef = {
     [112, 190, -10.5],
     [68, 198, -11],
     [26, 188, -11.5],
-    // 16.7: Einmündung. 17–20 Seegraswald nach Südwesten
+    // 17.3: Einmündung. 17–20 Seegraswald nach Südwesten
     [-10, 166, -12],
     [-44, 142, -12.5],
     [-84, 130, -12.5],
     [-124, 118, -12.5],
-    // 20.2: Gabelung Wrack. 21–23 außen um das Wrack
+    // 19.8: Gabelung Wrack. 20–23 außen um das Wrack
     [-166, 104, -12.2],
     [-192, 70, -11.8],
     [-196, 30, -10.5],
-    // 23.4: Einmündung. 24–26 den Riffhang hinauf, bei 26 durch die Oberfläche
+    // 24.55: Einmündung. 24–26 den Riffhang hinauf, bei 26 durch die Oberfläche
     [-180, -6, -7.5],
     [-172, -44, -4],
     [-176, -82, -0.4],
@@ -82,7 +82,6 @@ export const RIFF: TrackDef = {
   bumps: [
     { at: 7.3, length: 14, height: 1.3 },
     { at: 9.5, length: 14, height: 1.3 },
-    { at: 18.3, length: 14, height: 1.2 },
     { at: 22.1, length: 14, height: 1.2 },
   ],
   currents: [
@@ -90,40 +89,40 @@ export const RIFF: TrackDef = {
     { from: 6.2, to: 8.2, lat0: 0.8, lat1: 6.4, along: 5 },
     { from: 6.2, to: 8.2, lat0: -6.4, lat1: -0.8, along: -4 },
     // Seegraswald: Querströmungen, abwechselnd nach rechts und links
-    { from: 17.25, to: 17.85, lat0: -6.4, lat1: 6.4, across: 3.4 },
-    { from: 18.55, to: 19.15, lat0: -6.4, lat1: 6.4, across: -3.4 },
-    { from: 19.5, to: 20.0, lat0: -6.4, lat1: 6.4, across: 3.4 },
+    { from: 17.5, to: 18.05, lat0: -6.4, lat1: 6.4, across: 3.4 },
+    { from: 18.4, to: 18.9, lat0: -6.4, lat1: 6.4, across: -3.4 },
+    { from: 19.2, to: 19.6, lat0: -6.4, lat1: 6.4, across: 3.4 },
   ],
   // Blasenschlote: reihum aktiv; darüber hängen Schubringe
   bubbles: [
     { at: 10.4, lat: -3.2, period: 5, phase: 0 },
     { at: 10.4, lat: 3.2, period: 5, phase: 2.5 },
-    { at: 24.4, lat: 0, period: 4.4, phase: 1 },
+    { at: 24.9, lat: 0, period: 4.4, phase: 1 },
   ],
   rings: [
-    { at: 10.72, lat: -3.2, up: 4.2 },
-    { at: 10.72, lat: 3.2, up: 4.2 },
-    { at: 24.72, lat: 0, up: 4.6 },
+    { at: 10.76, lat: -3.2, up: 3.6 },
+    { at: 10.76, lat: 3.2, up: 3.6 },
+    { at: 25.26, lat: 0, up: 3.6 },
   ],
   pads: [
     { at: 1.3, lat: 0 },
     { at: 12.5, lat: 0 },
-    { at: 21.2, lat: 0 },
+    { at: 17.1, lat: 0 },
     { at: 27.6, lat: 0 },
   ],
-  boxRows: [2.2, 8.7, 15.2, 19.3, 25.1],
+  boxRows: [2.2, 8.7, 15.2, 21.6, 25.3],
   hazards: [{ at: 14.4, amp: 4, period: 5.2, phase: 0.6 }],
   branches: [
     // a: über den Graben – kürzer, aber nur mit dem Schwebesprung von der Kante (an der Luft wäre er nicht zu schaffen)
     {
       from: 11.3,
-      to: 16.7,
+      to: 17.3,
       points: [
         [150, 128, -9.6],
         [122, 150, -10.2],
-        [88, 164, -10.8],
-        [50, 172, -11.2],
-        [16, 172, -11.6],
+        [88, 162, -10.8],
+        [52, 166, -11.2],
+        [18, 158, -11.7],
       ],
       roadHalf: 5.6,
       dives: [[0, 5.99]],
@@ -132,19 +131,20 @@ export const RIFF: TrackDef = {
     },
     // b: mitten durch das Wrack – kürzer und eng
     {
-      from: 20.2,
-      to: 23.4,
+      from: 19.8,
+      to: 24.55,
       points: [
-        [-150, 88, -12.4],
-        [-164, 56, -12],
-        [-170, 26, -11],
+        [-140, 100, -12.5],
+        [-156, 72, -12.2],
+        [-163, 40, -11.4],
+        [-164, 8, -9.4],
       ],
       roadHalf: 4.8,
       shoulder: 1.2,
       surface: 'metal',
-      dives: [[0, 3.99]],
-      tunnels: [[0.5, 2.6]],
-      boxRows: [1.6],
+      dives: [[0, 4.99]],
+      tunnels: [[0.9, 3.3]],
+      boxRows: [2.1],
     },
   ],
 };
