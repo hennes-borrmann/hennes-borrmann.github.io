@@ -417,6 +417,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   mond: NEUE_STUECKE.mond,
   // (vorläufig das Stück des Werkshofs, bis das eigene da ist)
   hafen: WERKSHOF,
+  vulkan: GLUT,
   results: RESULTS,
 };
 

@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Vulkaninsel im Ausbruch: Aschehimmel mit Glutschein, schwarzer Fels, ringsum dunkle See.
+  vulkan: {
+    sky: [0x17131f, 0x4a2a35, 0xe0703a],
+    fog: 0x5a3038,
+    fogNear: 110,
+    fogFar: 460,
+    sunDir: [-0.45, 0.5, -0.5],
+    sunColor: 0xffb48a,
+    sunIntensity: 1.8,
+    hemiSky: 0xa08aa8,
+    hemiGround: 0xff6a2a,
+    hemiIntensity: 1.3,
+    disc: 0xffc9a0,
+    discSize: 26,
+    clouds: 0x3c2c36,
+    cloudShade: 0x221820,
+    stars: false,
+    road: 0x35323a,
+    roadAlt: 0x3d3942,
+    line: 0xffe2b0,
+    kerbA: 0xff6a1f,
+    kerbB: 0x26222b,
+    shoulder: 0x4f4650,
+    wallA: 0x26222b,
+    wallB: 0xff6a1f,
+    wallCap: 0x15121a,
+    deck: 0x5d5560,
+    deckDark: 0x3a333d,
+    pillar: 0x443c46,
+    ground: [0x3d3740, 0x4b434c, 0x2a252e, 0x6a5c5e],
+    liquidY: -4,
+    liquid: [0x152634, 0x23405a, 0xff9a5a],
+    liquidGlow: false,
+    farY: -11,
+    rough: 6,
+  },
   // Sturmhafen: tiefe Wolken, nasser Asphalt, graugrüne See mit Schaumkronen.
   hafen: {
     sky: [0x27303d, 0x52606f, 0xa9b6bf],

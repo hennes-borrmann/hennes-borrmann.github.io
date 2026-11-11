@@ -34,7 +34,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, gustStrength, gustWarning, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -302,8 +302,34 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
             else if (wet < 0.15) take = false;
           }
         }
+        // Ein Tor auf einem der beiden Wege: Ist es bei der Ankunft zu, bleibt nur der andere.
+        // (Das sieht jeder – auch die leichte KI fährt nicht vor eine Wand.)
+        for (const g of t.gates) {
+          const arrive = ctx.time + ((DECIDE_AT + 12) * t.step * 60) / Math.max(v, 12);
+          if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 240)) continue;
+          if (t.branchOf[g.first] === k) take = false;
+          else if (t.branchOf[g.first] < 0 && segDelta(t, t.branches[k].from, g.first) >= 0 && segDelta(t, g.first, t.branches[k].to) > 0) take = true;
+        }
         b.route = take ? b.route | (1 << k) : b.route & ~(1 << k);
       }
+    }
+  }
+  // Tor zu und so bald nicht offen (etwa: die Brücke ist inzwischen eingestürzt): umplanen, solange die
+  // Hauptstrecke noch daneben liegt – wer nach einem Treffer später ankommt als gedacht, bliebe sonst davor stehen.
+  if (!b.routeLock) {
+    for (const g of t.gates) {
+      const k = t.branchOf[g.first];
+      if (k < 0 || ((b.route >> k) & 1) === 0) continue;
+      let d = 0;
+      if (on === k) {
+        if (t.twin[s.seg] < 0) continue;
+      } else if (on < 0) {
+        d = segDelta(t, s.seg, t.branches[k].from);
+        if (d > DECIDE_AT || d < -g.count) continue;
+        d = Math.max(0, d);
+      } else continue;
+      const arrive = ctx.time + (d * t.step * 60) / Math.max(v, 12);
+      if (planActive(g.plan, arrive) && planActive(g.plan, arrive + 90)) b.route &= ~(1 << k);
     }
   }
   pathAhead(t, s.seg, b.route, PATH);
@@ -372,7 +398,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
-  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide) && !air) {
+  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0) && !air) {
     blocks = 0;
     projectOnTrack(t, s.x, s.z, s.seg);
     const here = proj.lat;
@@ -450,6 +476,30 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         continue;
       }
       if (c0 < p.on || c1 < p.on || c1 < c0) block(p.lat - p.radius - KART_HALF - 0.5, p.lat + p.radius + KART_HALF + 0.5, 1);
+    }
+    // Bruchstellen: was bei meiner Ankunft weggebrochen ist (oder gerade bricht), ist gesperrt.
+    for (const h of t.holes) {
+      let d = -1;
+      for (let k = 0; k < PATH.length && k * t.step <= range + 12; k++) {
+        if (PATH[k] >= h.first && PATH[k] < h.first + h.count) {
+          d = k * t.step;
+          break;
+        }
+      }
+      if (d < 0) continue;
+      const eta = (d / Math.max(v, 8)) * 60;
+      if (planActive(h.plan, ctx.time + eta + 45) || planActive(h.plan, ctx.time + eta)) block(h.lat0 - KART_HALF - 0.7, h.lat1 + KART_HALF + 0.7, 1);
+    }
+    // Tor voraus und noch zu: vom Gas, bis es offen ist.
+    for (const g of t.gates) {
+      for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
+        if (PATH[k] !== g.first) continue;
+        if (planActive(g.plan, ctx.time + ((k * t.step) / Math.max(v, 8)) * 60)) {
+          jam = true;
+          haltSpeed = Math.min(haltSpeed, Math.sqrt(Math.max(0, 20 * (k * t.step - 6))));
+        }
+        break;
+      }
     }
     AI_TRACE.here = here;
     AI_TRACE.want = lat;

@@ -424,6 +424,79 @@ export function pontoonLift(p: Pontoon, time: number): number {
   return p.amp * Math.sin(((time + p.phase) / p.period) * 2 * Math.PI);
 }
 
+// --- Zeitpläne, Bruchstellen und Tore ------------------------------------------------
+// Manche Strecken verändern sich während des Rennens: Platten brechen weg, Wege öffnen
+// oder schließen sich. Wann, steht in einem Plan – wie alles hier eine reine Funktion der
+// Rennzeit, also auf jedem Gerät gleich.
+
+/**
+ * Wann etwas gilt: Zeitspannen [von, bis) in Ticks, paarweise in spans. period = 0: die Spannen
+ * zählen einmal ab Rennbeginn (bis darf Infinity sein); sonst wiederholt sich der Plan alle period Ticks.
+ */
+export interface Plan {
+  period: number;
+  spans: number[];
+}
+
+function planClock(p: Plan, time: number): number {
+  if (p.period <= 0) return time;
+  const c = time % p.period;
+  return c < 0 ? c + p.period : c;
+}
+
+export function planActive(p: Plan, time: number): boolean {
+  const c = planClock(p, time);
+  for (let i = 0; i < p.spans.length; i += 2) if (c >= p.spans[i] && c < p.spans[i + 1]) return true;
+  return false;
+}
+
+/** Ticks, bis der Plan das nächste Mal gilt: 0 = er gilt gerade, Infinity = nie mehr. */
+export function planUntil(p: Plan, time: number): number {
+  const c = planClock(p, time);
+  let best = Infinity;
+  for (let i = 0; i < p.spans.length; i += 2) {
+    if (c >= p.spans[i] && c < p.spans[i + 1]) return 0;
+    if (p.spans[i] > c) best = Math.min(best, p.spans[i] - c);
+    else if (p.period > 0) best = Math.min(best, p.spans[i] + p.period - c);
+  }
+  return best;
+}
+
+/** Ticks, seit der Plan zuletzt zu gelten begann (er gilt gerade): sonst −1. */
+export function planSince(p: Plan, time: number): number {
+  const c = planClock(p, time);
+  for (let i = 0; i < p.spans.length; i += 2) if (c >= p.spans[i] && c < p.spans[i + 1]) return c - p.spans[i];
+  return -1;
+}
+
+/**
+ * Bruchstelle: ein Stück Fahrbahn (Abschnitte first … first+count−1, seitlich lat0 … lat1), das fehlt,
+ * solange sein Plan gilt. Wer darüber gerät, stürzt. In den warn Ticks davor bröckelt es sichtbar.
+ */
+export interface Hole {
+  first: number;
+  count: number;
+  lat0: number;
+  lat1: number;
+  plan: Plan;
+  warn: number;
+}
+
+/**
+ * Tor: sperrt den Weg an dieser Stelle über die ganze Breite, solange sein Plan gilt
+ * (z. B. eine Lavaröhre, die erst leerläuft, oder eine Brücke, die später einstürzt).
+ */
+export interface Gate {
+  first: number;
+  count: number;
+  plan: Plan;
+  warn: number;
+}
+
+/** So lange vorher kündigt sich ein Bruch bzw. das Schließen eines Tors an (Ticks). */
+export const HOLE_WARN = 150;
+export const GATE_WARN = 300;
+
 // --- Geringe Schwerkraft -------------------------------------------------------------
 // Auf dem Mond (Track.gravity < 1) fällt alles langsam: jeder Buckel wird zum hohen,
 // weiten Sprung – anders als unter Wasser ohne Bremse und ohne Grenze beim Sinken.
