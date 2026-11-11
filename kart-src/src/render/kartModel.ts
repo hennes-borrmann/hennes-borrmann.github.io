@@ -120,8 +120,17 @@ const B = {
   tipL: 33, // … und Außenteil (federt im Flug)
   tipR: 34,
   wtail: 35, // Leitwerk bzw. Propeller am Heck
+  dHead: 36, // Tauchausrüstung am Kopf (Maske, Brille, Kuppel)
+  dBody: 37, // … an der Karosserie (Schraubenhalter, Flossen, Außenborder)
+  dPropL: 38, // Schiffsschrauben (dreht sich unter Wasser)
+  dPropR: 39,
+  bub0: 40, // drei aufsteigende Blasen
+  bub1: 41,
+  bub2: 42,
+  jetL: 43, // Blasenstrahl statt Auspuffflamme
+  jetR: 44,
 } as const;
-const BONE_COUNT = 36;
+const BONE_COUNT = 45;
 
 // Farben, die alle Karts teilen.
 const DARK = 0x2d2a36; // Gummi, Rahmen
@@ -993,6 +1002,11 @@ interface Spec {
   wingTip: number;
   wingUp: number;
   wingTail: V3;
+  /** Tauchen: Drehpunkt der Kopf-Ausrüstung (im Kopf), Gelenk an der Karosserie, linke Schraube, Blasenquelle (im Kopf). */
+  diveHead: V3;
+  diveBody: V3;
+  diveProp: V3;
+  diveBub: V3;
 }
 
 const SPECS: Spec[] = [
@@ -1026,6 +1040,10 @@ const SPECS: Spec[] = [
     wingTip: 0.62,
     wingUp: 0.02,
     wingTail: [0, 0.62, -0.9],
+    diveHead: [0, 0.345, 0.29],
+    diveBody: [0, 0.27, -1.0],
+    diveProp: [0, 0.27, -1.13],
+    diveBub: [0.34, 0.77, 0.07],
   },
   // 1 – Vera Vergaser: schlanker Renner
   {
@@ -1057,6 +1075,10 @@ const SPECS: Spec[] = [
     wingTip: 0.78,
     wingUp: 0.1,
     wingTail: [0, 0.6, -0.86],
+    diveHead: [0, 0.28, 0],
+    diveBody: [0, 0.34, -1.0],
+    diveProp: [0.33, 0.34, -1.04],
+    diveBub: [0, 0.16, 0.44],
   },
   // 2 – Bremsen-Bert: Badewanne auf Rädern
   {
@@ -1088,6 +1110,10 @@ const SPECS: Spec[] = [
     wingTip: 0.5,
     wingUp: 0.12,
     wingTail: [0, 0.62, -1.0],
+    diveHead: [0, 0.375, 0.3],
+    diveBody: [-0.34, 0.62, -0.86],
+    diveProp: [-0.34, 0.17, -1.1],
+    diveBub: [0, 0.07, 0.44],
   },
   // 3 – Zünd-Zoe: kantiger Keil mit Zündkerzen
   {
@@ -1119,6 +1145,10 @@ const SPECS: Spec[] = [
     wingTip: 0.72,
     wingUp: 0.06,
     wingTail: [0, 0.5, -0.5],
+    diveHead: [0, 0.36, 0],
+    diveBody: [0, 0.4, -0.9],
+    diveProp: [0.22, 0.38, -1.1],
+    diveBub: [0, 0.8, -0.2],
   },
 ];
 
@@ -2016,39 +2046,42 @@ function buildVera(c: Ctx): void {
   const CAP_R: V3 = [0.306, 0.281, 0.296];
   addHelmet(b, C, CAP_R, 1.15, -0.38, TURQ, { rim: TURQ_D, gloss: 2.4 });
   b.put(sphere(0.055, 0.13, 0.1, 6, 4), { bone: H, color: TURQ, pos: [0.272, 0.21, -0.03], mirror: H, outline: 0.8 });
-  // Fliegerbrille auf der Stirn, Riemen um die Kappe
+  // Fliegerbrille auf der Stirn, Riemen um die Kappe. Sie hängt an einem eigenen
+  // Knochen (Drehpunkt Kopfmitte): unter Wasser rutscht sie über die Augen.
+  const G = B.dHead;
+  const gy = sp.diveHead[1];
   const strap = new THREE.TorusGeometry(0.247, 0.016, 3, b.s(12, 8));
   if (b.fine)
-    b.put(strap, { bone: H, color: 0x4a332a, pos: [0, 0.4265, -0.0525], rot: [-1.876, 0, 0], scale: [1.075, 1, 1], outline: 0 });
+    b.put(strap, { bone: G, color: 0x4a332a, pos: [0, 0.4265 - gy, -0.0525], rot: [-1.876, 0, 0], scale: [1.075, 1, 1], outline: 0 });
   const gx = 0.082;
-  const gPos: V3 = [gx, 0.508, 0.174];
+  const gPos: V3 = [gx, 0.508 - gy, 0.174];
   const gRot: V3 = [0.66, 0.38, 0];
   b.put(cyl(0.066, 0.074, 0.05, b.s(8, 5)), {
-    bone: H,
+    bone: G,
     color: CREAM,
     pos: gPos,
     rot: gRot,
     order: 'YXZ',
-    mirror: H,
+    mirror: G,
     outline: 0.55,
   });
   b.put(cyl(0.048, 0.048, 0.058, b.s(8, 5)), {
-    bone: H,
+    bone: G,
     color: 0x2b4a73,
     pos: gPos,
     rot: gRot,
     order: 'YXZ',
-    mirror: H,
+    mirror: G,
     outline: 0,
   });
   if (b.fine)
     b.put(sphere(0.018, 0.006, 0.012, 4, 2), {
-      bone: H,
+      bone: G,
       color: WHITE,
-      pos: [gx + 0.018, 0.546, 0.19],
+      pos: [gx + 0.018, 0.546 - gy, 0.19],
       rot: gRot,
       order: 'YXZ',
-      mirror: H,
+      mirror: G,
       outline: 0,
     });
   addEyes(c, { c: C, r: R, phi: 0.43, psi: 0.17, dphi: 0.26, dpsi: 0.27, tilt: 0.2 });
@@ -2498,6 +2531,176 @@ function wingsZoe(c: Ctx): void {
 }
 
 const WING_BUILDERS = [wingsKalle, wingsVera, wingsBert, wingsZoe];
+
+// ───────────────────────────── Tauchausrüstung ─────────────────────────────
+//
+// Unter Wasser legt jede Figur ihre Ausrüstung an – nach dem Muster der
+// Gleitflügel: alles steckt im Netz des Karts und hängt an eigenen Knochen,
+// die außerhalb des Wassers auf null geschrumpft sind. Kopf-Ausrüstung am
+// Knochen dHead (Koordinaten relativ zu seinem Drehpunkt spec.diveHead im
+// Kopf), Karosserie-Teile an dBody, Schrauben an dPropL/R. Dazu kommen drei
+// aufsteigende Blasen und je Auspuff ein Blasenstrahl (bei Schub statt der
+// Flammen).
+
+const BUBBLE = 0xe8fbff;
+
+/**
+ * Riemen um den Hinterkopf: Bogen auf dem (etwas aufgeblähten) Kopf-Ellipsoid
+ * in Höhe y, von Winkel phi0 (0 = vorn) links über hinten nach rechts. Die
+ * Lage ist relativ zur Kopfmitte; o verschiebt sie in den Raum von dHead.
+ */
+function headBand(b: Builder, R: V3, y: number, phi0: number, color: number, o: V3, r = 0.016): void {
+  const pts: V3[] = [];
+  const n = 4;
+  const k = 1.05;
+  const f = Math.sqrt(Math.max(1 - (y / (R[1] * k)) ** 2, 0.05));
+  for (let i = 0; i <= n; i++) {
+    const a = phi0 + ((TAU - 2 * phi0) * i) / n;
+    pts.push([R[0] * k * f * Math.sin(a) + o[0], y + o[1], R[2] * k * f * Math.cos(a) + o[2]]);
+  }
+  b.put(sweep(pts, r, 3), { bone: B.dHead, color, outline: 0 });
+}
+
+/** Schiffsschraube am Knochen dPropL (gespiegelt an dPropR): Nabe nach hinten, zwei gekreuzte, angestellte Blätter. */
+function propeller(b: Builder, r: number, blade: number, color: number, twin: boolean): void {
+  const mirror = twin ? B.dPropR : undefined;
+  b.put(cone(r * 0.3, r * 0.55, b.s(6, 5)), { bone: B.dPropL, color: CHROME, rot: [-HALF_PI, 0, 0], mirror, outline: 0 });
+  for (const a of [0, HALF_PI])
+    b.put(box(blade, r * 2, 0.016), { bone: B.dPropL, color, pos: [0, 0, -0.02], rot: [0, 0.55, a], order: 'ZYX', mirror, outline: 0.5 });
+}
+
+/** Kalle: Taucherbrille (Gummirahmen um beide Augen, sitzt auf der Schnauze), Schnorchel, Heckschraube. */
+function diveKalle(c: Ctx): void {
+  const b = c.b;
+  const G = B.dHead;
+  const R: V3 = [0.33, 0.29, 0.3];
+  // Alles relativ zur Kopfmitte angegeben; dHead sitzt vorn auf dem Gesicht,
+  // damit die Ausrüstung beim Auf- und Abploppen nicht im Kopf verschwindet.
+  const h = c.sp.diveHead;
+  const o: V3 = [-h[0], 0.3 - h[1], -h[2]];
+  const at = (x: number, y: number, z: number): V3 => [x + o[0], y + o[1], z + o[2]];
+  // Rahmen: Ring auf dem Kopf-Ellipsoid rund um beide Augen
+  const loop: V3[] = [];
+  for (let k = 0; k <= 8; k++) {
+    const a = (k / 8) * TAU;
+    const x = 0.235 * Math.cos(a);
+    const y = 0.045 + 0.085 * Math.sin(a);
+    const q = 1 - (x / (R[0] * 1.07)) ** 2 - (y / (R[1] * 1.07)) ** 2;
+    loop.push(at(x, y, R[2] * 1.07 * Math.sqrt(Math.max(q, 0.05))));
+  }
+  b.put(sweep(loop, 0.027, 3), { bone: G, color: DARK, outline: 0 });
+  // Glanzstrich auf dem Glas
+  b.put(box(0.065, 0.014, 0.008), { bone: G, color: WHITE, pos: at(0.205, 0.1, 0.25), rot: [-0.3, 0.6, 0.55], outline: 0 });
+  headBand(b, R, 0.045, 0.79, DARK, o);
+  // Schnorchel: Mundstück in der Schnauze, steigt links vor dem Ohr auf
+  b.put(
+    sweep(
+      [
+        at(0.12, -0.09, 0.33),
+        at(0.29, -0.07, 0.2),
+        at(0.36, 0.15, 0.12),
+        at(0.34, 0.47, 0.07),
+      ],
+      0.03,
+      4,
+    ),
+    { bone: G, color: c.p.accent, outline: 0.7 },
+  );
+  // Heckschraube auf kurzer Welle unter der Startnummer
+  b.put(box(0.04, 0.04, 0.14), { bone: B.dBody, color: DARK, pos: [0, 0, -0.07], outline: 0 });
+  propeller(b, 0.16, 0.07, trim(c, 0xffefd2), false);
+}
+
+/** Vera: die Fliegerbrille rutscht über die Augen (siehe buildVera), Schrauben in den Auspufftrichtern, Flossen obenauf. */
+function diveVera(c: Ctx): void {
+  const b = c.b;
+  b.put(prism([0.24, 0.03, -0.03, 0.03, -0.06, 0.17, 0.04, 0.17], 0.03), {
+    bone: B.dBody,
+    color: c.p.dark,
+    pos: [0.33, 0, 0],
+    rot: [0, -HALF_PI, 0],
+    mirror: B.dBody,
+    outline: 0.6,
+  });
+  propeller(b, 0.105, 0.05, trim(c, WHITE), true);
+}
+
+/** Bert: nur eine Schwimmbrille – und ein Außenborder an der Wanne. */
+function diveBert(c: Ctx): void {
+  const b = c.b;
+  const G = B.dHead;
+  const NAVY = 0x2e4372;
+  const R: V3 = [0.35, 0.3, 0.31];
+  // relativ zur Kopfmitte, dHead sitzt vorn zwischen den Augen (siehe Kalle)
+  const h = c.sp.diveHead;
+  const o: V3 = [-h[0], 0.29 - h[1], -h[2]];
+  const at = (x: number, y: number, z: number): V3 => [x + o[0], y + o[1], z + o[2]];
+  // Brillengläser: Ringe um die Augen, Steg über der Nase, Riemen nach hinten
+  const lens = new THREE.TorusGeometry(0.07, 0.019, 3, b.s(7, 6));
+  lens.rotateX(-HALF_PI);
+  b.put(lens, { bone: G, color: NAVY, pos: at(0.116, 0.085, 0.3), aim: [0.28, 0.28, 0.92], mirror: G, outline: 0 });
+  b.put(box(0.06, 0.022, 0.022), { bone: G, color: NAVY, pos: at(0, 0.095, 0.322), outline: 0 });
+  headBand(b, R, 0.085, 0.62, NAVY, o);
+  // Außenborder: Klemme am Wannenrand, Motorhaube, Schaft, Schraube
+  const D = B.dBody;
+  b.put(box(0.18, 0.17, 0.26), { bone: D, color: c.p.dark, pos: [0, 0.11, -0.17], outline: 0.75 });
+  b.put(box(0.06, 0.46, 0.08), { bone: D, color: DARK, pos: [0, -0.21, -0.17], outline: 0.6 });
+  propeller(b, 0.12, 0.06, trim(c, 0xfff6e2), false);
+}
+
+/** Zoe: Glaskuppel über Kopf und Ohren – Katzen und Wasser … –, oben ein Ventil. */
+function diveZoe(c: Ctx): void {
+  const b = c.b;
+  const G = B.dHead;
+  const r = 0.47;
+  const hole = 1.0;
+  // Kuppel: Kugel mit runder Öffnung vorn (das Gesicht schaut heraus)
+  const ws = b.s(10, 6);
+  // Beginn bei −90°: eine Kante der Facetten läuft genau über den Scheitel (dort sitzt die Naht).
+  const dome = new THREE.SphereGeometry(r, ws, b.s(4, 3), -HALF_PI, TAU, hole, Math.PI - hole);
+  dome.rotateX(HALF_PI);
+  b.put(dome, { bone: G, color: 0xc4ecff });
+  const rim = new THREE.TorusGeometry(r * Math.sin(hole), 0.032, 3, ws);
+  b.put(rim, { bone: G, color: c.p.dark, pos: [0, 0, r * Math.cos(hole)], outline: 0 });
+  // Naht vom Rand über den Scheitel nach hinten – gibt der Kuppel von hinten Halt
+  const seam = new THREE.TorusGeometry(r + 0.006, 0.022, 3, b.s(6, 4), Math.PI - 0.25);
+  seam.rotateY(-HALF_PI);
+  seam.rotateX(-hole);
+  b.put(seam, { bone: G, color: c.p.dark, outline: 0 });
+  // Glanzstriche vorn links und hinten rechts (auf Höhe der Facetten, nicht der Ecken)
+  const gr = r * Math.cos(Math.PI / ws) + 0.006;
+  const glints = [
+    [0.62, 0.66, 0.36],
+    [-0.45, 0.7, -0.55],
+  ] as const;
+  if (b.fine)
+    for (const d of glints) {
+      const l = Math.hypot(d[0], d[1], d[2]);
+      b.put(box(0.17, 0.008, 0.035), { bone: G, color: WHITE, pos: [(d[0] / l) * gr, (d[1] / l) * gr, (d[2] / l) * gr], aim: d, outline: 0 });
+    }
+  const vd: V3 = [0, 0.906, -0.423];
+  b.put(cyl(0.028, 0.04, 0.07, 5), { bone: G, color: c.p.accent, pos: [0, vd[1] * (r + 0.025), vd[2] * (r + 0.025)], aim: vd, outline: 0 });
+}
+
+const DIVE_BUILDERS = [diveKalle, diveVera, diveBert, diveZoe];
+
+/** Drei Blasen, die aus Schnorchel, Mund oder Ventil aufsteigen. */
+function diveBubbles(b: Builder): void {
+  for (let i = 0; i < 3; i++) b.put(sphere(0.045, 0.045, 0.045, 6, 3), { bone: B.bub0 + i, color: BUBBLE, outline: 0 });
+}
+
+/**
+ * Blasenstrahl bei Schub unter Wasser: steckt im Netz der Flammen (leuchtend,
+ * nur bei Bedarf sichtbar) – kostet also weder Dreiecke im Normalfall noch
+ * einen eigenen Zeichenaufruf. Entlang +z der Knochen jetL/R, wie die Flammen.
+ */
+function buildJets(b: Builder): void {
+  for (const bone of [B.jetL, B.jetR]) {
+    b.put(sphere(0.065, 0.065, 0.065, 6, 3), { bone, color: 0x8fd6ea, pos: [0, 0, 0.08] });
+    b.put(sphere(0.05, 0.05, 0.05, 6, 3), { bone, color: 0x76c4dc, pos: [0.03, 0.02, 0.2] });
+    b.put(sphere(0.038, 0.038, 0.038, 5, 3), { bone, color: 0x5fb0cc, pos: [-0.02, 0.035, 0.31] });
+  }
+}
 
 // ───────────────────────────── Effekte ─────────────────────────────
 
@@ -3145,6 +3348,7 @@ const _iw = new THREE.Vector3();
 const _iq = new THREE.Quaternion();
 const _ie = new THREE.Euler();
 const _ik = new Float32Array(KEY);
+const _dv = new THREE.Vector3();
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -3179,6 +3383,9 @@ export class KartVisual {
   private readonly body: THREE.SkinnedMesh;
   private readonly fx: THREE.SkinnedMesh;
   private readonly flames: THREE.SkinnedMesh;
+  /** Das Netz der Flammen zeigt an Land die Flammen, unter Wasser den Blasenstrahl. */
+  private flameGeo: THREE.BufferGeometry | null = null;
+  private jetGeo: THREE.BufferGeometry | null = null;
   private readonly decals: THREE.SkinnedMesh;
   private bodyOutline: THREE.SkinnedMesh | null = null;
   private fxOutline: THREE.SkinnedMesh | null = null;
@@ -3256,6 +3463,13 @@ export class KartVisual {
   private bank = 0;
   private wheelV = 0;
   private propA = 0;
+  // Tauchen: Ausrüstung (0 … 1, linear in der Zeit), Schwimmhaltung, Blasenstrahl, Schrauben
+  private fDive = false;
+  private diveU = 0;
+  private diveS = 0;
+  private swimS = 0;
+  private jetS = 0;
+  private dPropA = 0;
 
   // Item in der Hand: eigenes Netz am Karosserie-Knochen, Geometrie wird getauscht
   private readonly prop: THREE.Mesh;
@@ -3503,6 +3717,15 @@ export class KartVisual {
     set(B.tipL, B.wingL, [sp.wingTip, 0, 0]);
     set(B.tipR, B.wingR, [-sp.wingTip, 0, 0]);
     set(B.wtail, B.chassis, sp.wingTail);
+    set(B.dHead, B.head, sp.diveHead);
+    const db = sp.diveBody;
+    const dp = sp.diveProp;
+    set(B.dBody, B.chassis, db);
+    set(B.dPropL, B.dBody, [dp[0] - db[0], dp[1] - db[1], dp[2] - db[2]]);
+    set(B.dPropR, B.dBody, [-dp[0] - db[0], dp[1] - db[1], dp[2] - db[2]]);
+    for (let i = 0; i < 3; i++) set(B.bub0 + i, B.chassis, [0, 1.2, -0.3]);
+    set(B.jetL, B.chassis, ex, [Math.PI + sp.exhaustUp, 0, 0]);
+    set(B.jetR, B.chassis, [-ex[0], ex[1], ex[2]], [Math.PI + sp.exhaustUp, 0, 0]);
     this.bones[B.wFL].rotation.order = 'YXZ';
     this.bones[B.wFR].rotation.order = 'YXZ';
     // Flügel: erst um die eigene Längsachse verwinden, dann V-Stellung, dann nach hinten anklappen.
@@ -3524,6 +3747,18 @@ export class KartVisual {
     this.bones[B.wingL].scale.setScalar(0);
     this.bones[B.wingR].scale.setScalar(0);
     this.bones[B.wtail].scale.setScalar(0);
+    // Ebenso die Tauchausrüstung (Veras Brille ist immer da und klappt nur herunter).
+    this.hideDive();
+  }
+
+  private hideDive(): void {
+    const bn = this.bones;
+    if (this.character === 1) bn[B.dHead].rotation.x = 0;
+    else bn[B.dHead].scale.setScalar(0);
+    bn[B.dBody].scale.setScalar(0);
+    for (let i = 0; i < 3; i++) bn[B.bub0 + i].scale.setScalar(0);
+    bn[B.jetL].scale.setScalar(0);
+    bn[B.jetR].scale.setScalar(0);
   }
 
   /** Baut alle Netze für die aktuelle Detailstufe neu. */
@@ -3543,16 +3778,22 @@ export class KartVisual {
     };
     BUILDERS[this.character](ctx);
     WING_BUILDERS[this.character](ctx);
+    DIVE_BUILDERS[this.character](ctx);
+    diveBubbles(main);
     const fx = new Builder(this.rest, this.detail, lines);
     buildFx(fx, this.paint.base);
     const fl = new Builder(this.rest, this.detail, false);
     buildFlames(fl);
+    const jt = new Builder(this.rest, this.detail, false);
+    buildJets(jt);
 
     const mainGeo = main.finish();
     const fxGeo = fx.finish();
     const decalGeo = decal.finish().main;
     const flameGeo = fl.finish().main;
-    this.geos.push(mainGeo.main, fxGeo.main, decalGeo, flameGeo);
+    this.flameGeo = flameGeo;
+    this.jetGeo = jt.finish().main;
+    this.geos.push(mainGeo.main, fxGeo.main, decalGeo, flameGeo, this.jetGeo);
     this.body.geometry = mainGeo.main;
     this.fx.geometry = fxGeo.main;
     this.decals.geometry = decalGeo;
@@ -3645,6 +3886,8 @@ export class KartVisual {
     // Ältere Aufrufer kennen glide nicht (undefined → false).
     const glide = pose.glide === true;
     this.fGlide = glide;
+    const dive = pose.dive === true;
+    this.fDive = dive;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -3658,14 +3901,22 @@ export class KartVisual {
     this.offS = damp(this.offS, pose.offroad ? 1 : 0, 8, dt);
     this.driftS = damp(this.driftS, drift, 9, dt);
     // Im Gleitflug bleiben die Hände am Lenkrad – gesteuert wird ja weiter.
-    this.armsUp = damp(this.armsUp, (pose.air && !glide) || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
+    // Unter Wasser schwebt die Figur mit Schwimmzügen statt hochgerissener Arme.
+    this.armsUp = damp(this.armsUp, (pose.air && !glide && !dive) || pose.emote === 'win' ? 1 : pose.stall ? 0.5 : 0, 10, dt);
     this.wingU = glide ? Math.min(1, this.wingU + dt / 0.25) : Math.max(0, this.wingU - dt / 0.2);
     this.glideS = damp(this.glideS, glide ? 1 : 0, 6, dt);
     // In die Kurve legen: etwa 0,35 rad bei vollem Einschlag
     this.bank = damp(this.bank, glide ? steer * 0.35 : 0, 5, dt);
     // Räder laufen in der Luft langsam aus und drehen bei der Landung sofort wieder mit.
-    this.wheelV = glide ? damp(this.wheelV, 0, 0.8, dt) : speed;
-    this.flameS = damp(this.flameS, pose.boost ? 1 : 0, pose.boost ? 18 : 11, dt);
+    // Unter Wasser drehen sie gemächlicher.
+    this.wheelV = glide ? damp(this.wheelV, 0, 0.8, dt) : dive ? speed * 0.55 : speed;
+    // Unter Wasser keine Flammen – dort bläst der Schub einen Blasenstrahl.
+    const flame = pose.boost && !dive;
+    this.flameS = damp(this.flameS, flame ? 1 : 0, flame ? 18 : 11, dt);
+    this.diveU = dive ? Math.min(1, this.diveU + dt / 0.25) : Math.max(0, this.diveU - dt / 0.2);
+    this.diveS = damp(this.diveS, dive ? 1 : 0, 4, dt);
+    this.swimS = damp(this.swimS, dive && pose.air ? 1 : 0, 6, dt);
+    this.jetS = damp(this.jetS, dive && pose.boost ? 1 : 0, pose.boost ? 14 : 9, dt);
     this.lean = damp(this.lean, steer * 0.2 * (0.3 + 0.7 * v1) + this.driftS * 0.22, 8, dt);
 
     // Nachschwingen: seitlich (Kurve) und längs (Beschleunigung)
@@ -3689,6 +3940,7 @@ export class KartVisual {
     this.moveExtras();
     this.moveEffects(pose.guard);
     this.moveWings();
+    this.moveDive();
     this.moveItem();
     this.pickEyes(pose);
     this.placeAnchors();
@@ -3770,16 +4022,20 @@ export class KartVisual {
     const sxz = 1 / Math.sqrt(sy);
     const ch = bn[B.chassis];
     ch.scale.set(sxz, sy, sxz);
+    // Unter Wasser wiegt sich das Kart sanft, als trüge es das Wasser.
+    const dv = this.diveS;
+    const sway = this.slot * 1.3;
     ch.position.y =
+      dv * 0.025 * Math.sin(t * 1.7 + sway) +
       Math.sin(t * 61) * 0.0035 * idle +
       cough * 0.012 +
       hop * 0.07 +
       airS * 0.03 +
       rough * 0.02 * Math.sin(t * 33) * Math.sin(t * 21 + 1);
     ch.rotation.set(
-      this.pitch + rough * 0.02 * Math.sin(t * 27),
+      this.pitch + rough * 0.02 * Math.sin(t * 27) + dv * 0.035 * Math.sin(t * 1.25 + sway),
       0,
-      this.roll + Math.sin(t * 47 + 2) * 0.006 * idle + cough * 0.03 * Math.sin(t * 90) + rough * 0.025 * Math.sin(t * 19 + 2),
+      this.roll + dv * 0.045 * Math.sin(t * 0.95 + sway + 1) + Math.sin(t * 47 + 2) * 0.006 * idle + cough * 0.03 * Math.sin(t * 90) + rough * 0.025 * Math.sin(t * 19 + 2),
     );
   }
 
@@ -3796,7 +4052,7 @@ export class KartVisual {
 
     const torso = bn[B.torso];
     torso.rotation.set(
-      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.gTx,
+      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.swimS * 0.24 + this.gTx,
       this.gTy,
       lean + this.gTz,
     );
@@ -3811,7 +4067,8 @@ export class KartVisual {
       airS * 0.14 +
       clamp(-acc * 0.006, -0.12, 0.15) +
       stallS * 0.08 -
-      this.glideS * 0.1 +
+      this.glideS * 0.1 -
+      this.swimS * 0.2 +
       Math.sin(t * 2.1) * 0.02 +
       this.gHx;
     const hzT = lean * 0.7 + stallS * 0.1 * Math.sin(t * 7) + spinS * 0.22 * Math.sin(t * 14);
@@ -3826,7 +4083,7 @@ export class KartVisual {
 
     // Ohren: legen sich im Fahrtwind an, zucken ab und zu, hängen bei Niederlage
     const twitch = Math.pow(Math.max(0, Math.sin(t * 1.7 + this.slot * 2)), 24);
-    const earBack = -0.32 * this.fWind + this.swayZ * 0.5 - airS * 0.15;
+    const earBack = -0.32 * this.fWind + this.swayZ * 0.5 - airS * 0.15 - this.swimS * 0.25;
     const earOut = sp.earTilt + loseS * 0.55 + stallS * 0.3 - winS * 0.1;
     bn[B.earL].rotation.set(earBack, 0, -earOut + this.swayX * 0.25 - twitch * 0.22);
     bn[B.earR].rotation.set(earBack, 0, earOut + this.swayX * 0.25);
@@ -3924,7 +4181,10 @@ export class KartVisual {
 
     // Flammen: pulsieren, werden mit dem Tempo länger
     const fs = this.flameS;
-    this.flames.visible = fs > 0.03;
+    const wet = this.fDive;
+    const fg = wet ? this.jetGeo : this.flameGeo;
+    if (fg && this.flames.geometry !== fg) this.flames.geometry = fg;
+    this.flames.visible = wet ? this.jetS > 0.02 : fs > 0.03;
     for (let i = 0; i < 2; i++) {
       const flick = 0.85 + 0.22 * Math.sin(t * 71 + i * 2) + 0.12 * Math.sin(t * 173 + i);
       const wide = fs * (0.92 + 0.16 * Math.sin(t * 53 + i * 1.3));
@@ -4293,6 +4553,73 @@ export class KartVisual {
     }
   }
 
+  /** Tauchausrüstung: ploppt auf bzw. klappt herunter, Schrauben drehen, Blasen steigen, bei Schub ein Blasenstrahl. */
+  private moveDive(): void {
+    const bn = this.bones;
+    const u = this.diveU;
+    if (u <= 0) {
+      if (bn[B.dBody].scale.x !== 0) this.hideDive();
+      return;
+    }
+    const sp = this.spec;
+    const rp = this.restPos;
+    const t = this.time;
+    const open = this.fDive;
+    // Anlegen schießt etwas über, Ablegen läuft weich
+    const pop = open ? easeOutBack(u) : smooth01(u);
+    const size = open ? smooth01(u / 0.5) : smooth01(u / 0.6);
+    const hd = bn[B.dHead];
+    if (this.character === 1) hd.rotation.x = 0.78 * pop;
+    else if (this.character === 3) {
+      // Glaskuppel: wabert ein wenig
+      const w = 0.018 * this.diveS * Math.sin(t * 2.3);
+      hd.scale.set(Math.max(pop * (1 + w), 0.001), Math.max(pop * (1 - w), 0.001), Math.max(pop, 0.001));
+    } else hd.scale.setScalar(Math.max(pop, 0.001));
+    const body = bn[B.dBody];
+    body.scale.setScalar(Math.max(pop, 0.001));
+    // Bert: der Außenborder klappt aus der Waagrechten herunter
+    if (this.character === 2) body.rotation.x = 1.4 * (1 - pop);
+
+    // Schrauben: schneller mit Tempo und Schub
+    this.dPropA = (this.dPropA + this.fDt * this.diveS * (6 + 24 * this.fV1 + 26 * this.boostS)) % TAU;
+    bn[B.dPropL].rotation.z = this.dPropA;
+    bn[B.dPropR].rotation.z = -this.dPropA;
+
+    // Blasen: Quelle im Kopf (Schnorchel, Mund, Ventil) in den Raum der Karosserie
+    const head = bn[B.head];
+    head.updateMatrix();
+    const q = sp.diveBub;
+    _dv.set(q[0], q[1], q[2]).applyMatrix4(head.matrix).applyMatrix4(bn[B.torso].matrix);
+    const rate = 1.1 + 0.7 * this.fV1;
+    const drift = 0.12 + 0.6 * this.fV1;
+    for (let i = 0; i < 3; i++) {
+      const p = t * rate + i / 3;
+      const life = p - Math.floor(p);
+      const bb = bn[B.bub0 + i];
+      bb.position.set(_dv.x + Math.sin(t * 4 + i * 2.1) * 0.04 * life, _dv.y + life * 0.8, _dv.z - life * drift);
+      const g = (0.55 + 0.75 * life) * Math.min(1, (1 - life) * 5) * Math.min(1, life * 8) * size;
+      bb.scale.setScalar(g);
+    }
+
+    // Blasenstrahl aus dem Auspuff (läuft entlang der Flammenrichtung nach hinten)
+    const js = this.jetS * size;
+    const up = sp.exhaustUp;
+    for (let i = 0; i < 2; i++) {
+      const jt = bn[B.jetL + i];
+      if (js < 0.02) {
+        jt.scale.setScalar(0);
+        continue;
+      }
+      const k = t * 6.5 + i * 0.5;
+      const run = (k - Math.floor(k)) * 0.13;
+      const j = (B.jetL + i) * 3;
+      jt.position.set(rp[j], rp[j + 1] + Math.sin(up) * run, rp[j + 2] - Math.cos(up) * run);
+      jt.rotation.set(this.restRot[j], 0, Math.sin(t * 9 + i * 2) * 0.6);
+      const s = js * (0.85 + 0.25 * Math.sin(t * 37 + i * 2));
+      jt.scale.set(s, s, s * (1 + 0.5 * this.fV));
+    }
+  }
+
   /** Augen: Kringel beim Schleudern, verdattert bei Kurzschluss, sonst je nach Lage – und ab und zu blinzeln. */
   private pickEyes(pose: KartPose): void {
     let eye: number = EYE.OPEN;
@@ -4339,6 +4666,18 @@ export class KartVisual {
         sp.shoulder[2] + 0.1,
       ).applyMatrix4(torso.matrix);
       _hd.lerp(_t, up);
+    }
+    // … oder Brustschwimmen: nach vorn strecken, weit ausholen, zurück
+    const sw = this.swimS;
+    if (sw > 0.001) {
+      const r = (sp.upper + sp.fore) / 0.5;
+      const out = Math.max(0, Math.sin(t * 4.4));
+      _t.set(
+        side * (sp.shoulder[0] + (0.05 + 0.2 * out) * r),
+        sp.shoulder[1] + (0.12 - 0.07 * out) * r,
+        sp.shoulder[2] + (0.38 - 0.18 * out) * r,
+      ).applyMatrix4(torso.matrix);
+      _hd.lerp(_t, sw);
     }
     // … oder (nur rechts) beim Item. Hochgerissene Arme haben Vorrang, außer während einer Geste.
     if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 ? 1 : 1 - up));

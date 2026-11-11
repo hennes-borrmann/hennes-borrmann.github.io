@@ -13,7 +13,7 @@ import type { TrackDef } from '../track';
 export const MOND: TrackDef = {
   id: 'mond',
   name: 'Mondbasis',
-  theme: 'glut',
+  theme: 'mond',
   blurb: 'Kuppel, Schleuse, Kraterrand, Meteoritenfeld, Solarfeld oder Lavaröhre – und der Massenbeschleuniger.',
   twist: 'Geringe Schwerkraft: jeder Buckel wird zum weiten Sprung, Sprungplatten schleudern über Krater. Meteoriten schlagen ein.',
   grade: 3,

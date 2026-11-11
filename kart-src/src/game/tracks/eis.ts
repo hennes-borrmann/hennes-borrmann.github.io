@@ -12,7 +12,7 @@ import type { TrackDef } from '../track';
 export const EIS: TrackDef = {
   id: 'eis',
   name: 'Eiszapfen-Pass',
-  theme: 'klippe',
+  theme: 'eis',
   blurb: 'Serpentinen im Schnee, Grat ohne Geländer, Eishöhle oder zugefrorener See, Bobbahn ins Tal.',
   twist: 'Rutschen: auf Eis dreht die Nase, das Kart gleitet weiter. Lawinen gehen im Takt nieder – durchstarten oder warten.',
   grade: 3,

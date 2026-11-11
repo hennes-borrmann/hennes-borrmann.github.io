@@ -1139,8 +1139,13 @@ export class RaceScene {
     }
     if (e.boost > 0 && Math.random() < 90 * budget * dt) {
       const ex = (Math.random() < 0.5 ? this.v1.copy(A.exhaustL) : this.v1.copy(A.exhaustR)).applyMatrix4(root.matrixWorld);
-      this.color.set(Math.random() < 0.5 ? 0xff8a2a : 0xffd23f);
-      this.sparks.emit(ex.x, ex.y, ex.z, e.vx * 0.55 + (Math.random() - 0.5) * 1.5, Math.random() * 1.2, e.vz * 0.55 + (Math.random() - 0.5) * 1.5, 0.16, 0.3, this.color, -1.2, 0, 1);
+      if (dive) {
+        // Unter Wasser sprüht kein Feuer: der Schub wirbelt Blasen auf.
+        this.fx.puff(ex.x, ex.y, ex.z, e.vx * 0.3 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.6, e.vz * 0.3 + (Math.random() - 0.5) * 2, 0.5 + Math.random() * 0.3, 0.12 + Math.random() * 0.16, 0xe8fbff, 0, -2.5);
+      } else {
+        this.color.set(Math.random() < 0.5 ? 0xff8a2a : 0xffd23f);
+        this.sparks.emit(ex.x, ex.y, ex.z, e.vx * 0.55 + (Math.random() - 0.5) * 1.5, Math.random() * 1.2, e.vz * 0.55 + (Math.random() - 0.5) * 1.5, 0.16, 0.3, this.color, -1.2, 0, 1);
+      }
     }
     if (e.stall > 0 && Math.random() < 14 * dt) {
       this.color.set(0x4a4654);
