@@ -251,7 +251,14 @@ function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
   } finally {
     canvas.removeEventListener('webglcontextcreationerror', onError);
   }
-  throw new Error(errors.join(' · ') + (reason ? ` · Begründung des Browsers: ${reason}` : ''));
+  // Häufigster Fall auf dem iPad: Der Browser gibt einen Kontext her, der schon verloren ist.
+  let lost = false;
+  try {
+    lost = canvas.getContext('webgl2')?.isContextLost() === true;
+  } catch {
+    // dann eben ohne diese Auskunft
+  }
+  throw new Error((lost ? 'Der Browser liefert eine bereits verlorene Grafik. ' : '') + errors.join(' · ') + (reason ? ` · Begründung des Browsers: ${reason}` : ''));
 }
 
 /** Ein Bildpunkt für die Stichprobe in checkFrame. */
@@ -402,6 +409,11 @@ export class RaceScene {
     this.camera.add(this.speedLines.mesh);
     window.addEventListener('resize', () => this.resize());
     this.resize();
+  }
+
+  /** Der eine Renderer der Seite – die Porträts der Lobby zeichnen mit ihm (portraits.ts). */
+  get gl(): THREE.WebGLRenderer {
+    return this.renderer;
   }
 
   /** Gibt Welt und Renderer frei – für den Fall, dass die Szene auf einer frischen Zeichenfläche neu entsteht. */

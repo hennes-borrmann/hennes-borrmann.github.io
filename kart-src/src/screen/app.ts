@@ -39,7 +39,7 @@ import {
   type Phase,
 } from '../net/protocol';
 import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../render/debugOverlay';
-import { disposePortraits } from '../render/portraits';
+import { setPortraitRenderer } from '../render/portraits';
 import { RaceScene, type KartAudio, type Quality } from '../render/raceScene';
 import { $, ms } from '../util/dom';
 import { keepAwake, wakeLockMode } from '../util/wakeLock';
@@ -319,6 +319,9 @@ export class App {
     const name = loadName();
     this.ui.setHome(name, isValidCode(urlCode, ROOM_CODE_LENGTH) ? urlCode : '');
     this.ui.setVersion(BUILD_ID);
+    // Die 3D-Grafik gleich jetzt anlegen (siehe createScene). Klappt es nicht, entstehen vorerst keine Porträts,
+    // und beim Rennstart wird es noch einmal versucht – dort mit Meldung.
+    this.createScene();
 
     requestAnimationFrame(this.frame);
     window.setInterval(() => this.everySecond(), 1000);
@@ -690,8 +693,12 @@ export class App {
   // --- Rennen ---------------------------------------------------------------
 
   private syncPhase(phase: Phase): void {
-    if (phase === 'game' && !this.inGame) this.enterGame();
-    else if (phase === 'lobby' && this.inGame) {
+    // (Nach einem gescheiterten Aufbau der 3D-Szene nicht bei jeder Meldung der Lobby neu anlaufen: jeder Anlauf legt
+    // Grafikkontexte an. Weiter geht es über „Erneut versuchen“ im Dialog.)
+    if (phase !== 'game') this.sceneFailed = false;
+    if (phase === 'game' && !this.inGame) {
+      if (!this.sceneFailed) this.enterGame();
+    } else if (phase === 'lobby' && this.inGame) {
       this.exitGame();
       this.ui.show('lobby');
     }
@@ -716,28 +723,17 @@ export class App {
     this.gfxHistory.length = 0;
     this.gfxHidden = '';
     setTrack(state.track);
-    // Die Porträts der Lobby werden nicht mehr gebraucht; ihr Grafikkontext wird erst freigegeben, wenn das Rennen
-    // seinen eigenen hat (ein iPad verweigerte den neuen Kontext, wenn der alte unmittelbar davor zwangsweise endete).
+    // Die Szene (und mit ihr die eine 3D-Grafik der Seite) steht normalerweise schon seit dem Laden.
     this.ui.cancelPortraits();
+    // Hat der Browser die Grafik inzwischen verloren (etwa im Hintergrund), entsteht die Szene auf frischer Fläche neu.
+    if (this.scene?.gfx.isLost) {
+      const lost = this.scene;
+      this.scene = null;
+      lost.release();
+    }
     if (!this.scene) {
-      const errors: unknown[] = [];
-      // 1. solange der Porträt-Kontext noch lebt · 2. nachdem er zwangsweise freigegeben ist (falls der Browser nur
-      // einen erlaubt) · 3. auf einer frischen Zeichenfläche (falls an der alten ein unbrauchbarer Kontext hängt)
-      for (let attempt = 0; attempt < 3 && !this.scene; attempt++) {
-        try {
-          if (attempt === 1) disposePortraits(true);
-          let canvas = $<HTMLCanvasElement>('stage');
-          if (attempt === 2) {
-            const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
-            canvas.replaceWith(fresh);
-            canvas = fresh;
-          }
-          this.scene = new RaceScene(canvas, this.quality);
-        } catch (err) {
-          console.error(err);
-          errors.push(err);
-        }
-      }
+      const errors = this.createScene();
+      this.sceneFailed = !this.scene;
       if (!this.scene) {
         this.ui.showModal('3D-Darstellung nicht möglich', sceneFailure(errors), [
           { label: 'Erneut versuchen', primary: true, run: () => this.enterGame() },
@@ -746,7 +742,8 @@ export class App {
         return;
       }
     }
-    disposePortraits();
+    // Beim Laden war die Zeichenfläche noch verborgen: jetzt auf ihre wirkliche Größe bringen.
+    this.scene.resize();
     this.scene.setTrack();
     this.scene.reset();
     this.ui.setCameraLabel(false);
@@ -849,6 +846,8 @@ export class App {
   }
 
   /** Grafik-Meldung: zuletzt gezeigter Text, seit wann der Kontext fehlt, ob schon von selbst neu aufgebaut wurde, was vorher war. */
+  /** Die 3D-Szene ließ sich beim Rennstart nicht anlegen (Dialog steht): kein selbsttätiger neuer Anlauf. */
+  private sceneFailed = false;
   private gfxShown = '';
   /** Befund, den der Spieler ausgeblendet hat – er kommt erst wieder, wenn sich etwas ändert. */
   private gfxHidden = '';
@@ -888,6 +887,32 @@ export class App {
       this.checkGraphics(now);
     }
   };
+
+  /**
+   * Legt die Rennszene an – und mit ihr die eine 3D-Grafik der Seite, die auch die Porträts der Lobby zeichnet.
+   * Sie entsteht beim Laden und bleibt bis zum Schließen der Seite: Auf einem iPad kam ein Kontext, der erst beim
+   * Rennstart angelegt wurde, schon verloren an. Zwei Anläufe: auf der vorhandenen Zeichenfläche, dann auf einer frischen.
+   * @returns die Fehler der gescheiterten Anläufe (leer, wenn es gleich klappt)
+   */
+  private createScene(): unknown[] {
+    const errors: unknown[] = [];
+    for (let attempt = 0; attempt < 2 && !this.scene; attempt++) {
+      try {
+        let canvas = $<HTMLCanvasElement>('stage');
+        if (attempt === 1) {
+          const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
+          canvas.replaceWith(fresh);
+          canvas = fresh;
+        }
+        this.scene = new RaceScene(canvas, this.quality);
+      } catch (err) {
+        console.error(err);
+        errors.push(err);
+      }
+    }
+    setPortraitRenderer(this.scene ? this.scene.gl : null);
+    return errors;
+  }
 
   /** Zeichnet der Browser die Szene nicht (Kontext verloren, Programme abgelehnt, Bild schwarz), steht es auf dem Bildschirm. */
   private checkGraphics(now: number): void {
@@ -965,6 +990,7 @@ export class App {
       scene.onEvent = (e) => this.sound.sceneEvent(e);
       scene.setRoster(this.drivers(state));
       this.scene = scene;
+      setPortraitRenderer(scene.gl);
       old.release();
     } catch (err) {
       console.error(err);
@@ -1347,14 +1373,15 @@ export class App {
   }
 }
 
-/** Ob der Browser auf einer frischen Zeichenfläche einen Grafikkontext dieser Art hergibt. */
+/** Ob der Browser auf einer frischen Zeichenfläche einen Grafikkontext dieser Art hergibt – und ob der brauchbar ist. */
 function probeContext(kind: 'webgl2' | 'webgl'): string {
   try {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 2;
-    const ok = canvas.getContext(kind) !== null;
+    const gl = canvas.getContext(kind) as WebGLRenderingContext | null;
+    const text = !gl ? 'nein' : gl.isContextLost() ? 'ja, aber schon verloren' : 'ja';
     canvas.width = canvas.height = 0;
-    return ok ? 'ja' : 'nein';
+    return text;
   } catch {
     return 'Fehler';
   }
@@ -1362,13 +1389,13 @@ function probeContext(kind: 'webgl2' | 'webgl'): string {
 
 /** Text für den Dialog, wenn die 3D-Szene nicht entsteht: was der Browser gemeldet hat, und was meist hilft. */
 function sceneFailure(errors: unknown[]): string[] {
-  const names = ['Erster Anlauf', 'Nach Freigabe der Porträts', 'Frische Zeichenfläche'];
+  const names = ['Vorhandene Zeichenfläche', 'Frische Zeichenfläche'];
   const texts = errors.map((e) => (e instanceof Error ? e.message : String(e)));
-  const lines = texts.map((t, i) => (i > 0 && t === texts[0] ? `${names[i]}: wie oben.` : `${names[i]}: ${t}`));
+  const lines = texts.map((t, i) => (i > 0 && t === texts[0] ? `${names[i] ?? 'Weiterer Anlauf'}: wie oben.` : `${names[i] ?? 'Weiterer Anlauf'}: ${t}`));
   return [
     'Der Browser hat dem Spiel keine 3D-Grafik bereitgestellt.',
     ...lines,
     `Prüfung auf frischer Fläche: WebGL 2 ${probeContext('webgl2')}, WebGL 1 ${probeContext('webgl')} · Version ${BUILD_ID}`,
-    'Hilft oft: diesen Tab schließen und die Seite neu öffnen, sonst den Browser ganz beenden und neu starten. Im Blockierungsmodus von iOS/iPadOS ist WebGL abgeschaltet.',
+    'Hilft meist: alle Tabs mit diesem Spiel schließen, den Browser ganz beenden und neu starten, dann nur diese Seite öffnen. Im Blockierungsmodus von iOS/iPadOS ist WebGL abgeschaltet.',
   ];
 }
