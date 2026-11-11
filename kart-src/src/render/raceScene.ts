@@ -314,7 +314,7 @@ export class RaceScene {
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
     this.scene.fog = this.world.fog;
-    this.scene.background = new THREE.Color(this.world.theme.sky[2]);
+    this.scene.background = this.world.background;
     this.camReady = false;
     this.needsCompile = true;
     this.pops.prewarm(this.renderer, [

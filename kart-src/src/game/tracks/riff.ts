@@ -13,7 +13,7 @@ import type { TrackDef } from '../track';
 export const RIFF: TrackDef = {
   id: 'riff',
   name: 'Tiefseeriff',
-  theme: 'klippe',
+  theme: 'riff',
   blurb: 'Vom Steg ins Wasser: Korallengarten, Graben, Seegraswald und ein Wrack – und am Ende wieder hinauf.',
   twist: 'Tauchen: unter Wasser springt das Kart weit und sinkt langsam. Strömungen tragen oder bremsen, Blasenschlote heben.',
   grade: 2,
