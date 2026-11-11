@@ -11,6 +11,7 @@
 //   ?debug=0      Diagnose ausblenden; ?debug=1 zeigt sie auch im Rennen von Anfang an
 //   ?peerlog=3    ausführliches PeerJS-Protokoll in der Browser-Konsole (0–3)
 //   ?laps=1       Rundenzahl überschreiben (gilt für den Host)
+//   ?aufbau=behutsam  das erste Bild Teil für Teil vorbereiten und festhalten, wobei die Grafik stirbt (gfxGuard.ts)
 //   ?auto=1       das eigene Kart fährt von selbst (zum Testen ohne Controller)
 //   ?track=2      Strecke vorwählen (0–3, gilt für den Host)
 //   ?ai=0         Stärke der KI vorwählen (0 leicht, 1 mittel, 2 schwer)
@@ -33,6 +34,8 @@ export interface DebugParams {
   /** Rundenzahl, 0 = Vorgabe der Strecke. */
   laps: number;
   autopilot: boolean;
+  /** Erstes Bild Teil für Teil vorbereiten (Suche nach einem Teil, das die Grafik beendet). */
+  careful: boolean;
   /** Vorgewählte Strecke, -1 = keine Vorgabe. */
   track: number;
   /** Vorgewählte KI-Stärke, -1 = keine Vorgabe. */
@@ -63,6 +66,7 @@ export function readDebugParams(search: string = location.search): DebugParams {
     peerLog: p.has('peerlog') ? Math.max(0, Math.min(3, Number(p.get('peerlog')) || 0)) : 1,
     laps: Math.round(num(p, 'laps', 9)),
     autopilot: p.get('auto') === '1',
+    careful: p.get('aufbau') === 'behutsam',
     track: p.has('track') ? Math.max(0, Math.round(Number(p.get('track')) || 0)) : -1,
     ai: p.has('ai') ? Math.max(0, Math.min(2, Math.round(Number(p.get('ai')) || 0))) : -1,
     quality: ['auto', 'low', 'medium', 'high'].includes(q ?? '') ? (q as 'auto' | 'low' | 'medium' | 'high') : null,
