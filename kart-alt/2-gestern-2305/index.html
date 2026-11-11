@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101214">
+<meta name="robots" content="noindex">
+<title>Schräglage – Kart-Racer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23101214'/%3E%3Cpath d='M9 24 15 8h8l-6 16z' fill='%23ffd23f'/%3E%3C/svg%3E">
+  <script type="module" crossorigin src="./assets/screen-Jn9Fv3LU.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/items-DvTlp9lt.js">
+  <link rel="stylesheet" crossorigin href="./assets/screen-GXdrC6i1.css">
+</head>
+<body>
+<div id="app" data-view="boot">
+
+  <main class="view view-boot">
+    <p class="boot-text">Lade …</p>
+  </main>
+
+  <!-- Startseite -->
+  <main class="view view-home">
+    <header class="brand">
+      <h1 class="brand-mark">Schräglage</h1>
+      <p class="brand-tag">Kart-Racer für den großen Bildschirm, gelenkt mit dem Handy.</p>
+      <p class="brand-phase">Vier Strecken · neun Items · vier Figuren zur Wahl</p>
+    </header>
+
+    <div class="home-grid">
+      <label class="field field-name">
+        <span class="field-label">Dein Name</span>
+        <input id="in-name" type="text" maxlength="14" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="z. B. Hennes">
+      </label>
+
+      <section class="panel">
+        <h2>Lobby erstellen</h2>
+        <p>Du bekommst einen Raumcode. Bis zu drei weitere Bildschirme können damit beitreten.</p>
+        <button id="btn-create" class="btn btn-primary" type="button">Lobby erstellen</button>
+      </section>
+
+      <section class="panel">
+        <h2>Beitreten</h2>
+        <label class="field">
+          <span class="field-label">Raumcode</span>
+          <input id="in-code" class="code-input" type="text" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="·····">
+        </label>
+        <button id="btn-join" class="btn" type="button">Beitreten</button>
+      </section>
+    </div>
+
+    <p id="home-msg" class="home-msg" role="status"></p>
+    <p id="home-version" class="home-version"></p>
+  </main>
+
+  <!-- Lobby -->
+  <main class="view view-lobby">
+    <header class="lobby-head">
+      <div class="roomcode">
+        <span class="eyebrow">Raumcode</span>
+        <strong id="lobby-code" class="roomcode-value">–</strong>
+      </div>
+      <div class="invite">
+        <span class="eyebrow">Einladungslink</span>
+        <div class="invite-row">
+          <input id="lobby-link" class="invite-link" type="text" readonly>
+          <button id="btn-copy" class="btn btn-small" type="button">Kopieren</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="lobby-body">
+      <div class="players">
+        <h2 class="eyebrow">Spieler</h2>
+        <ol id="lobby-players" class="player-list"></ol>
+        <div class="setup">
+          <h2 class="eyebrow">Deine Figur</h2>
+          <div id="char-list" class="char-list"></div>
+          <p id="char-trait" class="char-trait"></p>
+        </div>
+        <div class="setup">
+          <h2 class="eyebrow">Strecke</h2>
+          <div id="track-list" class="track-list"></div>
+          <div class="setup-row">
+            <label id="bots-toggle" class="bots-toggle"><input id="chk-bots" type="checkbox"> <span>Freie Plätze mit KI-Gegnern auffüllen</span></label>
+            <div class="setup-ai">
+              <span class="setup-label">Stärke</span>
+              <div id="ai-level" class="seg" role="group" aria-label="Stärke der KI-Gegner">
+                <button type="button" data-level="0">Leicht</button>
+                <button type="button" data-level="1">Mittel</button>
+                <button type="button" data-level="2">Schwer</button>
+              </div>
+            </div>
+            <div class="setup-ai">
+              <span class="setup-label">Runden</span>
+              <div id="lap-count" class="seg" role="group" aria-label="Anzahl der Runden">
+                <button type="button" data-laps="2">2</button>
+                <button type="button" data-laps="3">3</button>
+                <button type="button" data-laps="4">4</button>
+                <button type="button" data-laps="5">5</button>
+              </div>
+            </div>
+          </div>
+          <p id="bots-note" class="players-note"></p>
+        </div>
+      </div>
+
+      <aside class="pairing">
+        <h2 class="eyebrow">Dein Controller</h2>
+        <div class="pairing-row">
+          <div id="lobby-qr" class="qr"></div>
+          <div class="pairing-text">
+            <p id="pair-status" class="pair-status">Kein Handy verbunden</p>
+            <ol class="steps">
+              <li>QR-Code mit der Handy-Kamera scannen.</li>
+              <li>Auf dem Handy „Tippen zum Starten“ und Bewegungssensor erlauben.</li>
+              <li>Handy quer halten und kalibrieren.</li>
+            </ol>
+            <p class="pairing-url"><span id="pair-url"></span></p>
+          </div>
+        </div>
+        <button id="btn-settings" class="btn btn-small" type="button">Einstellungen</button>
+        <button id="btn-debug-lobby" class="btn btn-quiet btn-small" type="button">Diagnose ein/aus</button>
+        <div id="debug-slot"></div>
+      </aside>
+    </section>
+
+    <footer class="lobby-foot">
+      <button id="btn-leave" class="btn btn-quiet" type="button">Lobby verlassen</button>
+      <p id="lobby-hint" class="lobby-hint"></p>
+      <button id="btn-ready" class="btn" type="button">Ich bin bereit</button>
+      <button id="btn-start" class="btn btn-primary" type="button">Rennen starten</button>
+    </footer>
+  </main>
+
+  <!-- Rennen -->
+  <main class="view view-game">
+    <div class="stage"><canvas id="stage"></canvas></div>
+    <div id="smoke-veil" class="smoke-veil"></div>
+
+    <div id="race-hud" class="race-hud" hidden>
+      <div id="rh-item" class="rh-item" data-state="none">
+        <div id="rh-item-icon" class="rh-item-icon"></div>
+        <span id="rh-item-name" class="rh-item-name"></span>
+        <span id="rh-item-hint" class="rh-item-hint"></span>
+      </div>
+      <div class="rh-lap">
+        <span class="rh-lap-label">Runde</span>
+        <strong id="rh-lap">1/3</strong>
+        <span id="rh-time" class="rh-time">0:00.0</span>
+      </div>
+      <ol id="rh-order" class="rh-order"></ol>
+      <div id="rh-place-box" class="rh-place"><strong id="rh-place">1</strong><span id="rh-of">von 4</span></div>
+      <div class="rh-speed"><strong id="rh-speed">0</strong><span>km/h</span></div>
+      <canvas id="minimap" class="minimap" width="328" height="328"></canvas>
+    </div>
+    <div id="race-title" class="race-title" hidden><span id="race-title-sub"></span><strong id="race-title-name"></strong><em id="race-title-twist"></em></div>
+    <div id="countdown" class="countdown" hidden></div>
+    <div id="race-banner" class="race-banner" hidden></div>
+    <div id="finish-flag" class="finish-flag" hidden></div>
+    <p id="hud-note" class="hud-note"></p>
+    <div id="fps" class="fps" hidden></div>
+    <div class="hud-menu"><button id="btn-menu" class="btn-menu" type="button">Menü</button></div>
+
+    <section id="results" class="results" hidden>
+      <div class="results-card">
+        <p class="eyebrow" id="results-track">Zieleinlauf</p>
+        <h2>Zieleinlauf</h2>
+        <ol id="results-list" class="results-list"></ol>
+        <p id="results-note" class="results-note"></p>
+        <div class="results-actions">
+          <button id="btn-lobby" class="btn" type="button">Zur Lobby</button>
+          <button id="btn-again" class="btn btn-primary" type="button">Nochmal</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="menu" class="menu" hidden>
+      <div class="menu-card" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+        <h2 id="menu-title">Menü</h2>
+        <p class="menu-room">Raum <strong id="hud-code"></strong> · das Rennen läuft weiter</p>
+        <div class="menu-list">
+          <button id="btn-menu-close" class="menu-primary" type="button">Weiterfahren</button>
+          <button id="btn-settings-game" type="button">Einstellungen</button>
+          <button id="btn-pair" type="button">Controller koppeln</button>
+          <button id="btn-camera" type="button">Kamera: Übersicht</button>
+          <button id="btn-debug" type="button">Diagnose</button>
+          <button id="btn-back" class="menu-quiet" type="button">Zur Lobby</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="banner" class="banner" role="status" hidden></div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title"></h2>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-actions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <aside id="debug" class="debug" hidden></aside>
+</div>
+</body>
+</html>
