@@ -127,11 +127,18 @@ export function portraitUrl(character: number, slot: number, size = 256): string
   }
 }
 
-/** Gibt den versteckten Renderer wieder frei (die gemerkten Bilder bleiben gültig). */
-export function disposePortraits(): void {
+/**
+ * Gibt den versteckten Renderer wieder frei (die gemerkten Bilder bleiben gültig).
+ *
+ * force = false (üblich): Speicher freigeben und die Zeichenfläche auf null verkleinern; den Kontext selbst räumt
+ * der Browser ab, sobald nichts mehr auf ihn zeigt. force = true erzwingt den Kontextverlust sofort – nur noch als
+ * Ausweg, wenn das Rennen sonst keinen Kontext bekommt: ein iPad verweigerte nach einem erzwungenen Verlust den nächsten.
+ */
+export function disposePortraits(force = false): void {
   if (!stage) return;
   const { renderer } = stage;
   stage = null;
   renderer.dispose();
-  renderer.forceContextLoss();
+  if (force) renderer.forceContextLoss();
+  renderer.domElement.width = renderer.domElement.height = 0;
 }
