@@ -970,7 +970,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         if (t.edge[g] & EDGE_GAP) gapSoon = true;
       }
       // … und nicht auf schwankenden Pontons: dort käme das Kart mit vollem Zug auf schmalem, nassem Stahl an.
-      if (gapSoon || (t.edge[s.seg] & EDGE_FLOAT) !== 0 || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
+      // … und nicht in der Magnettrommel: Dort könnte er es über einer Deckenplatte absetzen, die gerade abgeschaltet ist.
+      if (gapSoon || (t.edge[s.seg] & (EDGE_FLOAT | EDGE_DRUM)) !== 0 || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
       else {
         s.tow = 0;
         s.boost = Math.max(s.boost, 45);

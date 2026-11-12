@@ -1269,6 +1269,14 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       if (lat0 < 1.6 && lat1 > -1.6) {
         let back = first;
         for (let k = 0; k < 8; k++) back = prev[back];
+        // … und nie auf ein anderes Stück, das selbst wegbrechen kann (liegen mehrere hintereinander – die Deckenplatten
+        // des Magnetwerks –, stünde ein Gestürzter sonst still auf der nächsten Platte und fiele beim Abschalten gleich wieder).
+        // (Auch die schmalen Fugen zwischen zwei Stücken taugen nicht: Vor dem Rücksetzpunkt müssen 8 m festen Bodens liegen.)
+        const nearBroken = (seg: number): boolean => {
+          for (let j = 0, g = seg; j <= 8; j++, g = next[g]) if ((edge[g] & EDGE_BROKEN) !== 0) return true;
+          return false;
+        };
+        for (let k = 0; k < 400 && nearBroken(back); k++) back = prev[back];
         for (let k = 0; k < count; k++) respawn[first + k] = respawn[back];
       }
     }

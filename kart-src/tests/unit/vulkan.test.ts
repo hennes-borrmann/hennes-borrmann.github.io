@@ -23,6 +23,7 @@ import {
   rightZ,
   setTrack,
   trackHeading,
+  EDGE_DRUM,
 } from '../../src/game/track';
 
 const VULKAN = 9;
@@ -96,6 +97,12 @@ describe('Vulkaninsel: Bruchstellen', () => {
       } else if (t.era) {
         // Die Zeitriss-Ruine hat ihre eigenen Bruchstellen und Tore: sie hängen an den Zeitaltern (ruine.test.ts).
         for (const h of t.holes) expect(h.plan.period).toBe(t.era.period);
+      } else if (t.drums.length > 0) {
+        // Das Magnetwerk hat Deckenplatten, die im Takt abschalten (magnet.test.ts): nur in der Trommel, mit wiederkehrendem Plan.
+        for (const h of t.holes) {
+          expect(t.edge[h.first] & EDGE_DRUM).not.toBe(0);
+          expect(h.plan.period).toBeGreaterThan(0);
+        }
       } else {
         expect(t.holes.length).toBe(0);
         // (Größentore – Riesenkinderzimmer – haben keinen Zeitplan: Sie hängen am Kart, nicht an der Rennzeit.)

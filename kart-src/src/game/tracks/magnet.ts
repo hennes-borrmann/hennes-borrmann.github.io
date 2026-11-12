@@ -9,11 +9,11 @@
 
 import type { TrackDef } from '../track';
 
-// Deckenplatten: je ein Stück, links (lat −6,4 … 0,6) und rechts (−0,6 … 6,4) im Wechsel aus – 2 s von je 6 s, nie beide
+// Deckenplatten: je ein Stück, links (lat −6,4 … 0,2) und rechts (−0,2 … 6,4) im Wechsel aus – 2 s von je 6 s, nie beide
 // zugleich; die Mitte gehört zu beiden (wer stur in der Mitte fährt, fällt auch).
 const plates = (from: number, to: number, phase: number): { from: number; to: number; lat0: number; lat1: number; at: number; until: number; every: number }[] => [
-  { from, to, lat0: -6.4, lat1: 0.6, at: phase, until: phase + 2, every: 6 },
-  { from, to, lat0: -0.6, lat1: 6.4, at: phase + 3, until: phase + 5, every: 6 },
+  { from, to, lat0: -6.4, lat1: 0.2, at: phase, until: phase + 2, every: 6 },
+  { from, to, lat0: -0.2, lat1: 6.4, at: phase + 3, until: phase + 5, every: 6 },
 ];
 
 export const MAGNET: TrackDef = {
@@ -24,7 +24,8 @@ export const MAGNET: TrackDef = {
   twist: 'In der Magnettrommel fährt man an Wand und Decke: An der Wand sackt man ab, an der Decke rutscht man leichter – und die Deckenplatten schalten im Takt ab, links und rechts im Wechsel.',
   grade: 3,
   scale: 1.6,
-  surface: 'metal',
+  // Werksstraßen aus Asphalt (der Stahl-Untergrund zeichnet gelbe Randlinien – Gelb heißt hier „Platte schaltet gleich ab“)
+  surface: 'asphalt',
   points: [
     // 0–2: Werkstor, nach Osten (Start)
     [-80, -110, 3],

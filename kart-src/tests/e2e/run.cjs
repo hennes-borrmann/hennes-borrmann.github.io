@@ -803,7 +803,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Siebzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 17);
+    check('Achtzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 18);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1317,7 +1317,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen siebzehn Strecken zur Wahl', cards === 17, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen achtzehn Strecken zur Wahl', cards === 18, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1934,9 +1934,47 @@ async function main() {
       check('Lenken wechselt die Schiene: nach einem Druck nach rechts sitzt Anna auf der rechten Schiene', sw.right < 0.6 && sw.left > 3.4, `${sw.right.toFixed(2)} m von der rechten, ${sw.left.toFixed(2)} m von der linken Schiene`);
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Magnetwerk: In der Magnettrommel schraubt sich die Bahn über Wand und Decke; die Deckenplatten schalten nach Fahrplan
+    // ab – auf beiden Bildschirmen gleich, links und rechts nie zugleich; an der Wand sackt ein Kart ab.
+    await h7.page.locator('.track-card').nth(17).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 17, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 17, null, { timeout: 30000 });
+    const plateState = (d) => d.plates.map((p) => (p.off ? 1 : 0)).join('');
+    const [dH0, dC0] = await Promise.all([kart(h7.page, 'drum(1, 580)'), kart(c7.page, 'drum(1, 580)')]);
+    const [dH1, dC1] = await Promise.all([kart(h7.page, 'drum(4, 480)'), kart(c7.page, 'drum(4, 480)')]);
+    let both = false;
+    for (let t = 0; t < 6; t += 0.25) {
+      const d = await kart(h7.page, `drum(${t})`);
+      for (let k = 0; k + 1 < d.plates.length; k += 2) if (d.plates[k].off && d.plates[k + 1].off) both = true;
+    }
+    check(
+      'Magnetwerk hat eine Trommel (Decke bei 580 m, rechte Wand bei 480 m) und sechs Deckenplatten im Takt – auf beiden Bildschirmen gleich, nie beide eines Paars zugleich aus',
+      dH0.drums.length === 1 && Math.abs(dH0.roll - 180) < 1 && Math.abs(dH1.roll - 90) < 8 && dH0.plates.length === 6 && plateState(dH0) === plateState(dC0) && plateState(dH1) === plateState(dC1) && plateState(dH0) !== plateState(dH1) && !both,
+      `Verdrehung ${dH0.roll.toFixed(0)}° / ${dH1.roll.toFixed(0)}° · Platten bei 1 s ${plateState(dH0)} / ${plateState(dC0)}, bei 4 s ${plateState(dH1)} / ${plateState(dC1)}`,
+    );
+    if (dH0.drums.length === 1) {
+      // An der rechten Wand (480 m): Anna steht ohne Gas und Lenkung – die Schwerkraft zieht sie nach links zum Hallenboden.
+      await kart(h7.page, 'place(0, 480, 0)');
+      await sleep(200);
+      const sag0 = await h7.page.evaluate(() => { const s = window.__kart.authoritative(0); return { x: s.x, z: s.z, seg: s.seg, time: window.__kart.race().time }; });
+      await sleep(1500);
+      const sag1 = await h7.page.evaluate(([seg]) => {
+        const s = window.__kart.authoritative(0);
+        const a = window.__kart.spot(seg, 0, 0);
+        const r = window.__kart.spot(seg, 1, 0);
+        return { side: (s.x - a[0]) * (r[0] - a[0]) + (s.z - a[2]) * (r[2] - a[2]), time: window.__kart.race().time };
+      }, [sag0.seg]);
+      check('An der rechten Wand sackt Anna ohne Lenken nach links ab', sag1.side < -1.5, `${sag1.side.toFixed(1)} m quer nach ${((sag1.time - sag0.time) / 60).toFixed(1)} s`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die siebzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die achtzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

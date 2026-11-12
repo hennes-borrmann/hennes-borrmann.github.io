@@ -113,6 +113,9 @@ describe('Magnettrommel', () => {
       }
       expect(off).toBe(120);
     }
+    // Wer durch eine Platte fällt, wird vor allen Platten aufgesetzt – nie auf einer anderen
+    const firstPlate = Math.min(...plates.map((h) => h.first));
+    for (const h of plates) for (let k = 0; k < h.count; k++) expect(t.respawn[h.first + k]).toBeLessThan(firstPlate);
     // Anna steht mitten auf einer Platte, die gleich abschaltet: Sie fällt
     const h = plates[0];
     let time = 1;
