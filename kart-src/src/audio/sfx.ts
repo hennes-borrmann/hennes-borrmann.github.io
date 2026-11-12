@@ -54,6 +54,12 @@ const GUST_PATTERN = [
   [1040, 1490, 0.47, 2000, 0.6, 2600, 0.69, 1800, 0.9, 2300],
   [1310, 1770, 0.53, 2400, 0.62, 2000, 0.77, 2200, 0.84, 2700],
 ];
+/** Bauklotz-Mauer: fallende Klötze je Fassung, paarweise [Beginn (s), Tonhöhe (Hz)]. */
+const SMASH_BLOCKS = [
+  [0.06, 1320, 0.1, 980, 0.13, 1760, 0.19, 1180, 0.23, 1500, 0.3, 880, 0.35, 1400, 0.44, 1050, 0.52, 1620, 0.6, 940, 0.64, 1240],
+  [0.05, 1180, 0.09, 1640, 0.14, 900, 0.18, 1420, 0.25, 1080, 0.29, 1840, 0.37, 1260, 0.43, 960, 0.53, 1520, 0.59, 1120, 0.66, 1360],
+  [0.07, 1480, 0.1, 1060, 0.15, 1880, 0.2, 940, 0.24, 1300, 0.32, 1700, 0.36, 1000, 0.46, 1380, 0.51, 860, 0.61, 1560, 0.67, 1160],
+];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -141,11 +147,15 @@ const LEVEL: Record<SfxName, number> = {
   trainpass: 0.8,
   board: 1.2,
   rattle: 0.8,
-  // Riesenkinderzimmer (vorläufig)
-  shrink: 1.3,
-  grow: 1.3,
-  sizeend: 1.0,
-  smash: 1.4,
+  // Riesenkinderzimmer (Runde 17), gemessen wie oben: Schrumpfen ≈ −15,8 und Wachsen ≈ −16,2 LUFS
+  // (Schubring −17,3: im Spiel-Mix mit Motor und Zimmer-Stück trägt der Ring mit seinem hellen
+  // Glanz bei 1,5–4 kHz mehr; so liegen alle drei dort gleichauf, lautestes 100-ms-Fenster
+  // −18,5 bis −18,9 LUFS); Wieder-normal ≈ −24,3 (oft und nebensächlich, im Mix gut 4 dB unter
+  // den beiden); Bauklotz-Mauer ≈ −13,1 bis −13,6 (Presse −13,2).
+  shrink: 2,
+  grow: 1.6,
+  sizeend: 2.2,
+  smash: 2.8,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -321,6 +331,7 @@ export class SfxPlayer {
   private icicleTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
+  private smashTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -778,10 +789,6 @@ export class SfxPlayer {
       case 'charge':
       // Spiegelkabinett (vorläufig: wie der Schubring)
       case 'portal':
-      // Riesenkinderzimmer (vorläufig: wie der Schubring)
-      case 'shrink':
-      case 'grow':
-      case 'sizeend':
       case 'shimmer':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
@@ -897,6 +904,81 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Riesenkinderzimmer ---
+      // Schrumpfen und Wachsen sind ein Paar aus denselben drei Bausteinen in entgegengesetzter
+      // Richtung: ein Gleitton aus Sägezahn, Dreieck und Sinus (wie ein Tonband, das schneller bzw.
+      // langsamer läuft – mit leichtem Leiern, 9 Hz), ein „Zip“ (schmaler Puls mit 70-Hz-Rattern
+      // und ein enges Rauschband, die gemeinsam fahren) und ein Schlusston. Beim Schrumpfen fällt
+      // zuerst der dicke Sägezahn weg und der Sinus läuft am höchsten hinauf: der Ton wird dünn;
+      // beim Wachsen kommt der Sägezahn erst nach und nach dazu: der Ton wird breit. Abgrenzung:
+      // 'ring' zieht in einen hellen Glockenzweiklang mit Schubrauschen, 'fall' fällt lange
+      // und leise, 'use-spring' ist ein Boing mit 21-Hz-Vibrato.
+      case 'shrink':
+        // Hinauf in 0,34 s (240 → 1500 Hz, der Sinus bis 2,9 kHz), das Zip saust mit hinauf
+        // (1,8 → 7,5 kHz), dann ein winziges, hohes „Pling“ (E7 mit leiser Oktave), 0,45 s.
+        // Gemessen: Frequenzschwerpunkt je 60 ms 330 → 460 → 640 → 880 → 1570 → 2650 Hz
+        // (+8,4 Oktaven/s), nichts unter 200 Hz.
+        v.tone('sawtooth', 240, 820, 0.22, 0.12, { attack: 0.012, vibHz: 9, vibDepth: 0.015 })
+          .tone('triangle', 240, 1500, 0.34, 0.16, { attack: 0.012, sustain: 0.6, vibHz: 9, vibDepth: 0.015 })
+          .tone('sine', 480, 2900, 0.32, 0.07, { at: 0.04, attack: 0.03, sustain: 0.6 })
+          .tone('pulse12', 900, 3600, 0.16, 0.05, { at: 0.03, attack: 0.01, tremHz: 70 })
+          .noise(1800, 7500, 0.16, 0.1, { q: 3, at: 0.03, attack: 0.01 })
+          .tone('sine', 2637, 2630, 0.16, 0.2, { at: 0.29, attack: 0.002 })
+          .tone('triangle', 5274, 5260, 0.08, 0.04, { at: 0.29, attack: 0.002 });
+        break;
+      case 'grow':
+        // Hinab in 0,4 s (Sinus 1500 → 240, Dreieck 900 → 160, Sägezahn 620 → 115 Hz, die
+        // tiefen Schichten setzen später und weicher ein), das Zip saust hinab (7,5 → 1,8 kHz),
+        // dann ab 0,31 s ein sattes, rundes „Bwomm“: Sinus 150 → 80 Hz mit weichem Anstieg,
+        // Dreieck eine Oktave darüber, ein Hauch braunes Rauschen. 0,56 s. Gemessen:
+        // Schwerpunkt 1370 → 990 → 690 → 580 → 680 → 330 → 285 Hz (−5,4 Oktaven/s),
+        // die Hüllkurve steigt (Drittel −21 / −17 / −15 dB), gut die Hälfte unter 200 Hz.
+        v.tone('sine', 1500, 240, 0.36, 0.08, { attack: 0.012, sustain: 0.4 })
+          .tone('triangle', 900, 160, 0.38, 0.14, { at: 0.04, attack: 0.1, sustain: 0.55, vibHz: 9, vibDepth: 0.015 })
+          .tone('sawtooth', 620, 115, 0.34, 0.12, { at: 0.06, attack: 0.12, sustain: 0.7, vibHz: 9, vibDepth: 0.015 })
+          .tone('pulse12', 3600, 900, 0.16, 0.05, { at: 0.03, attack: 0.01, tremHz: 70 })
+          .noise(7500, 1800, 0.16, 0.1, { q: 3, at: 0.03, attack: 0.01 })
+          .tone('sine', 150, 80, 0.28, 0.45, { at: 0.31, attack: 0.025 })
+          .tone('triangle', 300, 165, 0.2, 0.1, { at: 0.31, attack: 0.025 })
+          .noise(320, 110, 0.16, 0.15, { type: 'lowpass', brown: true, at: 0.31, attack: 0.02 });
+        break;
+      case 'sizeend':
+        // Wieder normal groß – passiert oft, darum weich und kurz (0,24 s), ohne Gleitfahrt und
+        // ohne Zip der beiden anderen: ein „Plopp“ (Sinus, der in 50 ms eine Oktave
+        // hinaufschnippt, mit dumpfem Lippenknall aus Rauschen), dann federt der Ton um
+        // 650 Hz kurz nach (16-Hz-Vibrato, 5 %) und verklingt. Mitte 500–1500 Hz statt tiefer:
+        // dort lässt ihm das Zimmer-Stück mit dem Motor Platz (im Mix +1 dB bei 1 kHz);
+        // weiter unten verschwand es ganz.
+        v.tone('sine', 380, 760, 0.05, 0.3, { attack: 0.003 })
+          .noise(1200, 400, 0.03, 0.12, { type: 'lowpass', attack: 0.002 })
+          .tone('sine', 700, 600, 0.22, 0.14, { at: 0.04, attack: 0.01, vibHz: 16, vibDepth: 0.05 })
+          .tone('triangle', 1400, 1200, 0.08, 0.04, { at: 0.04, attack: 0.01 });
+        break;
+      case 'smash': {
+        // Ein riesiges Kart bricht durch die Bauklotz-Mauer (0,75 s): ein dumpfer, hohler Stoß
+        // (tiefer Sinus, braunes Rauschen, ein kurzes Dreieck um 200 Hz als Holzkasten), dann
+        // fallen elf Klötze – jeder ein trockener Klick (enges Rauschen) über einem kurzen
+        // Sinus mit dem schiefen Teilton ×2,71 eines Holzstabs, 0,9–1,9 kHz, also hell und hohl
+        // statt Stein (kein breites Rauschen, kein Splittern). Die Abstände werden größer
+        // (30–60 ms am Anfang, 80–100 ms am Ende) und die Klötze leiser: sie fallen
+        // auseinander und rollen aus. Drei Fassungen reihum (SMASH_BLOCKS). Gemessen
+        // (Einsätze über 700 Hz): 1 Stoß + 11 Klötze in allen drei Fassungen, Pegel von −8
+        // auf −14 dB fallend; im Spiel-Mix +5,6 dB bei 1 kHz, Ausgangsspitze 0,52 (Presse 0,50).
+        const p = SMASH_BLOCKS[this.smashTick++ % SMASH_BLOCKS.length];
+        v.tone('sine', 120, 48, 0.22, 0.5)
+          .noise(520, 120, 0.18, 0.4, { type: 'lowpass', brown: true })
+          .tone('triangle', 230, 170, 0.09, 0.16, { attack: 0.002 })
+          .noise(1400, 700, 0.04, 0.18, { q: 1.2, attack: 0.002 });
+        for (let i = 0; i < p.length; i += 2) {
+          const at = p[i];
+          const f = p[i + 1];
+          const s = 1 - 0.55 * Math.min(1, at / 0.75);
+          v.noise(f * 2.2, f * 1.8, 0.014, 0.3 * s, { q: 2, at, attack: 0.0008 })
+            .tone('sine', f, f * 0.985, 0.07, 0.28 * s, { at, attack: 0.001 })
+            .tone('sine', f * 2.71, f * 2.69, 0.03, 0.07 * s, { at, attack: 0.001 });
+        }
+        break;
+      }
       // --- Maschinen und Wasser ---
       case 'press':
         // Stampfpresse: ganz kurz zischt die Hydraulik, dann (ab 0,06 s) der Schlag –
@@ -947,8 +1029,7 @@ export class SfxPlayer {
         v.noise(700, 320, 0.11, 0.3, { q: 1.2 }).tone('sine', 118, 58, 0.1, 0.38);
         break;
       // Dschungel-Fluss (vorläufig: wie die Landung)
-      // Wüstenexpress (vorläufig: wie das Floß); Riesenkinderzimmer: die Bauklotz-Mauer (vorläufig ebenso)
-      case 'smash':
+      // Wüstenexpress (vorläufig: wie das Floß)
       case 'board':
       case 'rattle':
       case 'raft':

@@ -16,6 +16,7 @@
 
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { ZIMMER_STUECK } from './stuecke/zimmer';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -426,8 +427,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   spiegel: NEUE_STUECKE.wolken,
   // Wüstenexpress: VORLÄUFIG das Stück des Werkshofs
   wueste: WERKSHOF,
-  // Riesenkinderzimmer: VORLÄUFIG das Stück der Möwenklippe
-  zimmer: KLIPPE,
+  // Riesenkinderzimmer: eigenes Stück (stuecke/zimmer.ts)
+  zimmer: ZIMMER_STUECK,
   results: RESULTS,
 };
 
