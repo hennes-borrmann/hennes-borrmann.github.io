@@ -54,7 +54,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { NO_GROUND, TRACK, groundNow, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { EDGE_GAP, EDGE_RIVER, NO_GROUND, TRACK, groundNow, newVehiclePose, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -153,7 +153,14 @@ export interface SceneEvent {
     | 'thunder'
     | 'rod'
     | 'rumble'
-    | 'charge';
+    | 'charge'
+    /**
+     * Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß; das eigene Kart fährt auf dem Fluss (wiederholt);
+     * das Tosen des Wasserfalls (ortsfest, wiederholt, solange man in der Nähe ist).
+     */
+    | 'raft'
+    | 'rapids'
+    | 'falls';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -215,6 +222,9 @@ interface KartView {
   /** Sturmhafen: steckt gerade in einer Böe / Zeit bis zur nächsten Meldung. */
   gusty: boolean;
   gustWait: number;
+  /** Dschungel-Fluss: auf welcher Floßbahn das Kart zuletzt stand (−1 = auf keiner) / Zeit bis zur nächsten Meldung. */
+  raft: number;
+  riverWait: number;
   roulette: number;
   item: number;
   flags: number;
@@ -783,6 +793,8 @@ export class RaceScene {
       snowWait: 0,
       gusty: false,
       gustWait: 0,
+      raft: -1,
+      riverWait: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -875,6 +887,15 @@ export class RaceScene {
         if (shut && me) {
           const d = Math.hypot(me.x - t.px[g.first], me.z - t.pz[g.first]);
           if (d < 80) this.shake = Math.max(this.shake, 0.6 * (1 - d / 80));
+        }
+      }
+      // Dschungel-Fluss: der Wasserfall tost – hörbar, solange man in seiner Nähe ist (alle halbe Sekunde ein Schwall).
+      if (t.rivers.length > 0 && Math.floor(time / 30) !== Math.floor(before / 30)) {
+        for (const r of t.rivers) {
+          // Die Kante: die erste Lücke hinter dem Fluss
+          let lip = r.first + r.count;
+          for (let n = 0; n < 40 && (t.edge[lip] & EDGE_GAP) === 0; n++) lip = t.next[lip];
+          if (t.edge[lip] & EDGE_GAP) this.emitAt('falls', t.px[lip], t.py[lip] - 3, t.pz[lip], 170);
         }
       }
       // Gewitterkamm: fernes Wetterleuchten – der Donner dazu rollt eine knappe Sekunde später heran.
@@ -1077,6 +1098,29 @@ export class RaceScene {
       if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
     } else k.snowWait = 0;
     k.snowed = snowed;
+    // Dschungel-Fluss: auf welchem Floß steht das Kart? Beim Wechsel rumpelt es; das eigene Kart rauscht, solange es auf dem Fluss ist.
+    if (this.track.rivers.length > 0) {
+      const tr = this.track;
+      let lane = -1;
+      if (!air && e.respawn === 0 && e.seg < tr.total && (tr.edge[e.seg] & EDGE_RIVER) !== 0) {
+        projectOnTrack(tr, e.x, e.z, e.seg);
+        const l = raftLane(tr, proj.seg, proj.along, proj.lat, this.mechTime);
+        const r = tr.rivers.find((x) => proj.seg >= x.first && proj.seg < x.first + x.count);
+        if (l && r) lane = r.lanes.indexOf(l);
+      }
+      if (lane >= 0) {
+        if (lane !== k.raft && !k.fresh) {
+          this.emit('raft', k, local);
+          this.burst(e.x, e.y + 0.1, e.z, 5, 4, 0xdff3e8, false, 0.4, 0.4, 2);
+        }
+        k.riverWait -= dt;
+        if (k.riverWait <= 0) {
+          k.riverWait = 0.35;
+          if (local) this.emit('rapids', k, true);
+        }
+      } else if (!air) k.riverWait = 0;
+      if (!air) k.raft = lane;
+    }
     // Sturmhafen: schiebt gerade eine Böe? Das eigene Kart meldet sich regelmäßig (Heulen); Schleier und Gischt zeichnet mechanics/harbor.ts.
     if (this.track.winds.length > 0) {
       const tr = this.track;

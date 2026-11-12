@@ -128,6 +128,10 @@ const LEVEL: Record<SfxName, number> = {
   // der Sturm-Aufrufe ≈ −34 LUFS wie der Fahrtwind im Gleitflug – ein Bett, kein Hauptdarsteller.
   gust: 4.5,
   storm: 0.85,
+  // Dschungel-Fluss (vorläufig)
+  raft: 1.2,
+  rapids: 0.8,
+  falls: 1.4,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -829,6 +833,9 @@ export class SfxPlayer {
         for (let i = 2; i < g.length; i += 2) v.noise(g[i + 1], g[i + 1] * 0.7, 0.035, 0.3, { q: 3, at: g[i], attack: 0.002 });
         break;
       }
+      // Dschungel-Fluss (vorläufig: wie der Sturm)
+      case 'rapids':
+      case 'falls':
       case 'storm': {
         // Das eigene Kart steckt in der Böe; etwa alle 0,3 s aufgerufen (raceScene: gustWait,
         // je nach Bildrate 0,30–0,33 s). Jeder Aufruf ist ~0,55 s lang und weich: fünf Schichten
@@ -912,6 +919,8 @@ export class SfxPlayer {
       case 'wall':
         v.noise(700, 320, 0.11, 0.3, { q: 1.2 }).tone('sine', 118, 58, 0.1, 0.38);
         break;
+      // Dschungel-Fluss (vorläufig: wie die Landung)
+      case 'raft':
       case 'land':
         v.noise(320, 120, 0.16, 0.5, { type: 'lowpass', brown: true }).tone('sine', 96, 46, 0.14, 0.42).noise(2200, 900, 0.05, 0.1, { q: 1 });
         break;
