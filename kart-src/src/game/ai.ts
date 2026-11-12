@@ -34,7 +34,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, pulseCycle, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -76,6 +76,9 @@ export interface BotBrain {
   route: number;
   /** true = route bleibt, wie sie ist (für Tests); sonst wird vor jeder Gabelung neu gewürfelt. */
   routeLock: boolean;
+  /** Portal voraus, über das schon entschieden ist (Abschnitt; −1 = keines) – und ob die KI es ansteuert. */
+  portalSeg: number;
+  portalTake: boolean;
   /** Ticks, die das Kart praktisch steht. */
   stuck: number;
   /** Verbleibende Ticks Rückwärtsfahrt zum Freikommen. */
@@ -110,6 +113,8 @@ const DRIFT_FROM = [
   [1 / 36, 1 / 26, 1 / 30, 1 / 22],
 ];
 const PATIENCE_FACTOR = [1.6, 1, 0.7];
+/** So oft steuert die KI ein Portal an, das vorwärts führt (leicht, mittel, schwer). */
+const PORTAL_DARE = [0.2, 0.55, 0.9];
 
 export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
   const l = Math.max(0, Math.min(2, level | 0));
@@ -120,6 +125,8 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     line: [-1.6, 1.4, 0.2, -0.6][slot % 4],
     route: 0,
     routeLock: false,
+    portalSeg: -1,
+    portalTake: false,
     stuck: 0,
     reverse: 0,
     holding: 0,
@@ -405,7 +412,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
-  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0) && !air) {
+  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0 || t.portals.length > 0) && !air) {
     blocks = 0;
     projectOnTrack(t, s.x, s.z, s.seg);
     const here = proj.lat;
@@ -547,6 +554,35 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const eta = (d / Math.max(v, 8)) * 60;
       if (planActive(h.plan, ctx.time + eta + 45) || planActive(h.plan, ctx.time + eta)) block(h.lat0 - KART_HALF - 0.7, h.lat1 + KART_HALF + 0.7, 1);
     }
+    // Portale: Was mich bei der Ankunft zurückwürfe, ist gesperrt. Was vorwärts führt, ist ein Ziel – für den,
+    // der es wagt (je Anfahrt einmal entschieden). Kurz vor und nach einem Wechsel gilt ein Rahmen als unsicher.
+    let portalWant = Number.NaN;
+    let portalNear = false;
+    for (const p of t.portals) {
+      let d = -1;
+      for (let k = 0; k < PATH.length && k * t.step <= range + 12; k++) {
+        if (PATH[k] === p.seg) {
+          d = k * t.step;
+          break;
+        }
+      }
+      if (d < 0) continue;
+      portalNear = true;
+      const eta = (d / Math.max(v, 8)) * 60;
+      const early = portalOpen(p, ctx.time + eta - 25);
+      const now = portalOpen(p, ctx.time + eta);
+      const late = portalOpen(p, ctx.time + eta + 25);
+      if (p.kind === 1) {
+        if (early || now || late) block(p.lat0 - KART_HALF - 0.6, p.lat1 + KART_HALF + 0.6, 1);
+      } else if (early && now && late) {
+        if (b.portalSeg !== p.seg) {
+          b.portalSeg = p.seg;
+          b.portalTake = random(b) < PORTAL_DARE[b.level];
+        }
+        if (b.portalTake) portalWant = (p.lat0 + p.lat1) / 2;
+      }
+    }
+    if (!portalNear) b.portalSeg = -1;
     // Tor voraus und noch zu: vom Gas, bis es offen ist.
     for (const g of t.gates) {
       for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
@@ -597,6 +633,12 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       for (let k = 0; k < blocks; k++) if (BLOCK_W[k] >= 1 && riverWant > BLOCK_LO[k] && riverWant < BLOCK_HI[k]) open = false;
       // (Auf dem Fluss gibt es keine Bande, vor der man Abstand hielte: die Bahnmitte liegt gut zwei Meter vom Wasser.)
       if (open) lat = riverWant;
+    }
+    // Portal: ebenfalls ein Ziel – außer, ein gesperrter Streifen liegt darauf.
+    if (portalWant === portalWant) {
+      let open = true;
+      for (let k = 0; k < blocks; k++) if (BLOCK_W[k] >= 1 && portalWant > BLOCK_LO[k] && portalWant < BLOCK_HI[k]) open = false;
+      if (open) lat = portalWant;
     }
   }
   AI_TRACE.lat = lat;

@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -72,6 +72,8 @@ export type SfxName =
   | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – ein tiefer Gong (überall gleich laut) – VORLÄUFIG
   | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter (überall gleich laut) – VORLÄUFIG
   | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
+  | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung) – VORLÄUFIG
+  | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle) – VORLÄUFIG
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

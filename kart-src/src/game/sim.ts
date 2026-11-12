@@ -58,6 +58,7 @@ import {
   PULSE_AVALANCHE,
   PULSE_ROD,
   LOWG_STEER,
+  portalOpen,
   WIND_AIR,
   WIND_EDGE,
   WIND_ENDS,
@@ -250,6 +251,8 @@ export const EV_LAUNCH = 1 << 27;
 export const EV_WIND = 1 << 28;
 /** Im Ladefeld eines Blitzableiters aufgeladen (Schub). */
 export const EV_CHARGE = 1 << 29;
+/** Durch ein Portal gefahren: das Kart steht jetzt an dessen Ausgang. */
+export const EV_PORTAL = 1 << 30;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -1159,6 +1162,39 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (Math.hypot(s.vx, s.vz) > 5) ev |= EV_WALL;
       s.vx *= -0.3;
       s.vz *= -0.3;
+    }
+  }
+
+  // --- Portal: wer durch einen offenen Rahmen fährt, kommt an dessen Ausgang heraus ---
+  // (Gleiche seitliche Lage, gleiches Tempo, Richtung und Höhe über dem Boden wie vorher – nur an anderer Stelle.)
+  if (t.portals.length > 0 && s.respawn === 0) {
+    for (const p of t.portals) {
+      // Durchfahrt: eben noch vor dem Ende des Portal-Abschnitts, jetzt dahinter – auf demselben Weg, in Fahrtrichtung.
+      if (seg0 === s.seg || !samePath(t, p.seg, seg0) || !samePath(t, p.seg, s.seg)) continue;
+      const before = segDelta(t, seg0, p.seg);
+      const after = segDelta(t, s.seg, p.seg);
+      if (before < 0 || before > 6 || after >= 0 || after < -6) continue;
+      if (lat < p.lat0 || lat > p.lat1 || !portalOpen(p, env.time)) continue;
+      const dest = walk(t, p.to, -after - 1);
+      const g0 = groundAt(t, s.seg, along, lat);
+      const turn = trackHeading(t, dest) - trackHeading(t, s.seg);
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const vx = s.vx;
+      // Am Ausgang darf die Fahrbahn schmaler sein: innerhalb der Bande bleiben.
+      const room = Math.max(0, t.wh[dest] - KART_RADIUS - 0.2);
+      const l = Math.max(-room, Math.min(room, lat));
+      s.x = t.px[dest] + t.tx[dest] * along + rightX(t, dest) * l;
+      s.z = t.pz[dest] + t.tz[dest] * along + rightZ(t, dest) * l;
+      const g1 = groundAt(t, dest, along, l);
+      s.y = g1 === NO_GROUND ? t.py[dest] : g1 + (g0 === NO_GROUND ? 0 : Math.max(0, s.y - g0));
+      s.vx = vx * cos + s.vz * sin;
+      s.vz = -vx * sin + s.vz * cos;
+      s.heading = wrapAngle(s.heading + turn);
+      s.seg = dest;
+      lat = l;
+      ev |= EV_PORTAL;
+      break;
     }
   }
 

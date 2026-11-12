@@ -52,6 +52,7 @@ import {
   type Gate,
   type Hole,
   type Plan,
+  type Portal,
   type RaftLane,
   type River,
   raftAt,
@@ -59,7 +60,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -159,6 +160,11 @@ export interface PathFeatures {
    * seitlich lat0 … lat1, Länge und Abstand in Metern, Tempo in m/s, Versatz in Metern).
    */
   rivers?: { from: number; to: number; lanes: { lat0: number; lat1: number; length: number; gap: number; speed: number; phase?: number }[] }[];
+  /**
+   * Portale: Rahmen bei at, seitlich lat0 … lat1; wer hindurchfährt, kommt bei to (Stützpunkt-Einheiten der
+   * Hauptstrecke) heraus. Ohne opens immer offen; sonst offen von opens bis closes (Sekunden), mit every wiederholt.
+   */
+  portals?: { at: number; to: number; lat0: number; lat1: number; opens?: number; closes?: number; every?: number }[];
   /**
    * Bruchstellen: das Stück [from, to], seitlich lat0 … lat1 (Meter), bricht zur Rennzeit at (Sekunden)
    * weg und bleibt weg – oder, mit until, bis zu dieser Rennzeit. Mit every (Sekunden) wiederholt sich das.
@@ -403,6 +409,8 @@ export interface Track {
   winds: Wind[];
   /** Flussstücke mit ihren Floßbahnen (mechanics.ts). */
   rivers: River[];
+  /** Portale (mechanics.ts). */
+  portals: Portal[];
   /**
    * Pontons und je Abschnitt, welche (höchstens zwei) seine Höhe bestimmen und mit welchem Gewicht:
    * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
@@ -1020,6 +1028,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     sea: def.sea ?? 0,
     winds: [],
     rivers: [],
+    portals: [],
     pontoons: [],
     floatA: new Int16Array(total).fill(-1),
     floatB: new Int16Array(total).fill(-1),
@@ -1132,6 +1141,16 @@ export function buildTrack(def: TrackDef, index = 0): Track {
           track.floatWB[seg] = w;
         }
       }
+    }
+    for (const q of p.f.portals ?? []) {
+      // Ein Portal führt von diesem Weg auf die Hauptstrecke (to in deren Stützpunkt-Einheiten).
+      const seg = segAt(p, q.at);
+      const to = mainSeg(q.to);
+      const period = Math.round((q.every ?? 0) * 60);
+      const plan: Plan | null = q.opens === undefined ? null : { period, spans: [Math.round(q.opens * 60), q.closes === undefined ? (period > 0 ? period : Infinity) : Math.round(q.closes * 60)] };
+      // vorwärts oder zurück? (der kürzere Weg um die Runde entscheidet; auf einer Abzweigung gilt es als vorwärts)
+      const ahead = p.closed ? (((to - seg) % n) + n) % n : 0;
+      track.portals.push({ seg, lat0: Math.min(q.lat0, q.lat1), lat1: Math.max(q.lat0, q.lat1), to, plan, kind: ahead <= n / 2 ? 0 : 1 });
     }
     for (const r of p.f.rivers ?? []) {
       const first = segAt(p, r.from);

@@ -132,6 +132,9 @@ const LEVEL: Record<SfxName, number> = {
   raft: 1.2,
   rapids: 0.8,
   falls: 1.4,
+  // Spiegelkabinett (vorläufig)
+  portal: 1.4,
+  mirror: 1.4,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -758,6 +761,8 @@ export class SfxPlayer {
         break;
       // Gewitterkamm (vorläufig: wie der Schubring)
       case 'charge':
+      // Spiegelkabinett (vorläufig: wie der Schubring)
+      case 'portal':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
         // (G6 + D7, leicht schwebend) – Glocke statt Notenfolge wie beim Einsammeln;
@@ -906,6 +911,8 @@ export class SfxPlayer {
           .tone('sine', dF, dF * 1.7, 0.045, 0.05, { at: dAt });
         break;
       }
+      // Spiegelkabinett (vorläufig: wie der Kurzschluss)
+      case 'mirror':
       case 'stall':
         v.tone('sawtooth', 120, 100, 0.07, 0.24)
           .tone('sawtooth', 105, 88, 0.07, 0.22, { at: 0.11 })

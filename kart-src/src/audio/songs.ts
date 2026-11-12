@@ -422,6 +422,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   ruine: KLIPPE,
   gewitter: NACHT,
   dschungel: KLIPPE,
+  // Spiegelkabinett: VORLÄUFIG das Stück der Wolkenbahn
+  spiegel: NEUE_STUECKE.wolken,
   results: RESULTS,
 };
 
