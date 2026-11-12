@@ -42,11 +42,16 @@ import {
   pontoonLift,
   type Pontoon,
   type Wind,
+  GATE_WARN,
+  HOLE_WARN,
+  planActive,
+  type Gate,
+  type Hole,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -137,6 +142,18 @@ export interface PathFeatures {
    * period und phase in Sekunden (ohne Angabe 3,4 und 0). Die Enden sind gelenkige Übergänge.
    */
   pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number }[];
+  /**
+   * Bruchstellen: das Stück [from, to], seitlich lat0 … lat1 (Meter), bricht zur Rennzeit at (Sekunden)
+   * weg und bleibt weg – oder, mit until, bis zu dieser Rennzeit. Mit every (Sekunden) wiederholt sich das.
+   * Reicht ein Bruch über die Fahrbahnmitte, wird ein dort Gestürzter weiter vorn auf festem Boden aufgesetzt.
+   */
+  cracks?: { from: number; to: number; lat0: number; lat1: number; at: number; until?: number; every?: number }[];
+  /**
+   * Tore: sperren eine Abzweigung an ihrer Mündung (auf der Hauptstrecke: den Weg bei at) – von Rennbeginn
+   * bis opens (Sekunden) und/oder ab closes (Sekunden). Mit every (Sekunden) wiederholt sich der Plan; dann
+   * ist das Tor in [closes, opens) zu.
+   */
+  gates?: { at?: number; opens?: number; closes?: number; every?: number; noteOpen?: string; noteShut?: string }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -232,6 +249,11 @@ export const EDGE_GLIDE = 256;
  * Die stehende Welt zeichnet hier keine Fahrbahn – das übernimmt die Darstellung der Pontons.
  */
 export const EDGE_FLOAT = 512;
+/**
+ * Bruchzone: hier bricht im Lauf des Rennens Fahrbahn weg (Track.holes). Auch diese Abschnitte
+ * zeichnet nicht die stehende Welt, sondern die Darstellung der Mechanik – Platte für Platte.
+ */
+export const EDGE_BROKEN = 1024;
 /**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
@@ -350,6 +372,9 @@ export interface Track {
   floatB: Int16Array;
   floatWA: Float32Array;
   floatWB: Float32Array;
+  /** Bruchstellen und Tore (mechanics.ts). */
+  holes: Hole[];
+  gates: Gate[];
   laps: number;
 }
 
@@ -955,6 +980,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     floatB: new Int16Array(total).fill(-1),
     floatWA: new Float32Array(total),
     floatWB: new Float32Array(total),
+    holes: [],
+    gates: [],
     laps: def.laps,
   };
   for (const p of paths) {
@@ -1057,6 +1084,43 @@ export function buildTrack(def: TrackDef, index = 0): Track {
           track.floatWB[seg] = w;
         }
       }
+    }
+    for (const c of p.f.cracks ?? []) {
+      const first = segAt(p, c.from);
+      const last = segAt(p, c.to);
+      const count = Math.max(1, last - first + 1);
+      const lat0 = Math.min(c.lat0, c.lat1);
+      const lat1 = Math.max(c.lat0, c.lat1);
+      track.holes.push({ first, count, lat0, lat1, plan: { period: Math.round((c.every ?? 0) * 60), spans: [Math.round(c.at * 60), c.until === undefined ? Infinity : Math.round(c.until * 60)] }, warn: HOLE_WARN });
+      for (let k = 0; k < count; k++) edge[first + k] |= EDGE_BROKEN;
+      // Bricht auch die Mitte weg, kann dort niemand aufgesetzt werden: zurück bis vor die Bruchstelle
+      // (über den Anfang einer Abzweigung hinaus auf die Hauptstrecke vor der Gabelung).
+      if (lat0 < 1.6 && lat1 > -1.6) {
+        let back = first;
+        for (let k = 0; k < 8; k++) back = prev[back];
+        for (let k = 0; k < count; k++) respawn[first + k] = respawn[back];
+      }
+    }
+    for (const g of p.f.gates ?? []) {
+      // Auf einer Abzweigung steht das Tor an ihrer Mündung: es sperrt alles vom ersten Abschnitt bis kurz
+      // hinter die Stelle, an der sie sich von der Hauptstrecke gelöst hat. Ist es zu, läuft die Bande der
+      // Hauptstrecke dort einfach durch (sim.ts) – niemand fährt erst hinein und steht dann vor einer Wand.
+      let first = segAt(p, g.at ?? 0);
+      let count = 3;
+      if (!p.closed) {
+        first = p.off;
+        count = 0;
+        while (count < p.count - 6 && twin[first + count] >= 0) count++;
+        count += 5;
+      }
+      const period = Math.round((g.every ?? 0) * 60);
+      const spans: number[] = [];
+      if (period > 0) spans.push(Math.round((g.closes ?? 0) * 60), Math.round((g.opens ?? 0) * 60));
+      else {
+        if (g.opens !== undefined) spans.push(-1e9, Math.round(g.opens * 60));
+        if (g.closes !== undefined) spans.push(Math.round(g.closes * 60), Infinity);
+      }
+      track.gates.push({ first, count, plan: { period, spans }, warn: GATE_WARN, noteOpen: g.noteOpen ?? '', noteShut: g.noteShut ?? '' });
     }
     for (const [from, to] of p.f.dives ?? []) spanU(p, from, to, (seg) => (track.deep[seg] = 1));
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
@@ -1384,10 +1448,28 @@ export function heaveAt(t: Track, seg: number, along: number, time: number): num
   return h + (nodeHeave(t, j, time) - h) * f;
 }
 
-/** Höhe des Bodens zur Rennzeit time: wie groundAt, auf Pontons samt Seegang. */
+/** Fehlt an dieser Stelle zur Rennzeit time die Fahrbahn (Bruchstelle)? */
+export function holeAt(t: Track, seg: number, lat: number, time: number): boolean {
+  if ((t.edge[seg] & EDGE_BROKEN) === 0) return false;
+  for (const h of t.holes) {
+    if (seg < h.first || seg >= h.first + h.count || lat < h.lat0 || lat > h.lat1) continue;
+    if (planActive(h.plan, time)) return true;
+  }
+  return false;
+}
+
+/** Sperrt zur Rennzeit time ein Tor diesen Abschnitt? */
+export function gateAt(t: Track, seg: number, time: number): boolean {
+  for (const g of t.gates) if (seg >= g.first && seg < g.first + g.count && planActive(g.plan, time)) return true;
+  return false;
+}
+
+/** Höhe des Bodens zur Rennzeit time: wie groundAt, auf Pontons samt Seegang – und ohne das, was weggebrochen ist. */
 export function groundNow(t: Track, seg: number, along: number, lat: number, time: number): number {
   const g = groundAt(t, seg, along, lat);
-  return g === NO_GROUND || t.pontoons.length === 0 ? g : g + heaveAt(t, seg, along, time);
+  if (g === NO_GROUND) return g;
+  if (t.holes.length > 0 && holeAt(t, seg, lat, time)) return NO_GROUND;
+  return t.pontoons.length === 0 ? g : g + heaveAt(t, seg, along, time);
 }
 
 /** Seitliche Lage eines pendelnden Hindernisses zum Host-Tick tick. */

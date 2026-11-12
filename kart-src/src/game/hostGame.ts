@@ -509,6 +509,12 @@ export class HostGame implements GameView {
    * Nur für Tests: ein Kart an eine Stelle der Strecke setzen – Meter hinter
    * der Startlinie bzw., mit branch ≥ 0, Meter hinter der Gabelung dieser Abzweigung.
    */
+  /** Nur für Tests: stellt die Rennzeit auf seconds Sekunden nach „Los“ (alles, was nach Plan geschieht, springt mit). */
+  debugClock(seconds: number): void {
+    if (this.phase !== RACE_RUNNING) return;
+    this.goTick = this.tick - Math.max(0, Math.round(seconds * 60));
+  }
+
   /**
    * Nur für Tests: beendet das laufende Rennen sofort. order nennt die Plätze (slots) in der
    * Reihenfolge des Zieleinlaufs; wer fehlt, folgt im aktuellen Stand des Rennens.

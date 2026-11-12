@@ -72,6 +72,7 @@ import {
   TRACK,
   centerHeight,
   gridPosition,
+  gateAt,
   groundAt,
   groundNow,
   heaveAt,
@@ -1099,6 +1100,51 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         const turn = wrapAngle(trackHeading(t, s.seg) - s.heading);
         if (Math.abs(turn) < Math.PI / 2) s.heading = wrapAngle(s.heading + turn * 0.08);
       }
+    }
+  }
+
+  // --- Tor: eine gesperrte Abzweigung ---
+  // An der Mündung liegen Abzweigung und Hauptstrecke noch ineinander: dort läuft, solange das Tor zu ist, die
+  // Bande der Hauptstrecke einfach durch. (Wer tiefer drin ist, wenn es schließt, kommt noch hinaus.)
+  if (t.gates.length > 0 && gateAt(t, s.seg, env.time)) {
+    const tw = t.twin[s.seg];
+    if (tw >= 0) {
+      const nx = rightX(t, tw);
+      const nz = rightZ(t, tw);
+      const l = (s.x - t.px[tw]) * nx + (s.z - t.pz[tw]) * nz;
+      const over = Math.abs(l) - (t.wh[tw] - KART_RADIUS);
+      if (over > 0) {
+        const sgn = l > 0 ? 1 : -1;
+        s.x -= nx * sgn * over;
+        s.z -= nz * sgn * over;
+        const vn = (s.vx * nx + s.vz * nz) * sgn;
+        if (vn > 0) {
+          s.vx -= nx * sgn * vn * 1.3;
+          s.vz -= nz * sgn * vn * 1.3;
+          const loss = Math.min(0.55, 0.008 + vn * 0.03);
+          s.vx *= 1 - loss;
+          s.vz *= 1 - loss;
+          if (vn > 5) {
+            ev |= EV_WALL;
+            s.driftDir = 0;
+            s.driftCharge = 0;
+          }
+        }
+        flags |= FLAG_WALL;
+        projectOnTrack(t, s.x, s.z, tw);
+        s.seg = proj.seg;
+        lat = proj.lat;
+        along = proj.along;
+      }
+    } else if (!gateAt(t, seg0, env.time)) {
+      s.x = x0;
+      s.z = z0;
+      s.seg = seg0;
+      lat = lat0;
+      along = along0;
+      if (Math.hypot(s.vx, s.vz) > 5) ev |= EV_WALL;
+      s.vx *= -0.3;
+      s.vz *= -0.3;
     }
   }
 

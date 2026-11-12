@@ -25,7 +25,11 @@ import {
 } from '../../src/game/track';
 import { RACE_RUNNING, THING_TOP } from '../../src/net/protocol';
 
+/** Was einzelne Tests an den (gemeinsam genutzten) Strecken verstellt haben, wird am Ende zurückgedreht. */
+const restore: (() => void)[] = [];
+
 afterAll(() => {
+  for (const undo of restore) undo();
   setTrack(0);
 });
 
@@ -287,6 +291,15 @@ describe('Rennfortschritt über Abzweigungen (alle Strecken)', () => {
     it(`Strecke ${ti + 1}: wer überall abbiegt, kommt genau an der Ziellinie ins Ziel`, () => {
       setTrack(ti);
       const t = TRACK;
+      // Geprüft wird die Zählung des Fortschritts, nicht die Mechanik: Tore und Bruchstellen, die einen Weg
+      // zeitweise sperren (Vulkaninsel), bleiben für diesen Lauf offen. afterAll stellt sie wieder her.
+      const kept = { gates: t.gates, holes: t.holes };
+      t.gates = [];
+      t.holes = [];
+      restore.push(() => {
+        t.gates = kept.gates;
+        t.holes = kept.holes;
+      });
       const host = new HostGame(0);
       host.setRoster([0], false);
       host.newRace();

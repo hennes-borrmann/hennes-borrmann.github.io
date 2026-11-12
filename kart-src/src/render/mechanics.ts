@@ -17,6 +17,7 @@ import { buildMoon } from './mechanics/moon';
 import { buildSnow } from './mechanics/snow';
 import { buildTide } from './mechanics/tide';
 import { buildTraffic } from './mechanics/traffic';
+import { buildVolcano } from './mechanics/volcano';
 
 export interface MechanicView {
   readonly group: THREE.Group;
@@ -47,5 +48,6 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.pulses.some((p) => p.kind === PULSE_AVALANCHE || p.kind === PULSE_ICICLE)) out.push(buildSnow(track, detail));
   if (track.launchers.length > 0 || track.pulses.some((p) => p.kind === PULSE_METEOR)) out.push(buildMoon(track, detail));
   if (track.winds.length > 0 || track.pontoons.length > 0) out.push(buildHarbor(track, detail));
+  if (track.holes.length > 0 || track.gates.length > 0) out.push(buildVolcano(track, detail));
   return out;
 }
