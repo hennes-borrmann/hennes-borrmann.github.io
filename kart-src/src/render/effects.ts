@@ -470,6 +470,86 @@ export class SpeedLines {
   }
 }
 
+// --- Scheinwerfer ----------------------------------------------------------------
+
+/**
+ * Lichtkegel der Karts auf dunklen Strecken: je Kart ein flacher, heller Fächer auf dem Boden vor der Nase.
+ * Kein echtes Licht (das hieße neue Lichtarten in allen Materialien), sondern eine additiv aufgehellte Fläche
+ * mit Eckenfarben, die nach vorn und zu den Seiten ausläuft – ohne Textur, ohne eigenen Shader.
+ */
+export class LightPools {
+  readonly mesh: THREE.InstancedMesh;
+  private readonly m = new THREE.Matrix4();
+  private readonly s = new THREE.Vector3(1, 1, 1);
+  private readonly p = new THREE.Vector3();
+  private count = 0;
+
+  constructor(capacity: number) {
+    // Fächer in der Ebene y = 0, Spitze bei z = 0, nach +z (Fahrtrichtung) 15 m lang; drei Ringe, fünf Strahlen.
+    const rows = [0.9, 5, 10, 15];
+    const half = [0.7, 2.3, 3.6, 4.6];
+    const glow = [0.62, 0.5, 0.24, 0];
+    const cols = 5;
+    const pos: number[] = [];
+    const col: number[] = [];
+    const idx: number[] = [];
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < cols; c++) {
+        const u = c / (cols - 1) - 0.5;
+        pos.push(u * 2 * half[r], 0, rows[r]);
+        // zur Seite hin weich auslaufend; warmweiß
+        const k = glow[r] * (1 - Math.abs(u * 2) ** 2);
+        col.push(k, k * 0.94, k * 0.72);
+      }
+    }
+    for (let r = 0; r < rows.length - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const a = r * cols + c;
+        idx.push(a, a + cols, a + 1, a + 1, a + cols, a + cols + 1);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -12,
+    });
+    this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 3;
+    this.mesh.count = 0;
+  }
+
+  begin(): void {
+    this.count = 0;
+  }
+
+  /** Kegel am Boden vor einem Kart; q richtet ihn am Hang und in Fahrtrichtung aus. */
+  add(x: number, groundY: number, z: number, q: THREE.Quaternion): void {
+    if (this.count >= this.mesh.instanceMatrix.count) return;
+    this.m.compose(this.p.set(x, groundY + 0.07, z), q, this.s);
+    this.mesh.setMatrixAt(this.count++, this.m);
+  }
+
+  end(): void {
+    this.mesh.count = this.count;
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+  }
+}
+
 // --- Blitze ----------------------------------------------------------------------
 
 /** Gezackte Leuchtbänder zwischen zwei Punkten – der Kurzschluss springt sichtbar vom Auslöser zum Opfer. */

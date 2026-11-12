@@ -128,6 +128,11 @@ const LEVEL: Record<SfxName, number> = {
   // der Sturm-Aufrufe ≈ −34 LUFS wie der Fahrtwind im Gleitflug – ein Bett, kein Hauptdarsteller.
   gust: 4.5,
   storm: 0.85,
+  // Gewitterkamm (vorläufig)
+  thunder: 2.2,
+  rod: 1.6,
+  rumble: 1.2,
+  charge: 1.4,
   // Zeitriss-Ruine (vorläufig)
   riftwarn: 1.6,
   rift: 1.8,
@@ -703,6 +708,10 @@ export class SfxPlayer {
       // Vulkaninsel (vorläufig: brechen und leerlaufen wie der Einschlag)
       case 'crack':
       case 'drain':
+      // Gewitterkamm (vorläufig)
+      case 'thunder':
+      case 'rod':
+      case 'rumble':
       // Zeitriss-Ruine (vorläufig)
       case 'riftwarn':
       case 'rift':
@@ -743,6 +752,8 @@ export class SfxPlayer {
           .noise(500, 2300, 0.34, 0.16, { q: 0.8, attack: 0.07, at: 0.05 })
           .tone('sine', 380, 880, 0.3, 0.05, { attack: 0.1, at: 0.09, vibHz: 6, vibDepth: 0.02 });
         break;
+      // Gewitterkamm (vorläufig: wie der Schubring)
+      case 'charge':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
         // (G6 + D7, leicht schwebend) – Glocke statt Notenfolge wie beim Einsammeln;

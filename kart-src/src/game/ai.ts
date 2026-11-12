@@ -34,7 +34,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -481,6 +481,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         }
         continue;
       }
+      // Ein Blitzableiter ist keine Gefahr (sein Ladefeld schiebt an) – und der Mast steht neben der Bahn.
+      if (p.kind === PULSE_ROD) continue;
       if (c0 < p.on || c1 < p.on || c1 < c0) block(p.lat - p.radius - KART_HALF - 0.5, p.lat + p.radius + KART_HALF + 0.5, 1);
     }
     // Bruchstellen: was bei meiner Ankunft weggebrochen ist (oder gerade bricht), ist gesperrt.

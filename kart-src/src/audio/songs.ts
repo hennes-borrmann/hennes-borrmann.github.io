@@ -420,6 +420,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   // (vorläufig, bis die eigenen Stücke da sind)
   vulkan: GLUT,
   ruine: KLIPPE,
+  gewitter: NACHT,
   results: RESULTS,
 };
 
