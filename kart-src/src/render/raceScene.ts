@@ -47,6 +47,7 @@ import {
   eraSince,
   eraUntil,
   planActive,
+  portalOpen,
   pulseCycle,
   tideLevel,
   vehicleAt,
@@ -163,7 +164,9 @@ export interface SceneEvent {
     | 'falls'
     /** Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt / durch eines, das zurückwirft. */
     | 'portal'
-    | 'mirror';
+    | 'mirror'
+    /** Spiegelkabinett (ortsfest, slot −1): in einem Rahmen erscheint oder verschwindet ein Spiegel. */
+    | 'shimmer';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -902,6 +905,16 @@ export class RaceScene {
           const d = Math.hypot(me.x - t.px[g.first], me.z - t.pz[g.first]);
           if (d < 80) this.shake = Math.max(this.shake, 0.6 * (1 - d / 80));
         }
+      }
+      // Spiegelkabinett: in einem Rahmen erscheint ein Spiegel oder er verschwindet – ein Schimmern am Ort des Rahmens.
+      // (Rahmen mit zwei Spiegeln im Wechsel melden sich je Tausch einmal: beim Erscheinen.)
+      for (const p of t.portals) {
+        if (p.plan === null) continue;
+        const open = portalOpen(p, time);
+        if (open === portalOpen(p, before)) continue;
+        if (!open && t.portals.some((q) => q !== p && q.seg === p.seg && q.lat0 === p.lat0)) continue;
+        const lat = (p.lat0 + p.lat1) / 2;
+        this.emitAt('shimmer', t.px[p.seg] + rightX(t, p.seg) * lat, t.py[p.seg] + 2, t.pz[p.seg] + rightZ(t, p.seg) * lat, 110);
       }
       // Dschungel-Fluss: der Wasserfall tost – hörbar, solange man in seiner Nähe ist (alle halbe Sekunde ein Schwall).
       if (t.rivers.length > 0 && Math.floor(time / 30) !== Math.floor(before / 30)) {

@@ -135,6 +135,7 @@ const LEVEL: Record<SfxName, number> = {
   // Spiegelkabinett (vorläufig)
   portal: 1.4,
   mirror: 1.4,
+  shimmer: 1.0,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -763,6 +764,7 @@ export class SfxPlayer {
       case 'charge':
       // Spiegelkabinett (vorläufig: wie der Schubring)
       case 'portal':
+      case 'shimmer':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
         // (G6 + D7, leicht schwebend) – Glocke statt Notenfolge wie beim Einsammeln;
