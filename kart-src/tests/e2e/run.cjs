@@ -219,7 +219,9 @@ async function main() {
 
   const inviteUrl = await kart(host.page, 'inviteUrl()');
   const client = await openScreen('client');
-  await client.page.goto(inviteUrl);
+  // (Dieser Mitspieler wartet länger als die üblichen 30 s auf einen verlorenen Host: Ohne Grafikkarte hängt der Host im
+  // Abschnitt „Volle Lobby" beim ersten Bild des Rennens unter Last länger – das Fenster selbst prüft „Host verschwindet".)
+  await client.page.goto(`${inviteUrl}&warten=180`);
   await client.page.waitForSelector('#app[data-view="home"]');
   check('Einladungslink füllt den Raumcode vor', (await client.page.inputValue('#in-code')) === code);
   await joinLobby(client, 'Ben', null);
@@ -988,6 +990,14 @@ async function main() {
     const code7 = await createLobby(h7, 'Anna');
     const c7 = await openScreen('client7', '&laps=2&alle=1');
     await joinLobby(c7, 'Ben', code7);
+    // Die KI-Gegner (Plätze 2 und 3) bekommen in diesem Abschnitt keine Gegenstände: Sonst trifft ein Störsender oder ein
+    // Rollreifen ein Kart, das für eine Prüfung still an einer Stelle steht – und die Prüfung misst den Treffer statt der Strecke.
+    await h7.page.evaluate(() => {
+      window.__noItems = setInterval(() => {
+        const k = window.__kart;
+        if (k && k.race && k.race()) for (const slot of [2, 3]) k.giveItem(slot, 0);
+      }, 50);
+    });
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
     check('Streckenwahl nennt die Eigenheit der Nachtschicht', /Stadtverkehr/.test(twist || ''), twist || '');

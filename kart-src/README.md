@@ -209,6 +209,7 @@ Prüfen, ob TURN funktioniert: Seite mit `?turn=force` öffnen (dann ist nur der
 | `?laps=1` | Rundenzahl überschreiben, geht der Auswahl in der Lobby vor (zählt beim Host) |
 | `?track=2` / `?ai=0` | Strecke (ab 0 gezählt) bzw. KI-Stärke (0–2) vorwählen (zählt beim Host) |
 | `?alle=1` | auch Strecken anbieten, die noch in Arbeit sind (zurzeit keine – alle fünfzehn stehen in der Lobby) |
+| `?warten=120` | so viele Sekunden (5 bis 600, sonst 30) versucht ein Mitspieler, einen verlorenen Host wieder zu erreichen; der Tab merkt es sich über ein Neuladen hinweg. Für den Browser-Test auf Rechnern ohne Grafikkarte, auf denen der Host beim ersten Bild eines Rennens lange hängen kann |
 | `?q=low` | Grafik: `low`, `medium`, `high`, `auto` |
 | `?mute=1` | ohne Ton starten |
 | `?auto=1` | das eigene Kart fährt von selbst – zum Ausprobieren ohne Controller |

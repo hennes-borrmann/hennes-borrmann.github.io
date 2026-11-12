@@ -27,8 +27,25 @@ export type ClientStatus =
   | 'replaced'; // derselbe Spieler ist in einem anderen Tab aktiv
 
 const RETRY_MS = 1200;
-/** So lange versuchen wir nach einem Abbruch, den Host wieder zu erreichen. */
-const RECONNECT_WINDOW_MS = 30_000;
+/**
+ * So lange versuchen wir nach einem Abbruch, den Host wieder zu erreichen: eine halbe Minute.
+ * Test-Schalter `?warten=<Sekunden>` (5 … 600) ändert das für diesen Tab (er merkt es sich über ein Neuladen hinweg) –
+ * gedacht für den Browser-Test auf einer Maschine ohne Grafikkarte, auf der der Host beim ersten Bild eines Rennens
+ * länger als eine halbe Minute hängen kann.
+ */
+const RECONNECT_WINDOW_MS = reconnectWindow();
+
+function reconnectWindow(): number {
+  try {
+    const asked = new URLSearchParams(location.search).get('warten');
+    if (asked !== null) sessionStorage.setItem('kart-warten', asked);
+    const seconds = Number(sessionStorage.getItem('kart-warten'));
+    if (seconds >= 5 && seconds <= 600) return seconds * 1000;
+  } catch {
+    // kein Fenster (Tests in Node) oder kein Speicher: Standard
+  }
+  return 30_000;
+}
 const FIRST_CONNECT_WINDOW_MS = 25_000;
 
 const FINAL: ClientStatus[] = ['not-found', 'unreachable', 'rejected', 'closed', 'lost', 'replaced'];
