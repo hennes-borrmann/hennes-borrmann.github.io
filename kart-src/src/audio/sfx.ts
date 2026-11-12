@@ -48,6 +48,12 @@ const METEOR_GRAVEL = [
   [0.46, 1100, 0.63, 1400, 0.78, 850, 0.95, 1050, 1.15, 780],
   [0.5, 950, 0.62, 1250, 0.8, 1000, 0.97, 1200, 1.12, 850],
 ];
+/** Böe: je Fassung die zwei Pfeiftöne (Hz) in der Takelage, dann paarweise [Beginn (s), Eckfrequenz (Hz)] der klappernden Leinen. */
+const GUST_PATTERN = [
+  [1180, 1630, 0.5, 2300, 0.58, 1900, 0.71, 2500, 0.86, 2100],
+  [1040, 1490, 0.47, 2000, 0.6, 2600, 0.69, 1800, 0.9, 2300],
+  [1310, 1770, 0.53, 2400, 0.62, 2000, 0.77, 2200, 0.84, 2700],
+];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -117,9 +123,11 @@ const LEVEL: Record<SfxName, number> = {
   icicle: 4,
   launch: 1.9,
   meteor: 2.3,
-  // Sturmhafen (vorläufig)
-  gust: 1.6,
-  storm: 0.9,
+  // Sturmhafen (Runde 10), gemessen wie oben: die Böe ≈ −10 LUFS (etwas über Geysir und
+  // Lawine, damit das Warnsignal aus der Nähe sicher über Motor und Musik kommt); die Folge
+  // der Sturm-Aufrufe ≈ −34 LUFS wie der Fahrtwind im Gleitflug – ein Bett, kein Hauptdarsteller.
+  gust: 4.5,
+  storm: 0.85,
   // Zeitriss-Ruine (vorläufig)
   riftwarn: 1.6,
   rift: 1.8,
@@ -289,6 +297,7 @@ export class SfxPlayer {
   private snowTick = 0;
   private icicleTick = 0;
   private meteorTick = 0;
+  private gustTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -753,9 +762,6 @@ export class SfxPlayer {
           .noise(2200, 4500, 0.85, 0.05, { type: 'highpass', attack: 0.34, at: 0.06 })
           .tone('sine', 230, 460, 0.9, 0.03, { attack: 0.4, vibHz: 4, vibDepth: 0.015 });
         break;
-      // Sturmhafen (vorläufig: wie der Fahrtwind)
-      case 'gust':
-      case 'storm':
       case 'wind': {
         // Fahrtwind im Gleitflug, etwa alle 0,42 s aufgerufen (je nach Bildrate 0,36–0,5 s):
         // drei breite Rauschschichten, um je 0,15 s versetzt, die langsam (0,45 s) ein- und
@@ -780,6 +786,72 @@ export class SfxPlayer {
           .noise(260, 200, 1.35, 0.05, { type: 'lowpass', brown: true, attack: 0.45, at: 0.075 })
           .noise(240, 200, 1.35, 0.05, { type: 'lowpass', brown: true, attack: 0.45, at: 0.3 })
           .noise(w, w * 1.15, 0.9, 0.02, { q: 7, attack: 0.35, at: 0.1 });
+        break;
+      }
+      // --- Sturmhafen ---
+      case 'gust': {
+        // Eine Böe setzt ein (ortsfest, einmal je Böe, ~1,2 s) – das Warnsignal der Strecke.
+        // Ein Fauchen schwillt in gut einer halben Sekunde an (so lange, wie die Böe in der
+        // Physik zum vollen Schub braucht: WIND_RISE = 26 Ticks), hält kurz und verweht: drei
+        // breite Rauschbänder, gestaffelt einsetzend, die ersten beiden fahren hinauf (260 →
+        // 1500 und 500 → 2300 Hz: der Wind „kommt heran"), das dritte schon wieder hinab;
+        // darüber Gischt (Hochpass), darunter Druck aus braunem Rauschen. In der Takelage und
+        // an den Kränen pfeift es: zwei enge Rauschbänder (Güte 12–14, also immer noch Rauschen
+        // und kein Sinus), die nur eine Viertel- bzw. Achteloktave gleiten und nicht wiederkehren
+        // – darum keine Sirene. Auf dem Höhepunkt schlagen lose Leinen an (vier kurze Klapse).
+        // Abgrenzung: 'wind' ist ein gleichmäßiges Bett um 0,8–0,95 kHz ohne Anschwellen,
+        // 'lift' ein weiches, dünnes Aufrauschen mit Sinus; die Böe ist breiter, lauter, hat
+        // Pfeifen und Klappern und fällt nach dem Gipfel wieder. Drei Fassungen reihum
+        // (Pfeiftöne, Klapse). Gemessen (vor dem Mischpult): −9,6 bis −10,3 LUFS (Geysir −11,3,
+        // Lawine −11,5), Spitze 1,3–1,6, voll nach ≈ 0,5 s, ab 0,8 s fallend, Dauer 1,2 s;
+        // im Spiel-Mix aus 0 m (Faktor 0,55) hebt sie gegen Motor und Musik die Oktaven
+        // 1/2/4 kHz um 1,9/4/8 dB an – mehr als der Geysir (−0,3/1,5/6,9 dB).
+        const k = this.gustTick++ % 3;
+        const g = GUST_PATTERN[k];
+        v.noise(260, 1500, 1.0, 0.3, { q: 0.7, attack: 0.45 })
+          .noise(500, 2300, 1.0, 0.3, { q: 0.8, attack: 0.36, at: 0.2 })
+          .noise(2400, 900, 0.95, 0.25, { q: 0.75, attack: 0.3, at: 0.4 })
+          .noise(4200, 6500, 0.8, 0.07, { type: 'highpass', attack: 0.32, at: 0.25 })
+          .noise(160, 380, 1.15, 0.3, { type: 'lowpass', brown: true, attack: 0.5, at: 0.05 })
+          .noise(g[0] * 0.86, g[0] * 1.07, 0.95, 0.5, { q: 12, attack: 0.45, at: 0.15 })
+          .noise(g[1] * 1.05, g[1] * 0.93, 0.7, 0.35, { q: 14, attack: 0.25, at: 0.45 });
+        for (let i = 2; i < g.length; i += 2) v.noise(g[i + 1], g[i + 1] * 0.7, 0.035, 0.3, { q: 3, at: g[i], attack: 0.002 });
+        break;
+      }
+      case 'storm': {
+        // Das eigene Kart steckt in der Böe; etwa alle 0,3 s aufgerufen (raceScene: gustWait,
+        // je nach Bildrate 0,30–0,33 s). Jeder Aufruf ist ~0,55 s lang und weich: fünf Schichten
+        // braunes Rauschen (Druck, 230–340 Hz) um je 0,065 s versetzt, mit 0,16 s Anstieg – so
+        // liegt auch über die Aufrufe hinweg etwa alle 0,065 s ein neuer Gipfel an, und zwischen
+        // 0,30 und 0,33 s Abstand entsteht keine Lücke (mit drei Schichten zu 0,1 s fiel die
+        // Folge bei 0,33 s periodisch um 5 dB ein). Darüber drei breite Bänder um 0,9–1,35 kHz
+        // und ein Hochpass-Zischen, deren Mitten bei jedem Aufruf zufällig etwas anders liegen:
+        // das Rauschen „wandert", ohne im Aufruftakt zu pumpen. Das Knattern (Plane, Jacke) sind
+        // kurze, breite Klapse (0,7–1,4 kHz) in unregelmäßigen Abständen von 42–72 ms, drei bis
+        // sechs je Aufruf, und bei etwa jedem dritten Aufruf keine – so flattert es in Schüben
+        // und nicht im 0,3-s-Raster. Abgrenzung: 'wind' (Fliegen) ist glatt und mittig ohne
+        // Knattern und tiefen Druck; 'snow' dumpf mit Wummern.
+        // Gemessen, 14 Aufrufe (systematische Welligkeit über 8 Durchläufe gemittelt, 50 ms):
+        // 2,3 dB bei 0,30 s, 2,7 dB bei 0,333 s, 2,8 dB bei 0,31 s ± 15 ms Zittern (der tiefste
+        // gemittelte Wert liegt höchstens 2 dB unter dem Mittel); 40 Aufrufe: Anfang und Ende
+        // gleich laut, nichts schaukelt sich auf. Pegel der Folge −33,9 bis −34,8 LUFS, wie
+        // 'wind' im Gleitflug (−33,7). Das Knattern hebt die Folge um
+        // ≈ 1 dB und bringt Spitzen von ≈ 16 dB über dem Rauschen.
+        const r = Math.random;
+        const lo = 230 + 90 * r();
+        const mid = 900 + 450 * r();
+        for (let i = 0; i < 5; i++) v.noise(lo + 20 * i, lo * 0.8, 0.3, 0.09, { type: 'lowpass', brown: true, attack: 0.16, at: i * 0.065 });
+        for (let i = 0; i < 3; i++) v.noise(mid * (0.85 + 0.3 * r()), mid * (0.85 + 0.3 * r()), 0.36, 0.06, { q: 0.6, attack: 0.18, at: 0.02 + i * 0.11 });
+        v.noise(2800 + 1200 * r(), 3600 + 1200 * r(), 0.55, 0.03, { type: 'highpass', attack: 0.27 });
+        if (r() < 0.7) {
+          let t = 0.1 + 0.08 * r();
+          const n = 3 + Math.floor(r() * 4);
+          for (let i = 0; i < n && t < 0.42; i++) {
+            const f = 700 + 700 * r();
+            v.noise(f, f * 0.7, 0.035, 0.4 * (0.7 + 0.3 * r()), { q: 1.3, at: t, attack: 0.002 });
+            t += 0.042 + 0.03 * r();
+          }
+        }
         break;
       }
       // --- Maschinen und Wasser ---

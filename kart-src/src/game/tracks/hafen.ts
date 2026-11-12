@@ -133,16 +133,19 @@ export const HAFEN: TrackDef = {
       // An Gabelung und Einmündung so breit wie die Hauptstrecke, dazwischen schmale Stahlroste.
       roadHalf: 6.4,
       shoulder: 1.6,
-      widths: [[0.9, 4.3, 4.8, 0.4]],
-      surfaces: [[0.8, 4.4, 'metal']],
+      // Die Kette endet auf einem festen Steg, bevor die Abzweigung in die Mole einläuft (ab 4.0 liegen beide
+      // Fahrbahnen ineinander): Ein schwankendes Deck neben der festen Nachbarfahrbahn gäbe eine Stufe.
+      widths: [[0.9, 4.02, 4.8, 0.4]],
+      surfaces: [[0.8, 4.0, 'metal']],
       decks: [[0.6, 4.7]],
-      open: [[0.95, 4.25, 0]],
+      open: [[0.95, 3.92, 0]],
       pontoons: [
         { from: 1.0, to: 2.0, amp: 0.85, period: 3.2, phase: 0 },
         { from: 2.0, to: 3.1, amp: 0.9, period: 3.6, phase: 1.5 },
-        { from: 3.1, to: 4.2, amp: 0.85, period: 3.0, phase: 2.3 },
+        // der dritte ist kürzer: dahinter folgt fester Steg
+        { from: 3.1, to: 3.75, amp: 0.85, period: 3.0, phase: 2.3 },
       ],
-      winds: [{ from: 0.9, to: 4.3, push: -3.6, period: 5.5, phase: 1, gust: 2.2 }],
+      winds: [{ from: 0.9, to: 3.92, push: -3.6, period: 5.5, phase: 1, gust: 2.2 }],
       boxRows: [2.5],
     },
   ],

@@ -7,9 +7,9 @@
 <meta name="robots" content="noindex">
 <title>Schräglage – Kart-Racer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23101214'/%3E%3Cpath d='M9 24 15 8h8l-6 16z' fill='%23ffd23f'/%3E%3C/svg%3E">
-  <script type="module" crossorigin src="./assets/screen-BfQheikk.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/items-B8Atd-iY.js">
-  <link rel="stylesheet" crossorigin href="./assets/screen-Cl72X6K6.css">
+  <script type="module" crossorigin src="./assets/screen-W7WdWrWv.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/items-BV8_lbHB.js">
+  <link rel="stylesheet" crossorigin href="./assets/screen-DmZ6ECrc.css">
 </head>
 <body>
 <div id="app" data-view="boot">
@@ -78,7 +78,33 @@
           <p id="char-trait" class="char-trait"></p>
         </div>
         <div class="setup">
-          <h2 class="eyebrow">Strecke</h2>
+          <h2 class="eyebrow">Modus</h2>
+          <div class="setup-row mode-row">
+            <div id="mode" class="seg seg-wide" role="group" aria-label="Spielmodus">
+              <button type="button" data-mode="single">Einzelrennen</button>
+              <button type="button" data-mode="cup">Turnier</button>
+            </div>
+            <div id="cup-size-box" class="setup-ai">
+              <span class="setup-label">Rennen</span>
+              <div id="cup-size" class="seg" role="group" aria-label="Anzahl der Rennen im Turnier">
+                <button type="button" data-races="3">3</button>
+                <button type="button" data-races="5">5</button>
+                <button type="button" data-races="10">10</button>
+              </div>
+            </div>
+          </div>
+          <p id="mode-note" class="players-note"></p>
+          <div id="cup-panel" class="cup-panel" hidden>
+            <div class="cup-head">
+              <strong id="cup-title">Turnier</strong>
+              <span id="cup-progress"></span>
+            </div>
+            <ol id="cup-table" class="cup-table"></ol>
+            <button id="btn-cup-end" class="btn btn-quiet btn-small" type="button">Turnier beenden</button>
+          </div>
+        </div>
+        <div class="setup">
+          <h2 id="track-head" class="eyebrow">Strecke</h2>
           <div id="track-list" class="track-list"></div>
           <div class="setup-row">
             <label id="bots-toggle" class="bots-toggle"><input id="chk-bots" type="checkbox"> <span>Freie Plätze mit KI-Gegnern auffüllen</span></label>
@@ -166,10 +192,18 @@
         <p class="eyebrow" id="results-track">Zieleinlauf</p>
         <h2>Zieleinlauf</h2>
         <ol id="results-list" class="results-list"></ol>
+        <div id="results-cup" class="results-cup" hidden>
+          <div class="results-cup-head">
+            <h3 id="results-cup-title">Gesamtstand</h3>
+            <span id="results-cup-progress"></span>
+          </div>
+          <ol id="results-cup-list" class="results-cup-list"></ol>
+        </div>
         <p id="results-note" class="results-note"></p>
         <div class="results-actions">
           <button id="btn-lobby" class="btn" type="button">Zur Lobby</button>
           <button id="btn-again" class="btn btn-primary" type="button">Nochmal</button>
+          <button id="btn-next" class="btn btn-primary" type="button" hidden>Nächstes Rennen</button>
         </div>
       </div>
     </section>
@@ -189,6 +223,19 @@
       </div>
     </section>
   </main>
+
+  <!-- Turnier: Auslosung der nächsten Strecke -->
+  <section id="draw" class="draw" hidden>
+    <div class="draw-head">
+      <p id="draw-eyebrow" class="eyebrow">Turnier</p>
+      <h2 id="draw-title">Wohin geht’s?</h2>
+    </div>
+    <div class="draw-window">
+      <div id="draw-strip" class="draw-strip"></div>
+      <div class="draw-mark" aria-hidden="true"></div>
+    </div>
+    <p id="draw-twist" class="draw-twist"></p>
+  </section>
 
   <div id="banner" class="banner" role="status" hidden></div>
 
