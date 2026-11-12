@@ -136,6 +136,11 @@ const LEVEL: Record<SfxName, number> = {
   portal: 1.4,
   mirror: 1.4,
   shimmer: 1.0,
+  // Wüstenexpress (vorläufig)
+  whistle: 1.4,
+  trainpass: 0.8,
+  board: 1.2,
+  rattle: 0.8,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -487,6 +492,8 @@ export class SfxPlayer {
           .noise(4400, 3800, 0.02, 0.1, { q: 4, at: 0.31 })
           .noise(3200, 2700, 0.025, 0.09, { q: 4, at: 0.43 });
         break;
+      // Wüstenexpress (vorläufig: wie die Hupe)
+      case 'whistle':
       case 'honk':
         // „Möp-möp": zwei kurze Stöße aus großer Terz (F + A), leicht absackend,
         // mit einer weichen Dreieckstimme darunter, damit es rund statt schrill klingt.
@@ -497,6 +504,8 @@ export class SfxPlayer {
           .tone('pulse25', 440, 416, 0.2, 0.13, { attack: 0.008, at: 0.15, vibHz: 7, vibDepth: 0.01 })
           .tone('triangle', 175, 166, 0.2, 0.2, { attack: 0.008, at: 0.15 });
         break;
+      // Wüstenexpress (vorläufig: wie der Fahrtwind beim Überholen)
+      case 'trainpass':
       case 'pass': {
         // Fahrtwind-„Wusch": Rauschen schwillt an und fällt wieder (zwei überlappende Fahrten).
         // Die Mitte wechselt leicht, damit es nicht bei jedem Vorbeiziehen gleich klingt.
@@ -929,6 +938,9 @@ export class SfxPlayer {
         v.noise(700, 320, 0.11, 0.3, { q: 1.2 }).tone('sine', 118, 58, 0.1, 0.38);
         break;
       // Dschungel-Fluss (vorläufig: wie die Landung)
+      // Wüstenexpress (vorläufig: wie das Floß)
+      case 'board':
+      case 'rattle':
       case 'raft':
       case 'land':
         v.noise(320, 120, 0.16, 0.5, { type: 'lowpass', brown: true }).tone('sine', 96, 46, 0.14, 0.42).noise(2200, 900, 0.05, 0.1, { q: 1 });
