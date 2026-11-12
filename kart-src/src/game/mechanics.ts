@@ -92,6 +92,65 @@ export const PULSE_AVALANCHE = 4;
 export const PULSE_ICICLE = 5;
 /** Meteorit: schlägt im Takt ein – trifft wie eine Lavabombe, der Krater glüht kurz nach. */
 export const PULSE_METEOR = 6;
+/** Blitz: schlägt im Takt an einer Stelle der Fahrbahn ein – trifft wie eine Lavabombe; kurze, grelle Vorwarnung. */
+export const PULSE_BOLT = 7;
+/**
+ * Blitzableiter: ein Mast neben der Bahn (bei lat), in den im Takt der Blitz fährt. Solange er geladen ist
+ * (on Ticks), steht quer über die ganze Fahrbahn ein Ladefeld – radius Meter vor und hinter dem Mast. Wer
+ * hindurchfährt, wird aufgeladen: ein Schub wie vom Boost-Feld. Kein Treffer.
+ */
+export const PULSE_ROD = 8;
+
+// --- Wetterleuchten ------------------------------------------------------------------
+// Auf einer dunklen Strecke (Gewitterkamm) erhellt jeder Blitz für einen Augenblick alles. Wie hell es
+// gerade ist, folgt allein aus der Rennzeit – auf jedem Bildschirm gleich (render/mechanics/storm.ts).
+
+/** Fernes Wetterleuchten ohne Einschlag: Takt und Versatz in Ticks, Helligkeit 0…1. */
+export interface Flash {
+  period: number;
+  phase: number;
+  power: number;
+}
+
+/** So lange leuchtet ein Blitz nach (Ticks). */
+export const FLASH_TICKS = 26;
+
+/**
+ * Helligkeit eines Blitzes c Ticks nach seinem Beginn: heller Schlag, ein leichtes Nachzucken, Ausklang. 0…1.
+ * Bewusst kein hartes Flackern: der Wert fällt zwischendurch nie unter 0,7 des Schlags – schnelle, starke
+ * Hell-Dunkel-Wechsel sind unangenehm und können bei manchen Menschen Anfälle auslösen.
+ */
+export function flashShape(c: number): number {
+  if (c < 0 || c >= FLASH_TICKS) return 0;
+  if (c < 3) return 1;
+  if (c < 6) return 0.72;
+  if (c < 9) return 0.86;
+  return 0.86 * (1 - (c - 9) / (FLASH_TICKS - 9)) ** 2;
+}
+
+/** So stark hellt ein Einschlag auf der Bahn bzw. in einen Blitzableiter die ganze Welt auf (das Wetterleuchten: bis 1). */
+export const BOLT_LIGHT = 0.38;
+export const ROD_LIGHT = 0.28;
+
+/**
+ * Wie hell das Gewitter die ganze Welt zur Rennzeit time gerade macht (0 = finster … 1 = taghell). Taghell wird es
+ * nur beim seltenen Wetterleuchten; die vielen Einschläge auf dem Kamm (PULSE_BOLT, PULSE_ROD) hellen nur schwach
+ * auf – grell sind sie bloß an Ort und Stelle (das zeichnet render/mechanics/storm.ts). Es zählt der hellste Beitrag.
+ */
+export function stormLight(pulses: Pulse[], flashes: Flash[], time: number): number {
+  let best = 0;
+  for (const p of pulses) {
+    if (p.kind !== PULSE_BOLT && p.kind !== PULSE_ROD) continue;
+    const k = flashShape(pulseCycle(p, time)) * (p.kind === PULSE_BOLT ? BOLT_LIGHT : ROD_LIGHT);
+    if (k > best) best = k;
+  }
+  for (const f of flashes) {
+    const c = (time + f.phase) % f.period;
+    const k = flashShape(c < 0 ? c + f.period : c) * f.power;
+    if (k > best) best = k;
+  }
+  return best;
+}
 /** Lawine: seitlicher Schub (m/s) und Bremsfaktor je Tick. */
 export const AVALANCHE_PUSH = 6.5;
 export const AVALANCHE_DRAG = 0.962;

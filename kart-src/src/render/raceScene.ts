@@ -37,7 +37,9 @@ import {
   gustStrength,
   PULSE_BUBBLE,
   PULSE_ICICLE,
+  PULSE_BOLT,
   PULSE_METEOR,
+  PULSE_ROD,
   PULSE_PRESS,
   PULSE_VENT,
   WATER_FROM,
@@ -56,7 +58,7 @@ import { NO_GROUND, TRACK, groundNow, newVehiclePose, proj, projectOnTrack, righ
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
-import { BlobShadows, Bolts, ComicPops, Particles, SkidMarks, SpeedLines } from './effects';
+import { BlobShadows, Bolts, ComicPops, LightPools, Particles, SkidMarks, SpeedLines } from './effects';
 import type { FxSink } from './fxApi';
 import { KartVisual, type KartDetail, type KartPose } from './kartModel';
 import { ThingVisuals } from './things';
@@ -143,7 +145,15 @@ export interface SceneEvent {
     | 'drain'
     /** Zeitriss-Ruine (überall zu hören): der Sprung der Zeit kündigt sich an (Gong) / die Zeit reißt. */
     | 'riftwarn'
-    | 'rift';
+    | 'rift'
+    /**
+     * Gewitterkamm: ein Blitz schlägt auf der Bahn ein / fährt in einen Blitzableiter (beide ortsfest, slot −1);
+     * fernes Donnergrollen nach einem Wetterleuchten (überall); ein Kart wird im Ladefeld aufgeladen.
+     */
+    | 'thunder'
+    | 'rod'
+    | 'rumble'
+    | 'charge';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -463,6 +473,8 @@ export class RaceScene {
   private readonly pops = new ComicPops();
   private readonly speedLines = new SpeedLines();
   private readonly shadows = new BlobShadows(24);
+  /** Scheinwerferkegel der Karts – nur auf dunklen Strecken zu sehen. */
+  private readonly lights = new LightPools(8);
   private readonly bolts = new Bolts();
   /** In diesem Bild: wer einen Kurzschluss ausgelöst hat und wen er gerade erwischt. */
   private readonly empFrom: KartView[] = [];
@@ -543,6 +555,8 @@ export class RaceScene {
     this.skids.mesh.name = 'Bremsspuren';
     this.pops.group.name = 'Comic-Wörter';
     this.shadows.mesh.name = 'Schatten';
+    this.lights.mesh.name = 'Scheinwerfer';
+    this.scene.add(this.lights.mesh);
     this.bolts.group.name = 'Blitze';
     this.speedLines.mesh.name = 'Tempostriche';
     const c = this.color;
@@ -608,6 +622,7 @@ export class RaceScene {
       ['SOG!', 'cool'],
       ['PLATT!', 'white'],
       ['HUI!', 'cool'],
+      ['GELADEN!', 'cool'],
     ]);
     this.applyLevel();
   }
@@ -865,12 +880,28 @@ export class RaceScene {
           if (d < 80) this.shake = Math.max(this.shake, 0.6 * (1 - d / 80));
         }
       }
+      // Gewitterkamm: fernes Wetterleuchten – der Donner dazu rollt eine knappe Sekunde später heran.
+      for (const f of t.flashes) {
+        const c0 = (((before + f.phase) % f.period) + f.period) % f.period;
+        const c1 = (((time + f.phase) % f.period) + f.period) % f.period;
+        if (c0 < 50 && c1 >= 50) this.onEvent?.({ kind: 'rumble', slot: -1, local: false, pan: 0, gain: 0.35 + 0.5 * f.power });
+      }
       for (const p of t.pulses) {
         // Der Zyklus ist seit dem letzten Bild über null gelaufen: Ausbruch bzw. Einschlag.
         if (pulseCycle(p, time) < pulseCycle(p, before)) {
           if (p.kind === PULSE_BUBBLE) {
             // Ein Blasenschlot beginnt zu blasen: harmlos, nur zu hören.
             this.emitAt('bubbles', p.x, p.y, p.z);
+            continue;
+          }
+          if (p.kind === PULSE_BOLT || p.kind === PULSE_ROD) {
+            // Blitz: auf dem ganzen Kamm zu hören, in der Nähe bebt das Bild.
+            const bolt = p.kind === PULSE_BOLT;
+            this.emitAt(bolt ? 'thunder' : 'rod', p.x, p.y, p.z, 420);
+            if (me) {
+              const d = Math.hypot(me.x - p.x, me.z - p.z);
+              if (d < 60) this.shake = Math.max(this.shake, (bolt ? 0.5 : 0.25) * (1 - d / 60));
+            }
             continue;
           }
           if (p.kind > PULSE_BUBBLE) {
@@ -973,6 +1004,19 @@ export class RaceScene {
       }
       if (Math.random() < 0.3) this.fx.puff(me.x, me.y + 0.5, me.z, 0, 2.5, 0, 0.7, 1.1, 0x4a3b45, 1.2, -2);
     }
+  }
+
+  /** Steht dieses Kart gerade im geladenen Feld eines Blitzableiters? (So erkennt die Szene, woher ein Schub kommt.) */
+  private inChargeField(e: RenderEntity): boolean {
+    const t = this.track;
+    for (const p of t.pulses) {
+      if (p.kind !== PULSE_ROD || pulseCycle(p, this.mechTime) >= p.on + 8) continue;
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      if (Math.abs(dx * t.tx[p.seg] + dz * t.tz[p.seg]) > p.radius + 3 || Math.abs(e.y - p.y) > 3) continue;
+      if (Math.abs(dx * rightX(t, p.seg) + dz * rightZ(t, p.seg) + p.lat) <= t.wh[p.seg] + 1) return true;
+    }
+    return false;
   }
 
   private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
@@ -1112,6 +1156,13 @@ export class RaceScene {
         k.visual.squash(-0.8);
         this.emit('ring', k, local);
         if (local) this.shake = Math.max(this.shake, 0.14);
+      } else if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0 && this.inChargeField(e)) {
+        // Im Ladefeld eines Blitzableiters aufgeladen.
+        this.pop('GELADEN!', e, 'cool', 3);
+        this.burst(e.x, e.y + 0.7, e.z, 14, 10, 0xbfe9ff, true, 0.45, 0.45, 3);
+        k.visual.squash(-0.8);
+        this.emit('charge', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.2);
       } else if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0) {
         const turbo = k.driftDir !== 0 ? Math.max(1, k.driftStage) : 0;
         this.pop(turbo ? 'WUSCH!' : 'ZISCH!', e, turbo === 3 ? 'violet' : turbo ? 'cool' : 'warm', 2.6 + turbo * 0.35);
@@ -1277,6 +1328,7 @@ export class RaceScene {
     this.empFrom.length = 0;
     this.empHit.length = 0;
     this.shadows.begin();
+    this.lights.begin();
     let me: RenderEntity | null = null;
     let meView: KartView | null = null;
 
@@ -1373,6 +1425,8 @@ export class RaceScene {
         this.e1.set(groundPitch, e.heading, groundRoll);
         this.q1.setFromEuler(this.e1);
         this.shadows.add(e.x, ground, e.z, this.q1, 2.5, e.y - ground);
+        // Dunkle Strecke: der Scheinwerfer zeichnet einen Lichtfächer auf die Bahn (in der Luft trägt er nicht bis zum Boden).
+        if (this.track.dark && e.y - ground < 1.2) this.lights.add(e.x, ground, e.z, this.q1);
       }
 
       this.trail(k, e, speed, air, pose.driftStage, dt);
@@ -1431,6 +1485,7 @@ export class RaceScene {
     }
     for (const h of this.things.hazards) this.shadows.add(h.position.x, h.position.y, h.position.z, this.flat, 3.4, 0);
     this.shadows.end();
+    this.lights.end();
     this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
     this.threat = Math.max(0, threat);
     this.bolts.update(dt);

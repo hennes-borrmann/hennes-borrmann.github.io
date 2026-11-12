@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SONGS, compileSong, type Song, type SongDef } from '../../src/audio/songs';
 import { NEUE_STUECKE } from '../../src/audio/songs-neu';
+import { GEWITTER_STUECK } from '../../src/audio/stuecke/gewitter';
 import { HAFEN_STUECK } from '../../src/audio/stuecke/hafen';
 import { VULKAN_STUECK } from '../../src/audio/stuecke/vulkan';
 import { RUINE_STUECK } from '../../src/audio/stuecke/ruine';
@@ -12,6 +13,7 @@ const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'hafen', def: HAFEN_STUECK },
   { schluessel: 'vulkan', def: VULKAN_STUECK },
   { schluessel: 'ruine', def: RUINE_STUECK },
+  { schluessel: 'gewitter', def: GEWITTER_STUECK },
 ];
 
 // Maßstab sind die vier ursprünglichen Rennstücke (in songs.ts) – weder die aus songs-neu.ts

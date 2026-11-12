@@ -56,6 +56,7 @@ import {
   AVALANCHE_DRAG,
   AVALANCHE_PUSH,
   PULSE_AVALANCHE,
+  PULSE_ROD,
   LOWG_STEER,
   WIND_AIR,
   WIND_EDGE,
@@ -245,6 +246,8 @@ export const EV_SNOW = 1 << 26;
 export const EV_LAUNCH = 1 << 27;
 /** In einer Böe (wird alle paar Ticks gemeldet, solange sie das Kart schiebt). */
 export const EV_WIND = 1 << 28;
+/** Im Ladefeld eines Blitzableiters aufgeladen (Schub). */
+export const EV_CHARGE = 1 << 29;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -1253,6 +1256,17 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (dy < -1.5 || dy > (p.kind === PULSE_BUBBLE ? 5 : 2.5)) continue;
     const dx = s.x - p.x;
     const dz = s.z - p.z;
+    if (p.kind === PULSE_ROD) {
+      // Blitzableiter: Solange er geladen ist, steht quer über die Fahrbahn ein Ladefeld – wer hindurchfährt, bekommt Schub.
+      // (Der Mast steht bei p.lat neben der Bahn; das Feld reicht über deren ganze Breite.)
+      if (Math.abs(dx * t.tx[p.seg] + dz * t.tz[p.seg]) > p.radius || pulseCycle(p, env.time) >= p.on) continue;
+      if (Math.abs(dx * rightX(t, p.seg) + dz * rightZ(t, p.seg) + p.lat) > t.wh[p.seg] + 0.5) continue;
+      if (s.boost < PAD_TICKS - 8 && s.respawn === 0) {
+        s.boost = PAD_TICKS;
+        ev |= EV_CHARGE;
+      }
+      continue;
+    }
     if (p.kind === PULSE_AVALANCHE) {
       // Die Lawine läuft als Streifen quer über die ganze Bahn: sie schiebt talwärts und bremst.
       if (Math.abs(dx * t.tx[p.seg] + dz * t.tz[p.seg]) > p.radius || pulseCycle(p, env.time) >= p.on) continue;

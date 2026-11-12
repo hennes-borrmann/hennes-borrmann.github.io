@@ -37,7 +37,9 @@ import {
   PULSE_AVALANCHE,
   PULSE_ICICLE,
   LAUNCH_SPEED,
+  PULSE_BOLT,
   PULSE_METEOR,
+  PULSE_ROD,
   PONTOON_LINK,
   pontoonLift,
   type Pontoon,
@@ -46,6 +48,7 @@ import {
   HOLE_WARN,
   planActive,
   type Era,
+  type Flash,
   type Gate,
   type Hole,
   type Plan,
@@ -53,7 +56,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -131,6 +134,10 @@ export interface PathFeatures {
   icicles?: { at: number; lat: number; period: number; phase: number }[];
   /** Meteoriten: schlagen im Takt ein. */
   meteors?: { at: number; lat: number; period: number; phase: number }[];
+  /** Blitze: schlagen im Takt an dieser Stelle der Fahrbahn ein (mechanics.ts, PULSE_BOLT). */
+  bolts?: { at: number; lat: number; period: number; phase: number }[];
+  /** Blitzableiter: Mast bei lat neben der Bahn; im Takt geladen, dann schiebt das Ladefeld quer über die Bahn an (PULSE_ROD). */
+  rods?: { at: number; lat: number; period: number; phase: number }[];
   /** Sprungplatten: schleudern das Kart hoch (power = Steiggeschwindigkeit in m/s, ohne Angabe LAUNCH_SPEED). */
   launchers?: { at: number; lat?: number; halfWidth?: number; power?: number }[];
   /**
@@ -216,6 +223,11 @@ export interface TrackDef extends PathFeatures {
   sea?: number;
   /** Anteil der Schwerkraft auf dieser Strecke (Mond: etwa 0,38); ohne Angabe 1. */
   gravity?: number;
+  /**
+   * Dunkle Strecke (Gewitterkamm): Die Welt ist finster, Blitze erhellen sie für Augenblicke (mechanics.ts, stormLight).
+   * flashes = fernes Wetterleuchten ohne Einschlag: Takt und Versatz in Sekunden, Helligkeit 0…1.
+   */
+  dark?: { flashes: { period: number; phase: number; power: number }[] };
 }
 
 export interface BoostPad {
@@ -354,6 +366,10 @@ export interface Track {
   launchers: Launcher[];
   /** Anteil der Schwerkraft (1 = Erde). */
   gravity: number;
+  /** Dunkle Strecke: es ist finster, Blitze erhellen sie (mechanics.ts, stormLight). */
+  dark: boolean;
+  /** Fernes Wetterleuchten einer dunklen Strecke. */
+  flashes: Flash[];
   boxes: { x: number; y: number; z: number; seg: number }[];
   hazards: Hazard[];
   /** Streckenmechanik (mechanics.ts): Verkehr, Geysire und Lavabomben, steigende Lava. */
@@ -964,6 +980,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     pads: [],
     launchers: [],
     gravity: def.gravity ?? 1,
+    dark: def.dark !== undefined,
+    flashes: (def.dark?.flashes ?? []).map((f) => ({ period: Math.round(f.period * 60), phase: Math.round(f.phase * 60), power: f.power })),
     boxes: [],
     hazards: [],
     vehicles: [],
@@ -1046,6 +1064,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const b of p.f.avalanches ?? []) pulse(PULSE_AVALANCHE, b);
     for (const b of p.f.icicles ?? []) pulse(PULSE_ICICLE, b);
     for (const b of p.f.meteors ?? []) pulse(PULSE_METEOR, b);
+    for (const b of p.f.bolts ?? []) pulse(PULSE_BOLT, b);
+    for (const b of p.f.rods ?? []) pulse(PULSE_ROD, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
@@ -1215,6 +1235,10 @@ const PULSE_KINDS = [
   { radius: 1.7, on: 80, warn: 85 },
   // Meteorit: großer Einschlag, der Krater glüht nach; lange Vorwarnung (Schatten wächst)
   { radius: 2.8, on: 110, warn: 130 },
+  // Blitz: schlägt kurz und hart ein; die Stelle knistert anderthalb Sekunden vorher
+  { radius: 3.0, on: 34, warn: 90 },
+  // Blitzableiter: das Ladefeld (6 m vor bis 6 m hinter dem Mast) steht knapp eine Sekunde
+  { radius: 6, on: 54, warn: 90 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;

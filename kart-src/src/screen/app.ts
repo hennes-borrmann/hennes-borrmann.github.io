@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1459,7 +1459,24 @@ export class App {
           return { id: v.id, kind: v.kind, lat: p.lat, half: v.half, speed: v.speed, at: vehicleAt(v, time, lap), x: p.x, y: p.y, z: p.z, time };
         });
       },
-      pulses: () => TRACK.pulses.map((p) => ({ kind: p.kind, lat: p.lat, at: TRACK.prog[p.seg] * TRACK.step, period: p.period / 60 })),
+      // (strike = erste Rennzeit ≥ 0, zu der das Hindernis losgeht; on = wie lange es dann wirkt – alles in Sekunden)
+      pulses: () =>
+        TRACK.pulses.map((p) => ({
+          kind: p.kind,
+          lat: p.lat,
+          at: TRACK.prog[p.seg] * TRACK.step,
+          period: p.period / 60,
+          strike: ((p.period - (((p.phase % p.period) + p.period) % p.period)) % p.period) / 60,
+          on: p.on / 60,
+          warn: p.warn / 60,
+        })),
+      // Gewitterkamm: Ist die Strecke dunkel, und wie hell ist das Wetterleuchten zur Rennzeit dieses Bildschirms
+      // bzw. zur angegebenen Rennzeit (Sekunden)? 0 = finster … 1 = taghell.
+      storm: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        return { dark: TRACK.dark, time, light: stormLight(TRACK.pulses, TRACK.flashes, time), flashes: TRACK.flashes.length };
+      },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
         const glides: { from: number; to: number }[] = [];
