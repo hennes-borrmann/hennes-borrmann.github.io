@@ -77,6 +77,8 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'whistle',
   'trainpass',
   'board',
+  // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer
+  'smash',
 ]);
 
 export class Sound {
