@@ -68,6 +68,14 @@ import {
   ROOF_STEP,
   roofTop,
   type Vehicle,
+  BIG_ACCEL,
+  BIG_GRIP,
+  BIG_VMAX,
+  SIZE_TICKS,
+  SIZE_WARN,
+  SMALL_ACCEL,
+  SMALL_GRIP,
+  SMALL_VMAX,
 } from './mechanics';
 import {
   EDGE_FLOAT,
@@ -80,7 +88,7 @@ import {
   TRACK,
   centerHeight,
   gridPosition,
-  gateAt,
+  gateShut,
   groundAt,
   groundNow,
   heaveAt,
@@ -198,6 +206,8 @@ export interface KartState {
   draft: number;
   /** Verbleibende Ticks geplättet (Stampfpresse): das Kart ist flach und langsam. */
   flat: number;
+  /** Größe (Riesenkinderzimmer): > 0 = so viele Ticks noch riesig, < 0 = so viele Ticks noch winzig, 0 = normal. */
+  size: number;
   item: number;
   /** Das Item, das nach der Auslosung erscheint. */
   nextItem: number;
@@ -425,6 +435,7 @@ export function newState(): KartState {
     tow: 0,
     draft: 0,
     flat: 0,
+    size: 0,
     item: ITEM_NONE,
     nextItem: ITEM_NONE,
     roulette: 0,
@@ -453,6 +464,7 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.tow = src.tow;
   dst.draft = src.draft;
   dst.flat = src.flat;
+  dst.size = src.size;
   dst.item = src.item;
   dst.nextItem = src.nextItem;
   dst.roulette = src.roulette;
@@ -858,6 +870,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.guard > 0) s.guard--;
   if (s.stall > 0) s.stall--;
   if (s.flat > 0) s.flat--;
+  // Größe läuft ab – außer in der Abkürzung, die nur diese Größe einlässt (im Mauseloch bleibt man winzig).
+  if (s.size !== 0) {
+    const k = s.seg < t.total ? t.branchOf[s.seg] : -1;
+    if (k < 0 || t.branchOnly[k] !== (s.size > 0 ? 1 : -1)) s.size += s.size > 0 ? -1 : 1;
+  }
   const spinning = s.spin > 0;
   if (spinning) s.spin--;
   if (s.roulette > 0) {
@@ -1004,7 +1021,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
   // Tauchen: unter dem Meeresspiegel einer Tauchstrecke trägt das Wasser (siehe mechanics.ts).
   const diving = t.deep[seg0] !== 0 && y0 < t.sea;
-  const hold = A_LAT * ch.grip * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
+  const hold = A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
   const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
   const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? (diving ? DIVE_STEER : t.gravity < 1 ? LOWG_STEER : AIR_STEER) : 1);
@@ -1044,7 +1061,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
     // --- Beschleunigen und Bremsen ---
     const boosting = s.boost > 0;
-    let vmax = V_MAX * env.speedFactor * ch.vmax * ground.speed;
+    let vmax = V_MAX * env.speedFactor * ch.vmax * ground.speed * (s.size > 0 ? BIG_VMAX : s.size < 0 ? SMALL_VMAX : 1);
     if (boosting) vmax = V_BOOST * env.speedFactor;
     else if (wasOffroad) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
@@ -1087,7 +1104,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
-      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * ground.accel * (diving ? DIVE_ACCEL : 1) * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * (s.size > 0 ? BIG_ACCEL : s.size < 0 ? SMALL_ACCEL : 1) * ground.accel * (diving ? DIVE_ACCEL : 1) * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
       else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
     } else if (brake) {
       if (vf > 0.4) vf = Math.max(0, vf - BRAKE * ground.brake * DT);
@@ -1216,7 +1233,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Tor: eine gesperrte Abzweigung ---
   // An der Mündung liegen Abzweigung und Hauptstrecke noch ineinander: dort läuft, solange das Tor zu ist, die
   // Bande der Hauptstrecke einfach durch. (Wer tiefer drin ist, wenn es schließt, kommt noch hinaus.)
-  if (t.gates.length > 0 && gateAt(t, s.seg, env.time)) {
+  if (t.gates.length > 0 && gateShut(t, s.seg, env.time, s.size)) {
     const tw = t.twin[s.seg];
     if (tw >= 0) {
       const nx = rightX(t, tw);
@@ -1246,7 +1263,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         lat = proj.lat;
         along = proj.along;
       }
-    } else if (!gateAt(t, seg0, env.time)) {
+    } else if (!gateShut(t, seg0, env.time, s.size)) {
       s.x = x0;
       s.z = z0;
       s.seg = seg0;
@@ -1255,6 +1272,25 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (Math.hypot(s.vx, s.vz) > 5) ev |= EV_WALL;
       s.vx *= -0.3;
       s.vz *= -0.3;
+    }
+  }
+
+  // --- Aus der Größen-Abkürzung heraus: die Größe hält nur noch kurz (sie kündigt ihr Ende gleich an) ---
+  if (s.size !== 0 && seg0 !== s.seg && seg0 < t.total) {
+    const k0 = t.branchOf[seg0];
+    if (k0 >= 0 && t.branchOnly[k0] !== 0 && t.branchOf[s.seg] !== k0 && Math.abs(s.size) > SIZE_WARN) s.size = s.size > 0 ? SIZE_WARN : -SIZE_WARN;
+  }
+
+  // --- Größenring: wer hindurchfährt, schrumpft bzw. wächst ---
+  if (t.sizers.length > 0 && s.respawn === 0 && seg0 !== s.seg) {
+    for (const z of t.sizers) {
+      if (!samePath(t, z.seg, seg0) || !samePath(t, z.seg, s.seg)) continue;
+      const before = segDelta(t, seg0, z.seg);
+      const after = segDelta(t, s.seg, z.seg);
+      if (before < 0 || before > 6 || after >= 0 || after < -6) continue;
+      if (lat < z.lat0 || lat > z.lat1) continue;
+      s.size = z.grow ? SIZE_TICKS : -SIZE_TICKS;
+      break;
     }
   }
 

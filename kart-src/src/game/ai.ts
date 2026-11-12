@@ -34,7 +34,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -82,6 +82,9 @@ export interface BotBrain {
   /** Zug voraus, über den schon entschieden ist (Kennung; −1 = keiner) – und ob die KI aufs Dach will. */
   trainId: number;
   trainTake: boolean;
+  /** Größenring voraus, über den schon entschieden ist (Abschnitt; −1 = keiner) – und ob die KI hindurchwill. */
+  sizerSeg: number;
+  sizerTake: boolean;
   /** Ticks, die das Kart praktisch steht. */
   stuck: number;
   /** Verbleibende Ticks Rückwärtsfahrt zum Freikommen. */
@@ -120,6 +123,8 @@ const PATIENCE_FACTOR = [1.6, 1, 0.7];
 const PORTAL_DARE = [0.2, 0.55, 0.9];
 /** So oft fährt die KI von hinten auf einen Zug auf, um über die Dächer zu fahren (leicht, mittel, schwer). */
 const TRAIN_DARE = [0.1, 0.5, 0.9];
+/** So oft fährt die KI durch einen Größenring, um die Abkürzung dahinter zu nehmen (leicht, mittel, schwer). */
+const SIZE_DARE = [0.15, 0.55, 0.9];
 
 export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
   const l = Math.max(0, Math.min(2, level | 0));
@@ -134,6 +139,8 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     portalTake: false,
     trainId: -1,
     trainTake: false,
+    sizerSeg: -1,
+    sizerTake: false,
     stuck: 0,
     reverse: 0,
     holding: 0,
@@ -323,6 +330,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           // (Ein Tor sperrt nur die Mündung, und was dahinter einstürzt, tut es mit Verzögerung: wer knapp vor dem
           // Schließen einfährt, kommt durch. Die halbe Sekunde Abstand gilt der Unsicherheit der eigenen Schätzung.)
           const arrive = ctx.time + ((DECIDE_AT + 12) * t.step * 60) / Math.max(v, 12);
+          // Größentor (Riesenkinderzimmer): offen nur für den, der bei der Ankunft noch die verlangte Größe hat –
+          // wer sie hat, nimmt den Weg (dafür ist er ja durch den Ring gefahren).
+          if (g.only !== 0) {
+            if (t.branchOf[g.first] !== k) continue;
+            take = sizeClass(s.size) === g.only && Math.abs(s.size) > arrive - ctx.time + 45;
+            continue;
+          }
           if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 30)) {
             // Offen – und das ist es nicht immer: Wer aufpasst, nimmt den Weg meistens, solange es ihn gibt.
             if (t.branchOf[g.first] === k && b.level > 0 && !take) take = random(b) < 0.6;
@@ -350,7 +364,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         d = Math.max(0, d);
       } else continue;
       const arrive = ctx.time + (d * t.step * 60) / Math.max(v, 12);
-      if (planActive(g.plan, arrive) && planActive(g.plan, arrive + 90)) b.route &= ~(1 << k);
+      if (g.only !== 0) {
+        // Die Größe reicht nicht (mehr) bis zur Mündung: zurück auf die Hauptstrecke.
+        if (sizeClass(s.size) !== g.only || Math.abs(s.size) < arrive - ctx.time + 20) b.route &= ~(1 << k);
+      } else if (planActive(g.plan, arrive) && planActive(g.plan, arrive + 90)) b.route &= ~(1 << k);
     }
   }
   pathAhead(t, s.seg, b.route, PATH);
@@ -419,7 +436,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
-  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0 || t.portals.length > 0) && !air) {
+  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0 || t.portals.length > 0 || t.sizers.length > 0) && !air) {
     blocks = 0;
     projectOnTrack(t, s.x, s.z, s.seg);
     const here = proj.lat;
@@ -616,8 +633,38 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       }
     }
     if (!portalNear) b.portalSeg = -1;
+    // Größenringe: je Anfahrt einmal entschieden – hindurch (der Ring ist das Ziel) oder daran vorbei (gesperrt).
+    // Wer schon eine Größe trägt, die er für die nächste Abkürzung braucht, meidet jeden weiteren Ring.
+    let sizerWant = Number.NaN;
+    let sizerNear = false;
+    for (const z of t.sizers) {
+      let d = -1;
+      for (let k = 0; k < PATH.length && k * t.step <= range + 12; k++) {
+        if (PATH[k] === z.seg) {
+          d = k * t.step;
+          break;
+        }
+      }
+      if (d < 0) continue;
+      sizerNear = true;
+      if (b.sizerSeg !== z.seg) {
+        b.sizerSeg = z.seg;
+        // (Ein Rest der alten Größe, der bis zum Ring abläuft oder gerade ausklingt, zählt nicht – und wer noch in
+        // der Größen-Abkürzung steckt, behält seine Größe nach dem Ausgang nur noch die Ankündigungszeit.)
+        let have = Math.abs(s.size);
+        const kb = t.branchOf[s.seg];
+        if (kb >= 0 && t.branchOnly[kb] !== 0) have = Math.min(have, SIZE_WARN);
+        const left = have - (d / Math.max(v, 8)) * 60;
+        b.sizerTake = (left <= 0 || have <= SIZE_WARN) && random(b) < SIZE_DARE[b.level];
+      }
+      if (b.sizerTake) sizerWant = (z.lat0 + z.lat1) / 2;
+      else block(z.lat0 - KART_HALF - 0.4, z.lat1 + KART_HALF + 0.4, 1);
+    }
+    if (!sizerNear) b.sizerSeg = -1;
     // Tor voraus und noch zu: vom Gas, bis es offen ist.
     for (const g of t.gates) {
+      // (Ein Größentor geht nicht von selbst auf: Davor wird umgeplant, nicht gewartet.)
+      if (g.only !== 0) continue;
       for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
         if (PATH[k] !== g.first) continue;
         if (planActive(g.plan, ctx.time + ((k * t.step) / Math.max(v, 8)) * 60)) {
@@ -667,6 +714,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       // (Auf dem Fluss gibt es keine Bande, vor der man Abstand hielte: die Bahnmitte liegt gut zwei Meter vom Wasser.)
       if (open) lat = riverWant;
     }
+    // Größenring: mitten hindurch.
+    if (sizerWant === sizerWant) lat = sizerWant;
     // Zug: aufs Gleis hinter den Rampenwagen bzw. oben in der Wagenmitte bleiben.
     if (!trainNear) b.trainId = -1;
     if (trainWant === trainWant) lat = trainWant;

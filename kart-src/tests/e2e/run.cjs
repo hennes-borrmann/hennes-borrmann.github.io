@@ -59,6 +59,9 @@ async function openScreen(name, query = '') {
 }
 
 const kart = (page, expr) => page.evaluate(`window.__kart.${expr}`);
+// Riesenkinderzimmer: von hier fährt ein Kart geradeaus auf das Mauseloch zu (Streckenmeter, seitliche Lage).
+const HOLE_FROM = 612;
+const HOLE_LAT = 6.4;
 /**
  * Rennstand samt Uhrzeit der Abfrage. "goAt" ist der Zeitpunkt (Sekunden, gemeinsame Uhr des
  * Rechners), zu dem diese Seite "Los" erwartet – vergleichbar auch dann, wenn eine Seite die
@@ -800,7 +803,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Fünfzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 15);
+    check('Sechzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 16);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1314,7 +1317,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen fünfzehn Strecken zur Wahl', cards === 15, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen sechzehn Strecken zur Wahl', cards === 16, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1792,14 +1795,21 @@ async function main() {
         const s = window.__kart.authoritative(0);
         return { x: s.x, z: s.z, time: window.__kart.race().time };
       })()`;
+      // (Lage auf dem Wagen: längs (du) und quer (dw) zur Fahrtrichtung des Wagens – die zeigt von Wagen 4 zu Wagen 2.)
       const stillOn = `(() => {
-        const c = window.__kart.trains()[0].cars[3];
+        const cars = window.__kart.trains()[0].cars;
+        const c = cars[3];
         const s = window.__kart.authoritative(0);
-        return { x: s.x, y: s.y, z: s.z, off: Math.hypot(s.x - c.x, s.z - c.z), above: s.y - c.y, time: window.__kart.race().time };
+        const fx = cars[2].x - cars[4].x;
+        const fz = cars[2].z - cars[4].z;
+        const n = Math.hypot(fx, fz) || 1;
+        const du = ((s.x - c.x) * fx + (s.z - c.z) * fz) / n;
+        const dw = ((s.x - c.x) * fz - (s.z - c.z) * fx) / n;
+        return { x: s.x, y: s.y, z: s.z, du, dw, above: s.y - c.y, time: window.__kart.race().time };
       })()`;
       await watch(0);
       const roof0 = await h7.page.evaluate(onRoof);
-      let roof1 = { ...roof0, off: 0, above: 0 };
+      let roof1 = { ...roof0, du: 0, dw: 0, above: 0 };
       for (const until = Date.now() + 12000; Date.now() < until && roof1.time - roof0.time < 160; ) {
         await sleep(100);
         roof1 = await h7.page.evaluate(stillOn);
@@ -1812,14 +1822,78 @@ async function main() {
       const fellOff = await h7.page.evaluate(() => window.__seen.respawn);
       check(
         'Der Zug nimmt mit: Anna steht ohne Gas auf dem Dach eines Flachwagens und fährt mit ihm – auch auf dem Bildschirm des Mitspielers',
-        fellOff === null && carriedFor >= 2.5 && carried > 14 * carriedFor * 0.8 && carried < 14 * carriedFor * 1.2 && roof1.off < 2.5 && roof1.above > 1.2 && offC < 8,
-        `${carried.toFixed(1)} m in ${carriedFor.toFixed(1)} s (Zug 14 m/s), ${roof1.off.toFixed(2)} m neben der Wagenmitte, ${roof1.above.toFixed(2)} m über dem Gleis; beim Mitspieler ${offC.toFixed(1)} m neben der Wagenmitte`,
+        fellOff === null && carriedFor >= 2.5 && carried > 14 * carriedFor * 0.8 && carried < 14 * carriedFor * 1.2 && Math.abs(roof1.du) < 6 && Math.abs(roof1.dw) < 1.9 && roof1.above > 1.2 && offC < 8,
+        `${carried.toFixed(1)} m in ${carriedFor.toFixed(1)} s (Zug 14 m/s), auf dem Wagen ${roof1.du.toFixed(1)} m längs und ${roof1.dw.toFixed(2)} m quer zur Mitte (Wagen 12 × 3,8 m), ${roof1.above.toFixed(2)} m über dem Gleis; beim Mitspieler ${offC.toFixed(1)} m neben der Wagenmitte`,
       );
+    }
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Riesenkinderzimmer: Ringe lassen schrumpfen und wachsen – die Größe kommt auf beiden Bildschirmen an –, und ins
+    // Mauseloch kommt nur, wer winzig ist.
+    await h7.page.locator('.track-card').nth(15).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 15, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 15, null, { timeout: 30000 });
+    const [szH, szC] = await Promise.all([kart(h7.page, 'sizers()'), kart(c7.page, 'sizers()')]);
+    const shrinkRing = szH.rings.find((z) => !z.grow);
+    const growRing = szH.rings.find((z) => z.grow);
+    check(
+      'Riesenkinderzimmer hat einen Schrumpf- und einen Wachsring und je eine Abkürzung nur für Winzige und nur für Riesen – auf beiden Bildschirmen gleich',
+      szH.rings.length === 2 && !!shrinkRing && !!growRing && szH.only.includes(-1) && szH.only.includes(1) && JSON.stringify(szH) === JSON.stringify(szC),
+      `Ringe bei ${szH.rings.map((z) => `${z.at.toFixed(0)} m (${z.grow ? 'wachsen' : 'schrumpfen'})`).join(' und ')}, Abkürzungen ${JSON.stringify(szH.only)}`,
+    );
+    if (shrinkRing && growRing) {
+      // Anna (das Kart des Hosts) fährt aus dem Stand mit Gas durch einen Ring. Die Größe hält zehn Sekunden – die Abfrage
+      // darf also ruhig einen Augenblick zu spät kommen.
+      const ring = async (z) => {
+        await kart(h7.page, 'size(0, 0)');
+        await kart(h7.page, `place(0, ${Math.round(z.at) - 9}, ${(z.lat0 + z.lat1) / 2})`);
+        await sleep(150);
+        await h7.page.keyboard.down('ArrowUp');
+        let size = 0;
+        for (const until = Date.now() + 8000; Date.now() < until; ) {
+          size = (await kart(h7.page, 'whereIs(0)')).size;
+          if (size !== 0) break;
+          await sleep(40);
+        }
+        await h7.page.keyboard.up('ArrowUp');
+        await sleep(600);
+        const seen = (await kart(c7.page, 'entities()')).find((e) => e.slot === 0);
+        return [size, seen ? seen.size : 0];
+      };
+      const small = await ring(shrinkRing);
+      check('Schrumpfring: Anna ist winzig – beim Host und auf dem Bildschirm des Mitspielers', small[0] < 0 && small[1] < 0, `Größe ${small[0]} / ${small[1]} Ticks`);
+      const big = await ring(growRing);
+      check('Wachsring: Anna ist riesig – beim Host und auf dem Bildschirm des Mitspielers', big[0] > 0 && big[1] > 0, `Größe ${big[0]} / ${big[1]} Ticks`);
+      // Größentor am Mauseloch (geht rechts ab, schnurgerade – die Hauptstrecke biegt nach links weg): Anna fährt ohne zu
+      // lenken geradeaus. Winzig landet sie in der Abkürzung; normal groß läuft für sie die Bande durch.
+      const hole = async (ticks) => {
+        await kart(h7.page, `size(0, ${ticks})`);
+        await kart(h7.page, `place(0, ${HOLE_FROM}, ${HOLE_LAT})`);
+        await sleep(150);
+        await h7.page.keyboard.down('ArrowUp');
+        // (Die ersten knapp 50 m der Abzweigung liegen noch neben der Hauptstrecke – entschieden ist es erst dahinter.)
+        let w = { branch: -1, seg: 0, at: 0, size: 0 };
+        for (const until = Date.now() + 9000; Date.now() < until; ) {
+          w = await kart(h7.page, 'whereIs(0)');
+          if ((w.branch === 0 && w.at > 70) || (w.branch < 0 && w.at > 665)) break;
+          await sleep(60);
+        }
+        await h7.page.keyboard.up('ArrowUp');
+        return w;
+      };
+      const tiny = await hole(-30000);
+      const normal = await hole(0);
+      check('Mauseloch: Winzig kommt Anna hinein – normal groß lenkt die Fußleiste sie zurück auf die Hauptstrecke', tiny.branch === 0 && tiny.at > 70 && normal.branch === -1 && normal.at > 665, `winzig: ${tiny.branch === 0 ? `${tiny.at.toFixed(0)} m tief in der Abkürzung` : `Hauptstrecke bei ${tiny.at.toFixed(0)} m`}; normal: ${normal.branch === -1 ? `Hauptstrecke bei ${normal.at.toFixed(0)} m` : `in der Abkürzung (${normal.at.toFixed(0)} m)`}`);
+      await kart(h7.page, 'size(0, 0)');
     }
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die fünfzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die sechzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

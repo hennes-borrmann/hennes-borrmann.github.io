@@ -591,11 +591,58 @@ export interface Gate {
   /** Was die Anzeige meldet, wenn das Tor aufgeht bzw. zugeht ('' = nichts). */
   noteOpen: string;
   noteShut: string;
+  /**
+   * 0 = das Tor folgt seinem Zeitplan. −1 / +1 = ein Größentor (Riesenkinderzimmer): offen nur für winzige
+   * bzw. nur für riesige Karts (KartState.size), für alle anderen läuft die Bande durch – unabhängig von der Zeit.
+   */
+  only: number;
 }
 
 /** So lange vorher kündigt sich ein Bruch bzw. das Schließen eines Tors an (Ticks). */
 export const HOLE_WARN = 150;
 export const GATE_WARN = 300;
+
+// --- Schrumpfen und Wachsen ----------------------------------------------------------
+// Im Riesenkinderzimmer stehen Ringe in der Fahrbahn: Wer durch einen blauen fährt, schrumpft, wer durch einen
+// orangen fährt, wächst – für SIZE_TICKS, dann ist das Kart wieder normal. In der Abkürzung, die nur diese
+// Größe einlässt, steht die Uhr still; wer sie verlässt, ist zwei Sekunden später wieder normal. Die Größe steht im Zustand des Karts
+// (KartState.size: > 0 = so viele Ticks noch riesig, < 0 = so viele Ticks noch winzig).
+//   winzig: etwas langsamer, zieht aber schneller an und lenkt enger – und passt durchs Mauseloch.
+//   riesig: etwas schneller, träger – und bricht durch die Bauklotz-Mauer; andere Karts schiebt es einfach weg.
+
+/** Ein Ring am Ende des Abschnitts seg, seitlich lat0 … lat1: grow = er lässt wachsen, sonst schrumpfen. */
+export interface Sizer {
+  seg: number;
+  lat0: number;
+  lat1: number;
+  grow: boolean;
+}
+
+/** So lange hält eine Größe (Ticks) – und so lange vorher kündigt sich das Ende an. */
+export const SIZE_TICKS = 600;
+export const SIZE_WARN = 120;
+/** Maßstab eines winzigen bzw. riesigen Karts (Darstellung; die Physik rechnet mit den Faktoren unten). */
+export const SIZE_SMALL = 0.6;
+export const SIZE_BIG = 1.5;
+/** Fahrwerte nach Größe: Höchsttempo, Antritt, Halt in der Kurve. */
+export const SMALL_VMAX = 0.92;
+export const SMALL_ACCEL = 1.3;
+export const SMALL_GRIP = 1.2;
+export const BIG_VMAX = 1.07;
+export const BIG_ACCEL = 0.85;
+export const BIG_GRIP = 0.9;
+/** So viel schwerer ist beim Rempeln das größere von zwei verschieden großen Karts. */
+export const SIZE_MASS = 5;
+
+/** Größenklasse: −1 winzig, 0 normal, 1 riesig. */
+export function sizeClass(size: number): number {
+  return size > 0 ? 1 : size < 0 ? -1 : 0;
+}
+
+/** Maßstab des Karts für die Darstellung. */
+export function sizeScale(size: number): number {
+  return size > 0 ? SIZE_BIG : size < 0 ? SIZE_SMALL : 1;
+}
 
 // --- Portale -------------------------------------------------------------------------
 // Ein Portal steht als Rahmen quer in der Fahrbahn (oder in einem Teil davon). Wer hindurchfährt, solange es

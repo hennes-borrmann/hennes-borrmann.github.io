@@ -252,6 +252,17 @@ const SHOTS = {
     ],
     when: '(window.__we || (window.__we = setInterval(() => window.__kart.clock(2), 50)), (window.__wn = (window.__wn || 0) + 1) > 20)',
   },
+  // Riesenkinderzimmer: auf dem Schreibtisch vor der Bauklotz-Burg – links die bunte Klotzmauer, durch die nur ein
+  // riesiges Kart bricht, dahinter Stifte, Lampe und die Tapete des Zimmers. Die Karts sind Spielzeug.
+  zimmer: {
+    from: [1078, 4.2, 4.6],
+    to: [1112, -3.2, 2.2],
+    fov: 60,
+    karts: [
+      [1, 1096, -3.6],
+      [2, 1103, 1.8],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

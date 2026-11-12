@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -79,6 +79,10 @@ export type SfxName =
   | 'trainpass' // Wüstenexpress: ein Zug rollt dicht am eigenen Kart vorbei (ortsfest, etwa alle 0,45 s aufgerufen): tiefes Rollen mit „ta-tack“ der Schienenstöße, verschmilzt zu einem Bett
   | 'board' // Wüstenexpress: ein Kart rollt über die Rampe aufs Wagendach: Blechscheppern, polternde Schläge, heller Akzent (~0,5 s)
   | 'rattle' // Wüstenexpress: das eigene Kart fährt über die Wagendächer (etwa alle 0,3 s aufgerufen): hohles Rattern auf Bohlen und Blech, verschmilzt zu einem Bett
+  | 'shrink' // Riesenkinderzimmer: ein Kart schrumpft (durch den blauen Ring gefahren): Gleitton rutscht hinauf und wird dünn, Zip, winziges Pling (~0,45 s)
+  | 'grow' // Riesenkinderzimmer: ein Kart wächst (durch den orangen Ring gefahren): Gleitton rutscht hinab und wird breit, Zip, rundes Bwomm (~0,55 s)
+  | 'sizeend' // Riesenkinderzimmer: ein Kart ist wieder normal groß: weiches Plopp mit kurzem Nachfedern (~0,25 s)
+  | 'smash' // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer: dumpfer Stoß, elf helle Holzklötze poltern auseinander (~0,75 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

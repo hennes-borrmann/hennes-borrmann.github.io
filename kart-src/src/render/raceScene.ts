@@ -48,6 +48,9 @@ import {
   eraUntil,
   planActive,
   portalOpen,
+  SIZE_WARN,
+  sizeClass,
+  sizeScale,
   pulseCycle,
   tideLevel,
   vehicleAt,
@@ -175,7 +178,13 @@ export interface SceneEvent {
     | 'whistle'
     | 'trainpass'
     | 'board'
-    | 'rattle';
+    | 'rattle'
+    /** Riesenkinderzimmer: ein Kart schrumpft / wächst (durch einen Ring gefahren) / ist wieder normal groß. */
+    | 'shrink'
+    | 'grow'
+    | 'sizeend'
+    /** Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer. */
+    | 'smash';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -248,6 +257,11 @@ interface KartView {
   /** Wüstenexpress: steht das Kart auf einem Wagendach? / Zeit bis zur nächsten Meldung des eigenen Karts. */
   roof: boolean;
   roofWait: number;
+  /** Riesenkinderzimmer: Größenklasse im letzten Bild (−1/0/1) und der gezeigte Maßstab (weich nachgeführt). */
+  sizeWas: number;
+  sizeK: number;
+  /** Riesenkinderzimmer: ist das Kart gerade auf dem eigenen Stück der Abkürzung durch die Bauklotz-Burg? */
+  inCastle: boolean;
   roulette: number;
   item: number;
   flags: number;
@@ -658,6 +672,8 @@ export class RaceScene {
       ['GELADEN!', 'cool'],
       ['HINDURCH!', 'violet'],
       ['AUFGESPRUNGEN!', 'warm'],
+      ['WINZIG!', 'cool'],
+      ['RIESIG!', 'hot'],
       ['ZURÜCK!', 'hot'],
     ]);
     this.applyLevel();
@@ -827,6 +843,9 @@ export class RaceScene {
       lastSeg: 0,
       roof: false,
       roofWait: 0,
+      sizeWas: 0,
+      sizeK: 1,
+      inCastle: false,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1158,6 +1177,29 @@ export class RaceScene {
       if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
     } else k.snowWait = 0;
     k.snowed = snowed;
+    // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer (es fährt auf das eigene Stück der
+    // Abkürzung, die nur Riesige einlässt) – es kracht und Klötze fliegen.
+    if (this.track.sizers.length > 0 && e.seg < this.track.total) {
+      const tr = this.track;
+      const kb = tr.branchOf[e.seg];
+      const own = kb >= 0 && tr.branchOnly[kb] > 0 && tr.twin[e.seg] < 0;
+      if (own && !k.inCastle && !k.fresh) {
+        this.emit('smash', k, local);
+        for (let n = 0; n < 3; n++) this.burst(e.x, e.y + 0.6 + n * 0.6, e.z, 8, 9, [0xe2483a, 0x3f8fd6, 0xe8b93a][n], false, 0.7, 0.8, 6);
+        if (local) this.shake = Math.max(this.shake, 0.35);
+      }
+      k.inCastle = own;
+    }
+    // Riesenkinderzimmer: geschrumpft, gewachsen oder wieder normal?
+    if (this.track.sizers.length > 0) {
+      const cls = sizeClass(e.size);
+      if (cls !== k.sizeWas && !k.fresh) {
+        this.emit(cls < 0 ? 'shrink' : cls > 0 ? 'grow' : 'sizeend', k, local);
+        this.burst(e.x, e.y + 0.6, e.z, 12, 6, cls < 0 ? 0x6fc3ff : cls > 0 ? 0xffa23a : 0xffffff, true, 0.5, 0.5, 3);
+        if (local && cls !== 0) this.pop(cls < 0 ? 'WINZIG!' : 'RIESIG!', e, cls < 0 ? 'cool' : 'hot', 3.4);
+      }
+      k.sizeWas = cls;
+    }
     // Wüstenexpress: Steht das Kart auf einem Wagendach? Beim Aufrollen scheppert es; das eigene Kart rattert, solange es oben ist.
     if (this.track.roofed) {
       const tr = this.track;
@@ -1561,7 +1603,13 @@ export class RaceScene {
       root.rotation.set(k.pitch, e.heading, k.roll);
       // Von der Presse geplättet: flach wie eine Flunder, dafür etwas breiter – und am Ende federt es zurück.
       k.flatK += ((e.flat > 6 ? 1 : 0) - k.flatK) * Math.min(1, dt * (e.flat > 6 ? 26 : 9));
-      root.scale.set(1 + 0.22 * k.flatK, 1 - 0.7 * k.flatK, 1 + 0.12 * k.flatK);
+      // Riesenkinderzimmer: winzig oder riesig – weich nachgeführt; kurz vor dem Ende pulsiert das Kart ruhig
+      // zwischen seiner Größe und der normalen (drei Mal je Sekunde, kein Flackern).
+      let wantK = sizeScale(e.size);
+      if (e.size !== 0 && Math.abs(e.size) < SIZE_WARN) wantK = 1 + (wantK - 1) * (0.7 + 0.3 * Math.cos(this.time * 19));
+      if (k.fresh) k.sizeK = wantK;
+      k.sizeK += (wantK - k.sizeK) * Math.min(1, dt * 9);
+      root.scale.set((1 + 0.22 * k.flatK) * k.sizeK, (1 - 0.7 * k.flatK) * k.sizeK, (1 + 0.12 * k.flatK) * k.sizeK);
       // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist – nur nicht, solange es platt ist:
       // die Flunder soll man sehen.
       root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
@@ -1613,7 +1661,10 @@ export class RaceScene {
     // Dinge und Hindernisse
     this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
-    for (const m of this.mechanics) m.update(race.time, this.time, dt, this.camera.position, this.fx);
+    for (const m of this.mechanics) {
+      m.update(race.time, this.time, dt, this.camera.position, this.fx);
+      m.observe?.(entities, dt, this.fx);
+    }
     this.mechanicEvents(race.time, me ?? undefined, dt, entities);
     let smoke = 0;
     let threat = 0;
@@ -1961,8 +2012,10 @@ export class RaceScene {
     let yaw = this.camYaw;
     // Im Gleitflug rückt die Kamera ab und höher: man sieht Ringe, Aufwinde und die Landebahn kommen.
     this.camGlide += (((me.flags & FLAG_GLIDE) !== 0 && me.respawn === 0 ? 1 : 0) - this.camGlide) * Math.min(1, dt * 2.6);
-    let dist = 5.3 + frac * 1.1 + this.camGlide * 2.6;
-    let height = 2.45 + frac * 0.25 + this.camGlide * 1.5;
+    // (Ein winziges Kart sieht man aus der Nähe und von tiefer, ein riesiges aus größerem Abstand.)
+    const zoom = 0.45 + 0.55 * k.sizeK;
+    let dist = (5.3 + frac * 1.1) * zoom + this.camGlide * 2.6;
+    let height = (2.45 + frac * 0.25) * zoom + this.camGlide * 1.5;
     let lookAhead = 3.2 + this.camGlide * 5;
     if (intro > 0) {
       // Kamerafahrt: von schräg vorn über die Startaufstellung nach hinten ins Heck.

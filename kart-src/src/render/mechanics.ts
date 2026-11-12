@@ -5,6 +5,7 @@
 
 import type * as THREE from 'three';
 import type { Track } from '../game/track';
+import type { RenderEntity } from '../game/view';
 import type { FxSink } from './fxApi';
 import type { World } from './world';
 import { PULSE_AVALANCHE, PULSE_BOMB, PULSE_BUBBLE, PULSE_ICICLE, PULSE_METEOR, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
@@ -17,6 +18,7 @@ import { buildMirrors } from './mechanics/mirrors';
 import { buildMoon } from './mechanics/moon';
 import { buildRift } from './mechanics/rift';
 import { buildRiver } from './mechanics/river';
+import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
 import { buildStorm } from './mechanics/storm';
 import { buildTide } from './mechanics/tide';
@@ -34,6 +36,12 @@ export interface MechanicView {
    * @param fx      Teilchen der Szene (fxApi.ts)
    */
   update(time: number, seconds: number, dt: number, cam: THREE.Vector3, fx: FxSink): void;
+  /**
+   * Wahlweise, je Bild nach update: wo die Karts gerade sind (Lage, Größe …). Nur für Zierde, die auf Karts
+   * antwortet – etwa die Bauklotz-Mauer, die auseinanderfliegt, wenn ein riesiges Kart hindurchbricht. Was die
+   * Physik angeht, bleibt eine reine Funktion der Rennzeit.
+   */
+  observe?(karts: readonly RenderEntity[], dt: number, fx: FxSink): void;
   dispose(): void;
 }
 
@@ -58,7 +66,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.dark) out.push(buildStorm(track, detail, world));
   if (track.rivers.length > 0) out.push(buildRiver(track, detail));
   if (track.portals.length > 0) out.push(buildMirrors(track, detail));
+  if (track.sizers.length > 0) out.push(buildSizers(track, detail));
   if (track.era) out.push(buildRift(track, detail));
-  else if (track.holes.length > 0 || track.gates.length > 0) out.push(buildVolcano(track, detail));
+  else if (track.holes.length > 0 || track.gates.some((g) => g.only === 0)) out.push(buildVolcano(track, detail));
   return out;
 }

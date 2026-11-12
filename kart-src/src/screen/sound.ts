@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
@@ -77,6 +77,12 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'whistle',
   'trainpass',
   'board',
+  // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer
+  'smash',
+  // … und fremde Karts schrumpfen, wachsen und springen hörbar zurück (leiser, wie beim Schubring)
+  'shrink',
+  'grow',
+  'sizeend',
 ]);
 
 export class Sound {

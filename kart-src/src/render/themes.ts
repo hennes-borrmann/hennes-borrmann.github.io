@@ -71,6 +71,44 @@ export interface Theme {
 
 export const THEMES: Record<ThemeId, Theme> = {
   // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
+  // Riesenkinderzimmer: Nachmittag im Kinderzimmer – Holzdielen, bunter Spielteppich, Tapetenwände, warmes Licht durchs Fenster
+  // im Norden. Der „Himmel“ ist die Zimmerdecke; die Sonnenscheibe verschwindet hinter der Fensterwand (Farbe wie die Decke).
+  zimmer: {
+    sky: [0xf6ecd8, 0xf3e4c8, 0xefdcbc],
+    fog: 0xf0e0c4,
+    fogNear: 300,
+    fogFar: 1500,
+    sunDir: [0.2, 0.72, -0.66],
+    sunColor: 0xfff0d2,
+    sunIntensity: 2.1,
+    hemiSky: 0xfff4e0,
+    hemiGround: 0xc49a6a,
+    hemiIntensity: 1.55,
+    disc: 0xf3e4c8,
+    discSize: 2,
+    clouds: 0xffffff,
+    cloudShade: 0xe6dccb,
+    noClouds: true,
+    stars: false,
+    road: 0x5a6068,
+    roadAlt: 0x525860,
+    line: 0xf6f0dc,
+    kerbA: 0xe2483a,
+    kerbB: 0xf6f0dc,
+    shoulder: 0xd6ccb6,
+    wallA: 0xf2c94c,
+    wallB: 0xd9483b,
+    wallCap: 0xf6f0dc,
+    deck: 0xd9b27a,
+    deckDark: 0x9a7448,
+    pillar: 0xc79a62,
+    ground: [0xd2a46c, 0xc4945c, 0xa87a48, 0xd8ac74],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: 0,
+    rough: 0.12,
+  },
   // Wüstenexpress: Mittagshitze im Canyonland – tiefblauer Himmel, heller Sand in den Senken, roter Fels;
   // die erdbraune Bahn hebt sich dunkel vom hellen Sand ab.
   wueste: {

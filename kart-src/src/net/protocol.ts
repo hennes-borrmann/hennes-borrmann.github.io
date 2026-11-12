@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -263,7 +263,7 @@ export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 
-const STATE_SIZE = 46;
+const STATE_SIZE = 48;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
 const SNAP_THING_SIZE = 24;
@@ -336,6 +336,7 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 43, s.tow);
   v.setUint8(o + 44, s.draft);
   v.setUint8(o + 45, s.flat);
+  v.setInt16(o + 46, s.size);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -365,6 +366,7 @@ function readState(v: DataView, o: number): KartState {
     tow: v.getUint8(o + 43),
     draft: v.getUint8(o + 44),
     flat: v.getUint8(o + 45),
+    size: v.getInt16(o + 46),
   };
 }
 
