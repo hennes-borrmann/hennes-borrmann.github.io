@@ -1676,16 +1676,10 @@ async function main() {
       `${rode.toFixed(1)} m in ${rodeFor.toFixed(1)} s (Bahn ${raft0.speed} m/s), bei ihm ${seenC.toFixed(1)} m`,
     );
     // … und in der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt.
+    await watch(1);
     await h7.page.evaluate(spot(true));
-    const drowned = [0, 0];
-    const untilDrowned = Date.now() + 10000;
-    while (Date.now() < untilDrowned && !(drowned[0] > 0 && drowned[1] > 0)) {
-      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
-      drowned[0] = Math.max(drowned[0], eh.find((e) => e.slot === 1).respawn);
-      drowned[1] = Math.max(drowned[1], ec.find((e) => e.slot === 1).respawn);
-      await sleep(50);
-    }
-    check('In der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt – beim Host und auf seinem eigenen Bildschirm', drowned[0] > 0 && drowned[1] > 0, `Rücksetzen ${drowned[0]} / ${drowned[1]} Ticks`);
+    const drowned = await seenOnBoth('respawn', 12000);
+    check('In der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt – beim Host und auf seinem eigenen Bildschirm', drowned[0] !== null && drowned[1] !== null, `Rücksetzen bei ${at(drowned[0])} / ${at(drowned[1])}`);
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
