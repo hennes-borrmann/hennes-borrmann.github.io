@@ -145,6 +145,7 @@ const LEVEL: Record<SfxName, number> = {
   shrink: 1.3,
   grow: 1.3,
   sizeend: 1.0,
+  smash: 1.4,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -946,7 +947,8 @@ export class SfxPlayer {
         v.noise(700, 320, 0.11, 0.3, { q: 1.2 }).tone('sine', 118, 58, 0.1, 0.38);
         break;
       // Dschungel-Fluss (vorläufig: wie die Landung)
-      // Wüstenexpress (vorläufig: wie das Floß)
+      // Wüstenexpress (vorläufig: wie das Floß); Riesenkinderzimmer: die Bauklotz-Mauer (vorläufig ebenso)
+      case 'smash':
       case 'board':
       case 'rattle':
       case 'raft':

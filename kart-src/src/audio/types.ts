@@ -82,6 +82,7 @@ export type SfxName =
   | 'shrink' // Riesenkinderzimmer: ein Kart schrumpft (durch den blauen Ring gefahren) – VORLÄUFIG
   | 'grow' // Riesenkinderzimmer: ein Kart wächst (durch den orangen Ring gefahren) – VORLÄUFIG
   | 'sizeend' // Riesenkinderzimmer: ein Kart ist wieder normal groß – VORLÄUFIG
+  | 'smash' // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer – VORLÄUFIG
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

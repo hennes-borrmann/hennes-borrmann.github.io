@@ -5,6 +5,7 @@
 
 import type * as THREE from 'three';
 import type { Track } from '../game/track';
+import type { RenderEntity } from '../game/view';
 import type { FxSink } from './fxApi';
 import type { World } from './world';
 import { PULSE_AVALANCHE, PULSE_BOMB, PULSE_BUBBLE, PULSE_ICICLE, PULSE_METEOR, PULSE_PRESS, PULSE_VENT } from '../game/mechanics';
@@ -35,6 +36,12 @@ export interface MechanicView {
    * @param fx      Teilchen der Szene (fxApi.ts)
    */
   update(time: number, seconds: number, dt: number, cam: THREE.Vector3, fx: FxSink): void;
+  /**
+   * Wahlweise, je Bild nach update: wo die Karts gerade sind (Lage, Größe …). Nur für Zierde, die auf Karts
+   * antwortet – etwa die Bauklotz-Mauer, die auseinanderfliegt, wenn ein riesiges Kart hindurchbricht. Was die
+   * Physik angeht, bleibt eine reine Funktion der Rennzeit.
+   */
+  observe?(karts: readonly RenderEntity[], dt: number, fx: FxSink): void;
   dispose(): void;
 }
 

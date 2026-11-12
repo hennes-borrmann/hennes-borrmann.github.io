@@ -182,7 +182,9 @@ export interface SceneEvent {
     /** Riesenkinderzimmer: ein Kart schrumpft / wächst (durch einen Ring gefahren) / ist wieder normal groß. */
     | 'shrink'
     | 'grow'
-    | 'sizeend';
+    | 'sizeend'
+    /** Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer. */
+    | 'smash';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -258,6 +260,8 @@ interface KartView {
   /** Riesenkinderzimmer: Größenklasse im letzten Bild (−1/0/1) und der gezeigte Maßstab (weich nachgeführt). */
   sizeWas: number;
   sizeK: number;
+  /** Riesenkinderzimmer: ist das Kart gerade auf dem eigenen Stück der Abkürzung durch die Bauklotz-Burg? */
+  inCastle: boolean;
   roulette: number;
   item: number;
   flags: number;
@@ -841,6 +845,7 @@ export class RaceScene {
       roofWait: 0,
       sizeWas: 0,
       sizeK: 1,
+      inCastle: false,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1169,6 +1174,19 @@ export class RaceScene {
       if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
     } else k.snowWait = 0;
     k.snowed = snowed;
+    // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer (es fährt auf das eigene Stück der
+    // Abkürzung, die nur Riesige einlässt) – es kracht und Klötze fliegen.
+    if (this.track.sizers.length > 0 && e.seg < this.track.total) {
+      const tr = this.track;
+      const kb = tr.branchOf[e.seg];
+      const own = kb >= 0 && tr.branchOnly[kb] > 0 && tr.twin[e.seg] < 0;
+      if (own && !k.inCastle && !k.fresh) {
+        this.emit('smash', k, local);
+        for (let n = 0; n < 3; n++) this.burst(e.x, e.y + 0.6 + n * 0.6, e.z, 8, 9, [0xe2483a, 0x3f8fd6, 0xe8b93a][n], false, 0.7, 0.8, 6);
+        if (local) this.shake = Math.max(this.shake, 0.35);
+      }
+      k.inCastle = own;
+    }
     // Riesenkinderzimmer: geschrumpft, gewachsen oder wieder normal?
     if (this.track.sizers.length > 0) {
       const cls = sizeClass(e.size);
@@ -1640,7 +1658,10 @@ export class RaceScene {
     // Dinge und Hindernisse
     this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
-    for (const m of this.mechanics) m.update(race.time, this.time, dt, this.camera.position, this.fx);
+    for (const m of this.mechanics) {
+      m.update(race.time, this.time, dt, this.camera.position, this.fx);
+      m.observe?.(entities, dt, this.fx);
+    }
     this.mechanicEvents(race.time, me ?? undefined, dt, entities);
     let smoke = 0;
     let threat = 0;

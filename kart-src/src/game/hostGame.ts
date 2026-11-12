@@ -501,6 +501,12 @@ export class HostGame implements GameView {
     k.state.roulette = 0;
   }
 
+  /** Nur für Tests: die Größe eines Karts setzen (> 0 = so viele Ticks riesig, < 0 = so viele Ticks winzig, 0 = normal). */
+  debugSize(slot: number, size: number): void {
+    const k = this.karts.get(slot);
+    if (k) k.state.size = Math.max(-32000, Math.min(32000, Math.round(size)));
+  }
+
   /** Nur für Tests: ein Kart so treffen, als wäre es in einen Ölfleck gefahren. */
   debugHit(slot: number): void {
     const k = this.karts.get(slot);

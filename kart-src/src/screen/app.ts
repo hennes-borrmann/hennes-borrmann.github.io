@@ -1532,6 +1532,8 @@ export class App {
       },
       // Nur Host, nur für Tests: einem Kart direkt ein Item geben.
       giveItem: (slot: number, item: number) => this.hostGame?.giveItem(slot, item),
+      // Riesenkinderzimmer: Größe eines Karts setzen (Ticks; > 0 riesig, < 0 winzig) – nur beim Host.
+      size: (slot: number, ticks: number) => this.hostGame?.debugSize(slot, ticks),
       debugHit: (slot: number) => this.hostGame?.debugHit(slot),
       clientStats: () => (this.clientGame ? { ...this.clientGame.stats, peak: this.rates.peakCorrection } : null),
       rates: () => ({ ...this.rates }),
