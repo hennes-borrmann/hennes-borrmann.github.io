@@ -1014,7 +1014,7 @@ export class RaceScene {
       if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
     } else k.snowWait = 0;
     k.snowed = snowed;
-    // Sturmhafen: schiebt gerade eine Böe? Gischt fegt quer, das eigene Kart meldet sich regelmäßig (Heulen).
+    // Sturmhafen: schiebt gerade eine Böe? Das eigene Kart meldet sich regelmäßig (Heulen); Schleier und Gischt zeichnet mechanics/harbor.ts.
     if (this.track.winds.length > 0) {
       const tr = this.track;
       let blow = 0;
@@ -1024,9 +1024,6 @@ export class RaceScene {
       }
       const gusty = Math.abs(blow) > 1.5;
       if (gusty) {
-        const wx = rightX(tr, proj.seg) * blow;
-        const wz = rightZ(tr, proj.seg) * blow;
-        if (Math.random() < dt * 26) this.fx.puff(e.x - wx * 0.5 + (Math.random() - 0.5) * 2, e.y + 0.2 + Math.random() * 1.4, e.z - wz * 0.5 + (Math.random() - 0.5) * 2, wx * 2.4, 0.4 + Math.random(), wz * 2.4, 0.4, 0.14 + Math.random() * 0.16, 0xe6f1f5, 0.6, 1);
         k.gustWait -= dt;
         if (k.gustWait <= 0) {
           k.gustWait = 0.3;
@@ -1425,7 +1422,7 @@ export class RaceScene {
     const wake = me ? (me.draft >= DRAFT_PULL_FROM ? 0.8 : (me.draft / DRAFT_FULL) * 0.5) : 0;
     const fast = me ? Math.max(wake, me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
-    this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx);
+    this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx, this.mechTime);
     if (this.needsCompile) {
       // Neue Welt: ihr erstes Bild Teil für Teil vorbereiten. Solange das läuft, wird nichts gezeigt.
       if (this.stagedPending) this.beginWarmup();

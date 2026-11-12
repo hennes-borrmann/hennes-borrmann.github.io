@@ -15,6 +15,7 @@ import {
   EDGE_OPEN_R,
   EDGE_RAMP,
   EDGE_TUNNEL,
+  heaveAt,
   rightX,
   rightZ,
   segDelta,
@@ -762,7 +763,7 @@ export class World {
     const id = t.def.theme;
     // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
     // Wänden, die Naturstrecken eine Höhle im Fels.
-    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken';
+    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen';
     const H = TUNNEL_H;
     const R = hall ? 0.9 : TUNNEL_ROCK;
     const cRock = rgb(th.ground[2]);
@@ -1087,8 +1088,10 @@ export class World {
     // Unter Brücken und Stegen bleibt das Gelände unter der Fahrbahn – auch wenn
     // gleich daneben eine höhere Fahrbahn am Boden verläuft. Unter Stegen, deren Platten
     // wegbrechen können, liegt ein tiefer Graben: dort glüht die Lava.
+    // Sturmhafen: die Lücke hinter der Schanze ist eine Ladeluke – das Gelände darunter liegt tief (über dem Meeresspiegel).
+    const gapPit = t.def.theme === 'hafen' ? 3.4 : 0;
     for (const i of this.deckSegs) {
-      const cap = t.py[i] - (this.pitAt(i) ? PIT_D : DECK_D + 0.8);
+      const cap = t.py[i] - (this.pitAt(i) ? PIT_D : gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
       if (h <= cap) continue;
       const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
       if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
@@ -1381,7 +1384,8 @@ export class World {
 
   // --- Pro Bild --------------------------------------------------------------
 
-  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink): void {
+  /** raceTime: Rennzeit in Ticks – für das Wenige, was hier mit der Strecke mitgeht (Kisten auf schwankenden Pontons). */
+  update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink, raceTime = 0): void {
     for (const m of this.timed) m.uniforms.time.value = time;
     this.life?.update(time, dt, camera, fx);
     // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund.
@@ -1419,7 +1423,8 @@ export class World {
         const k = this.boxScale[i];
         const pop = k < 1 ? k * (1 + 0.35 * Math.sin(k * Math.PI)) : 1;
         const b = boxes[i];
-        this.v.set(b.x, b.y + 1.15 + Math.sin(time * 2.2 + i * 1.7) * 0.14, b.z);
+        const heave = this.track.edge[b.seg] & EDGE_FLOAT ? heaveAt(this.track, b.seg, 0, raceTime) : 0;
+        this.v.set(b.x, b.y + heave + 1.15 + Math.sin(time * 2.2 + i * 1.7) * 0.14, b.z);
         this.euler.set(0.5, time * 1.4 + i, 0.35);
         this.q.setFromEuler(this.euler);
         this.s.setScalar(pop);

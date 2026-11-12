@@ -20,6 +20,6 @@ export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RI
 /**
  * So viele Strecken (von vorn gezählt) stehen in der Lobby zur Wahl. Was dahinter
  * stünde, wäre noch in Arbeit – zu erreichen nur mit dem Test-Schalter ?alle=1.
- * Zurzeit sind die ersten acht freigegeben; Sturmhafen und Vulkaninsel sind in Arbeit.
+ * Zurzeit sind die ersten neun freigegeben; die Vulkaninsel ist in Arbeit.
  */
-export const RELEASED_TRACKS = 8;
+export const RELEASED_TRACKS = 9;

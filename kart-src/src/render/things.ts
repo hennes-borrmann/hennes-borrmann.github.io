@@ -346,6 +346,18 @@ export class ThingVisuals {
         const len = 0.8 + (k % 3) * 0.22;
         put(b, new THREE.CylinderGeometry(0.1, 0.05, len, 5), k % 2 === 0 ? 0xc46ad6 : 0xff8fc8, Math.cos(a) * 0.7, 0.9 - len / 2, Math.sin(a) * 0.7);
       }
+    } else if (this.theme === 'hafen') {
+      // Container am Kranhaken: pendelt knapp über dem Boden quer über die Bahn, die Seile laufen hinauf zur Laufkatze.
+      b.box(0, 1.15, 0, 2.5, 1.7, 2.2, rgb(0xe8552e), 0, rgb(0xb93f20));
+      // Riffelung und Türriegel
+      for (let k = -2; k <= 2; k++) b.box(k * 0.5, 1.15, 1.11, 0.12, 1.5, 0.04, rgb(0xb93f20));
+      for (let k = -2; k <= 2; k++) b.box(k * 0.5, 1.15, -1.11, 0.12, 1.5, 0.04, rgb(0xb93f20));
+      // Warnschraffur unten rundum – das, was man vom Kart aus zuerst sieht
+      for (let k = 0; k < 6; k++) b.box(-1.05 + k * 0.42, 0.42, -1.12, 0.21, 0.24, 0.05, rgb(k % 2 === 0 ? 0xffd23f : 0x16131c));
+      // Ladegeschirr und vier Seile
+      b.box(0, 2.12, 0, 2.7, 0.16, 2.4, rgb(0xffd23f));
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.box(sx * 1.15, 10.6, sz * 1.0, 0.07, 17, 0.07, rgb(0x2a2733));
+      b.box(0, 2.35, 0, 0.5, 0.3, 0.5, rgb(0x2a2733));
     } else {
       // Kehrroboter mit Warnlicht
       b.box(0, 0.75, 0, 2.3, 1.0, 1.9, rgb(0x1fd6c8), 0, rgb(0x16a79c));
@@ -711,6 +723,11 @@ export class ThingVisuals {
         inner.position.y = 0.45 + 0.3 * Math.sin(time * 1.7 + i);
         inner.scale.set(1 + 0.09 * pump, 1 - 0.12 * pump, 1 + 0.09 * pump);
         inner.rotation.z = Math.sin(time * 1.1 + i) * 0.12;
+      } else if (this.theme === 'hafen') {
+        // Die Last hängt: am Umkehrpunkt steht sie schräg, in der Mitte gerade; dazu dreht sie leicht am Seil.
+        inner.position.y = 0.12 + 0.05 * Math.sin(time * 1.3 + i);
+        inner.rotation.z = -(lat / Math.max(1, h.amp)) * 0.1;
+        inner.rotation.y = Math.sin(time * 0.7 + i * 2.1) * 0.08;
       } else {
         inner.position.y = 0.04 * Math.sin(time * 20);
       }
