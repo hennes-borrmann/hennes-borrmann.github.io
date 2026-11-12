@@ -222,7 +222,9 @@ async function main() {
 
   const inviteUrl = await kart(host.page, 'inviteUrl()');
   const client = await openScreen('client');
-  await client.page.goto(inviteUrl);
+  // (Dieser Mitspieler wartet länger als die üblichen 30 s auf einen verlorenen Host: Ohne Grafikkarte hängt der Host im
+  // Abschnitt „Volle Lobby" beim ersten Bild des Rennens unter Last länger – das Fenster selbst prüft „Host verschwindet".)
+  await client.page.goto(`${inviteUrl}&warten=180`);
   await client.page.waitForSelector('#app[data-view="home"]');
   check('Einladungslink füllt den Raumcode vor', (await client.page.inputValue('#in-code')) === code);
   await joinLobby(client, 'Ben', null);
