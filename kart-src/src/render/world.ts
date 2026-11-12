@@ -1106,6 +1106,30 @@ export class World {
       const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
       if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
     }
+    // Fluss: Wo das Land neben dem Flussbett tiefer liegt als der Wasserspiegel (am Hang zum Tiefland hin), bekommt
+    // der Fluss einen Uferdamm – sonst stünde das Wasser als Kante frei über dem Land. Der Damm liegt seitlich
+    // neben dem Fluss (nicht vor der Kante des Wasserfalls): gezählt wird nur, was quer zu einem Flussabschnitt liegt.
+    if (t.rivers.length > 0) {
+      let side = Infinity;
+      let top = 0;
+      for (const i of this.deckSegs) {
+        if ((t.edge[i] & EDGE_RIVER) === 0) continue;
+        const dx = x - t.px[i];
+        const dz = z - t.pz[i];
+        if (Math.abs(dx * t.tx[i] + dz * t.tz[i]) > 1.6) continue;
+        const dd = Math.abs(dx * rightX(t, i) + dz * rightZ(t, i)) - t.wh[i];
+        if (dd < side) {
+          side = dd;
+          top = t.py[i] + 0.35;
+        }
+      }
+      if (side < 34) {
+        // Bett bis 4 m neben der Kante, dann die Böschung hinauf, Dammkrone bis 21 m (so weit reicht das Wasser nicht), dahinter fällt er ab.
+        const bed = top - 0.35 - RIVER_D;
+        const want = side < 21 ? bed + (top - bed) * smooth((side - 4) / 4.5) : h + (top - h) * (1 - smooth((side - 21) / 13));
+        if (want > h) h = want;
+      }
+    }
     return h;
   }
 

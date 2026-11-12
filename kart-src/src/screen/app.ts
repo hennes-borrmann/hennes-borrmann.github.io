@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1459,7 +1459,64 @@ export class App {
           return { id: v.id, kind: v.kind, lat: p.lat, half: v.half, speed: v.speed, at: vehicleAt(v, time, lap), x: p.x, y: p.y, z: p.z, time };
         });
       },
-      pulses: () => TRACK.pulses.map((p) => ({ kind: p.kind, lat: p.lat, at: TRACK.prog[p.seg] * TRACK.step, period: p.period / 60 })),
+      // (strike = erste Rennzeit ≥ 0, zu der das Hindernis losgeht; on = wie lange es dann wirkt – alles in Sekunden)
+      pulses: () =>
+        TRACK.pulses.map((p) => ({
+          kind: p.kind,
+          lat: p.lat,
+          at: TRACK.prog[p.seg] * TRACK.step,
+          period: p.period / 60,
+          strike: ((p.period - (((p.phase % p.period) + p.period) % p.period)) % p.period) / 60,
+          on: p.on / 60,
+          warn: p.warn / 60,
+        })),
+      // Gewitterkamm: Ist die Strecke dunkel, und wie hell ist das Wetterleuchten zur Rennzeit dieses Bildschirms
+      // bzw. zur angegebenen Rennzeit (Sekunden)? 0 = finster … 1 = taghell.
+      storm: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        return { dark: TRACK.dark, time, light: stormLight(TRACK.pulses, TRACK.flashes, time), flashes: TRACK.flashes.length };
+      },
+      // Dschungel-Fluss, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Flussstücke
+      // (Meter ab Start, Länge) mit ihren Bahnen – wie weit die Flöße getrieben sind (drift, Meter) und ob an der Stelle
+      // probe (Meter ab Flussanfang) gerade ein Floß liegt.
+      river: (seconds?: number, probe = 40) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        return {
+          time,
+          rivers: TRACK.rivers.map((r) => ({
+            at: r.first * TRACK.step,
+            length: r.count * TRACK.step,
+            lanes: r.lanes.map((l) => ({ lat0: l.lat0, lat1: l.lat1, length: l.length, gap: l.gap, speed: l.speed, phase: l.phase, drift: raftDrift(l, time), raft: raftAt(l, probe, time) })),
+          })),
+        };
+      },
+      // Spiegelkabinett, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Rahmen (Meter ab
+      // Start, seitliche Lage), wohin ihr Spiegel führt (Meter ab Start), die Sorte (0 = vorwärts, 1 = zurück) und ob
+      // gerade ein Spiegel darin steht.
+      portals: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        return TRACK.portals.map((p) => ({ at: TRACK.prog[p.seg] * TRACK.step, lat0: p.lat0, lat1: p.lat1, to: TRACK.prog[p.to] * TRACK.step, kind: p.kind, open: portalOpen(p, time), time }));
+      },
+      // Wüstenexpress, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): je Zug die Wagen von der
+      // Lok (0) bis zum Rampenwagen – Streckenmeter und seitliche Lage der Wagenmitte, Ort, Höhe des Dachs hinten und vorn.
+      trains: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const pose = newVehiclePose();
+        return TRACK.vehicles
+          .filter((v) => !!v.roofs)
+          .map((v) => ({
+            id: v.id,
+            time,
+            cars: Array.from({ length: v.cars }, (_, c) => {
+              const p = vehiclePose(TRACK, v, c, time, pose);
+              return { at: TRACK.prog[p.seg] * TRACK.step, lat: p.lat, x: p.x, y: p.y, z: p.z, roof: [roofTop(v, c, -v.half), roofTop(v, c, v.half)] };
+            }),
+          }));
+      },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
         const glides: { from: number; to: number }[] = [];
@@ -1497,6 +1554,23 @@ export class App {
             lee: w.lee.map((l) => ({ from: where(l.first).at, to: where(l.last).at, lat0: l.lat0, lat1: l.lat1 })),
           })),
           pontoons: TRACK.pontoons.map((p) => ({ ...where(p.first), length: p.count * TRACK.step, amp: p.amp, period: p.period / 60, lift: pontoonLift(p, time) })),
+        };
+      },
+      // Was sich an der Strecke nach Plan ändert, zur Rennzeit dieses Bildschirms: Bruchstellen (Meter ab Start bzw. ab
+      // Gabelung, seitliche Lage, ob gerade weggebrochen, wann sie zum ersten Mal bricht) und Tore (Abzweigung, ob gesperrt).
+      changes: () => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = view ? view.race(performance.now() / 1000).time : 0;
+        const where = (seg: number) => {
+          const branch = TRACK.branchOf[seg];
+          return { branch, at: (branch < 0 ? seg : seg - TRACK.branches[branch].first) * TRACK.step };
+        };
+        return {
+          time,
+          holes: TRACK.holes.map((h) => ({ ...where(h.first), length: h.count * TRACK.step, lat0: h.lat0, lat1: h.lat1, open: planActive(h.plan, time), breaksAt: h.plan.spans[0] / 60 })),
+          gates: TRACK.gates.map((g) => ({ branch: TRACK.branchOf[g.first], shut: planActive(g.plan, time) })),
+          // Zeitriss-Ruine: das geltende Zeitalter (0 = Einst, 1 = Jetzt) und wie lange es schon gilt (Sekunden).
+          era: TRACK.era ? { now: eraAt(TRACK.era, time), name: TRACK.era.names[eraAt(TRACK.era, time)], since: eraSince(TRACK.era, time) / 60, split: TRACK.era.split / 60, period: TRACK.era.period / 60 } : null,
         };
       },
       // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
