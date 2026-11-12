@@ -3,7 +3,7 @@
 // und laden den Drift schnell, Stahl ist schnell und glatt, Fels und der
 // Stadtasphalt kleben. Die KI plant mit denselben Werten.
 
-export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel';
+export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble';
 
 export interface Surface {
   id: SurfaceId;
@@ -54,6 +54,8 @@ export const SURFACES: Surface[] = [
   { id: 'regolith', name: 'Mondstaub', grip: 0.8, speed: 0.97, accel: 0.9, brake: 0.8, charge: 0.35 },
   // Bodenplatten der Mondbasis: griffig und schnell.
   { id: 'panel', name: 'Bodenplatten', grip: 1.05, speed: 1.03, accel: 1.03, brake: 1.05, charge: 0 },
+  // Tempelplatten: glatt geschliffener Sandstein – griffig und schnell.
+  { id: 'marble', name: 'Tempelplatten', grip: 1.04, speed: 1.02, accel: 1.02, brake: 1.05, charge: 0 },
 ];
 
 export const SURFACE_INDEX = Object.fromEntries(SURFACES.map((s, i) => [s.id, i])) as Record<SurfaceId, number>;

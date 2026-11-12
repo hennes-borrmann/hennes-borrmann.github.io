@@ -12,6 +12,7 @@ import { buildGlutLife } from './life/glut';
 import { buildKlippeLife } from './life/klippe';
 import { buildMondLife } from './life/mond';
 import { buildHafenLife } from './life/hafen';
+import { buildRuineLife } from './life/ruine';
 import { buildVulkanLife } from './life/vulkan';
 import { buildNachtLife } from './life/nacht';
 import { buildRiffLife } from './life/riff';
@@ -23,9 +24,11 @@ export interface Life {
   readonly group: THREE.Group;
   /**
    * Pro Bild. time = Sekunden seit Aufbau der Szene, cam = Kameraposition,
-   * fx = Teilchen der Szene (Funken und Comic-Bällchen, siehe fxApi.ts).
+   * fx = Teilchen der Szene (Funken und Comic-Bällchen, siehe fxApi.ts),
+   * raceTime = Rennzeit in Ticks (60 je Sekunde, im Countdown negativ) – für Kulissen,
+   * die mit der Strecke gehen (die Zeitriss-Ruine wechselt mit dem Zeitalter ihr Gesicht).
    */
-  update(time: number, dt: number, cam: THREE.Vector3, fx: FxSink): void;
+  update(time: number, dt: number, cam: THREE.Vector3, fx: FxSink, raceTime?: number): void;
   dispose(): void;
 }
 
@@ -51,6 +54,8 @@ export function buildLife(world: World): Life | null {
       return buildHafenLife(world);
     case 'vulkan':
       return buildVulkanLife(world);
+    case 'ruine':
+      return buildRuineLife(world);
     default:
       return null;
   }

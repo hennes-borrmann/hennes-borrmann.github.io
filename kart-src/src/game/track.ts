@@ -45,13 +45,15 @@ import {
   GATE_WARN,
   HOLE_WARN,
   planActive,
+  type Era,
   type Gate,
   type Hole,
+  type Plan,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -146,14 +148,16 @@ export interface PathFeatures {
    * Bruchstellen: das Stück [from, to], seitlich lat0 … lat1 (Meter), bricht zur Rennzeit at (Sekunden)
    * weg und bleibt weg – oder, mit until, bis zu dieser Rennzeit. Mit every (Sekunden) wiederholt sich das.
    * Reicht ein Bruch über die Fahrbahnmitte, wird ein dort Gestürzter weiter vorn auf festem Boden aufgesetzt.
+   * Auf Strecken mit Zeitaltern (TrackDef.eras) statt at: era – das Stück fehlt in diesem Zeitalter
+   * (mit delay erst so viele Sekunden nach dessen Beginn).
    */
-  cracks?: { from: number; to: number; lat0: number; lat1: number; at: number; until?: number; every?: number }[];
+  cracks?: { from: number; to: number; lat0: number; lat1: number; at?: number; until?: number; every?: number; era?: 0 | 1; delay?: number }[];
   /**
    * Tore: sperren eine Abzweigung an ihrer Mündung (auf der Hauptstrecke: den Weg bei at) – von Rennbeginn
    * bis opens (Sekunden) und/oder ab closes (Sekunden). Mit every (Sekunden) wiederholt sich der Plan; dann
    * ist das Tor in [closes, opens) zu.
    */
-  gates?: { at?: number; opens?: number; closes?: number; every?: number; noteOpen?: string; noteShut?: string }[];
+  gates?: { at?: number; opens?: number; closes?: number; every?: number; noteOpen?: string; noteShut?: string; era?: 0 | 1 }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -201,6 +205,11 @@ export interface TrackDef extends PathFeatures {
   traffic?: TrafficDef;
   /** Ein Satz dazu, was diese Strecke von den anderen unterscheidet – für die Streckenwahl. */
   twist?: string;
+  /**
+   * Zwei Zeitalter im Wechsel (mechanics.ts, Era): Periode und Dauer des ersten in Sekunden, Namen und Meldungen.
+   * Bruchstellen und Tore mit era hängen daran.
+   */
+  eras?: { period: number; split: number; names: [string, string]; notes: [string, string] };
   /** Ebbe und Flut: Wasserhöhe bei Ebbe und Flut (Meter), Periode und Versatz in Sekunden. */
   tide?: { low: number; high: number; period: number; phase: number };
   /** Höhe des Meeresspiegels für Tauchstrecken (PathFeatures.dives); ohne Angabe 0. */
@@ -375,6 +384,8 @@ export interface Track {
   /** Bruchstellen und Tore (mechanics.ts). */
   holes: Hole[];
   gates: Gate[];
+  /** Zeitalter der Strecke (mechanics.ts) – null: sie hat keine. */
+  era: Era | null;
   laps: number;
 }
 
@@ -982,6 +993,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     floatWB: new Float32Array(total),
     holes: [],
     gates: [],
+    era: def.eras ? { period: Math.round(def.eras.period * 60), split: Math.round(def.eras.split * 60), names: def.eras.names, notes: def.eras.notes } : null,
     laps: def.laps,
   };
   for (const p of paths) {
@@ -1091,7 +1103,13 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       const count = Math.max(1, last - first + 1);
       const lat0 = Math.min(c.lat0, c.lat1);
       const lat1 = Math.max(c.lat0, c.lat1);
-      track.holes.push({ first, count, lat0, lat1, plan: { period: Math.round((c.every ?? 0) * 60), spans: [Math.round(c.at * 60), c.until === undefined ? Infinity : Math.round(c.until * 60)] }, warn: HOLE_WARN });
+      let plan: Plan = { period: Math.round((c.every ?? 0) * 60), spans: [Math.round((c.at ?? 0) * 60), c.until === undefined ? Infinity : Math.round(c.until * 60)] };
+      if (c.era !== undefined && track.era) {
+        const e = track.era;
+        const delay = Math.round((c.delay ?? 0) * 60);
+        plan = { period: e.period, spans: c.era === 0 ? [delay, e.split] : [e.split + delay, e.period] };
+      }
+      track.holes.push({ first, count, lat0, lat1, plan, warn: HOLE_WARN });
       for (let k = 0; k < count; k++) edge[first + k] |= EDGE_BROKEN;
       // Bricht auch die Mitte weg, kann dort niemand aufgesetzt werden: zurück bis vor die Bruchstelle
       // (über den Anfang einer Abzweigung hinaus auf die Hauptstrecke vor der Gabelung).
@@ -1113,9 +1131,13 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         while (count < p.count - 6 && twin[first + count] >= 0) count++;
         count += 5;
       }
-      const period = Math.round((g.every ?? 0) * 60);
+      let period = Math.round((g.every ?? 0) * 60);
       const spans: number[] = [];
-      if (period > 0) spans.push(Math.round((g.closes ?? 0) * 60), Math.round((g.opens ?? 0) * 60));
+      if (g.era !== undefined && track.era) {
+        period = track.era.period;
+        if (g.era === 0) spans.push(0, track.era.split);
+        else spans.push(track.era.split, track.era.period);
+      } else if (period > 0) spans.push(Math.round((g.closes ?? 0) * 60), Math.round((g.opens ?? 0) * 60));
       else {
         if (g.opens !== undefined) spans.push(-1e9, Math.round(g.opens * 60));
         if (g.closes !== undefined) spans.push(Math.round(g.closes * 60), Infinity);

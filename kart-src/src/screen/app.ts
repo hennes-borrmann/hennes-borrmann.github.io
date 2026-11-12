@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, gustStrength, gustWarning, planActive, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1153,7 +1153,15 @@ export class App {
     // Die Strecke verändert sich (ein Tor geht auf oder zu): drei Sekunden lang melden.
     let trackNote: string | null = null;
     let trackNoteBad = false;
-    if (race.phase === RACE_RUNNING && TRACK.gates.length > 0) {
+    if (race.phase === RACE_RUNNING && TRACK.era) {
+      // Zeitriss: nach jedem Sprung drei Sekunden lang sagen, welches Zeitalter jetzt gilt.
+      const ticks = -race.untilGo * TICK_RATE;
+      if (ticks >= TRACK.era.split && eraSince(TRACK.era, ticks) < 180) {
+        const now = eraAt(TRACK.era, ticks);
+        trackNote = TRACK.era.notes[now];
+        trackNoteBad = now === 1;
+      }
+    } else if (race.phase === RACE_RUNNING && TRACK.gates.length > 0) {
       const ticks = -race.untilGo * TICK_RATE;
       for (const g of TRACK.gates) {
         const shut = planActive(g.plan, ticks);
@@ -1504,6 +1512,8 @@ export class App {
           time,
           holes: TRACK.holes.map((h) => ({ ...where(h.first), length: h.count * TRACK.step, lat0: h.lat0, lat1: h.lat1, open: planActive(h.plan, time), breaksAt: h.plan.spans[0] / 60 })),
           gates: TRACK.gates.map((g) => ({ branch: TRACK.branchOf[g.first], shut: planActive(g.plan, time) })),
+          // Zeitriss-Ruine: das geltende Zeitalter (0 = Einst, 1 = Jetzt) und wie lange es schon gilt (Sekunden).
+          era: TRACK.era ? { now: eraAt(TRACK.era, time), name: TRACK.era.names[eraAt(TRACK.era, time)], since: eraSince(TRACK.era, time) / 60, split: TRACK.era.split / 60, period: TRACK.era.period / 60 } : null,
         };
       },
       // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.

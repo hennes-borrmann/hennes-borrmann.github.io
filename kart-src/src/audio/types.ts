@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -63,6 +63,8 @@ export type SfxName =
   | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest): trockener Bruch, polternde Schollen, ab ~0,6 s dumpfes Platschen und Zischen aus der Tiefe (~1,4 s)
   | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören): reißende Seile, splitterndes Holz, klappernd fallende Bohlen mit Echo (~2,2 s)
   | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören): Gurgeln, das nach unten abzieht, Zischen, zum Schluss ein heller aufsteigender Glanz (~2 s)
+  | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – tiefer, schwebender Gong, ein Uhrwerk zieht immer schneller auf, ein Glaston steigt (überall gleich laut, ~2,7 s)
+  | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter – heller Riss nach oben, schimmernder Nachhall gleitet hinab, weicher Tiefton-Stoß (überall gleich laut, ~1 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

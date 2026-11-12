@@ -176,7 +176,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
   {
     const dirt = SURFACE_INDEX.dirt;
     const spots: Placement[] = [];
-    const cap = Math.round(170 * dense);
+    // (Die Zeitriss-Ruine liegt im Dschungel: ihre Bäume pflanzt die eigene Kulisse.)
+    const cap = t.def.theme === 'ruine' ? 0 : Math.round(170 * dense);
     for (let i = 0; i < t.total && spots.length < cap; i++) {
       if (t.surf[i] !== dirt || t.edge[i] & (EDGE_DECK | EDGE_TUNNEL)) continue;
       // Dicht an den Weg heran, dahinter lichter – auf jeder Seite etwa ein Baum alle drei Meter.

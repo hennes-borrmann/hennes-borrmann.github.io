@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Zeitriss-Ruine: Tempel im Dschungel, warmes Vormittagslicht durch Dunst; heller Sandstein vor sattem Grün.
+  ruine: {
+    sky: [0x2f8fa8, 0x8fd0c4, 0xf4e6b8],
+    fog: 0xc9dcc0,
+    fogNear: 170,
+    fogFar: 720,
+    sunDir: [0.5, 0.72, 0.35],
+    sunColor: 0xfff0c8,
+    sunIntensity: 2.3,
+    hemiSky: 0xbfe6dc,
+    hemiGround: 0x5f8a4a,
+    hemiIntensity: 1.35,
+    disc: 0xfff6d8,
+    discSize: 20,
+    clouds: 0xf6f1dc,
+    cloudShade: 0xc9d6c0,
+    stars: false,
+    road: 0xd9c79a,
+    roadAlt: 0xcbb886,
+    line: 0xfff6dc,
+    kerbA: 0x2fb6a6,
+    kerbB: 0xf2e6c4,
+    shoulder: 0xa9976c,
+    wallA: 0xcdbb8e,
+    wallB: 0x2fb6a6,
+    wallCap: 0x8a7a55,
+    deck: 0xc8b68a,
+    deckDark: 0x7d6f4e,
+    pillar: 0x9c8c64,
+    ground: [0x4f9a4a, 0x3f8242, 0x8a7a55, 0x6fae52],
+    liquidY: -5,
+    liquid: [0x1f6f7a, 0x2f9aa0, 0xbff2e4],
+    liquidGlow: false,
+    farY: -9,
+    rough: 5,
+  },
   // Vulkaninsel im Ausbruch: tiefe Abendsonne über dem Meer, unten heller Küstenfels und
   // grüne Macchia, oben schwarze Schlacke; über dem Krater ein Aschehimmel mit Glutschein.
   // Die Fahrbahn bleibt überall heller bzw. kühler als das Gelände daneben.
