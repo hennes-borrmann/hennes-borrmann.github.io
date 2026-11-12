@@ -424,6 +424,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   dschungel: KLIPPE,
   // Spiegelkabinett: VORLÄUFIG das Stück der Wolkenbahn
   spiegel: NEUE_STUECKE.wolken,
+  // Wüstenexpress: VORLÄUFIG das Stück des Werkshofs
+  wueste: WERKSHOF,
   results: RESULTS,
 };
 

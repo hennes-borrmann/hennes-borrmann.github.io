@@ -60,7 +60,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -411,6 +411,8 @@ export interface Track {
   rivers: River[];
   /** Portale (mechanics.ts). */
   portals: Portal[];
+  /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
+  roofed: boolean;
   /**
    * Pontons und je Abschnitt, welche (höchstens zwei) seine Höhe bestimmen und mit welchem Gewicht:
    * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
@@ -1029,6 +1031,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     winds: [],
     rivers: [],
     portals: [],
+    roofed: false,
     pontoons: [],
     floatA: new Int16Array(total).fill(-1),
     floatB: new Int16Array(total).fill(-1),
@@ -1265,6 +1268,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
   for (const lane of def.traffic?.lanes ?? []) {
     for (const [kind, at] of lane.cars) {
       track.vehicles.push({ ...VEHICLE_SPECS[kind], id: vid++, kind, lat: lane.lat, speed: lane.speed, offset: at });
+      if (VEHICLE_SPECS[kind].roofs) track.roofed = true;
     }
   }
   return track;

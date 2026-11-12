@@ -63,6 +63,11 @@ import {
   WIND_EDGE,
   WIND_ENDS,
   gustStrength,
+  ROOF_EDGE,
+  ROOF_OVERHANG,
+  ROOF_STEP,
+  roofTop,
+  type Vehicle,
 } from './mechanics';
 import {
   EDGE_FLOAT,
@@ -571,6 +576,63 @@ export function lavaAt(t: Track, seg: number, time: number): number {
 }
 
 const VPOSE = newVehiclePose();
+const RPOSE = newVehiclePose();
+const RPOSE2 = newVehiclePose();
+/**
+ * Ergebnis von roofUnder: das Fahrzeug, auf dessen Dach das Kart steht, und wie sich die Stelle des Dachs unter
+ * dem Kart bewegt (m/s, Drehung in rad/s) – in der Kurve dreht sich der Wagen unter dem Kart mit.
+ */
+let roofVehicle: Vehicle | null = null;
+let roofVx = 0;
+let roofVz = 0;
+let roofTurn = 0;
+
+/**
+ * Wagendächer (mechanics.ts: VehicleSpec.roofs): Höhe des Dachs unter (x, z), auf dem ein Kart in Höhe y steht
+ * oder landen kann – sonst NO_GROUND. Ein Dach trägt nur, wer höchstens ROOF_STEP unter seiner Kante ist.
+ */
+function roofUnder(t: Track, x: number, y: number, z: number, seg: number, time: number): number {
+  roofVehicle = null;
+  let best = NO_GROUND;
+  let bestCar = 0;
+  const lap = t.n * t.step;
+  const mine = t.prog[seg] * t.step;
+  for (const v of t.vehicles) {
+    if (!v.roofs) continue;
+    let d = mine - vehicleAt(v, time, lap);
+    if (d > lap / 2) d -= lap;
+    else if (d < -lap / 2) d += lap;
+    if (d > v.half + 8 || d < -((v.cars - 1) * v.pitch + v.half + 8)) continue;
+    for (let car = 0; car < v.cars; car++) {
+      const p = vehiclePose(t, v, car, time, RPOSE);
+      const hx = Math.sin(p.heading);
+      const hz = Math.cos(p.heading);
+      const dx = x - p.x;
+      const dz = z - p.z;
+      const du = dx * hx + dz * hz;
+      if (Math.abs(du) > v.half + ROOF_OVERHANG) continue;
+      const dw = -dx * hz + dz * hx;
+      if (Math.abs(dw) > v.halfWidth + ROOF_EDGE) continue;
+      const top = p.y + roofTop(v, car, du) + p.slope * du;
+      if (y < top - ROOF_STEP || top <= best) continue;
+      best = top;
+      roofVehicle = v;
+      bestCar = car;
+    }
+  }
+  if (roofVehicle !== null) {
+    // Bewegung der Stelle unter dem Kart: Fahrt der Wagenmitte plus Drehung des Wagens um sie.
+    const a = vehiclePose(t, roofVehicle, bestCar, time, RPOSE);
+    const b = vehiclePose(t, roofVehicle, bestCar, time + 1, RPOSE2);
+    let turn = b.heading - a.heading;
+    if (turn > Math.PI) turn -= 2 * Math.PI;
+    else if (turn < -Math.PI) turn += 2 * Math.PI;
+    roofTurn = turn / DT;
+    roofVx = (b.x - a.x) / DT + roofTurn * (z - a.z);
+    roofVz = (b.z - a.z) / DT - roofTurn * (x - a.x);
+  }
+  return best;
+}
 
 /**
  * Verkehr: Zusammenstöße und Windschatten. Fahrzeuge sind fahrende Wände –
@@ -610,7 +672,9 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
         inWake = true;
       }
       // Darüber hinweg (Sprungfeder, Schanze) oder auf einer anderen Ebene: kein Kontakt.
-      if (dy > v.height || dy < -1.5) continue;
+      // Bei Wagen mit befahrbarem Dach zählt die Höhe des Dachs an dieser Stelle: Wer (fast) auf Dachhöhe ist,
+      // fährt darauf – nur darunter ist der Wagen eine Wand.
+      if (dy > (v.roofs ? roofTop(v, car, du) + p.slope * du - ROOF_STEP : v.height) || dy < -1.5) continue;
       const pu = v.half + KART_RADIUS - Math.abs(du);
       const pw = v.halfWidth + KART_RADIUS - Math.abs(dw);
       if (pu <= 0 || pw <= 0) continue;
@@ -895,7 +959,20 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const along0 = proj.along;
   // (Auf Pontons zählt der Seegang mit – und zwar der vom vorigen Tick: so steckt in der Höhenänderung
   // auch die Bewegung des Pontons selbst, und das Kart hebt ab, wenn er unter ihm wegsackt.)
-  const g0 = groundNow(t, seg0, along0, lat0, env.time - 1);
+  let g0 = groundNow(t, seg0, along0, lat0, env.time - 1);
+  // Wagendach unter dem Kart (Wüstenexpress): Es ist der Boden – und nimmt mit, was auf ihm steht.
+  let carryX = 0;
+  let carryZ = 0;
+  let carryTurn = 0;
+  if (t.roofed) {
+    const r0 = roofUnder(t, x0, y0, z0, seg0, env.time - 1);
+    if (r0 !== NO_GROUND && roofVehicle !== null && (r0 > g0 || g0 === NO_GROUND)) {
+      g0 = r0;
+      carryX = roofVx;
+      carryZ = roofVz;
+      carryTurn = roofTurn;
+    }
+  }
 
   let fx = Math.sin(s.heading);
   let fz = Math.cos(s.heading);
@@ -1058,6 +1135,22 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  // Wagendach: der Zug nimmt mit, was auf ihm steht – wie ein Laufband, nur dass es selbst über die Strecke fährt.
+  if (!wasAir && (carryX !== 0 || carryZ !== 0)) {
+    s.x += carryX * DT;
+    s.z += carryZ * DT;
+    // In der Kurve dreht sich der Wagen – und mit ihm, was auf ihm steht (Nase und Fahrt).
+    if (carryTurn !== 0) {
+      const a = carryTurn * DT;
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      const vx = s.vx;
+      s.vx = vx * cos + s.vz * sin;
+      s.vz = -vx * sin + s.vz * cos;
+      s.heading = wrapAngle(s.heading + a);
+    }
+  }
+
   // Fluss: das Floß nimmt mit, was auf ihm steht – flussab, mit dem Tempo seiner Bahn.
   if (!wasAir && (t.edge[seg0] & EDGE_RIVER) !== 0) {
     const lane = raftLane(t, seg0, along0, lat0, env.time);
@@ -1216,6 +1309,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   // --- Boden: Stufen, Schwerkraft, Abheben und Landen ---
   let g = sunk ? NO_GROUND : groundNow(t, s.seg, along, lat, env.time);
+  if (t.roofed && !sunk) {
+    const r = roofUnder(t, s.x, y0, s.z, s.seg, env.time);
+    if (r !== NO_GROUND && (r > g || g === NO_GROUND)) g = r;
+  }
   if (g > y0 + STEP_MAX) {
     if (g0 > y0 + STEP_MAX) {
       // Schon an der alten Stelle unter der Fahrbahn: weiter fallen.

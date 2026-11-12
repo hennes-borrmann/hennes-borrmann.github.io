@@ -79,6 +79,9 @@ export interface BotBrain {
   /** Portal voraus, über das schon entschieden ist (Abschnitt; −1 = keines) – und ob die KI es ansteuert. */
   portalSeg: number;
   portalTake: boolean;
+  /** Zug voraus, über den schon entschieden ist (Kennung; −1 = keiner) – und ob die KI aufs Dach will. */
+  trainId: number;
+  trainTake: boolean;
   /** Ticks, die das Kart praktisch steht. */
   stuck: number;
   /** Verbleibende Ticks Rückwärtsfahrt zum Freikommen. */
@@ -115,6 +118,8 @@ const DRIFT_FROM = [
 const PATIENCE_FACTOR = [1.6, 1, 0.7];
 /** So oft steuert die KI ein Portal an, das vorwärts führt (leicht, mittel, schwer). */
 const PORTAL_DARE = [0.2, 0.55, 0.9];
+/** So oft fährt die KI von hinten auf einen Zug auf, um über die Dächer zu fahren (leicht, mittel, schwer). */
+const TRAIN_DARE = [0.1, 0.5, 0.9];
 
 export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
   const l = Math.max(0, Math.min(2, level | 0));
@@ -127,6 +132,8 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     routeLock: false,
     portalSeg: -1,
     portalTake: false,
+    trainId: -1,
+    trainTake: false,
     stuck: 0,
     reverse: 0,
     holding: 0,
@@ -425,6 +432,9 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     let shallow = 0;
     // Im Verkehr nutzt die KI die Fahrbahn bis an den Rand.
     const room = t.vehicles.length > 0 && !openAhead ? Math.max(maxLat, t.rh[target] - 0.9) : maxLat;
+    // Zug: die Spur, auf die ich will, um aufs Dach zu kommen oder oben zu bleiben (NaN = keine Vorliebe)
+    let trainWant = Number.NaN;
+    let trainNear = false;
     if (t.vehicles.length > 0) {
       const lap = t.n * t.step;
       const mine = t.prog[s.seg] * t.step + proj.along;
@@ -445,6 +455,29 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         const vl = (veh.lat * t.rh[target]) / t.def.roadHalf;
         // Wie bald bin ich dort? Was in zwei Sekunden neben mir ist, zählt voll.
         const eta = rear <= 0 ? 0 : rear / Math.max(2, vf - veh.speed);
+        // Zug mit befahrbarem Dach: Wer oben ist, bleibt in der Mitte der Wagen. Wer von hinten kommt und es
+        // wagt (je Zug einmal entschieden), hält auf das Gleis zu und fährt über die Rampe auf – der Zug ist
+        // dann kein Hindernis. Wer zu spät dran ist, um noch sauber einzufädeln, bleibt daneben.
+        if (veh.roofs) {
+          trainNear = true;
+          if (rear <= 0 && s.y > t.py[s.seg] + 0.8) {
+            trainWant = vl - offTarget;
+            close = true;
+            continue;
+          }
+          if (rear > 0) {
+            if (b.trainId !== veh.id) {
+              b.trainId = veh.id;
+              b.trainTake = random(b) < TRAIN_DARE[b.level];
+            }
+            const off = Math.abs(here - (vl - offHere));
+            if (b.trainTake && (off < 1.2 || eta > 0.4 + off * 0.35)) {
+              trainWant = vl - offTarget;
+              if (eta < 1.2) close = true;
+              continue;
+            }
+          }
+        }
         // In der Kurve schwenkt das Heck eines langen Fahrzeugs aus; im Drift fährt man selbst ungenauer.
         const margin = KART_HALF + 0.6 + veh.half * veh.half * Math.abs(t.curv[there]) * 0.5 + (s.driftDir !== 0 ? 0.4 : 0);
         if (eta < 1.2) close = true;
@@ -634,6 +667,9 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       // (Auf dem Fluss gibt es keine Bande, vor der man Abstand hielte: die Bahnmitte liegt gut zwei Meter vom Wasser.)
       if (open) lat = riverWant;
     }
+    // Zug: aufs Gleis hinter den Rampenwagen bzw. oben in der Wagenmitte bleiben.
+    if (!trainNear) b.trainId = -1;
+    if (trainWant === trainWant) lat = trainWant;
     // Portal: ebenfalls ein Ziel – außer, ein gesperrter Streifen liegt darauf.
     if (portalWant === portalWant) {
       let open = true;

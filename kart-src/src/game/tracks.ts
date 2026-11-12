@@ -17,9 +17,10 @@ import { RUINE } from './tracks/ruine';
 import { SPIEGEL } from './tracks/spiegel';
 import { VULKAN } from './tracks/vulkan';
 import { WERKSHOF } from './tracks/werkshof';
+import { WUESTE } from './tracks/wueste';
 import { WOLKEN } from './tracks/wolken';
 
-export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS, MOND, HAFEN, VULKAN, RUINE, KAMM, FLUSS, SPIEGEL];
+export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS, MOND, HAFEN, VULKAN, RUINE, KAMM, FLUSS, SPIEGEL, WUESTE];
 
 /**
  * So viele Strecken (von vorn gezählt) stehen in der Lobby zur Wahl. Was dahinter

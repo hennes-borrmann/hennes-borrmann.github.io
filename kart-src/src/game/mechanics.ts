@@ -19,6 +19,8 @@ export const VEH_TAXI = 0;
 export const VEH_VAN = 1;
 export const VEH_BUS = 2;
 export const VEH_TRAM = 3;
+/** Wüstenexpress: Lok, Keilwagen, vier Flachwagen und am Ende ein Rampenwagen – über die Dächer kann man fahren. */
+export const VEH_TRAIN = 4;
 
 export interface VehicleSpec {
   /** Halbe Länge und halbe Breite eines Wagens, Höhe über der Fahrbahn (Meter). */
@@ -28,6 +30,11 @@ export interface VehicleSpec {
   /** Anzahl Wagen (Straßenbahn: mehrere, die der Kurve folgen) und ihr Abstand von Mitte zu Mitte. */
   cars: number;
   pitch: number;
+  /**
+   * Befahrbare Dächer: je Wagen (0 = vorderster) die Höhe des Dachs am Heck und am Bug (Meter über der Fahrbahn),
+   * dazwischen linear. Ohne Angabe ist das Fahrzeug nur ein Hindernis.
+   */
+  roofs?: [number, number][];
 }
 
 export const VEHICLE_SPECS: VehicleSpec[] = [
@@ -35,7 +42,38 @@ export const VEHICLE_SPECS: VehicleSpec[] = [
   { half: 2.7, halfWidth: 1.05, height: 2.3, cars: 1, pitch: 0 },
   { half: 5.2, halfWidth: 1.25, height: 3.0, cars: 1, pitch: 0 },
   { half: 3.5, halfWidth: 1.2, height: 3.1, cars: 3, pitch: 7.5 },
+  // Zug (von vorn): Lok 3 m hoch, Keilwagen 1,8 → 3 m, vier Flachwagen 1,8 m, Rampenwagen vom Boden auf 1,8 m.
+  {
+    half: 6,
+    halfWidth: 1.9,
+    height: 3.0,
+    cars: 7,
+    pitch: 12.6,
+    roofs: [
+      [3.0, 3.0],
+      [1.8, 3.0],
+      [1.8, 1.8],
+      [1.8, 1.8],
+      [1.8, 1.8],
+      [1.8, 1.8],
+      [0.12, 1.8],
+    ],
+  },
 ];
+
+/** So weit unter der Dachkante gilt ein Kart noch als „auf dem Dach“ (Meter) – darunter ist der Wagen eine Wand. */
+export const ROOF_STEP = 0.45;
+/** Die Dächer reichen ein Stück über die Kupplungen (Meter je Wagenende) und seitlich über die Wagenkante. */
+export const ROOF_OVERHANG = 0.35;
+export const ROOF_EDGE = 0.15;
+
+/** Höhe des Dachs von Wagen car über der Fahrbahn an der Stelle du (Meter vor der Wagenmitte, zum Bug positiv). */
+export function roofTop(v: VehicleSpec, car: number, du: number): number {
+  const r = v.roofs ? v.roofs[Math.min(car, v.roofs.length - 1)] : null;
+  if (!r) return v.height;
+  const k = Math.max(0, Math.min(1, (du + v.half) / (2 * v.half)));
+  return r[0] + (r[1] - r[0]) * k;
+}
 
 /** Ein Fahrzeug im Verkehr: fährt mit festem Tempo auf fester Spur die Hauptstrecke entlang. */
 export interface Vehicle extends VehicleSpec {

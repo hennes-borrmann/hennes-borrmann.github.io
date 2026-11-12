@@ -21,6 +21,7 @@ import { buildSnow } from './mechanics/snow';
 import { buildStorm } from './mechanics/storm';
 import { buildTide } from './mechanics/tide';
 import { buildTraffic } from './mechanics/traffic';
+import { buildTrain } from './mechanics/train';
 import { buildVolcano } from './mechanics/volcano';
 
 export interface MechanicView {
@@ -42,7 +43,8 @@ export interface MechanicView {
  */
 export function buildMechanics(track: Track, detail: boolean, world: World): MechanicView[] {
   const out: MechanicView[] = [];
-  if (track.vehicles.length > 0) out.push(buildTraffic(track, detail));
+  if (track.vehicles.some((v) => !v.roofs)) out.push(buildTraffic(track, detail));
+  if (track.roofed) out.push(buildTrain(track, detail));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
   // (Im Dschungel ist ein „Band“ die Querströmung der Furt: die zeichnet mechanics/river.ts.)
