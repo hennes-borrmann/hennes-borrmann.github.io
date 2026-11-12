@@ -166,7 +166,16 @@ export interface SceneEvent {
     | 'portal'
     | 'mirror'
     /** Spiegelkabinett (ortsfest, slot −1): in einem Rahmen erscheint oder verschwindet ein Spiegel. */
-    | 'shimmer';
+    | 'shimmer'
+    /**
+     * Wüstenexpress: die Lok pfeift (ortsfest an der Lok, in festem Takt) / ein Zug rollt dicht am eigenen Kart
+     * vorbei (ortsfest, wiederholt) / ein Kart rollt über die Rampe aufs Dach / das eigene Kart fährt über die
+     * Dächer (wiederholt).
+     */
+    | 'whistle'
+    | 'trainpass'
+    | 'board'
+    | 'rattle';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -236,6 +245,9 @@ interface KartView {
   lastY: number;
   lastZ: number;
   lastSeg: number;
+  /** Wüstenexpress: steht das Kart auf einem Wagendach? / Zeit bis zur nächsten Meldung des eigenen Karts. */
+  roof: boolean;
+  roofWait: number;
   roulette: number;
   item: number;
   flags: number;
@@ -645,6 +657,7 @@ export class RaceScene {
       ['HUI!', 'cool'],
       ['GELADEN!', 'cool'],
       ['HINDURCH!', 'violet'],
+      ['AUFGESPRUNGEN!', 'warm'],
       ['ZURÜCK!', 'hot'],
     ]);
     this.applyLevel();
@@ -812,6 +825,8 @@ export class RaceScene {
       lastY: 0,
       lastZ: 0,
       lastSeg: 0,
+      roof: false,
+      roofWait: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1018,6 +1033,21 @@ export class RaceScene {
         if (d > lap / 2) d -= lap;
         else if (d < -lap / 2) d += lap;
         const key = v.id;
+        if (v.roofs) {
+          // Zug: Die Lok pfeift in festem Takt (alle 11 s, die Züge gegeneinander versetzt) – weit zu hören.
+          const beat = (x: number) => Math.floor((x + v.id * 165) / 660);
+          if (time > 0 && beat(time) !== beat(before)) {
+            const p = vehiclePose(t, v, 0, time, this.vpose);
+            this.emitAt('whistle', p.x, p.y + 3, p.z, 220);
+          }
+          // Rollt ein Zug dicht am eigenen Kart vorbei, hört man ihn (alle 0,45 s ein Stück Rollen und Schienenstoß).
+          if (d < 20 && d > -((v.cars - 1) * v.pitch + 20) && Math.floor(time / 27) !== Math.floor(before / 27) && !this.karts.get(me.slot)?.roof) {
+            const car = Math.max(0, Math.min(v.cars - 1, Math.round(-d / v.pitch)));
+            const p = vehiclePose(t, v, car, time, this.vpose);
+            this.emitAt('trainpass', p.x, p.y + 1, p.z, 42);
+          }
+          continue;
+        }
         if (d > 30 || d < -40) {
           this.passSide[key] = 0;
           continue;
@@ -1128,6 +1158,30 @@ export class RaceScene {
       if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
     } else k.snowWait = 0;
     k.snowed = snowed;
+    // Wüstenexpress: Steht das Kart auf einem Wagendach? Beim Aufrollen scheppert es; das eigene Kart rattert, solange es oben ist.
+    if (this.track.roofed) {
+      const tr = this.track;
+      let roof = k.roof;
+      if (e.respawn > 0) roof = false;
+      else if (!air && e.seg < tr.total) {
+        projectOnTrack(tr, e.x, e.z, e.seg);
+        const road = groundNow(tr, proj.seg, proj.along, proj.lat, this.mechTime);
+        roof = road !== NO_GROUND && e.y - road > 0.9;
+      } else if (air && e.y - tr.py[e.seg < tr.total ? e.seg : 0] < 0.6) roof = false;
+      if (roof && !k.roof && !k.fresh) {
+        this.emit('board', k, local);
+        this.burst(e.x, e.y + 0.1, e.z, 6, 4, 0xe9d9b5, false, 0.4, 0.4, 2);
+        if (local) this.pop('AUFGESPRUNGEN!', e, 'warm', 3.2);
+      }
+      if (roof && local) {
+        k.roofWait -= dt;
+        if (k.roofWait <= 0) {
+          k.roofWait = 0.3;
+          this.emit('rattle', k, true);
+        }
+      } else k.roofWait = 0;
+      k.roof = roof;
+    }
     // Dschungel-Fluss: auf welchem Floß steht das Kart? Beim Wechsel rumpelt es; das eigene Kart rauscht, solange es auf dem Fluss ist.
     if (this.track.rivers.length > 0) {
       const tr = this.track;

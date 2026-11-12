@@ -18,6 +18,7 @@ import { NEUE_STUECKE } from './songs-neu';
 import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
 import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { WUESTE_STUECK } from './stuecke/wueste';
 import { SPIEGEL_STUECK } from './stuecke/spiegel';
 import { RUINE_STUECK } from './stuecke/ruine';
 import { VULKAN_STUECK } from './stuecke/vulkan';
@@ -432,6 +433,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   dschungel: DSCHUNGEL_STUECK,
   // Spiegelkabinett: das eigene Stück (stuecke/spiegel.ts)
   spiegel: SPIEGEL_STUECK,
+  // Wüstenexpress: eigenes Stück (stuecke/wueste.ts)
+  wueste: WUESTE_STUECK,
   results: RESULTS,
 };
 

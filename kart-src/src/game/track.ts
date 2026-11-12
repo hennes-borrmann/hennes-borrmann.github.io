@@ -60,7 +60,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -68,6 +68,8 @@ export interface PathFeatures {
   pads?: { at: number; lat: number; halfWidth?: number }[];
   /** Reihen von Item-Kisten. */
   boxRows?: number[];
+  /** Seitliche Lage der Kisten einer Reihe als Anteil der halben Fahrbahn (ohne Angabe: vier Kisten über die ganze Breite). */
+  boxLat?: number[];
   /**
    * Sprungschanzen: steigen über length Meter auf height an und enden abrupt.
    * gap = Länge der Lücke in der Fahrbahn direkt hinter der Kante (Meter).
@@ -411,6 +413,8 @@ export interface Track {
   rivers: River[];
   /** Portale (mechanics.ts). */
   portals: Portal[];
+  /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
+  roofed: boolean;
   /**
    * Pontons und je Abschnitt, welche (höchstens zwei) seine Höhe bestimmen und mit welchem Gewicht:
    * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
@@ -1029,6 +1033,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     winds: [],
     rivers: [],
     portals: [],
+    roofed: false,
     pontoons: [],
     floatA: new Int16Array(total).fill(-1),
     floatB: new Int16Array(total).fill(-1),
@@ -1052,7 +1057,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     }
     for (const at of p.f.boxRows ?? []) {
       const seg = segAt(p, at);
-      for (const f of BOX_LATERALS) {
+      for (const f of p.f.boxLat ?? BOX_LATERALS) {
         const lat = f * rh[seg];
         track.boxes.push({
           x: px[seg] + rightX(track, seg) * lat,
@@ -1265,6 +1270,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
   for (const lane of def.traffic?.lanes ?? []) {
     for (const [kind, at] of lane.cars) {
       track.vehicles.push({ ...VEHICLE_SPECS[kind], id: vid++, kind, lat: lane.lat, speed: lane.speed, offset: at });
+      if (VEHICLE_SPECS[kind].roofs) track.roofed = true;
     }
   }
   return track;
@@ -1328,7 +1334,17 @@ export function newVehiclePose(): VehiclePose {
 export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
   const lap = t.n * t.step;
   let s = vehicleAt(v, time, lap);
-  if (car > 0) {
+  if (car > 0 && v.roofs) {
+    // Ein langer Zug reicht durch mehrere Kurven: Jeder Wagen folgt dem vor ihm im Abstand der Kupplung, gemessen
+    // auf der eigenen Spur an der Stelle, an der er gerade ist – sonst klafften die Kupplungen in einer S-Kurve
+    // meterweit auf (und wer über die Dächer fährt, fiele hinein).
+    for (let c = 0; c < car; c++) {
+      const at = Math.min(t.n - 1, Math.floor(s / t.step));
+      const scale = Math.max(0.6, Math.min(1.6, 1 - ((v.lat * t.rh[at]) / t.def.roadHalf) * t.curv[at]));
+      s -= v.pitch / scale;
+      if (s < 0) s += lap;
+    }
+  } else if (car > 0) {
     // Hintere Wagen folgen im Abstand der Kupplung – gemessen auf der eigenen Spur, nicht auf der
     // Mittellinie: außen in der Kurve ist der Weg länger, innen kürzer (curv > 0 = Rechtskurve).
     const lead = Math.min(t.n - 1, Math.floor(s / t.step));

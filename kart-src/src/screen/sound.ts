@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
@@ -73,6 +73,10 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'shimmer',
   'portal',
   'mirror',
+  // Wüstenexpress: Pfeife und Vorbeifahrt des Zugs sind ortsfest; fremde Karts hört man aufs Dach springen
+  'whistle',
+  'trainpass',
+  'board',
 ]);
 
 export class Sound {

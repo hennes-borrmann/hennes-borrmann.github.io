@@ -71,6 +71,43 @@ export interface Theme {
 
 export const THEMES: Record<ThemeId, Theme> = {
   // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
+  // Wüstenexpress: Mittagshitze im Canyonland – tiefblauer Himmel, heller Sand in den Senken, roter Fels;
+  // die erdbraune Bahn hebt sich dunkel vom hellen Sand ab.
+  wueste: {
+    sky: [0x1a56b8, 0x4f98e0, 0xf1dfc2],
+    fog: 0xf0dcbe,
+    fogNear: 230,
+    fogFar: 1050,
+    sunDir: [0.35, 0.86, 0.2],
+    sunColor: 0xfff2d6,
+    sunIntensity: 2.7,
+    hemiSky: 0xbcd8ff,
+    hemiGround: 0xd99a64,
+    hemiIntensity: 1.3,
+    disc: 0xfffbe0,
+    discSize: 20,
+    clouds: 0xffffff,
+    cloudShade: 0xd9dfee,
+    stars: false,
+    road: 0xcfa878,
+    roadAlt: 0xc49b6a,
+    line: 0xf6e7c8,
+    kerbA: 0xb5432e,
+    kerbB: 0xf2e4c6,
+    shoulder: 0x7f5a3c,
+    wallA: 0x9c5a3a,
+    wallB: 0xd9b382,
+    wallCap: 0x6e3f2a,
+    deck: 0x9a6a3e,
+    deckDark: 0x5e3f25,
+    pillar: 0x7a5230,
+    ground: [0xf3dcab, 0xebc996, 0xc8633e, 0xe9bf8a],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: -2,
+    rough: 2.6,
+  },
   // Spiegelkabinett: heller Nachmittag im Schlosspark, Glaspalast in Elfenbein, Gold und Mint.
   // Der Park liegt eben auf Höhe der Fahrbahn (farY), damit Parterres, Becken und der Palastboden flach liegen.
   spiegel: {
