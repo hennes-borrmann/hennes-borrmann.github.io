@@ -39,7 +39,7 @@ const TAIL = 7;
 /** Schwerkraft der Glutbrocken. */
 const BOMB_G = 15;
 /** So tief unter der Fahrbahn liegt die Lava im Glutgraben. */
-const PIT_LAVA = 4.5;
+const PIT_LAVA_DEFAULT = 4.5;
 /** Abstand der Kulisse zur Fahrbahnkante (Bande) und zur Hängebrücke. */
 const KEEP = 3;
 const KEEP_BRIDGE = 6;
@@ -63,6 +63,8 @@ export function buildVulkanLife(world: World): Life {
   const many = detail === 0 ? 0.5 : 1;
   const SEA = th.liquidY ?? -4;
   const rnd = seeded(9100 + t.index * 31);
+  /** Lava im Glutgraben: 1,5 m über dessen Boden (PIT_D unter der Fahrbahn). */
+  const PIT_LAVA = Math.min(PIT_LAVA_DEFAULT, PIT_D - 1.5);
   const cr = world.crater;
   const hemiBase = world.hemi.intensity;
   /** Wind (heißer Wind vom Meer übers Land, weht die Säule vom Kraterrand weg). */
@@ -387,7 +389,7 @@ export function buildVulkanLife(world: World): Life {
 
     // Kraterkrone: gezackte Felszähne auf dem Rand, wo keine Strecke läuft.
     const inner = cr.road - cr.wh - 1;
-    const NT = Math.round(46 * many);
+    const NT = Math.round(40 * many);
     const cTooth = rgb(0x2a2226);
     const cTooth2 = rgb(0x3d3034);
     for (let k = 0; k < NT; k++) {
@@ -436,7 +438,7 @@ export function buildVulkanLife(world: World): Life {
   {
     // Außenhang des Kraterrands (rechts der Fahrbahn, hinter dem Graben).
     let placed = 0;
-    for (let k = 0; k < 120 && placed < Math.round(9 * many); k++) {
+    for (let k = 0; k < 120 && placed < Math.round(7 * many); k++) {
       const i = 790 + Math.floor(rnd() * 160);
       const lat = t.wh[i] + 14 + rnd() * 22;
       if (basaltGroup(sx(i, lat), sz(i, lat), 5 + Math.floor(rnd() * 7), 3 + rnd() * 4)) placed++;
@@ -448,6 +450,32 @@ export function buildVulkanLife(world: World): Life {
   // =====================================================================================
   // Breite der Lava quer: Bruchteil von (wh + 9); innen eben, außen folgt sie dem Gelände
   // nach unten (läuft über) und endet in der Grabenwand.
+  const vents: number[] = []; // x, y, z, Stärke (Dampf)
+  let anemo: V3 | null = null;
+  /** Ein Lavaband, das dem Gelände folgt: Mittellinie pts, Breite w0 → w1, Flussrichtung = Reihenfolge. */
+  const ribbon = (pts: V3[], w0: number, w1: number, s0: number, kind = 2): void => {
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const a = pts[k];
+      const b = pts[k + 1];
+      let dx = b[0] - a[0];
+      let dz = b[2] - a[2];
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l;
+      dz /= l;
+      const wa = (w0 + (w1 - w0) * (k / (pts.length - 1))) / 2;
+      const wb = (w0 + (w1 - w0) * ((k + 1) / (pts.length - 1))) / 2;
+      // quer: (−dz, dx)
+      const aL: V3 = [a[0] - dz * wa, 0, a[2] + dx * wa];
+      const aR: V3 = [a[0] + dz * wa, 0, a[2] - dx * wa];
+      const bL: V3 = [b[0] - dz * wb, 0, b[2] + dx * wb];
+      const bR: V3 = [b[0] + dz * wb, 0, b[2] - dx * wb];
+      for (const v of [aL, aR]) v[1] = Math.max(TY(v[0], v[2]), a[1] - 0.6) + 0.22;
+      for (const v of [bL, bR]) v[1] = Math.max(TY(v[0], v[2]), b[1] - 0.6) + 0.22;
+      const s = s0 + k * 2.5;
+      lavaTri(aL, bL, aR, kind, s, 0);
+      lavaTri(aR, bL, bR, kind, s + 1, 0.5);
+    }
+  };
   const FR = [-1, -0.9, -0.8, -0.7, -0.45, -0.2, 0, 0.2, 0.45, 0.7, 0.8, 0.9, 1];
   let streamMouth: V3 | null = null;
   {
@@ -463,13 +491,14 @@ export function buildVulkanLife(world: World): Life {
     }
     const step = detail === 0 ? 3 : 2;
     for (const [r0, r1] of runs) {
-      const rows: { p: V3[]; buried: boolean[] }[] = [];
+      const rows: { p: V3[]; buried: boolean[]; cut: boolean[] }[] = [];
       for (let i = r0 - 2; i <= r1 + 3; i += step) {
         const seg = Math.max(0, Math.min(t.n - 1, i));
         const L = t.wh[seg] + 9;
         const y0 = t.py[seg] - PIT_LAVA;
         const p: V3[] = [];
         const buried: boolean[] = [];
+        const cut: boolean[] = [];
         for (const f of FR) {
           const lat = f * L;
           const x = sx(seg, lat);
@@ -478,9 +507,12 @@ export function buildVulkanLife(world: World): Life {
           let y = Math.abs(lat) <= t.wh[seg] + 3 ? y0 : Math.min(y0, g + 0.3);
           if (g > y0 + 0.6) y = y0;
           p.push([x, y, z]);
+          // Fällt das Gelände außen weiter ab (zum Krater hin), endet die Lava an der Kante,
+          // statt den Hang hinunterzulaufen.
           buried.push(g > y + 0.5);
+          cut.push(Math.abs(lat) > t.wh[seg] + 5 && g < y0 - 0.9);
         }
-        rows.push({ p, buried });
+        rows.push({ p, buried, cut });
       }
       for (let r = 0; r + 1 < rows.length; r++) {
         const A = rows[r];
@@ -488,38 +520,14 @@ export function buildVulkanLife(world: World): Life {
         for (let k = 0; k + 1 < FR.length; k++) {
           const s = (r0 + r * step) * 1.0;
           const o = Math.abs(FR[k]) * 2.2;
-          if (!(A.buried[k] && A.buried[k + 1] && Bq.buried[k])) lavaTri(A.p[k], Bq.p[k], A.p[k + 1], 2, s, o);
-          if (!(A.buried[k + 1] && Bq.buried[k] && Bq.buried[k + 1])) lavaTri(A.p[k + 1], Bq.p[k], Bq.p[k + 1], 2, s + step * 0.5, o);
+          if (!(A.buried[k] && A.buried[k + 1] && Bq.buried[k]) && !(A.cut[k] || A.cut[k + 1] || Bq.cut[k])) lavaTri(A.p[k], Bq.p[k], A.p[k + 1], 2, s, o);
+          if (!(A.buried[k + 1] && Bq.buried[k] && Bq.buried[k + 1]) && !(A.cut[k + 1] || Bq.cut[k] || Bq.cut[k + 1])) lavaTri(A.p[k + 1], Bq.p[k], Bq.p[k + 1], 2, s + step * 0.5, o);
         }
       }
     }
 
     // Basaltbrücke: der Strom kommt vom Berg (rechts) in den Graben und läuft links ins Meer.
     const basalt = runs.find(([r0, r1]) => r0 > 1200 && r1 < 1420);
-    /** Ein Lavaband, das dem Gelände folgt: Mittellinie pts, Breite w0 → w1, Flussrichtung = Reihenfolge. */
-    const ribbon = (pts: V3[], w0: number, w1: number, s0: number, kind = 2): void => {
-      for (let k = 0; k + 1 < pts.length; k++) {
-        const a = pts[k];
-        const b = pts[k + 1];
-        let dx = b[0] - a[0];
-        let dz = b[2] - a[2];
-        const l = Math.hypot(dx, dz) || 1;
-        dx /= l;
-        dz /= l;
-        const wa = (w0 + (w1 - w0) * (k / (pts.length - 1))) / 2;
-        const wb = (w0 + (w1 - w0) * ((k + 1) / (pts.length - 1))) / 2;
-        // quer: (−dz, dx)
-        const aL: V3 = [a[0] - dz * wa, 0, a[2] + dx * wa];
-        const aR: V3 = [a[0] + dz * wa, 0, a[2] - dx * wa];
-        const bL: V3 = [b[0] - dz * wb, 0, b[2] + dx * wb];
-        const bR: V3 = [b[0] + dz * wb, 0, b[2] - dx * wb];
-        for (const v of [aL, aR]) v[1] = Math.max(TY(v[0], v[2]), a[1] - 0.6) + 0.22;
-        for (const v of [bL, bR]) v[1] = Math.max(TY(v[0], v[2]), b[1] - 0.6) + 0.22;
-        const s = s0 + k * 2.5;
-        lavaTri(aL, bL, aR, kind, s, 0);
-        lavaTri(aR, bL, bR, kind, s + 1, 0.5);
-      }
-    };
     if (basalt) {
       const [r0, r1] = basalt;
       // Mündung: von der Grabenmitte nach links, bis das Meer erreicht ist.
@@ -533,11 +541,12 @@ export function buildVulkanLife(world: World): Life {
           const x = sx(i, lat);
           const z = sz(i, lat);
           const g = TY(x, z);
-          if (g > y0 + 1.2) break;
+          if (g > y0 + 2.2) break;
           // Ein anderer Teil der Strecke darf nicht im Weg liegen.
           if (clear(x, z) < KEEP && nearSeg >= 0 && !isPit[nearSeg]) break;
           pts.push([x, Math.min(y0, g + 0.3), z]);
-          if (g < SEA - 0.4) {
+          // Erst hinter der Grabenwand zählt das Meer (am Südende liegt der Grabenboden selbst tief).
+          if (g < SEA - 0.4 && lat < -(t.wh[i] + 8)) {
             ok = true;
             break;
           }
@@ -618,7 +627,6 @@ export function buildVulkanLife(world: World): Life {
   // =====================================================================================
   // 3. Fischerdorf (0–171 m und 1408–1445 m)
   // =====================================================================================
-  const village = (i: number): boolean => inRange(i, 1405, 175);
   const cWhite = rgb(0xf6f1e6);
   const cWhite2 = rgb(0xece4d4);
   const cRoofs = [rgb(0xf6f1e6), rgb(0x5a8fd0), rgb(0xd86a3a), rgb(0xf0eadb)];
@@ -896,11 +904,12 @@ export function buildVulkanLife(world: World): Life {
   // =====================================================================================
   // 4. Küstenstraße: Palmen, Agaven, Steinmauern
   // =====================================================================================
-  const palm = (x: number, y: number, z: number, h: number): void => {
-    const lean = rnd() * Math.PI * 2;
+  /** Palme; sie neigt sich von der Straße weg (awayX, awayZ), damit die Krone nicht über die Bande ragt. */
+  const palm = (x: number, y: number, z: number, h: number, awayX: number, awayZ: number): void => {
+    const lean = Math.atan2(awayZ, awayX) + (rnd() - 0.5) * 1.2;
     const lx = Math.cos(lean);
     const lz = Math.sin(lean);
-    const N = 5;
+    const N = 4;
     let px = x;
     let pz = z;
     let py = y - 0.3;
@@ -909,15 +918,15 @@ export function buildVulkanLife(world: World): Life {
       const nx = x + lx * f * f * h * 0.28;
       const nz = z + lz * f * f * h * 0.28;
       const seg = h / N;
-      prism(st, px, py, pz, 0.34 - k * 0.03, 0.3 - k * 0.03, seg + 0.1, 5, k % 2 ? rgb(0x8a6a48) : rgb(0x7a5a3c), k, undefined, nx - px, nz - pz);
+      prism(st, px, py, pz, 0.34 - k * 0.03, 0.3 - k * 0.03, seg + 0.1, 4, k % 2 ? rgb(0x8a6a48) : rgb(0x7a5a3c), k, undefined, nx - px, nz - pz);
       px = nx;
       pz = nz;
       py += seg;
     }
     const cF = rgb(0x3f8a3a);
     const cF2 = rgb(0x2f7030);
-    for (let k = 0; k < 7; k++) {
-      const a = (k / 7) * Math.PI * 2 + rnd() * 0.4;
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + rnd() * 0.4;
       const ca = Math.cos(a);
       const sa = Math.sin(a);
       const L = 3 + rnd() * 0.8;
@@ -963,19 +972,19 @@ export function buildVulkanLife(world: World): Life {
     // Palmen und Agaven im Dorf und an der Küstenstraße (nicht am Hang).
     let nP = 0;
     let nA = 0;
-    for (let tryK = 0; tryK < 900 && (nP < Math.round(30 * many) || nA < Math.round(30 * many)); tryK++) {
+    for (let tryK = 0; tryK < 900 && (nP < Math.round(30 * many) || nA < Math.round(22 * many)); tryK++) {
       const i = (1400 + Math.floor(rnd() * (560 + 45))) % t.n;
       if (!inRange(i, 1400, 548)) continue;
       const side = rnd() < 0.5 ? -1 : 1;
-      const wantPalm = nP < Math.round(30 * many) && (rnd() < 0.5 || nA >= Math.round(30 * many));
-      const lat = side * (t.wh[i] + (wantPalm ? 6 : 4) + rnd() * 16);
+      const wantPalm = nP < Math.round(30 * many) && (rnd() < 0.5 || nA >= Math.round(22 * many));
+      const lat = side * (t.wh[i] + (wantPalm ? 7 : 4) + rnd() * 16);
       const x = sx(i, lat);
       const z = sz(i, lat);
-      const y = site(x, z, wantPalm ? 3 : 1.2, KEEP, 3, 0.2);
+      const y = site(x, z, wantPalm ? 4 : 1.2, KEEP, 3, 0.2);
       if (Number.isNaN(y) || y > 14) continue;
       if (wantPalm) {
         take(x, z, 1.5);
-        palm(x, y, z, 6.5 + rnd() * 3.5);
+        palm(x, y, z, 6.5 + rnd() * 3.5, rightX(t, i) * side, rightZ(t, i) * side);
         nP++;
       } else {
         take(x, z, 1.2);
@@ -1007,12 +1016,13 @@ export function buildVulkanLife(world: World): Life {
   {
     const br = t.branches[1];
     if (br) {
-      const cCliff = [rgb(0x9a6c58), rgb(0x86604f), rgb(0xb07e64)];
+      const cCliff = [rgb(0x8a6a5c), rgb(0x765a50), rgb(0x9c7a66)];
+      const cCliffTop = rgb(0xb89a80);
       for (let k = 30; k < br.count - 30; k += detail === 0 ? 7 : 4) {
         const i = br.first + k;
         for (const side of [-1, 1]) {
           for (const extra of [0, 5]) {
-            const lat = side * (t.wh[i] + KEEP_BRIDGE + 1.5 + extra + rnd() * 2);
+            const lat = side * (t.wh[i] + KEEP_BRIDGE + 2.5 + extra + rnd() * 2);
             const x = sx(i, lat);
             const z = sz(i, lat);
             if (clear(x, z) < KEEP + 1) continue;
@@ -1021,8 +1031,12 @@ export function buildVulkanLife(world: World): Life {
             const top = Math.max(g, TY(x + rightX(t, i) * side * 6, z + rightZ(t, i) * side * 6));
             if (top < SEA + 3) continue;
             const bot = SEA - 2;
-            const h = top - bot + rnd() * 1.5 - 0.5;
-            prism(st, x, bot, z, 2.6 + rnd(), 1.6 + rnd() * 0.8, h, 5, cCliff[Math.floor(rnd() * 3)], rnd() * 3, rgb(0x6f9a48));
+            const h = top - bot + (extra > 0 ? 1 + rnd() * 2.5 : rnd() * 1.5 - 1);
+            // Kantige Felspfeiler, nach außen gelehnt: zusammen eine zerklüftete Wand.
+            const r0 = 3.4 + rnd() * 1.2;
+            const lx = rightX(t, i) * side * (0.8 + rnd() * 0.8);
+            const lz = rightZ(t, i) * side * (0.8 + rnd() * 0.8);
+            prism(st, x, bot, z, r0, r0 * (0.55 + rnd() * 0.2), h, 5, cCliff[Math.floor(rnd() * 3)], rnd() * 3, cCliffTop, lx, lz);
           }
         }
       }
@@ -1032,7 +1046,6 @@ export function buildVulkanLife(world: World): Life {
   // =====================================================================================
   // 6. Flanke (548–786 m): verkohlte Bäume, Asche, Glutrisse, Fumarolen, Messwagen
   // =====================================================================================
-  const vents: number[] = []; // x, y, z, Stärke (Dampf)
   const deadTree = (x: number, y: number, z: number, h: number): void => {
     const c = rgb(0x1f1a1c);
     prism(st, x, y - 0.3, z, 0.3, 0.14, h, 5, c, rnd() * 3, undefined, (rnd() - 0.5) * 0.6, (rnd() - 0.5) * 0.6);
@@ -1075,10 +1088,11 @@ export function buildVulkanLife(world: World): Life {
     for (let tryK = 0; tryK < 300 && nV < Math.round(8 * many); tryK++) {
       const i = 600 + Math.floor(rnd() * 340);
       const side = rnd() < 0.5 ? -1 : 1;
-      const lat = side * (t.wh[i] + 6 + rnd() * 18);
+      const lat = side * (t.wh[i] + 12 + rnd() * 18);
       const x = sx(i, lat);
       const z = sz(i, lat);
-      const y = site(x, z, 2, KEEP + 1, 3, 3);
+      // Dampf treibt mit dem Wind: weit genug weg, dass er nicht tief über die Fahrbahn zieht.
+      const y = site(x, z, 2, KEEP + 7, 3, 3);
       if (Number.isNaN(y)) continue;
       take(x, z, 2.5);
       for (let k = 0; k < 4; k++) {
@@ -1126,7 +1140,6 @@ export function buildVulkanLife(world: World): Life {
       break;
     }
   }
-  let anemo: V3 | null = null;
 
   // Glutrisse im Hang der Flanke und auf dem Lavafeld: Zickzackbänder.
   const crack = (x: number, z: number, len: number, w: number, kind = 3): void => {
@@ -1223,17 +1236,28 @@ export function buildVulkanLife(world: World): Life {
         const rx = rightX(t, i);
         const rz = rightZ(t, i);
         const y0 = t.py[i];
+        // Erst prüfen, ob beidseits Säulen Platz haben – sonst schwebte der Sturz.
+        const cols: number[] = [];
+        const perSide = [0, 0];
         for (const side of [-1, 1]) {
           for (let k = 0; k < 4; k++) {
             const lat = side * (t.wh[i] + KEEP + 0.6 + k * 1.25);
             const x = sx(i, lat) + t.tx[i] * dir * (k * 0.4);
             const z = sz(i, lat) + t.tz[i] * dir * (k * 0.4);
-            if (clear(x, z, 0) < KEEP) continue;
-            const g = TY(x, z);
-            const h = y0 + 9.5 + k * 0.9 - (g - 1.5);
-            prism(st, x, g - 1.5, z, 0.75, 0.75, h, 6, cBasalt, 0.2 + k, cBasaltTop);
+            if (clear(x, z, 0) < KEEP) break;
+            cols.push(x, z, k);
+            perSide[side < 0 ? 0 : 1]++;
           }
         }
+        // Wo nur eine Seite Platz hat (die Einfahrt liegt dicht an der Serpentine), steht nur
+        // dort ein gestaffelter Säulenpfeiler – ohne Sturz.
+        for (let c = 0; c < cols.length; c += 3) {
+          const g = TY(cols[c], cols[c + 1]);
+          const k = cols[c + 2];
+          const h = y0 + 10.2 + k * 1.1 - (g - 1.5);
+          prism(st, cols[c], g - 1.5, cols[c + 1], 0.75, 0.75, h, 6, cBasalt, 0.2 + k, cBasaltTop);
+        }
+        if (perSide[0] < 2 || perSide[1] < 2) continue;
         // Liegende Säulen als Sturz – mindestens 10 m über der Fahrbahn.
         const span = t.wh[i] + KEEP + 4.6;
         for (let k = 0; k < 3; k++) {
@@ -1299,10 +1323,10 @@ export function buildVulkanLife(world: World): Life {
     let nv = 0;
     for (let tryK = 0; tryK < 120 && nv < Math.round(5 * many); tryK++) {
       const i = 1200 + Math.floor(rnd() * 190);
-      const lat = (rnd() < 0.5 ? -1 : 1) * (t.wh[i] + 6 + rnd() * 20);
+      const lat = (rnd() < 0.5 ? -1 : 1) * (t.wh[i] + 12 + rnd() * 20);
       const x = sx(i, lat);
       const z = sz(i, lat);
-      const y = site(x, z, 1.5, KEEP + 1, 3, SEA + 0.6);
+      const y = site(x, z, 1.5, KEEP + 7, 3, SEA + 0.6);
       if (Number.isNaN(y)) continue;
       take(x, z, 1.5);
       vents.push(x, y + 0.3, z, 0.6);
@@ -1347,7 +1371,7 @@ export function buildVulkanLife(world: World): Life {
         const dc = Math.hypot(cx - cr.x, cz - cr.z);
         if (dc < cr.road - cr.wh - 2) return shade(mixRgb(cBowl, cBowlHot, smooth((lakeR + 7 - dc) / 7)), v);
       }
-      const lavaZone = seg >= 0 && inRange(seg, 1195, 1372) && dist < 48;
+      const lavaZone = seg >= 0 && inRange(seg, 1192, 1378) && dist < 58;
       if (lavaZone) {
         if (mid < SEA + 2.2) return shade(cBlackSand, v);
         return shade(n1 > 0.5 ? cSlag : cSlag2, v);
@@ -1387,7 +1411,8 @@ export function buildVulkanLife(world: World): Life {
         const tris: [V3, V3, V3, number, number][] = (ix + iz) % 2 === 0 ? [[a, d, c, 0, 3], [a, c, b, 0, 1]] : [[a, d, b, 0, 3], [b, d, c, 1, 2]];
         for (const [p, q, r, k0, k1] of tris) {
           const cmin = Math.min(cs[k0], cs[k1], cs[2], cs[0]);
-          if (cmin < 0.4) continue;
+          // Unter der Fahrbahn liegt das Gelände ohnehin tiefer – nur weit drinnen auslassen.
+          if (cmin < -2) continue;
           if (Math.max(p[1], q[1], r[1]) < SEA - 0.7) continue;
           const cx = (p[0] + q[0] + r[0]) / 3;
           const cz = (p[2] + q[2] + r[2]) / 3;
@@ -1784,11 +1809,9 @@ export function buildVulkanLife(world: World): Life {
   const nFoam = coast.length / 5;
   for (let k = 0; k < nFoam; k++) {
     const c = rgb(0xf4f8fa);
-    for (let q = 0; q < 6; q++) gAc.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]).valueOf();
+    for (let q = 0; q < 6; q++) gAc.push(c[0], c[1], c[2]);
     for (let q = 0; q < 18; q++) gA.push(0);
   }
-  // gAc wurde je Schaum für 6 Ecken × 3 Werte = 18 Werte zu viel befüllt? – auf Länge kürzen.
-  gAc.length = gA.length;
 
   const nA = gA.length / 3;
   const nBv = gB.length / 3;
@@ -1845,8 +1868,8 @@ export function buildVulkanLife(world: World): Life {
   }
 
   // Aschesäule: kantige Ballen (Instanzen) mit Kontur.
-  const nSmoke = cr ? (detail === 0 ? 22 : 40) : 0;
-  const smokeGeo = addSmoothNormals(new THREE.IcosahedronGeometry(1, 0));
+  const nSmoke = cr ? (detail === 0 ? 22 : 30) : 0;
+  const smokeGeo = addSmoothNormals(new THREE.IcosahedronGeometry(1, detail === 0 ? 0 : 1));
   const smokeMat = toonMaterial({});
   const smoke = new THREE.InstancedMesh(smokeGeo, smokeMat, Math.max(1, nSmoke));
   smoke.frustumCulled = false;
@@ -1861,15 +1884,26 @@ export function buildVulkanLife(world: World): Life {
     disposables.push(ol);
   }
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-  const ashA = new THREE.Color(0x4a3e48);
-  const ashB = new THREE.Color(0x6e6068);
-  const ashC = new THREE.Color(0x8a7c80);
+  const ashA = new THREE.Color(0x6a6470);
+  const ashB = new THREE.Color(0x938c96);
+  const ashC = new THREE.Color(0xbcb6bc);
   const ashHot = new THREE.Color(0xd0623a);
   const tmpC = new THREE.Color();
   // Je Ballen: Geburt, Lebensdauer, Startversatz x, z, Steiggeschw., Größe, Farbe 0..1, Drehung
   const sm = new Float32Array(Math.max(1, nSmoke) * 8);
+  // Die Säule steht schon, wenn das Rennen beginnt: Ballen mit gestaffeltem Alter anlegen.
   for (let k = 0; k < nSmoke; k++) {
-    sm[k * 8] = -1e9;
+    const o = k * 8;
+    sm[o + 1] = 18 + rnd() * 5;
+    sm[o] = -(k / Math.max(1, nSmoke)) * 20;
+    const a = rnd() * Math.PI * 2;
+    const r = rnd() * 5;
+    sm[o + 2] = (cr ? cr.x : 0) + Math.cos(a) * r;
+    sm[o + 3] = (cr ? cr.z : 0) + Math.sin(a) * r;
+    sm[o + 4] = 8.5 + rnd() * 3;
+    sm[o + 5] = 3.5 + rnd() * 2;
+    sm[o + 6] = rnd();
+    sm[o + 7] = rnd() * Math.PI * 2;
     smoke.setMatrixAt(k, zero);
     smoke.setColorAt(k, ashA);
   }
@@ -1945,7 +1979,12 @@ export function buildVulkanLife(world: World): Life {
   let hornNext = 6;
   let hornLeft = 0;
   let hornT = 0;
-  const lavaCol: RGB[] = [L_CRUST, L_DARK, L_MID, L_HOT, L_WHITE];
+
+  /** Brandung: Phase 0..1 je Uferpunkt; benachbarte Punkte laufen fast im Gleichtakt (eine Welle). */
+  const surfPhase = (time: number, o: number): number => {
+    const v = time / SURF + noise(coast[o] * 0.018, coast[o + 1] * 0.018) * 1.6;
+    return v - Math.floor(v);
+  };
 
   const startEruption = (time: number): void => {
     erStart = time;
@@ -2016,7 +2055,15 @@ export function buildVulkanLife(world: World): Life {
             const apex = 22 + rnd() * 26;
             const vy = Math.sqrt(2 * BOMB_G * apex);
             const T = (2 * vy) / BOMB_G;
-            bomb.set([1, time, x0, z0, (cr.x + Math.cos(a2) * r1 - x0) / T, vy, (cr.z + Math.sin(a2) * r1 - z0) / T, 1.2 + rnd() * 1.1], b * 8);
+            const o = b * 8;
+            bomb[o] = 1;
+            bomb[o + 1] = time;
+            bomb[o + 2] = x0;
+            bomb[o + 3] = z0;
+            bomb[o + 4] = (cr.x + Math.cos(a2) * r1 - x0) / T;
+            bomb[o + 5] = vy;
+            bomb[o + 6] = (cr.z + Math.sin(a2) * r1 - z0) / T;
+            bomb[o + 7] = 1.2 + rnd() * 1.1;
             break;
           }
         }
@@ -2076,22 +2123,22 @@ export function buildVulkanLife(world: World): Life {
 
         // --- Aschesäule ---
         smokeT -= dt;
-        const interval = (detail === 0 ? 0.85 : 0.5) * (heat > 0.7 ? 0.6 : 1);
+        const interval = (detail === 0 ? 0.95 : 0.7) * (heat > 0.7 ? 0.6 : 1);
         if (smokeT <= 0) {
           smokeT = interval;
           for (let k = 0; k < nSmoke; k++) {
             const o = k * 8;
             if (time - sm[o] < sm[o + 1]) continue;
             sm[o] = time;
-            sm[o + 1] = 15 + rnd() * 5;
+            sm[o + 1] = 18 + rnd() * 5;
             const a = rnd() * Math.PI * 2;
             const r = rnd() * 5;
             sm[o + 2] = cr.x + Math.cos(a) * r;
             sm[o + 3] = cr.z + Math.sin(a) * r;
-            sm[o + 4] = 5 + rnd() * 2.5 + heat * 6;
+            sm[o + 4] = 8.5 + rnd() * 3 + heat * 6;
             sm[o + 5] = 3.5 + rnd() * 2 + heat * 2.5;
             sm[o + 6] = rnd();
-            sm[o + 7] = rnd() * 6;
+            sm[o + 7] = rnd() * Math.PI * 2;
             break;
           }
         }
@@ -2103,11 +2150,13 @@ export function buildVulkanLife(world: World): Life {
             smoke.setMatrixAt(k, zero);
             continue;
           }
-          const drift = Math.pow(age, 1.5) * 0.33;
-          const x = sm[o + 2] + windX * drift + Math.sin(age * 0.4 + k) * 1.5;
-          const z = sm[o + 3] + windZ * drift + Math.cos(age * 0.35 + k) * 1.5;
-          const y = lakeY + 2 + sm[o + 4] * (age - (age * age) / 50);
-          let s = sm[o + 5] + age * 1.05;
+          // Mit dem Wind verweht, dabei quillt jeder Ballen zur Seite auseinander.
+          const drift = Math.pow(age, 1.5) * 0.42;
+          const spread = age * 1.25;
+          const x = sm[o + 2] + windX * drift + Math.cos(sm[o + 7]) * spread;
+          const z = sm[o + 3] + windZ * drift + Math.sin(sm[o + 7]) * spread;
+          const y = lakeY + 2 + sm[o + 4] * (age - (age * age) / 60);
+          let s = sm[o + 5] + age * 0.85;
           if (age < 0.8) s *= age / 0.8;
           if (age > life - 1.6) s *= Math.max(0, (life - age) / 1.6);
           eu.set(age * 0.05 + sm[o + 7], sm[o + 7] + age * 0.08, 0);
@@ -2138,14 +2187,14 @@ export function buildVulkanLife(world: World): Life {
       // --- Brandung: Schaumstreifen laufen aufs Ufer, an offenen Stellen spritzt Gischt ---
       for (let k = 0; k < nFoam; k++) {
         const o = k * 5;
-        const ph = (time / SURF + coast[o] * 0.013 + coast[o + 1] * 0.017) % 1;
+        const ph = surfPhase(time, o);
         const vis = ph < 0.65;
         const run = (1 - ph / 0.65) * 5 + 0.3;
         const x = coast[o] + coast[o + 2] * run;
         const z = coast[o + 1] + coast[o + 3] * run;
         const y = vis ? SEA + 0.08 : SEA - 3;
-        const w = 3.2;
-        const d = 0.9 + (1 - ph) * 0.8;
+        const w = 4.4;
+        const d = 0.4 + (1 - ph) * 0.55;
         const tx = -coast[o + 3] * w;
         const tz = coast[o + 2] * w;
         const nx = coast[o + 2] * d;
@@ -2173,7 +2222,7 @@ export function buildVulkanLife(world: World): Life {
           const o = k * 5;
           if (!coast[o + 4]) continue;
           if (Math.abs(coast[o] - cam.x) + Math.abs(coast[o + 1] - cam.z) > 170) continue;
-          const ph = (time / SURF + coast[o] * 0.013 + coast[o + 1] * 0.017) % 1;
+          const ph = surfPhase(time, o);
           if (ph < 0.55 || ph > 0.75) continue;
           for (let s = 0; s < 3; s++) fx.puff(coast[o] + (rnd() - 0.5) * 3, SEA + 0.6, coast[o + 1] + (rnd() - 0.5) * 3, coast[o + 2] * -1.5, 5 + rnd() * 4, coast[o + 3] * -1.5, 1.1, 1.4 + rnd(), 0xffffff, 1.2, 8);
           break;

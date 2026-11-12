@@ -103,7 +103,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     pillar: 0x2e2a33,
     ground: [0xe6cf98, 0x74a64c, 0xb0806a, 0x2b2429],
     liquidY: -4,
-    liquid: [0x173a5c, 0x2a6a96, 0xffc28a],
+    liquid: [0x173a5c, 0x2a6a96, 0xf2b48e],
     liquidGlow: false,
     farY: -11,
     rough: 6,
