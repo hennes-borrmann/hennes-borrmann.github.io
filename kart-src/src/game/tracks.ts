@@ -29,4 +29,4 @@ export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RI
  * stünde, wäre noch in Arbeit – zu erreichen nur mit dem Test-Schalter ?alle=1.
  * Zurzeit sind die ersten zwölf freigegeben.
  */
-export const RELEASED_TRACKS = 16;
+export const RELEASED_TRACKS = 17;

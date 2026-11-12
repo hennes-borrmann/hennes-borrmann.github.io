@@ -3,7 +3,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { AI_EASY, AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { KICK_TICKS, PULSE_KICK, RAIL_VMAX, pulseCycle } from '../../src/game/mechanics';
-import { BTN_BRAKE, BTN_GAS, EV_FALL, EV_PAD, EV_WALL, FLAG_AIR, V_MAX, gridState, stepKart, type KartState } from '../../src/game/sim';
+import { BTN_BRAKE, BTN_GAS, BTN_ITEM, EV_FALL, EV_PAD, EV_USE_BOOST, EV_WALL, FLAG_AIR, ITEM_BOOST, ITEM_NONE, ITEM_SPRING, V_MAX, gridState, stepKart, type KartState } from '../../src/game/sim';
 import { EDGE_GAP, EDGE_RAIL, TRACK, TRACK_COUNT, addProgress, getTrack, proj, progDelta, projectOnTrack, railOf, rightX, rightZ, setTrack, trackHeading } from '../../src/game/track';
 
 const RUMMEL = 16;
@@ -144,6 +144,21 @@ describe('Schienen', () => {
     for (let k = 1; k <= 180; k++) stepKart(up, { steer: 0, buttons: BTN_BRAKE }, { canDrive: true, speedFactor: 1, time: k });
     expect(speed(up)).toBeGreaterThan(2.5);
     expect(up.seg).toBeGreaterThan(r.lifts[0][0] + 30);
+  });
+
+  it('Items gehen auch auf der Schiene: der Schub wirkt, die Sprungfeder bleibt aufgehoben', () => {
+    const t = setTrack(RUMMEL);
+    const r = t.rails[0];
+    const s = at(r.first + 30, -2, 12);
+    s.item = ITEM_BOOST;
+    expect(stepKart(s, { steer: 0, buttons: BTN_ITEM }, { canDrive: true, speedFactor: 1, time: 1 }) & EV_USE_BOOST).not.toBe(0);
+    expect(s.item).toBe(ITEM_NONE);
+    expect(s.boost).toBeGreaterThan(0);
+    const f = at(r.first + 30, -2, 12);
+    f.item = ITEM_SPRING;
+    stepKart(f, { steer: 0, buttons: BTN_ITEM }, { canDrive: true, speedFactor: 1, time: 1 });
+    expect(f.item).toBe(ITEM_SPRING);
+    expect(f.flags & FLAG_AIR).toBe(0);
   });
 
   it('Schubmagnet: zieht er gerade und liegt er auf der eigenen Schiene, schiebt er an – sonst nicht', () => {
