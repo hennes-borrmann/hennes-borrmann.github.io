@@ -387,7 +387,9 @@ async function main() {
     await release(phoneA, 'item');
     let tiresHost = 0;
     let tiresClient = 0;
-    for (let i = 0; i < 8; i++) {
+    // (bis zu 4 s: Hängt eine Seite ohne Grafikkarte gerade, kommt der Tipp verspätet an – er geht aber nicht verloren;
+    // der Reifen selbst lebt lange genug, um auf beiden Bildschirmen gesehen zu werden)
+    for (const until = Date.now() + 4000; Date.now() < until && !(tiresHost >= 1 && tiresClient >= 1); ) {
       await sleep(60);
       tiresHost = Math.max(tiresHost, (await kart(host.page, 'things()')).filter((t) => t.kind === 1).length);
       tiresClient = Math.max(tiresClient, (await kart(client.page, 'things()')).filter((t) => t.kind === 1).length);
@@ -1132,19 +1134,30 @@ async function main() {
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 1, null, { timeout: 30000 });
     // Ebbe: Anna fährt durch die Senke, so schnell sie kann (aus dem Stand, 2 s Gas).
     // Gemessen wird das Tempo nach 20 m Weg, nicht nach einer festen Zeit – ein Hänger der Testmaschine verfälscht das nicht.
-    const dip = async () => {
-      await kart(h7.page, 'place(0, 1290, 0)');
-      await sleep(200);
-      const from = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
-      await h7.page.keyboard.down('ArrowUp');
+    // Gelesen wird der Stand des Hosts selbst (nicht das gezeichnete Kart, das einen Augenblick nachhinkt). Gültig ist eine
+    // Messung nur, wenn die Probe gleich hinter der 20-m-Marke kam: Hing die Seite länger, ist das Kart längst weiter (und
+    // womöglich an der Bande) – dann wird die Fahrt wiederholt.
+    const dipNote = [];
+    const dip = async (prepare) => {
       let speed = 0;
-      for (const until = Date.now() + 8000; Date.now() < until; ) {
-        const e = (await kart(h7.page, 'entities()')).find((x) => x.slot === 0);
-        speed = Math.hypot(e.vx, e.vz);
-        if (Math.hypot(e.x - from.x, e.z - from.z) >= 20) break;
-        await sleep(30);
+      let dist = 0;
+      for (let n = 0; n < 4; n++) {
+        await prepare();
+        await kart(h7.page, 'place(0, 1290, 0)');
+        await sleep(200);
+        const from = await kart(h7.page, 'authoritative(0)');
+        await h7.page.keyboard.down('ArrowUp');
+        for (const until = Date.now() + 8000; Date.now() < until; ) {
+          const e = await kart(h7.page, 'authoritative(0)');
+          speed = Math.hypot(e.vx, e.vz);
+          dist = Math.hypot(e.x - from.x, e.z - from.z);
+          if (dist >= 20) break;
+          await sleep(30);
+        }
+        await h7.page.keyboard.up('ArrowUp');
+        if (dist >= 20 && dist < 27) break;
       }
-      await h7.page.keyboard.up('ArrowUp');
+      dipNote.push(`${speed.toFixed(1)} m/s nach ${dist.toFixed(1)} m`);
       return speed;
     };
     const [tideH0, tideC0] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
@@ -1152,9 +1165,10 @@ async function main() {
     // Die Fahrt bei Ebbe zuerst: Sie muss stattfinden, solange die Senke noch trocken ist (das Wasser steigt von Beginn an).
     // Ohne Grafikkarte und unter Last vergehen bis hierher manchmal viele Sekunden Rennzeit – deshalb die Rennzeit
     // ausdrücklich an den Anfang stellen, statt sich auf die Wanduhr zu verlassen.
-    await kart(h7.page, 'clock(0.5)');
-    await sleep(300);
-    const dry = await dip();
+    const dry = await dip(async () => {
+      await kart(h7.page, 'clock(0.5)');
+      await sleep(300);
+    });
     // Wie beim Verkehr: Der Mitspieler baut seine Welt ohne Grafikkarte erst auf, während das Rennen schon läuft, und holt
     // die Uhr dann ein. Gemessen wird der eingeschwungene Zustand – bis zu viermal, die beste Messung zählt (die erste
     // stammt vom Rennbeginn, die weiteren folgen nach der Fahrt durch die Senke).
@@ -1168,8 +1182,8 @@ async function main() {
     await h7.page.waitForFunction(() => window.__kart.tide().phase === 1, null, { timeout: 40000 });
     const [tideH1, tideC1] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
     check('Flut steht auf beiden Bildschirmen', tideH1.phase === 1 && tideC1.phase === 1 && Math.abs(tideH1.level - tideC1.level) < 0.08, `Wasser ${tideH1.level.toFixed(2)} m / ${tideC1.level.toFixed(2)} m`);
-    const wet = await dip();
-    check('Bei Flut bremst das Wasser in der Senke', dry > 14 && wet < dry * 0.75, `Ebbe ${dry.toFixed(1)} m/s, Flut ${wet.toFixed(1)} m/s`);
+    const wet = await dip(() => h7.page.waitForFunction(() => window.__kart.tide().phase === 1, null, { timeout: 60000 }));
+    check('Bei Flut bremst das Wasser in der Senke', dry > 14 && wet < dry * 0.75, `Ebbe ${dipNote[0]}, Flut ${dipNote[1]}`);
     await toLobby(h7.page);
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
@@ -1460,6 +1474,40 @@ async function main() {
       return pair;
     };
     const state = (x) => `${x.holes.map((h) => (h.open ? 1 : 0)).join('')}/${x.gates.map((g) => (g.shut ? 1 : 0)).join('')}`;
+    // Kurze Zustände (das Rücksetzen dauert keine Sekunde, ein Dreher kaum länger) schreibt die Seite selbst mit – Bild für
+    // Bild –, statt dass der Test sie von außen abfragt: Unter Last braucht eine Abfrage manchmal länger, als der Zustand dauert.
+    const watch = (slot) =>
+      Promise.all(
+        [h7.page, c7.page].map((p) =>
+          p.evaluate((slot) => {
+            clearInterval(window.__watch);
+            // seen: Rennzeit, zu der der Zustand zum ersten Mal auftrat; last: zu der er zuletzt bestand.
+            const seen = (window.__seen = { respawn: null, spin: null, boost: null });
+            const last = (window.__last = { respawn: null, spin: null, boost: null });
+            window.__watch = setInterval(() => {
+              const e = window.__kart.entities().find((x) => x.slot === slot);
+              const r = window.__kart.race();
+              if (!e || !r) return;
+              for (const k of ['respawn', 'spin', 'boost']) {
+                if (!(e[k] > 0)) continue;
+                if (seen[k] === null) seen[k] = r.time / 60;
+                last[k] = r.time / 60;
+              }
+            }, 16);
+          }, slot),
+        ),
+      );
+    // Wartet, bis beide Bildschirme den Zustand gesehen haben (oder die Frist um ist): Rennzeit [beim Host, beim Mitspieler], sonst null.
+    const seenOnBoth = async (field, ms) => {
+      let pair = [null, null];
+      for (const until = Date.now() + ms; Date.now() < until; ) {
+        pair = await Promise.all([h7.page, c7.page].map((p) => p.evaluate((f) => (window.__seen ? window.__seen[f] : null), field)));
+        if (pair[0] !== null && pair[1] !== null) break;
+        await sleep(100);
+      }
+      return pair;
+    };
+    const at = (v) => (v === null ? 'nie' : `${v.toFixed(1)} s`);
     const tubeV = (x) => x.gates.find((g) => g.branch === 0);
     const bridgeV = (x) => x.gates.find((g) => g.branch === 1);
     const [v0h, v0c] = await changesAt(5);
@@ -1473,20 +1521,10 @@ async function main() {
     await kart(h7.page, `place(1, ${slab.at + slab.length / 2}, ${slabLat})`);
     await sleep(700);
     const standing = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
-    let fellV = [false, false];
-    let fellAtV = -1;
-    const untilV9 = Date.now() + 16000;
-    while (Date.now() < untilV9 && !(fellV[0] && fellV[1])) {
-      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
-      if (eh.find((e) => e.slot === 1).respawn > 0 && !fellV[0]) {
-        fellV[0] = true;
-        fellAtV = ch.time / 60;
-      }
-      if (ec.find((e) => e.slot === 1).respawn > 0) fellV[1] = true;
-      await sleep(50);
-    }
+    await watch(1);
+    const fellV = await seenOnBoth('respawn', 18000);
     check('Die Platte trägt, bis ihre Zeit gekommen ist', standing.respawn === 0 && !(standing.flags & 8), `Ben steht ab ${(slab.breaksAt - 6).toFixed(1)} s`);
-    check('Platte bricht: Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellV[0] && fellV[1] && fellAtV >= slab.breaksAt, `Sturz bei ${fellAtV.toFixed(1)} s (Bruch ${slab.breaksAt} s)`);
+    check('Platte bricht: Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellV[0] !== null && fellV[1] !== null && fellV[0] >= slab.breaksAt, `Sturz bei ${at(fellV[0])} / ${at(fellV[1])} (Bruch ${slab.breaksAt} s)`);
     const [v1h, v1c] = await changesAt(60);
     check('Nach 50 Sekunden ist die Lavaröhre frei – auf beiden Bildschirmen', !tubeV(v1h).shut && !tubeV(v1c).shut && !bridgeV(v1h).shut && state(v1h) === state(v1c), `${state(v1h)} / ${state(v1c)}`);
     const [v2h, v2c] = await changesAt(95);
@@ -1517,20 +1555,10 @@ async function main() {
     await kart(h7.page, `place(1, ${hallSlab.at + hallSlab.length / 2}, ${hallLat})`);
     await sleep(700);
     const standingR = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
-    const fellR = [false, false];
-    let fellAtR = -1;
-    const untilR = Date.now() + 16000;
-    while (Date.now() < untilR && !(fellR[0] && fellR[1])) {
-      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
-      if (eh.find((e) => e.slot === 1).respawn > 0 && !fellR[0]) {
-        fellR[0] = true;
-        fellAtR = ch.time / 60;
-      }
-      if (ec.find((e) => e.slot === 1).respawn > 0) fellR[1] = true;
-      await sleep(50);
-    }
+    await watch(1);
+    const fellR = await seenOnBoth('respawn', 18000);
     check('Im Einst trägt die Hallenplatte', standingR.respawn === 0 && !(standingR.flags & 8), `Ben steht ab ${(hallSlab.breaksAt - 6).toFixed(1)} s`);
-    check('Die Zeit springt ins Jetzt: Die Platte ist fort, Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellR[0] && fellR[1] && fellAtR >= hallSlab.breaksAt, `Sturz bei ${fellAtR.toFixed(1)} s (Sprung ${hallSlab.breaksAt} s)`);
+    check('Die Zeit springt ins Jetzt: Die Platte ist fort, Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellR[0] !== null && fellR[1] !== null && fellR[0] >= hallSlab.breaksAt, `Sturz bei ${at(fellR[0])} / ${at(fellR[1])} (Sprung ${hallSlab.breaksAt} s)`);
     const [r1h, r1c] = await changesAt(r0h.era.split + 9);
     check(
       'Im Jetzt – auf beiden Bildschirmen: Löcher in der Halle, das Aquädukt eingestürzt und gesperrt, die Bresche der Schatzkammer offen',
@@ -1570,37 +1598,28 @@ async function main() {
     await kart(h7.page, `place(1, ${bolt.at}, ${bolt.lat})`);
     await sleep(700);
     const waitingB = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
-    const spunB = [0, 0];
-    let spunAtB = -1;
-    const untilB = Date.now() + 16000;
-    while (Date.now() < untilB && !(spunB[0] > 0 && spunB[1] > 0)) {
-      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
-      const bh = eh.find((e) => e.slot === 1);
-      if (bh.spin > 0 && spunB[0] === 0) spunAtB = ch.time / 60;
-      spunB[0] = Math.max(spunB[0], bh.spin);
-      spunB[1] = Math.max(spunB[1], ec.find((e) => e.slot === 1).spin);
-      await sleep(50);
-    }
+    await watch(1);
+    const spunB = await seenOnBoth('spin', 18000);
     check('Vor dem Einschlag steht Ben unbehelligt auf der Stelle', waitingB.spin === 0 && waitingB.respawn === 0, `ab ${(strikeAt - 6).toFixed(1)} s`);
-    check('Blitz schlägt ein: Ben schleudert – beim Host und auf seinem eigenen Bildschirm', spunB[0] > 0 && spunB[1] > 0 && spunAtB >= strikeAt - 0.1, `Treffer bei ${spunAtB.toFixed(1)} s (Einschlag ${strikeAt.toFixed(1)} s)`);
+    check('Blitz schlägt ein: Ben schleudert – beim Host und auf seinem eigenen Bildschirm', spunB[0] !== null && spunB[1] !== null && spunB[0] >= strikeAt - 0.1, `Treffer bei ${at(spunB[0])} / ${at(spunB[1])} (Einschlag ${strikeAt.toFixed(1)} s)`);
     // Ben steht im Feld eines Blitzableiters, als der Blitz hineinfährt: Schub statt Treffer.
     const rod = rods[0];
     const chargeAt = rod.strike + rod.period * 3;
     await changesAt(chargeAt - 6);
-    // (erst warten, bis Ben nach dem Treffer wieder verwundbar und ohne Dreher ist – sonst sähe man den Schub nicht)
     await kart(h7.page, `place(1, ${rod.at}, 0)`);
-    let boostB = [0, 0];
-    let spinInField = 0;
-    const untilR13 = Date.now() + 16000;
-    while (Date.now() < untilR13 && !(boostB[0] > 0 && boostB[1] > 0)) {
-      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
-      const bh = eh.find((e) => e.slot === 1);
-      if (ch.time / 60 >= chargeAt - 0.2) spinInField = Math.max(spinInField, bh.spin);
-      boostB[0] = Math.max(boostB[0], bh.boost);
-      boostB[1] = Math.max(boostB[1], ec.find((e) => e.slot === 1).boost);
-      await sleep(50);
+    // (erst beobachten, wenn der Dreher vom Einschlag vorbei ist – bis zum Ladefeld sind es sechs Sekunden)
+    for (const until = Date.now() + 4000; Date.now() < until; ) {
+      const b = await kart(h7.page, 'authoritative(1)');
+      if (b.spin === 0) break;
+      await sleep(100);
     }
-    check('Blitzableiter: Im Ladefeld bekommt Ben Schub statt eines Treffers – beim Host und auf seinem eigenen Bildschirm', boostB[0] > 0 && boostB[1] > 0 && spinInField === 0, `Schub ${boostB[0]} / ${boostB[1]} Ticks, Ladefeld bei ${chargeAt.toFixed(1)} s`);
+    await watch(1);
+    const boostB = await seenOnBoth('boost', 18000);
+    // (Ein Dreher zählt nur, wenn er im Ladefeld bestand – das gezeichnete Kart zeigt den vom Einschlag davor noch einen Augenblick.)
+    await sleep(400);
+    const spunLast = await h7.page.evaluate(() => window.__last.spin);
+    const spinInField = spunLast !== null && spunLast >= chargeAt - 0.2;
+    check('Blitzableiter: Im Ladefeld bekommt Ben Schub statt eines Treffers – beim Host und auf seinem eigenen Bildschirm', boostB[0] !== null && boostB[1] !== null && !spinInField && boostB[0] >= chargeAt - 0.2, `Schub bei ${at(boostB[0])} / ${at(boostB[1])}, Ladefeld bei ${chargeAt.toFixed(1)} s, letzter Dreher ${at(spunLast)}`);
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
