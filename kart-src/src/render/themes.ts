@@ -71,17 +71,18 @@ export interface Theme {
 
 export const THEMES: Record<ThemeId, Theme> = {
   // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
-  // Spiegelkabinett: heller Nachmittag im Schlosspark, Glaspalast in Elfenbein, Gold und Mint. (VORLÄUFIG)
+  // Spiegelkabinett: heller Nachmittag im Schlosspark, Glaspalast in Elfenbein, Gold und Mint.
+  // Der Park liegt eben auf Höhe der Fahrbahn (farY), damit Parterres, Becken und der Palastboden flach liegen.
   spiegel: {
     sky: [0x4f9fe6, 0xa9d8f6, 0xfdf0dc],
-    fog: 0xdfeaf2,
+    fog: 0xe6eef2,
     fogNear: 140,
-    fogFar: 600,
+    fogFar: 640,
     sunDir: [0.45, 0.78, -0.3],
     sunColor: 0xfff4dc,
     sunIntensity: 2.4,
     hemiSky: 0xd6ecff,
-    hemiGround: 0x8fb98a,
+    hemiGround: 0xa9c79a,
     hemiIntensity: 1.4,
     disc: 0xfffbe6,
     discSize: 20,
@@ -94,18 +95,18 @@ export const THEMES: Record<ThemeId, Theme> = {
     kerbA: 0xcfa84a,
     kerbB: 0xf7f2ea,
     shoulder: 0xbfb6a8,
-    wallA: 0x9fd8c8,
+    wallA: 0xa8dcb0,
     wallB: 0xf2ede6,
     wallCap: 0xcfa84a,
     deck: 0xe6dfd2,
     deckDark: 0x8f8778,
     pillar: 0xd9d0c2,
-    ground: [0x6fbf5e, 0x58a850, 0x9a917f, 0x86cf6c],
+    ground: [0x74c262, 0x5fae55, 0xa49a86, 0x8ad172],
     liquidY: null,
     liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
     liquidGlow: false,
-    farY: 0,
-    rough: 2.5,
+    farY: 3.7,
+    rough: 0.45,
   },
   dschungel: {
     sky: [0x3fa3c8, 0xa8dcc8, 0xfdf0c0],
