@@ -76,9 +76,29 @@ import {
   SMALL_ACCEL,
   SMALL_GRIP,
   SMALL_VMAX,
+  KICK_HALF,
+  KICK_SPEED,
+  LIFT_BOOST,
+  KICK_TICKS,
+  PULSE_KICK,
+  RAIL_BOOST,
+  RAIL_BRAKE,
+  RAIL_CATCH,
+  RAIL_CHAIN,
+  RAIL_DRAG,
+  RAIL_G,
+  RAIL_GAS,
+  RAIL_ROLL,
+  RAIL_SHIFT,
+  RAIL_STEER,
+  RAIL_TRIM,
+  RAIL_VGAS,
+  RAIL_VMAX,
+  RAIL_VMIN,
 } from './mechanics';
 import {
   EDGE_FLOAT,
+  EDGE_RAIL,
   EDGE_RIVER,
   EDGE_GAP,
   EDGE_GLIDE,
@@ -96,6 +116,7 @@ import {
   proj,
   projectOnTrack,
   raftLane,
+  railOf,
   rightX,
   rightZ,
   samePath,
@@ -957,6 +978,79 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     return ev;
   }
 
+  // --- Schiene (Achterbahn-Rummel): das Kart sitzt auf einer Schiene und rollt wie ein Achterbahnwagen ---
+  // Bergab schießt es los, bergauf verliert es Schwung, den Lifthügel zieht die Kette hinauf. Lenken wechselt die
+  // Schiene; herunterfallen kann man nicht. Wer (von einer Sprungfeder) hoch über der Schiene fliegt, landet erst.
+  if (t.rails.length > 0 && (t.edge[s.seg] & EDGE_RAIL) !== 0) {
+    projectOnTrack(t, s.x, s.z, s.seg);
+    const seg = proj.seg;
+    const rail = railOf(t, seg);
+    if (rail && s.y <= centerHeight(t, seg, proj.along) + proj.lat * t.bank[seg] + RAIL_CATCH && Math.abs(proj.lat) <= t.wh[seg] + 1) {
+      const canSteer = env.canDrive && !spinning;
+      const steer = canSteer ? Math.max(-1, Math.min(1, cmd.steer / 127)) : 0;
+      // Welche Schiene: die nächste – mit Lenkeinschlag die Nachbarschiene in Lenkrichtung.
+      let lane = 0;
+      for (let i = 1; i < rail.lanes.length; i++) if (Math.abs(rail.lanes[i] - proj.lat) < Math.abs(rail.lanes[lane] - proj.lat)) lane = i;
+      if (steer > RAIL_STEER) lane = Math.min(rail.lanes.length - 1, lane + 1);
+      else if (steer < -RAIL_STEER) lane = Math.max(0, lane - 1);
+      const shift = Math.max(-RAIL_SHIFT * DT, Math.min(RAIL_SHIFT * DT, rail.lanes[lane] - proj.lat));
+      const lat = proj.lat + shift;
+      // Tempo entlang der Schiene.
+      let v = s.vx * t.tx[seg] + s.vz * t.tz[seg];
+      const slope = (t.py[t.next[seg]] - t.py[seg]) / t.step;
+      let a = -RAIL_G * slope - RAIL_ROLL - RAIL_DRAG * v * v;
+      if (canSteer && (cmd.buttons & BTN_GAS) !== 0 && s.stall === 0 && v < RAIL_VGAS) a += RAIL_GAS;
+      if (canSteer && (cmd.buttons & BTN_BRAKE) !== 0) a -= RAIL_BRAKE;
+      if (s.boost > 0) a += RAIL_BOOST;
+      if (spinning) a -= 5;
+      v += a * DT;
+      for (const l of rail.lifts) {
+        // Mit Schub läuft die Kette schneller: Auf dem Lifthügel zahlt sich der Takt der Schubmagnete aus.
+        const pull = s.boost > 0 ? l[2] * LIFT_BOOST : l[2];
+        if (seg >= l[0] && seg <= l[1] && v < pull) v = Math.min(pull, Math.max(v, 0) + RAIL_CHAIN * DT);
+      }
+      for (const b of rail.brakes) if (seg >= b[0] && seg <= b[1] && v > b[2]) v = Math.max(b[2], v - RAIL_TRIM * DT);
+      // Schubmagnet: zieht er gerade und liegt er auf dieser Schiene, schiebt er an.
+      if (env.canDrive) {
+        for (const p of t.pulses) {
+          if (p.kind !== PULSE_KICK || Math.abs(lat - p.lat) > KICK_HALF || pulseCycle(p, env.time) >= p.on) continue;
+          if (Math.abs((s.x - p.x) * t.tx[p.seg] + (s.z - p.z) * t.tz[p.seg]) > p.radius || Math.abs(segDelta(t, p.seg, seg)) > p.radius + 2) continue;
+          if (s.boost < KICK_TICKS - 8) {
+            // Der Ruck kommt einmal – beim Auffahren auf den Magneten; solange man über ihm ist, hält er den Schub.
+            if (s.boost < 6) {
+              v += KICK_SPEED;
+              ev |= EV_PAD;
+            }
+            s.boost = KICK_TICKS;
+          }
+        }
+      }
+      v = Math.max(env.canDrive ? RAIL_VMIN : 0, Math.min(RAIL_VMAX, v));
+      if (!env.canDrive) v = 0;
+      s.x += t.tx[seg] * v * DT;
+      s.z += t.tz[seg] * v * DT;
+      projectOnTrack(t, s.x, s.z, seg);
+      const seg1 = proj.seg;
+      // Seitlich genau auf die Spur (in Kurven wandert sie sonst).
+      s.x += rightX(t, seg1) * (lat - proj.lat);
+      s.z += rightZ(t, seg1) * (lat - proj.lat);
+      s.seg = seg1;
+      s.y = centerHeight(t, seg1, proj.along) + lat * t.bank[seg1];
+      s.vy = 0;
+      s.vx = t.tx[seg1] * v;
+      s.vz = t.tz[seg1] * v;
+      // Die Nase folgt der Schiene – beim Wechsel schwenkt sie ein wenig mit.
+      s.heading = wrapAngle(trackHeading(t, seg1) - Math.atan2(shift / DT, Math.max(9, v)) * 0.8);
+      s.driftDir = 0;
+      s.driftCharge = 0;
+      s.draft = 0;
+      // Items gehen auch auf der Schiene (der Schub wirkt über s.boost, der Drache zieht im nächsten Schritt).
+      if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && canSteer && s.item !== ITEM_NONE) ev |= useItem(s, false, true);
+      s.flags = itemBtn ? FLAG_ITEM_HELD : 0;
+      return ev;
+    }
+  }
+
   const wasAir = (s.flags & FLAG_AIR) !== 0;
   const drive = env.canDrive && !spinning;
   const steer = drive ? Math.max(-1, Math.min(1, cmd.steer / 127)) : 0;
@@ -1531,53 +1625,65 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   // --- Item auslösen (bei Tastendruck, nicht beim Halten) ---
   if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && drive && s.item !== ITEM_NONE) {
-    let used = true;
-    switch (s.item) {
-      case ITEM_BOOST:
-        s.boost = Math.max(s.boost, ITEM_BOOST_TICKS);
-        ev |= EV_USE_BOOST;
-        break;
-      case ITEM_TIRE:
-        ev |= EV_USE_TIRE;
-        break;
-      case ITEM_OIL:
-        ev |= EV_USE_OIL;
-        break;
-      case ITEM_TOP:
-        ev |= EV_USE_TOP;
-        break;
-      case ITEM_GUARD:
-        s.guard = GUARD_TICKS;
-        ev |= EV_USE_GUARD;
-        break;
-      case ITEM_EMP:
-        ev |= EV_USE_EMP;
-        break;
-      case ITEM_SMOKE:
-        ev |= EV_USE_SMOKE;
-        break;
-      case ITEM_SPRING:
-        // Aus der Luft heraus geht kein zweiter Sprung – das Item bleibt.
-        if (air) used = false;
-        else {
-          s.vy = SPRING_SPEED;
-          s.y += AIR_EPS + 0.05;
-          flags |= FLAG_AIR;
-          ev |= EV_USE_SPRING | EV_TAKEOFF;
-        }
-        break;
-      case ITEM_KITE:
-        s.tow = TOW_TICKS;
-        s.boost = 0;
-        s.stall = 0;
-        ev |= EV_USE_KITE;
-        break;
-      default:
-        used = false;
-    }
-    if (used) s.item = ITEM_NONE;
+    const used = useItem(s, air);
+    ev |= used;
+    if (used & EV_USE_SPRING) flags |= FLAG_AIR;
   }
 
   s.flags = flags;
+  return ev;
+}
+
+/**
+ * Löst das gehaltene Item aus (Aufrufer prüft Tastenflanke und ob gefahren werden darf). Gibt die Ereignisse zurück;
+ * die Sprungfeder setzt dabei das Kart in die Luft (EV_TAKEOFF – der Aufrufer setzt FLAG_AIR).
+ * noSpring: Auf den Schienen der Achterbahn bleibt die Feder aufgehoben (sie würde das Kart vom Deck ohne Bande werfen).
+ */
+function useItem(s: KartState, air: boolean, noSpring = false): number {
+  let ev = 0;
+  let used = true;
+  switch (s.item) {
+    case ITEM_BOOST:
+      s.boost = Math.max(s.boost, ITEM_BOOST_TICKS);
+      ev |= EV_USE_BOOST;
+      break;
+    case ITEM_TIRE:
+      ev |= EV_USE_TIRE;
+      break;
+    case ITEM_OIL:
+      ev |= EV_USE_OIL;
+      break;
+    case ITEM_TOP:
+      ev |= EV_USE_TOP;
+      break;
+    case ITEM_GUARD:
+      s.guard = GUARD_TICKS;
+      ev |= EV_USE_GUARD;
+      break;
+    case ITEM_EMP:
+      ev |= EV_USE_EMP;
+      break;
+    case ITEM_SMOKE:
+      ev |= EV_USE_SMOKE;
+      break;
+    case ITEM_SPRING:
+      // Aus der Luft heraus geht kein zweiter Sprung – das Item bleibt.
+      if (air || noSpring) used = false;
+      else {
+        s.vy = SPRING_SPEED;
+        s.y += AIR_EPS + 0.05;
+        ev |= EV_USE_SPRING | EV_TAKEOFF;
+      }
+      break;
+    case ITEM_KITE:
+      s.tow = TOW_TICKS;
+      s.boost = 0;
+      s.stall = 0;
+      ev |= EV_USE_KITE;
+      break;
+    default:
+      used = false;
+  }
+  if (used) s.item = ITEM_NONE;
   return ev;
 }

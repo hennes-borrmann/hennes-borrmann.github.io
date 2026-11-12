@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -83,6 +83,11 @@ export type SfxName =
   | 'grow' // Riesenkinderzimmer: ein Kart wächst (durch den orangen Ring gefahren): Gleitton rutscht hinab und wird breit, Zip, rundes Bwomm (~0,55 s)
   | 'sizeend' // Riesenkinderzimmer: ein Kart ist wieder normal groß: weiches Plopp mit kurzem Nachfedern (~0,25 s)
   | 'smash' // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer: dumpfer Stoß, elf helle Holzklötze poltern auseinander (~0,75 s)
+  | 'latch' // Achterbahn-Rummel: ein Kart rollt auf die Schienen und rastet ein: zwei kurze Stahlschläge, trockenes Einrasten, heller Nachklang (~0,35 s)
+  | 'coaster' // Achterbahn-Rummel: das eigene Kart rollt auf den Schienen: tiefes Rollen, mitschwingendes Holz, unregelmäßige Schienenstöße (wird etwa alle 0,4 s aufgerufen, solange es darauf ist, und verschmilzt zu einem Bett)
+  | 'chain' // Achterbahn-Rummel: die Kette des Lifthügels rattert unter dem eigenen Kart: trockenes Klack-klack der Rücklaufsperre über leisem Kettensurren, 1–3 kHz (wird etwa alle 0,22 s aufgerufen)
+  | 'kick' // Achterbahn-Rummel: ein Schubmagnet zieht an und ruckt das Kart nach vorn (zusätzlich zum Schub-Geräusch): brummender Magnet-Einsatz, der in einen hellen Schnalzer umschlägt, „Zzzack“ (~0,4 s)
+  | 'crest' // Achterbahn-Rummel: das eigene Kart kippt schnell über eine Kuppe in die Abfahrt: Luftholen (Rauschen steigt), dann fallendes „Whuuu“ wie eine Lotusflöte (~0,7 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

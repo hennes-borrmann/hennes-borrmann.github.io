@@ -18,6 +18,7 @@ import { NEUE_STUECKE } from './songs-neu';
 import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
 import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
 import { SPIEGEL_STUECK } from './stuecke/spiegel';
@@ -438,6 +439,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   wueste: WUESTE_STUECK,
   // Riesenkinderzimmer: eigenes Stück (stuecke/zimmer.ts)
   zimmer: ZIMMER_STUECK,
+  // Achterbahn-Rummel: eigenes Stück (stuecke/rummel.ts)
+  rummel: RUMMEL_STUECK,
   results: RESULTS,
 };
 

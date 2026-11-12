@@ -40,6 +40,7 @@ import {
   PULSE_BOLT,
   PULSE_METEOR,
   PULSE_ROD,
+  PULSE_KICK,
   PONTOON_LINK,
   pontoonLift,
   type Pontoon,
@@ -55,13 +56,14 @@ import {
   type Portal,
   type RaftLane,
   type Sizer,
+  type Rail,
   type River,
   raftAt,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -158,6 +160,13 @@ export interface PathFeatures {
    * period und phase in Sekunden (ohne Angabe 3,4 und 0). Die Enden sind gelenkige Übergänge.
    */
   pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number }[];
+  /**
+   * Schienen (Achterbahn): von … bis sitzt das Kart auf einer der Schienen (lanes = seitliche Lage in Metern) und rollt
+   * wie ein Achterbahnwagen (mechanics.ts, Rail). lifts = Kettenlifte, brakes = Bremsstrecken: je [von, bis, Tempo in m/s].
+   */
+  rails?: { from: number; to: number; lanes: number[]; lifts?: [number, number, number][]; brakes?: [number, number, number][] }[];
+  /** Schubmagnete auf einer Schiene (lat = Lage dieser Schiene): ziehen im Takt an (mechanics.ts, PULSE_KICK). */
+  kicks?: { at: number; lat: number; period: number; phase: number }[];
   /**
    * Flussstücke: von … bis ist die Fahrbahn Wasser; darauf treiben Flöße in Bahnen (mechanics.ts, RaftLane:
    * seitlich lat0 … lat1, Länge und Abstand in Metern, Tempo in m/s, Versatz in Metern).
@@ -303,6 +312,11 @@ export const EDGE_BROKEN = 1024;
  */
 export const EDGE_RIVER = 2048;
 /**
+ * Schiene: Hier sitzt das Kart auf einer Schiene und rollt wie ein Achterbahnwagen (Track.rails; sim.ts).
+ * Banden gibt es keine, die Schienen stehen frei auf ihrem Gerüst.
+ */
+export const EDGE_RAIL = 4096;
+/**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
  */
@@ -417,6 +431,8 @@ export interface Track {
   winds: Wind[];
   /** Flussstücke mit ihren Floßbahnen (mechanics.ts). */
   rivers: River[];
+  /** Schienenstücke (mechanics.ts). */
+  rails: Rail[];
   /** Portale (mechanics.ts). */
   portals: Portal[];
   /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
@@ -1042,6 +1058,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     sea: def.sea ?? 0,
     winds: [],
     rivers: [],
+    rails: [],
     portals: [],
     roofed: false,
     sizers: [],
@@ -1108,6 +1125,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const b of p.f.meteors ?? []) pulse(PULSE_METEOR, b);
     for (const b of p.f.bolts ?? []) pulse(PULSE_BOLT, b);
     for (const b of p.f.rods ?? []) pulse(PULSE_ROD, b);
+    for (const b of p.f.kicks ?? []) pulse(PULSE_KICK, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
@@ -1169,6 +1187,15 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       // vorwärts oder zurück? (der kürzere Weg um die Runde entscheidet; auf einer Abzweigung gilt es als vorwärts)
       const ahead = p.closed ? (((to - seg) % n) + n) % n : 0;
       track.portals.push({ seg, lat0: Math.min(q.lat0, q.lat1), lat1: Math.max(q.lat0, q.lat1), to, plan, kind: ahead <= n / 2 ? 0 : 1 });
+    }
+    for (const r of p.f.rails ?? []) {
+      const first = segAt(p, r.from);
+      const last = segAt(p, r.to);
+      const count = Math.max(1, last - first + 1);
+      const spans = (list: [number, number, number][] | undefined): [number, number, number][] => (list ?? []).map(([a, b, v]) => [segAt(p, a), segAt(p, b), v]);
+      track.rails.push({ first, count, lanes: [...r.lanes].sort((a, b) => a - b), lifts: spans(r.lifts), brakes: spans(r.brakes) });
+      // Schienen haben keine Bande und stehen frei auf ihrem Gerüst.
+      for (let k = 0; k < count; k++) edge[first + k] |= EDGE_RAIL | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
     }
     for (const r of p.f.rivers ?? []) {
       const first = segAt(p, r.from);
@@ -1317,6 +1344,8 @@ const PULSE_KINDS = [
   { radius: 3.0, on: 34, warn: 90 },
   // Blitzableiter: das Ladefeld (6 m vor bis 6 m hinter dem Mast) steht knapp eine Sekunde
   { radius: 6, on: 54, warn: 90 },
+  // Schubmagnet: 3 m vor bis 3 m hinter der Stelle; zieht gut eine Sekunde, eine Dreiviertelsekunde vorher läuft das Licht an
+  { radius: 3, on: 75, warn: 45 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;
@@ -1611,6 +1640,13 @@ export function gateShut(t: Track, seg: number, time: number, size: number): boo
 }
 
 /** Das Flussstück, zu dem dieser Abschnitt gehört (sonst null). */
+/** Das Schienenstück, zu dem der Abschnitt gehört – oder null. */
+export function railOf(t: Track, seg: number): Rail | null {
+  if ((t.edge[seg] & EDGE_RAIL) === 0) return null;
+  for (const r of t.rails) if (seg >= r.first && seg < r.first + r.count) return r;
+  return null;
+}
+
 export function riverOf(t: Track, seg: number): River | null {
   if ((t.edge[seg] & EDGE_RIVER) === 0) return null;
   for (const r of t.rivers) if (seg >= r.first && seg < r.first + r.count) return r;

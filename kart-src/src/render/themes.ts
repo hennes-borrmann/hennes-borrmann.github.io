@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Achterbahn-Rummel: Jahrmarkt am frühen Abend – der Himmel glüht orange bis violett, die tief stehende Sonne färbt alles warm, die Bahn ist noch gut zu sehen.
+  rummel: {
+    sky: [0x2c2f78, 0xc0649c, 0xffa868],
+    fog: 0xe8a28e,
+    fogNear: 190,
+    fogFar: 780,
+    sunDir: [-0.6, 0.3, 0.3],
+    sunColor: 0xffb47c,
+    sunIntensity: 2.2,
+    hemiSky: 0xbfaaff,
+    hemiGround: 0x7a5048,
+    hemiIntensity: 1.45,
+    disc: 0xffd890,
+    discSize: 30,
+    clouds: 0xffc8b0,
+    cloudShade: 0xb070a8,
+    stars: false,
+    road: 0x565a66,
+    roadAlt: 0x4e525e,
+    line: 0xf6f0dc,
+    kerbA: 0xe2483a,
+    kerbB: 0xf6f0dc,
+    shoulder: 0x6f8f5a,
+    wallA: 0xe2483a,
+    wallB: 0xf6f0dc,
+    wallCap: 0xffd23a,
+    deck: 0xc9a06a,
+    deckDark: 0x8a6440,
+    pillar: 0xf2efe6,
+    ground: [0x9aa864, 0x6f9652, 0x8a7a5a, 0x84ac66],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: 2,
+    rough: 0.7,
+  },
   // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
   // Riesenkinderzimmer: Nachmittag im Kinderzimmer – Holzdielen, bunter Spielteppich, Tapetenwände, warmes Licht durchs Fenster
   // im Norden. Der „Himmel“ ist die Zimmerdecke; die Sonnenscheibe verschwindet hinter der Fensterwand (Farbe wie die Decke).

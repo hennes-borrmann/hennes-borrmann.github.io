@@ -803,7 +803,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Sechzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 16);
+    check('Siebzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 17);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1317,7 +1317,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen sechzehn Strecken zur Wahl', cards === 16, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen siebzehn Strecken zur Wahl', cards === 17, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1891,9 +1891,52 @@ async function main() {
       await kart(h7.page, 'size(0, 0)');
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Achterbahn-Rummel: Auf den Schienen rollt das Kart wie ein Achterbahnwagen – die Kette zieht den Lifthügel hinauf,
+    // Lenken wechselt die Schiene; die Schubmagnete ziehen nach Fahrplan, auf beiden Bildschirmen gleich.
+    await h7.page.locator('.track-card').nth(16).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 16, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 16, null, { timeout: 30000 });
+    const kickState = (r) => r.kicks.map((k) => (k.on ? 1 : 0)).join('');
+    const [rH0, rC0] = await Promise.all([kart(h7.page, 'rails(1)'), kart(c7.page, 'rails(1)')]);
+    const [rH1, rC1] = await Promise.all([kart(h7.page, 'rails(2.6)'), kart(c7.page, 'rails(2.6)')]);
+    const rail = rH0.rails[0];
+    check(
+      'Achterbahn-Rummel hat ein Schienenstück mit zwei Schienen, Kettenlift und Bremse und zwölf Schubmagnete – beide Bildschirme rechnen denselben Takt',
+      rH0.rails.length === 1 && rail.lanes.length === 2 && rail.lifts.length === 1 && rail.brakes.length === 1 && rH0.kicks.length === 12 && kickState(rH0) === kickState(rC0) && kickState(rH1) === kickState(rC1) && kickState(rH0) !== kickState(rH1),
+      rail ? `Schienen ${rail.at.toFixed(0)}–${(rail.at + rail.length).toFixed(0)} m, Lift ${rail.lifts[0][0].toFixed(0)}–${rail.lifts[0][1].toFixed(0)} m · Magnete bei 1 s ${kickState(rH0)} / ${kickState(rC0)}, bei 2,6 s ${kickState(rH1)} / ${kickState(rC1)}` : 'keine Schienen',
+    );
+    if (rail) {
+      // Anna (Kart des Hosts) auf die linke Schiene am Fuß des Lifts, ohne Gas: Die Kette zieht sie hinauf.
+      const liftAt = Math.round(rail.lifts[0][0]) + 15;
+      await kart(h7.page, `place(0, ${liftAt}, -2)`);
+      const l0 = await kart(h7.page, 'authoritative(0)');
+      await sleep(2500);
+      const l1 = await kart(h7.page, 'authoritative(0)');
+      const climbed = l1.y - l0.y;
+      const rolled = l1.seg - l0.seg;
+      check('Kettenlift: Anna rollt ohne Gas den Lifthügel hinauf', climbed > 3 && rolled > 15 && l1.respawn === 0, `${rolled} m weiter, ${climbed.toFixed(1)} m höher`);
+      // Lenken nach rechts: auf die rechte Schiene. (Die Lage quer zur Bahn aus spot(): links −2, rechts +2.)
+      await h7.page.keyboard.down('ArrowRight');
+      await sleep(900);
+      await h7.page.keyboard.up('ArrowRight');
+      await sleep(300);
+      const sw = await h7.page.evaluate(() => {
+        const s = window.__kart.authoritative(0);
+        const a = window.__kart.spot(s.seg, -2, 0);
+        const b = window.__kart.spot(s.seg, 2, 0);
+        return { left: Math.hypot(s.x - a[0], s.z - a[2]), right: Math.hypot(s.x - b[0], s.z - b[2]) };
+      });
+      check('Lenken wechselt die Schiene: nach einem Druck nach rechts sitzt Anna auf der rechten Schiene', sw.right < 0.6 && sw.left > 3.4, `${sw.right.toFixed(2)} m von der rechten, ${sw.left.toFixed(2)} m von der linken Schiene`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die sechzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die siebzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

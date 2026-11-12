@@ -263,6 +263,17 @@ const SHOTS = {
       [2, 1103, 1.8],
     ],
   },
+  // Achterbahn-Rummel: vom Fuß des Lifthügels hinauf – zwei Schienen, die Kette, die Schubmagnete mit ihren Masten,
+  // oben die Kuppe und dahinter der Rummel im Abendlicht. Ein Kart auf jeder Schiene.
+  rummel: {
+    from: [418, 0.8, 4.4],
+    to: [480, 0, 2.5],
+    fov: 58,
+    karts: [
+      [1, 428, -2],
+      [2, 440, 2],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

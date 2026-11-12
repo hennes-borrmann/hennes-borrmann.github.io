@@ -58,7 +58,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { EDGE_GAP, EDGE_RIVER, NO_GROUND, TRACK, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { EDGE_GAP, EDGE_RAIL, EDGE_RIVER, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -184,7 +184,17 @@ export interface SceneEvent {
     | 'grow'
     | 'sizeend'
     /** Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer. */
-    | 'smash';
+    | 'smash'
+    /**
+     * Achterbahn-Rummel: ein Kart rastet auf den Schienen ein / das eigene rollt darauf (wiederholt) / die Kette des
+     * Lifthügels rattert unter dem eigenen (wiederholt) / ein Schubmagnet ruckt ein Kart an / das eigene kippt schnell
+     * über eine Kuppe.
+     */
+    | 'latch'
+    | 'coaster'
+    | 'chain'
+    | 'kick'
+    | 'crest';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -257,6 +267,12 @@ interface KartView {
   /** Wüstenexpress: steht das Kart auf einem Wagendach? / Zeit bis zur nächsten Meldung des eigenen Karts. */
   roof: boolean;
   roofWait: number;
+  /** Achterbahn-Rummel: sitzt auf der Schiene; Wartezeiten für Rollen und Kettenrattern; Steigung und Schub im vorigen Bild. */
+  rail: boolean;
+  railWait: number;
+  chainWait: number;
+  slopeWas: number;
+  boostWas: number;
   /** Riesenkinderzimmer: Größenklasse im letzten Bild (−1/0/1) und der gezeigte Maßstab (weich nachgeführt). */
   sizeWas: number;
   sizeK: number;
@@ -671,6 +687,7 @@ export class RaceScene {
       ['HUI!', 'cool'],
       ['GELADEN!', 'cool'],
       ['HINDURCH!', 'violet'],
+      ['ZACK!', 'warm'],
       ['AUFGESPRUNGEN!', 'warm'],
       ['WINZIG!', 'cool'],
       ['RIESIG!', 'hot'],
@@ -843,6 +860,11 @@ export class RaceScene {
       lastSeg: 0,
       roof: false,
       roofWait: 0,
+      rail: false,
+      railWait: 0,
+      chainWait: 0,
+      slopeWas: 0,
+      boostWas: 0,
       sizeWas: 0,
       sizeK: 1,
       inCastle: false,
@@ -1246,6 +1268,52 @@ export class RaceScene {
         }
       } else if (!air) k.riverWait = 0;
       if (!air) k.raft = lane;
+    }
+    // Achterbahn-Rummel: Sitzt das Kart auf der Schiene? Beim Auffahren rastet es ein; das eigene Kart rollt hörbar, auf dem
+    // Lifthügel rattert die Kette, ein Schubmagnet ruckt es an, und über eine schnelle Kuppe geht es mit „HUI!“.
+    if (this.track.rails.length > 0) {
+      const tr = this.track;
+      const rail = !air && e.respawn === 0 && e.seg < tr.total && (tr.edge[e.seg] & EDGE_RAIL) !== 0 ? railOf(tr, e.seg) : null;
+      if (rail) {
+        const v = Math.hypot(e.vx, e.vz);
+        if (!k.rail && !k.fresh) {
+          this.emit('latch', k, local);
+          this.burst(e.x, e.y + 0.1, e.z, 6, 4, 0xffe9a8, true, 0.35, 0.35, 2);
+        }
+        if (k.rail && e.boost > k.boostWas + 10) {
+          this.emit('kick', k, local);
+          this.burst(e.x, e.y + 0.3, e.z, 10, 7, 0xffd23a, true, 0.5, 0.45, 2);
+          if (local) this.pop('ZACK!', e, 'warm', 3.2);
+        }
+        const slope = (tr.py[tr.next[e.seg]] - tr.py[e.seg]) / tr.step;
+        if (local) {
+          let lift = false;
+          for (const l of rail.lifts) if (e.seg >= l[0] && e.seg <= l[1]) lift = true;
+          k.railWait -= dt;
+          if (k.railWait <= 0) {
+            k.railWait = 0.4;
+            this.emit('coaster', k, true);
+          }
+          if (lift) {
+            k.chainWait -= dt;
+            if (k.chainWait <= 0) {
+              k.chainWait = 0.22;
+              this.emit('chain', k, true);
+            }
+          } else k.chainWait = 0;
+          // Kuppe: eben noch bergauf, jetzt bergab – und schnell genug, dass es im Bauch kribbelt
+          if (k.rail && k.slopeWas > -0.06 && slope <= -0.06 && v > 15) {
+            this.emit('crest', k, true);
+            this.pop('HUI!', e, 'cool', 3.2);
+          }
+        }
+        k.slopeWas = slope;
+      } else if (!air) {
+        k.railWait = 0;
+        k.chainWait = 0;
+      }
+      if (!air) k.rail = rail !== null;
+      k.boostWas = e.boost;
     }
     // Sturmhafen: schiebt gerade eine Böe? Das eigene Kart meldet sich regelmäßig (Heulen); Schleier und Gischt zeichnet mechanics/harbor.ts.
     if (this.track.winds.length > 0) {

@@ -138,6 +138,11 @@ export const PULSE_BOLT = 7;
  * hindurchfährt, wird aufgeladen: ein Schub wie vom Boost-Feld. Kein Treffer.
  */
 export const PULSE_ROD = 8;
+/**
+ * Schubmagnet auf einer Schiene (Achterbahn-Rummel): Im Takt zieht er an – wer dann auf seiner Schiene über ihn
+ * rollt, wird angeschoben. Die Magnete der Schienen nebeneinander ziehen abwechselnd: Man wählt die Schiene nach dem Takt.
+ */
+export const PULSE_KICK = 9;
 
 // --- Wetterleuchten ------------------------------------------------------------------
 // Auf einer dunklen Strecke (Gewitterkamm) erhellt jeder Blitz für einen Augenblick alles. Wie hell es
@@ -720,6 +725,54 @@ export function raftAt(l: RaftLane, a: number, time: number): boolean {
   const u = (a - l.phase - raftDrift(l, time)) % pitch;
   return (u < 0 ? u + pitch : u) < l.length;
 }
+
+// --- Schienen ------------------------------------------------------------------------
+// Auf dem Achterbahn-Rummel fährt man streckenweise auf Schienen: Das Kart sitzt auf einer von mehreren Schienen
+// nebeneinander und rollt wie ein Achterbahnwagen – bergab schießt es los, bergauf verliert es Schwung, den Lifthügel
+// zieht die Kette hinauf. Lenken wechselt die Schiene; herunterfallen kann man nicht. (Keine Loopings: Hügel, Täler,
+// Steilkurven.)
+
+/** Schienenstück: Abschnitte first … first+count−1. */
+export interface Rail {
+  first: number;
+  count: number;
+  /** Seitliche Lage der Schienen (Meter, aufsteigend). */
+  lanes: number[];
+  /** Kettenlifte: [erster Abschnitt, letzter Abschnitt, Tempo in m/s] – langsamer rollt hier niemand. */
+  lifts: [number, number, number][];
+  /** Bremsstrecken: [erster Abschnitt, letzter Abschnitt, Tempo in m/s] – schneller verlässt sie niemand. */
+  brakes: [number, number, number][];
+}
+
+/** Hangabtrieb auf der Schiene: Beschleunigung (m/s²) bei Gefälle 1 (45°). */
+export const RAIL_G = 23;
+/** Eigener Antrieb auf der Schiene (m/s²) – hilft nur bis RAIL_VGAS. */
+export const RAIL_GAS = 5.5;
+export const RAIL_VGAS = 21;
+/** Schub (Boost, Schubmagnet) auf der Schiene (m/s²). */
+export const RAIL_BOOST = 11;
+/** Rollwiderstand (m/s²) und Luftwiderstand (· v²). */
+export const RAIL_ROLL = 0.7;
+export const RAIL_DRAG = 0.0016;
+/** Bremse (m/s²). */
+export const RAIL_BRAKE = 15;
+/** Langsamer als so rollt auf der Schiene nichts (kein Zurückrollen), schneller als so auch nichts. */
+export const RAIL_VMIN = 3;
+export const RAIL_VMAX = 43;
+/** So schnell zieht die Kette auf ihr Tempo, so schnell bremst eine Bremsstrecke (m/s²). */
+export const RAIL_CHAIN = 16;
+export const RAIL_TRIM = 20;
+/** Schienenwechsel: seitliches Tempo (m/s) und ab welchem Lenkeinschlag (0…1) gewechselt wird. */
+export const RAIL_SHIFT = 7.5;
+export const RAIL_STEER = 0.35;
+/** Bis so hoch über der Schiene greift sie ein Kart (Meter) – wer höher fliegt, landet erst. */
+export const RAIL_CATCH = 0.7;
+/** Schubmagnet: so breit ist seine Schiene für ihn (Meter um die Schienenmitte), so lange wirkt der Schub (Ticks), so viel Tempo gibt es sofort (m/s). */
+export const KICK_HALF = 1.1;
+export const KICK_TICKS = 50;
+export const KICK_SPEED = 3;
+/** Mit Schub (Boost, Schubmagnet) zieht die Kette eines Lifts so viel schneller. */
+export const LIFT_BOOST = 1.6;
 
 // --- Zeitalter -----------------------------------------------------------------------
 // Die Zeitriss-Ruine springt im festen Takt zwischen zwei Zeitaltern: „Einst“ (der Tempel steht)

@@ -124,6 +124,14 @@ const BOARD_PATTERN = [
   [380, 0.11, 0.21, 0.28, 0.37],
   [445, 0.13, 0.2, 0.3, 0.35],
 ];
+/** Achterbahn: Schienenstöße je Aufruf von 'coaster' (Beginn des ersten Schlags eines Paars, s), sieben Fassungen reihum. */
+const COASTER_JOINTS = [[0.06], [0.17, 0.33], [], [0.24], [0.02, 0.29], [0.13], [0.36]];
+/** Achterbahn: Mitten (Hz) der drei mitschwingenden Holzbänder von 'coaster', drei Fassungen reihum. */
+const COASTER_WOOD = [
+  [380, 440, 360],
+  [420, 360, 450],
+  [360, 410, 390],
+];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -253,6 +261,15 @@ const LEVEL: Record<SfxName, number> = {
   grow: 1.6,
   sizeend: 2.2,
   smash: 2.8,
+  // Achterbahn-Rummel (Runde 18), gemessen wie oben: Einrasten ≈ −17,6 LUFS (Landung −18,1,
+  // Schubring −17,3: es passiert oft, auch bei fremden Karts); die Folge des Rollens ≈ −33,5 wie
+  // der Fahrtwind im Gleitflug (−33,7), die der Kette ≈ −37,9 (4,4 dB darunter); Schubmagnet allein
+  // ≈ −17,1, zusammen mit 'boost' −12,8 (Schub allein −14,8); Kuppe ≈ −14,9 (Schub −14,8).
+  latch: 4.2,
+  coaster: 0.95,
+  chain: 1,
+  kick: 3,
+  crest: 2,
   rumble: 1.2,
   charge: 2,
 };
@@ -449,6 +466,8 @@ export class SfxPlayer {
   private meteorTick = 0;
   private gustTick = 0;
   private smashTick = 0;
+  private latchTick = 0;
+  private coasterTick = 0;
   private whistleTick = 0;
   private boardTick = 0;
   private raftTick = 0;
@@ -1163,6 +1182,134 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Achterbahn-Rummel ---
+      case 'latch': {
+        // Einrasten auf den Schienen (0,35 s): „Ka-tschack“. Erst zwei kurze Stahlschläge, 50 ms
+        // auseinander – die Räder greifen (enges, helles Rauschen, ein unharmonischer Dreieckston
+        // um 1 kHz, ein kleiner, tiefer Stoß) –, dann rastet es ein: ein trockener Klack im
+        // Mittenband mit Zischen darüber und sattem, tiefem Plumps darunter. Zuletzt klingt das
+        // Stahlteil kurz und hell nach (Sinus um 2,5 kHz mit dem schiefen Teilton ×2,76 eines
+        // Stabs, die Unteroktave leise darunter), drei Tonhöhen reihum, weil oft mehrere Karts
+        // kurz nacheinander auffahren. Gemessen: 0,34 s, Schwerpunkt 1,3 kHz (Schläge) → 2,1–2,9 kHz
+        // (Nachklang), 40 % der Energie über 2 kHz; im Spiel-Mix +3,7 dB bei 2 kHz und +13 dB bei 8 kHz
+        // (Landung: nirgends), Ausgangsspitze 0,48.
+        const ring = [2480, 2210, 2730][this.latchTick++ % 3];
+        v.noise(3400, 2100, 0.03, 0.28, { q: 2.2, attack: 0.001 })
+          .tone('triangle', 1180, 1140, 0.05, 0.1, { attack: 0.001 })
+          .tone('sine', 170, 90, 0.05, 0.12)
+          .noise(2900, 1800, 0.03, 0.24, { q: 2.2, at: 0.05, attack: 0.001 })
+          .tone('triangle', 990, 960, 0.05, 0.09, { at: 0.05, attack: 0.001 })
+          .tone('sine', 150, 80, 0.05, 0.1, { at: 0.05 })
+          .noise(5200, 3000, 0.07, 0.2, { type: 'highpass', at: 0.12, attack: 0.001 })
+          .noise(1700, 1100, 0.035, 0.32, { q: 2.5, at: 0.12, attack: 0.0008 })
+          .tone('sine', 230, 85, 0.08, 0.18, { at: 0.12 })
+          .tone('square', 115, 70, 0.05, 0.06, { at: 0.12 })
+          .tone('sine', ring, ring * 0.998, 0.22, 0.1, { at: 0.125, attack: 0.002 })
+          .tone('sine', ring * 2.76, ring * 2.75, 0.1, 0.025, { at: 0.125, attack: 0.002 })
+          .tone('triangle', ring * 0.5, ring * 0.499, 0.18, 0.04, { at: 0.125, attack: 0.003 });
+        break;
+      }
+      case 'coaster': {
+        // Das eigene Kart rollt auf den Schienen, alle 0,4 s aufgerufen (bis zu 30 s am Stück):
+        // ein Bett, kein Hauptdarsteller. Gebaut wie 'wind': jede Schicht schwillt langsam
+        // (0,42 s) an und klingt lang aus (1,3 s), drei gleiche Schichten je Aufruf um ein
+        // Drittel des Aufruftakts (0,133 s) versetzt – so liegt alle 0,133 s ein neuer Gipfel
+        // an und die Folge verschmilzt, ohne im Takt zu pumpen oder sich aufzuschaukeln (jeder
+        // Aufruf trägt gleich viel bei). Tief rollt braunes Rauschen (Tiefpass um 200 Hz), darüber
+        // schwingt Holz mit: drei enge Bänder (Güte 3) um 360–450 Hz, deren Mitten je Aufruf
+        // reihum wechseln, damit das Gerüst „lebt“; ein leises, breites Band um 1,1–1,3 kHz ist
+        // das Stahlrad auf der Schiene. Keine Dauertöne: Sinusse aus überlappenden Aufrufen
+        // würden sich mal verstärken, mal auslöschen. Die Schienenstöße sind Paare dumpfer
+        // Schläge („da-dumm“, 70–90 ms auseinander: Vorder- und Hinterachse) aus kurzem
+        // Mittenrauschen und einem kleinen Sinus-Stoß um 110 Hz, null bis zwei je Aufruf aus
+        // sieben Fassungen reihum (COASTER_JOINTS) – das Muster kehrt erst nach 2,8 s wieder,
+        // kein Rattern im 0,4-s-Raster. Gemessen, 30 Aufrufe (8 Durchläufe gemittelt, 50 ms): nichts
+        // fällt mehr als 1,3 dB unter den Median (±0,05 s Zittern: 1,4 dB), die Schienenstöße ragen
+        // bis 5,7 dB darüber; letztes gegen erstes Drittel +0,03 dB (kein Aufschaukeln); nach dem
+        // letzten Aufruf hält es gut 0,5 s und fällt dann in 0,4 s um 20 dB.
+        const k = this.coasterTick++;
+        const w = COASTER_WOOD[k % COASTER_WOOD.length];
+        const joints = COASTER_JOINTS[k % COASTER_JOINTS.length];
+        for (let i = 0; i < 3; i++) {
+          const at = i * 0.133;
+          v.noise(230 - 10 * i, 170, 1.3, 0.065, { type: 'lowpass', brown: true, attack: 0.42, at })
+            .noise(w[i], w[i] * 0.92, 1.3, 0.11, { q: 3, attack: 0.42, at: at + 0.067 })
+            .noise(1100 + 100 * i, 1250 - 100 * i, 1.3, 0.045, { q: 0.8, attack: 0.42, at: at + 0.033 });
+        }
+        for (let i = 0; i < joints.length; i++) {
+          const at = joints[i];
+          const gap = i % 2 === 0 ? 0.08 : 0.07;
+          v.noise(900, 600, 0.04, 0.1, { q: 1.4, at, attack: 0.002 })
+            .tone('sine', 120, 70, 0.07, 0.11, { at })
+            .noise(800, 550, 0.04, 0.075, { q: 1.4, at: at + gap, attack: 0.002 })
+            .tone('sine', 110, 65, 0.07, 0.085, { at: at + gap });
+        }
+        break;
+      }
+      case 'chain': {
+        // Die Kette des Lifthügels unter dem eigenen Kart, alle 0,22 s aufgerufen (etwa 9 s am
+        // Stück): das Klack-klack der Rücklaufsperre. Je Aufruf ein trockener, metallischer Klack
+        // (enges Rauschen um 2–4 kHz, 16 ms, dazu ein kurzer Dreieckston 1,5–2,2 kHz und ein
+        // winziges Rechteck darunter als Blech), bei knapp zwei von drei Aufrufen ein zweiter,
+        // leiserer und etwas tieferer – Abstand, Tonhöhe und Pegel mit leichtem Zufall, so wird
+        // es kein Metronom. Darunter surrt leise die Kette: zwei enge Rauschbänder um 1,7–2,3 kHz,
+        // um einen halben Aufruftakt versetzt, damit es durchgehend liegt. Alles bleibt im
+        // Band 1–3 kHz (über dem Rollen von 'coaster' und dem Motor, unter dem Zischen).
+        // Gemessen, 40 Aufrufe: 69 % der Energie bei 1,5–4 kHz, Folge −37,9 LUFS, gleichbleibend
+        // (letztes gegen erstes Drittel −0,04 dB); zusammen mit 'coaster' hebt sie dessen 2-kHz-Oktave
+        // um 3 dB (die übrigen um ≤ 1 dB), und nichts schaukelt sich auf (−0,01 dB).
+        const r = Math.random;
+        v.noise(1700, 1900, 0.55, 0.05, { q: 2.5, attack: 0.15 }).noise(2300, 2100, 0.55, 0.035, { q: 3, attack: 0.15, at: 0.11 });
+        const f = 1500 + 700 * r();
+        const n = r() < 0.65 ? 2 : 1;
+        for (let i = 0; i < n; i++) {
+          const at = i === 0 ? 0.012 * r() : 0.09 + 0.035 * r();
+          const fc = i === 0 ? f : f * (0.8 + 0.12 * r());
+          const vol = (i === 0 ? 0.32 : 0.2) * (0.85 + 0.15 * r());
+          v.noise(fc * 1.6, fc * 1.3, 0.016, vol, { q: 3, at, attack: 0.0008 })
+            .tone('triangle', fc, fc * 0.94, 0.03, vol * 0.4, { at, attack: 0.001 })
+            .tone('square', fc * 0.37, fc * 0.35, 0.012, vol * 0.15, { at, attack: 0.001 });
+        }
+        break;
+      }
+      case 'kick':
+        // Ein Schubmagnet zieht an (0,4 s) – die Schicht über dem zugleich spielenden 'boost':
+        // „Zzzack“. Zuerst der Magnet: ein satter, brummender Einsatz um 105–120 Hz (Sägezahn mit
+        // 55-Hz-Flattern wie ein Netzbrummen, ein Rechteck eine Oktave darüber) und ein enges
+        // Rauschband, das in 0,16 s von 0,7 auf 3,4 kHz hinaufsirrt; dann bei 0,15 s der helle
+        // Schnalzer: scharfes Hochpass-Rauschen mit 1 ms Anstieg, ein kurzer, fallender Dreiecks-
+        // und Sinuston (2,4 → 1,5 kHz bzw. 1,9 → 0,7 kHz) und ein kleiner, tiefer Ruck; zuletzt
+        // knistert es kurz (enges Rauschen um 5 kHz) – die Funken. Abgrenzung: 'boost' ist ein
+        // breites, nach oben fahrendes Rauschen mit Sägezahn 160 → 620 Hz ohne Einschnitt;
+        // 'kick' brummt tiefer und reißt nach 0,15 s hell ab. Gemessen mit 'boost' zugleich: Spitze
+        // vor dem Mischpult 1,63 (Schub allein 1,36), am Ausgang 0,50 (0,45) – keine Übersteuerung;
+        // im Spiel-Mix +2,6 dB bei 2 kHz und +15 dB bei 8 kHz (Schub allein −0,2 bzw. +6,3 dB).
+        v.tone('sawtooth', 104, 118, 0.17, 0.14, { attack: 0.006, sustain: 0.7, tremHz: 55 })
+          .tone('square', 208, 236, 0.16, 0.05, { attack: 0.006, sustain: 0.6 })
+          .noise(700, 3400, 0.16, 0.12, { q: 2.5, attack: 0.02 })
+          .noise(6500, 3000, 0.045, 0.4, { type: 'highpass', at: 0.15, attack: 0.0008 })
+          .tone('triangle', 2400, 1500, 0.05, 0.2, { at: 0.15, attack: 0.001 })
+          .tone('sine', 1900, 700, 0.12, 0.1, { at: 0.15, attack: 0.002 })
+          .tone('sine', 150, 60, 0.1, 0.12, { at: 0.15 })
+          .noise(4800, 5600, 0.22, 0.05, { q: 6, at: 0.17, attack: 0.01 });
+        break;
+      case 'crest':
+        // Über die Kuppe in die Abfahrt (0,7 s), fröhlich und ohne Stimme: erst ein Luftholen –
+        // breites Rauschen schwillt an und zieht hinauf (0,35 → 1,6 kHz), ein leiser Pfiff steigt
+        // mit (Sinus 520 → 1180 Hz) –, dann ab 0,26 s das Losrauschen: das Band stürzt hinab
+        // (1,8 → 0,42 kHz), und ein runder Gleitton fällt wie eine Lotusflöte von 1180 auf 330 Hz
+        // (kurz gehalten, dann fallend, leichtes 7-Hz-Vibrato, eine leise Quinte darüber), dazu
+        // ein Hauch Bauch aus braunem Rauschen. Der Frequenzschwerpunkt steigt also erst und fällt
+        // dann mit der Bahn. Gemessen (je 60 ms): 600 → 1050 → 1410 Hz, Gipfel 1680 Hz bei 0,27 s,
+        // dann 1280 → 1010 → 840 → 655 → 550 Hz; 0,69 s; im Spiel-Mix +6,3 dB bei 1 kHz.
+        v.noise(350, 1600, 0.5, 0.2, { q: 0.9, attack: 0.25 })
+          .noise(2400, 5200, 0.3, 0.05, { type: 'highpass', attack: 0.25, at: 0.03 })
+          .tone('sine', 520, 1180, 0.3, 0.06, { attack: 0.15, sustain: 0.8 })
+          .noise(1800, 420, 0.45, 0.24, { q: 0.8, attack: 0.04, at: 0.26 })
+          .tone('sine', 1180, 330, 0.44, 0.16, { at: 0.27, attack: 0.02, hold: 0.15, sustain: 0.5, vibHz: 7, vibDepth: 0.015 })
+          .tone('triangle', 1770, 495, 0.4, 0.04, { at: 0.28, attack: 0.03, hold: 0.15, sustain: 0.4 })
+          .noise(260, 140, 0.4, 0.12, { type: 'lowpass', brown: true, attack: 0.1, at: 0.3 });
+        break;
       // --- Wüstenexpress ---
       case 'whistle': {
         // Die Lok pfeift (ortsfest an der Lok, je Zug alle 11 s, bis ~220 m zu hören; ~1,1 s).

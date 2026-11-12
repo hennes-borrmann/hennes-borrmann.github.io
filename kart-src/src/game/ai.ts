@@ -34,11 +34,13 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
   EDGE_GLIDE,
+  EDGE_RAIL,
+  railOf,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   TRACK,
@@ -79,6 +81,9 @@ export interface BotBrain {
   /** Portal voraus, über das schon entschieden ist (Abschnitt; −1 = keines) – und ob die KI es ansteuert. */
   portalSeg: number;
   portalTake: boolean;
+  /** Schubmagnete voraus (Achterbahn-Rummel): Für diese Stelle ist entschieden, ob die Schiene nach dem Takt gewählt wird. */
+  kickSeg: number;
+  kickTake: boolean;
   /** Zug voraus, über den schon entschieden ist (Kennung; −1 = keiner) – und ob die KI aufs Dach will. */
   trainId: number;
   trainTake: boolean;
@@ -121,6 +126,8 @@ const DRIFT_FROM = [
 const PATIENCE_FACTOR = [1.6, 1, 0.7];
 /** So oft steuert die KI ein Portal an, das vorwärts führt (leicht, mittel, schwer). */
 const PORTAL_DARE = [0.2, 0.55, 0.9];
+/** Wie oft die KI auf der Schiene die Seite nach dem Takt der Schubmagnete wählt (je Stärke). */
+const KICK_DARE = [0.15, 0.55, 0.95];
 /** So oft fährt die KI von hinten auf einen Zug auf, um über die Dächer zu fahren (leicht, mittel, schwer). */
 const TRAIN_DARE = [0.1, 0.5, 0.9];
 /** So oft fährt die KI durch einen Größenring, um die Abkürzung dahinter zu nehmen (leicht, mittel, schwer). */
@@ -137,6 +144,8 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     routeLock: false,
     portalSeg: -1,
     portalTake: false,
+    kickSeg: -1,
+    kickTake: false,
     trainId: -1,
     trainTake: false,
     sizerSeg: -1,
@@ -864,6 +873,53 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         // Nur wo nichts passieren kann: gerade, mit Bande, kein Sprung voraus.
         press = late && straight && !air && (edgesAhead(70) & (EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R)) === 0;
         break;
+    }
+  }
+  // Auf der Schiene (Achterbahn-Rummel): Gas halten, nie bremsen oder driften – und, wer es kann, die Schiene wählen,
+  // deren Schubmagnet bei der Ankunft gerade zieht.
+  if (t.rails.length > 0 && (t.edge[s.seg] & EDGE_RAIL) !== 0 && !air) {
+    const rail = railOf(t, s.seg);
+    if (rail) {
+      projectOnTrack(t, s.x, s.z, s.seg);
+      const here = proj.lat;
+      let want = rail.lanes[0];
+      for (const l of rail.lanes) if (Math.abs(l - here) < Math.abs(want - here)) want = l;
+      // Die nächste Magnetgruppe voraus (alle Magnete am selben Abschnitt), bis 80 m.
+      let near = -1;
+      let nearD = 80;
+      for (const p of t.pulses) {
+        if (p.kind !== PULSE_KICK) continue;
+        const d = segDelta(t, s.seg, p.seg) * t.step;
+        if (d > 3 && d < nearD) {
+          nearD = d;
+          near = p.seg;
+        }
+      }
+      if (near >= 0) {
+        if (b.kickSeg !== near) {
+          b.kickSeg = near;
+          b.kickTake = random(b) < KICK_DARE[b.level];
+        }
+        if (b.kickTake) {
+          // Ankunft schätzen und an drei Zeitpunkten der Überfahrt prüfen, welcher Magnet zieht: Es gewinnt die Schiene
+          // mit den meisten Treffern (bei Gleichstand die eigene – ein Wechsel kostet eine halbe Sekunde).
+          const eta = (nearD / Math.max(9, v)) * 60;
+          let bestHits = 0;
+          for (const p of t.pulses) {
+            if (p.kind !== PULSE_KICK || p.seg !== near) continue;
+            let hits = 0;
+            for (let k = -1; k <= 1; k++) if (pulseCycle(p, ctx.time + eta + k * 9) < p.on - 4) hits++;
+            if (hits > bestHits || (hits === bestHits && hits > 0 && Math.abs(p.lat - here) < Math.abs(want - here))) {
+              bestHits = hits;
+              want = p.lat;
+            }
+          }
+        }
+      } else b.kickSeg = -1;
+      steer = want - here > 0.7 ? 1 : want - here < -0.7 ? -1 : 0;
+      buttons = (buttons & BTN_ITEM) | BTN_GAS;
+      b.drifting = 0;
+      b.stuck = 0;
     }
   }
   // Die Taste braucht eine Flanke: nie zwei Schritte hintereinander drücken.

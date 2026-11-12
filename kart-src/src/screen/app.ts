@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1530,6 +1530,19 @@ export class App {
         const branch = s.seg < TRACK.total ? TRACK.branchOf[s.seg] : -1;
         // at: Meter ab Start bzw. ab der Gabelung
         return { branch, seg: s.seg, at: (branch < 0 ? s.seg : s.seg - TRACK.branches[branch].first) * TRACK.step, size: s.size };
+      },
+      // Achterbahn-Rummel, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Schienenstücke
+      // (Meter ab Start, Länge, Lage der Schienen, Kettenlifte und Bremsstrecken als [von, bis, Tempo]) und die
+      // Schubmagnete (Meter ab Start, Schiene, ob er gerade zieht).
+      rails: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const m = (seg: number): number => TRACK.prog[seg] * TRACK.step;
+        return {
+          time,
+          rails: TRACK.rails.map((r) => ({ at: m(r.first), length: r.count * TRACK.step, lanes: r.lanes, lifts: r.lifts.map((l) => [m(l[0]), m(l[1]), l[2]]), brakes: r.brakes.map((b) => [m(b[0]), m(b[1]), b[2]]) })),
+          kicks: TRACK.pulses.filter((p) => p.kind === PULSE_KICK).map((p) => ({ at: m(p.seg), lat: p.lat, on: pulseCycle(p, time) < p.on })),
+        };
       },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
