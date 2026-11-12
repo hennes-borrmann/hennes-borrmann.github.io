@@ -16,6 +16,7 @@
 
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
@@ -429,8 +430,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   wueste: WERKSHOF,
   // Riesenkinderzimmer: eigenes Stück (stuecke/zimmer.ts)
   zimmer: ZIMMER_STUECK,
-  // Achterbahn-Rummel: VORLÄUFIG das Stück der Wolkenbahn
-  rummel: NEUE_STUECKE.wolken,
+  // Achterbahn-Rummel: eigenes Stück (stuecke/rummel.ts)
+  rummel: RUMMEL_STUECK,
   results: RESULTS,
 };
 
