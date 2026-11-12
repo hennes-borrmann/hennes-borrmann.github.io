@@ -15,6 +15,7 @@
 // Hat eine Stimme weniger Takte als der Abschnitt, wird sie wiederholt.
 
 import { NEUE_STUECKE } from './songs-neu';
+import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
@@ -420,7 +421,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   // (vorläufig, bis die eigenen Stücke da sind)
   vulkan: GLUT,
   ruine: KLIPPE,
-  gewitter: NACHT,
+  gewitter: GEWITTER_STUECK,
   results: RESULTS,
 };
 

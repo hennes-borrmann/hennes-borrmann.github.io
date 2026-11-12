@@ -54,6 +54,26 @@ const GUST_PATTERN = [
   [1040, 1490, 0.47, 2000, 0.6, 2600, 0.69, 1800, 0.9, 2300],
   [1310, 1770, 0.53, 2400, 0.62, 2000, 0.77, 2200, 0.84, 2700],
 ];
+/** Donner: je Fassung das Poltern nach dem Knall, paarweise [Beginn (s), Eckfrequenz (Hz)] –
+ *  erst dicht und heller, dann weiter auseinander und dunkler (der Schall der fernen Teile
+ *  des Blitzkanals kommt später und dumpfer an). */
+const THUNDER_ROLL = [
+  [0.07, 900, 0.17, 640, 0.29, 760, 0.42, 480, 0.58, 560, 0.77, 380, 0.99, 330, 1.22, 260],
+  [0.06, 820, 0.19, 700, 0.27, 520, 0.45, 620, 0.6, 420, 0.82, 450, 0.97, 300, 1.2, 280],
+  [0.08, 960, 0.15, 580, 0.33, 680, 0.41, 500, 0.64, 470, 0.76, 350, 1.05, 360, 1.27, 240],
+];
+/** Blitzableiter: je Fassung das Britzeln, paarweise [Beginn (s), Mitte (Hz)] – immer seltener und tiefer. */
+const ROD_SPARKS = [
+  [0.04, 5200, 0.07, 4600, 0.12, 4900, 0.16, 4100, 0.22, 4300, 0.29, 3600, 0.37, 3800, 0.46, 3100, 0.57, 2900, 0.7, 2400, 0.84, 2100],
+  [0.035, 4900, 0.08, 5300, 0.11, 4300, 0.17, 4500, 0.24, 3900, 0.3, 4000, 0.39, 3300, 0.48, 3400, 0.6, 2700, 0.72, 2600, 0.86, 1900],
+  [0.045, 5400, 0.075, 4400, 0.13, 4700, 0.18, 3900, 0.21, 4200, 0.31, 3500, 0.36, 3600, 0.5, 2900, 0.55, 3000, 0.74, 2300, 0.83, 2200],
+];
+/** Ladefeld: je Fassung das Knistern, paarweise [Beginn (s), Mitte (Hz)] – immer dichter und höher. */
+const CHARGE_SPARKS = [
+  [0.03, 1800, 0.1, 2300, 0.16, 2000, 0.21, 2900, 0.25, 2600, 0.29, 3400, 0.32, 3100, 0.35, 3900],
+  [0.05, 2100, 0.11, 1900, 0.17, 2600, 0.22, 2400, 0.26, 3200, 0.3, 2900, 0.33, 3700, 0.36, 3500],
+  [0.04, 1700, 0.09, 2500, 0.15, 2200, 0.2, 2700, 0.24, 3000, 0.28, 2800, 0.31, 3600, 0.345, 4000],
+];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -128,11 +148,16 @@ const LEVEL: Record<SfxName, number> = {
   // der Sturm-Aufrufe ≈ −34 LUFS wie der Fahrtwind im Gleitflug – ein Bett, kein Hauptdarsteller.
   gust: 4.5,
   storm: 0.85,
-  // Gewitterkamm (vorläufig)
-  thunder: 2.2,
-  rod: 1.6,
+  // Gewitterkamm (Runde 13), gemessen wie oben und im Spiel-Mix (Motor + Gewitter-Stück, Regler 0,5/0,8,
+  // Beitrag des Geräuschs als Momentanlautheit): der Donner aus 0 m (Faktor 0,55) −20,6 LUFS, etwas über dem
+  // Meteoriten (−22,4) – das lauteste Ereignis der Strecke; der Blitzableiter aus 0 m −25,8 (5 LU darunter, aber
+  // mit +7 dB bei 8 kHz klar); das Grollen −32,7 bei Faktor 0,41 (die Sturm-Folge des Hafens −37; das Grollen
+  // liegt fast ganz unter 200 Hz, wo Motor und Musik es verdecken, darum etwas darüber); das Aufladen wie der
+  // Schub (100-ms-Lautheit −18,2 gegen −18,8 beim Boost-Feld).
+  thunder: 3,
+  rod: 3.4,
   rumble: 1.2,
-  charge: 1.4,
+  charge: 2,
   // Zeitriss-Ruine (vorläufig)
   riftwarn: 1.6,
   rift: 1.8,
@@ -708,10 +733,6 @@ export class SfxPlayer {
       // Vulkaninsel (vorläufig: brechen und leerlaufen wie der Einschlag)
       case 'crack':
       case 'drain':
-      // Gewitterkamm (vorläufig)
-      case 'thunder':
-      case 'rod':
-      case 'rumble':
       // Zeitriss-Ruine (vorläufig)
       case 'riftwarn':
       case 'rift':
@@ -752,8 +773,6 @@ export class SfxPlayer {
           .noise(500, 2300, 0.34, 0.16, { q: 0.8, attack: 0.07, at: 0.05 })
           .tone('sine', 380, 880, 0.3, 0.05, { attack: 0.1, at: 0.09, vibHz: 6, vibDepth: 0.02 });
         break;
-      // Gewitterkamm (vorläufig: wie der Schubring)
-      case 'charge':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
         // (G6 + D7, leicht schwebend) – Glocke statt Notenfolge wie beim Einsammeln;
@@ -862,6 +881,106 @@ export class SfxPlayer {
             v.noise(f, f * 0.7, 0.035, 0.4 * (0.7 + 0.3 * r()), { q: 1.3, at: t, attack: 0.002 });
             t += 0.042 + 0.03 * r();
           }
+        }
+        break;
+      }
+      // --- Gewitterkamm ---
+      case 'thunder': {
+        // Blitzeinschlag auf der Bahn (ortsfest, Reichweite 420 m, alle paar Sekunden irgendwo), ~1,5 s. Erst der
+        // Knall: fünf sehr kurze, breite Stöße (Hochpass ab 5–6 kHz und ein breites Band um 1,5–4 kHz) binnen 0,1 s
+        // – das trockene Peitschen des Kanals; dann ohne Pause das Krachen (breites Band, das von 2,4 kHz auf
+        // 300 Hz fällt) und das Rollen: braunes Rauschen in Bändern um 160 und 120 Hz (nicht nur tief gefiltert –
+        // dessen Energie läge sonst unter 60 Hz, wo Motor, Bassdrum und kleine Lautsprecher sie verschlucken), ein
+        // schlingernder Sinus um 60 Hz und acht polternde Brocken, die erst dicht und heller, dann seltener und
+        // dunkler folgen (drei Fassungen, zufällig gewählt). Abgrenzung: 'meteor' heult erst und schlägt dann
+        // dumpf ein, 'bomb' ist ein satter Schlag mit Zischen danach – beide beginnen tief, der Donner hell.
+        // Gemessen (vor dem Mischpult, drei Fassungen): Gipfel bei 0,1 s, −20 dB nach 0,95–1,0 s, −40 dB nach
+        // 1,35–1,45 s, Dauer 1,5 s; 76–79 % der Energie unter 150 Hz (83–85 % unter 200 Hz), in den ersten 60 ms
+        // 23–27 % über 2 kHz (danach 2–3 %); −7,5 bis −8,4 LUFS, Spitze 2,9–3,2 (im Spiel ×0,55, Ausgang ≤ 0,53).
+        // Aus der Ferne (Faktor 0,25) liegt er im Spiel-Mix 10 LU unter Motor und Musik (Beitrag −29 LUFS):
+        // tiefer zu hören wäre er nur, wenn er auch aus der Nähe weit lauter wäre – der Kompressor des Mischpults
+        // drückt bei großen Tiefen zudem alles andere hinunter.
+        const roll = THUNDER_ROLL[Math.floor(Math.random() * 3)];
+        // Knall: drei sehr kurze, breite Stöße im Hochband binnen 40 ms – das Peitschen des Kanals.
+        v.noise(5000, 2500, 0.04, 0.8, { type: 'highpass', attack: 0.001 })
+          .noise(4000, 1500, 0.07, 0.8, { q: 0.5, attack: 0.001 })
+          .noise(5500, 2500, 0.025, 0.6, { type: 'highpass', attack: 0.001, at: 0.02 })
+          .noise(6000, 2500, 0.03, 0.5, { type: 'highpass', attack: 0.001, at: 0.045 })
+          .noise(5000, 2000, 0.03, 0.35, { type: 'highpass', attack: 0.001, at: 0.075 })
+          // Druckstoß und Krachen: ein tiefer Sinus und ein breites Band, das von 2,4 kHz hinabfällt.
+          .tone('sine', 90, 38, 0.6, 0.4, { attack: 0.01, at: 0.03 })
+          .noise(2400, 300, 0.7, 0.5, { q: 0.5, attack: 0.015, at: 0.03 })
+          // Rollen: drei lange Schichten braunes Rauschen, gestaffelt, immer tiefer; ein schlingernder Sinus.
+          .noise(700, 120, 1.1, 0.5, { type: 'lowpass', brown: true, attack: 0.05, at: 0.04 })
+          .noise(160, 80, 1.3, 0.9, { q: 0.7, brown: true, attack: 0.06, at: 0.03 })
+          .noise(120, 65, 1.4, 0.7, { q: 0.8, brown: true, attack: 0.2, at: 0.25 })
+          .tone('sine', 62, 34, 1.4, 0.14, { attack: 0.2, sustain: 0.4, vibHz: 5.5, vibDepth: 0.1, at: 0.2 });
+        for (let i = 0; i < roll.length; i += 2) {
+          const f = roll[i + 1];
+          v.noise(f * 1.4, f * 0.6, 0.28, 0.38 - 0.02 * i, { type: 'lowpass', q: 1.2, brown: true, at: roll[i], attack: 0.02 });
+        }
+        break;
+      }
+      case 'rod': {
+        // Blitz in den Ableiter (ortsfest, Reichweite 420 m), ~0,9 s – so lang, wie das Ladefeld steht (54 Ticks).
+        // Ein dünner Knall (Hochpass ab 8 kHz, kurzes Band um 2–3 kHz) mit kleinem Körper statt des Rollens; der
+        // Mast klingt nach (drei unharmonische Teiltöne, 590/1180/3245 Hz, wie ein angeschlagenes Stahlrohr); die
+        // Hochspannung surrt (Sägezahn 260 → 130 Hz mit 47-Hz-Flattern, hält gut die Hälfte und sinkt dann) unter
+        // einem fallenden Zischen, und es britzelt: elf winzige Funken (12 ms, 5,4 → 1,9 kHz), immer seltener und
+        // tiefer. Gemessen: Gipfel beim Knall, −20 dB nach 0,7 s, verklungen nach 0,9 s; Schwerpunkt 0,9–1 kHz
+        // (Donner 0,6–0,7 kHz, aber dort fast nur Tiefen), 9–10 % über 2 kHz durchgehend; −16,2 LUFS.
+        const sp = ROD_SPARKS[Math.floor(Math.random() * 3)];
+        // Dünner Knall, kleiner Körper.
+        v.noise(8000, 4500, 0.02, 0.45, { type: 'highpass', attack: 0.001 })
+          .noise(3000, 2000, 0.03, 0.25, { q: 1.5, attack: 0.001 })
+          .tone('sine', 160, 70, 0.12, 0.25)
+          // Der Mast klingt nach: unharmonische Teiltöne eines Stahlrohrs.
+          .tone('triangle', 1180, 1170, 0.7, 0.08, { at: 0.005, attack: 0.002 })
+          .tone('sine', 3245, 3230, 0.35, 0.03, { at: 0.005, attack: 0.002 })
+          .tone('sine', 590, 586, 0.9, 0.05, { at: 0.005, attack: 0.002 })
+          // Hochspannung: ein surrender Sägezahn, der absinkt, darüber ein fallendes Zischen.
+          .tone('sawtooth', 260, 130, 0.92, 0.06, { at: 0.03, attack: 0.03, sustain: 0.6, vibHz: 47, vibDepth: 0.06 })
+          .noise(4200, 1600, 0.9, 0.08, { q: 2, attack: 0.02, at: 0.03 });
+        for (let i = 0; i < sp.length; i += 2) {
+          const f = sp[i + 1];
+          v.noise(f, f * 0.8, 0.012, 0.3 - 0.01 * i, { q: 3, at: sp[i], attack: 0.001 });
+        }
+        break;
+      }
+      case 'rumble': {
+        // Fernes Grollen nach dem Wetterleuchten (überall gleich laut, etwa alle 5 s), ~2,2 s, ohne Knall: vier
+        // Paare braunes Rauschen (Bänder um 85–140 und 190–300 Hz), um je 0,38 s (± 0,06 s zufällig) versetzt und
+        // mit 0,6 s Anstieg, das zweite Paar am lautesten – so schwillt es an und ab; darunter ein Sinus um 45 Hz,
+        // der mit 3,2 Hz schlingert. Gemessen: Gipfel nach 1 s, die Drittel −23 / −19 / −28 dB, −20 dB nach 2 s;
+        // 92–93 % der Energie unter 200 Hz, nichts über 2 kHz; −21,5 bis −21,9 LUFS vor dem Faktor (0,34–0,41).
+        const r = Math.random;
+        const swell = [0.7, 1, 0.85, 0.6];
+        for (let i = 0; i < 4; i++) {
+          const at = i * 0.38 + 0.06 * r();
+          v.noise(140 - 10 * i, 85, 1.4, 0.5 * swell[i], { q: 0.8, brown: true, attack: 0.6, at })
+            .noise(300 - 20 * i, 190, 1.3, 0.3 * swell[i], { q: 0.7, brown: true, attack: 0.55, at: at + 0.08 });
+        }
+        v.tone('sine', 48, 38, 2.4, 0.12, { attack: 0.7, sustain: 0.5, vibHz: 3.2, vibDepth: 0.12 });
+        break;
+      }
+      case 'charge': {
+        // Im Ladefeld aufgeladen (eigenes Kart), ~0,56 s: „Bzzzing". Ein Schub wie 'boost' und 'ring' (ein breites
+        // Rauschband fährt von 0,7 auf 4,8 kHz), aber es schwillt an statt zu fallen, und es surrt: Sägezahn und
+        // Rechteck steigen zwei Oktaven (180 → 720 Hz) mit 61-Hz-Flattern; dazu knistern acht Funken, immer dichter
+        // und höher (1,7 → 4 kHz); am Ende das „-ing": ein heller Sinus gleitet eine Oktave hinauf (1,3 → 2,6 kHz) –
+        // ein Gleiten, kein stehender Glockenklang wie beim Ring, kein tiefer Schlag wie beim Boost-Feld.
+        // Gemessen: steigt über die Dauer um 5 dB (Drittel −21,7 / −18,1 / −16,4), Gipfel bei 0,4 s; −16,2 LUFS
+        // (Boost −14,9 – dessen Energie liegt aber unter 150 Hz, im Spiel-Mix gleich laut, s. LEVEL).
+        const sp = CHARGE_SPARKS[Math.floor(Math.random() * 3)];
+        v.noise(700, 4800, 0.5, 0.3, { q: 1.1, attack: 0.3 })
+          .tone('sawtooth', 180, 720, 0.42, 0.08, { attack: 0.03, sustain: 0.75, vibHz: 61, vibDepth: 0.05 })
+          .tone('square', 90, 360, 0.42, 0.04, { attack: 0.03, sustain: 0.75, vibHz: 61, vibDepth: 0.05 })
+          .tone('sine', 1320, 2640, 0.22, 0.13, { at: 0.32, attack: 0.01, sustain: 0.5 })
+          .tone('triangle', 660, 1320, 0.22, 0.06, { at: 0.32, attack: 0.01, sustain: 0.4 })
+          .noise(6000, 9000, 0.2, 0.05, { type: 'highpass', attack: 0.02, at: 0.34 });
+        for (let i = 0; i < sp.length; i += 2) {
+          const f = sp[i + 1];
+          v.noise(f, f * 1.2, 0.015, 0.2 + 0.01 * i, { q: 3, at: sp[i], attack: 0.001 });
         }
         break;
       }

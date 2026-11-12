@@ -62,10 +62,10 @@ export type SfxName =
   | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest) – VORLÄUFIG
   | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest) – VORLÄUFIG
   | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
-  | 'thunder' // Gewitterkamm: ein Blitz schlägt auf der Bahn ein (ortsfest, auf dem ganzen Kamm zu hören) – VORLÄUFIG
-  | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest) – VORLÄUFIG
-  | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall) – VORLÄUFIG
-  | 'charge' // Gewitterkamm: das Kart wird im Ladefeld aufgeladen (Schub) – VORLÄUFIG
+  | 'thunder' // Gewitterkamm: ein Blitz schlägt auf der Bahn ein (ortsfest, auf dem ganzen Kamm zu hören): heller, peitschender Knall, sofort rollendes, dunkles Krachen und Poltern (~1,5 s)
+  | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest): dünner Knall, nachklingender Mast, surrendes, absteigendes Britzeln (~0,9 s)
+  | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall gleich laut): tiefes, weiches Rollen ohne Knall, an- und abschwellend (~2,2 s)
+  | 'charge' // Gewitterkamm: das Kart wird im Ladefeld aufgeladen (Schub): aufsteigendes, knisterndes, surrendes „Bzzzing“ (~0,56 s)
   | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – ein tiefer Gong (überall gleich laut) – VORLÄUFIG
   | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter (überall gleich laut) – VORLÄUFIG
   | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
