@@ -16,6 +16,7 @@
 
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { WUESTE_STUECK } from './stuecke/wueste';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -424,8 +425,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   dschungel: KLIPPE,
   // Spiegelkabinett: VORLÄUFIG das Stück der Wolkenbahn
   spiegel: NEUE_STUECKE.wolken,
-  // Wüstenexpress: VORLÄUFIG das Stück des Werkshofs
-  wueste: WERKSHOF,
+  // Wüstenexpress: eigenes Stück (stuecke/wueste.ts)
+  wueste: WUESTE_STUECK,
   results: RESULTS,
 };
 

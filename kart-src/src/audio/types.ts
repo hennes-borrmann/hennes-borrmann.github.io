@@ -75,10 +75,10 @@ export type SfxName =
   | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung) – VORLÄUFIG
   | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle) – VORLÄUFIG
   | 'shimmer' // Spiegelkabinett: in einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, bis ~110 m zu hören) – VORLÄUFIG
-  | 'whistle' // Wüstenexpress: die Lok pfeift (ortsfest an der Lok, alle 11 s, bis ~220 m zu hören) – VORLÄUFIG
-  | 'trainpass' // Wüstenexpress: ein Zug rollt dicht am eigenen Kart vorbei (ortsfest, etwa alle 0,45 s aufgerufen) – VORLÄUFIG
-  | 'board' // Wüstenexpress: ein Kart rollt über die Rampe aufs Wagendach – VORLÄUFIG
-  | 'rattle' // Wüstenexpress: das eigene Kart fährt über die Wagendächer (etwa alle 0,3 s aufgerufen) – VORLÄUFIG
+  | 'whistle' // Wüstenexpress: die Lok pfeift (ortsfest an der Lok, alle 11 s, bis ~220 m zu hören): hauchiger Zweiklang in kleiner Terz, steht und gleitet abreißend hinab (~1,1 s)
+  | 'trainpass' // Wüstenexpress: ein Zug rollt dicht am eigenen Kart vorbei (ortsfest, etwa alle 0,45 s aufgerufen): tiefes Rollen mit „ta-tack“ der Schienenstöße, verschmilzt zu einem Bett
+  | 'board' // Wüstenexpress: ein Kart rollt über die Rampe aufs Wagendach: Blechscheppern, polternde Schläge, heller Akzent (~0,5 s)
+  | 'rattle' // Wüstenexpress: das eigene Kart fährt über die Wagendächer (etwa alle 0,3 s aufgerufen): hohles Rattern auf Bohlen und Blech, verschmilzt zu einem Bett
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

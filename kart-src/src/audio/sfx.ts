@@ -55,6 +55,19 @@ const GUST_PATTERN = [
   [1310, 1770, 0.53, 2400, 0.62, 2000, 0.77, 2200, 0.84, 2700],
 ];
 
+/** Lokpfeife: je Fassung die zwei Töne (Hz) des Zweiklangs – kleine Terz, leicht verstimmt. */
+const WHISTLE_HZ = [
+  [605, 720],
+  [572, 683],
+  [640, 762],
+];
+/** Aufspringen: je Fassung Blech-Grundton (Hz), drei polternde Schläge (s) und der helle Akzent (s). */
+const BOARD_PATTERN = [
+  [410, 0.12, 0.2, 0.29, 0.36],
+  [380, 0.11, 0.21, 0.28, 0.37],
+  [445, 0.13, 0.2, 0.3, 0.35],
+];
+
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
  * gebaut, nicht nach Pegel; diese Faktoren bringen sie auf gemessene Spitzen
@@ -136,11 +149,14 @@ const LEVEL: Record<SfxName, number> = {
   portal: 1.4,
   mirror: 1.4,
   shimmer: 1.0,
-  // Wüstenexpress (vorläufig)
-  whistle: 1.4,
-  trainpass: 0.8,
-  board: 1.2,
-  rattle: 0.8,
+  // Wüstenexpress (Runde 16), gemessen wie oben: die Pfeife ≈ −19,5 LUFS (Hupe −20,7: aus der
+  // Nähe so deutlich wie die Hupe, aber länger und weicher), das Aufspringen ≈ −20,5 (zwischen
+  // Landung −18 und Floß −27); die Folgen ≈ −35 LUFS (Rollen am Zug bei Faktor 0,5 wie die
+  // Stromschnellen, Rattern auf dem Dach wie der Sturm) – Betten, keine Hauptdarsteller.
+  whistle: 1.06,
+  trainpass: 0.9,
+  board: 1.6,
+  rattle: 1.18,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -316,6 +332,8 @@ export class SfxPlayer {
   private icicleTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
+  private whistleTick = 0;
+  private boardTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -492,8 +510,6 @@ export class SfxPlayer {
           .noise(4400, 3800, 0.02, 0.1, { q: 4, at: 0.31 })
           .noise(3200, 2700, 0.025, 0.09, { q: 4, at: 0.43 });
         break;
-      // Wüstenexpress (vorläufig: wie die Hupe)
-      case 'whistle':
       case 'honk':
         // „Möp-möp": zwei kurze Stöße aus großer Terz (F + A), leicht absackend,
         // mit einer weichen Dreieckstimme darunter, damit es rund statt schrill klingt.
@@ -504,8 +520,6 @@ export class SfxPlayer {
           .tone('pulse25', 440, 416, 0.2, 0.13, { attack: 0.008, at: 0.15, vibHz: 7, vibDepth: 0.01 })
           .tone('triangle', 175, 166, 0.2, 0.2, { attack: 0.008, at: 0.15 });
         break;
-      // Wüstenexpress (vorläufig: wie der Fahrtwind beim Überholen)
-      case 'trainpass':
       case 'pass': {
         // Fahrtwind-„Wusch": Rauschen schwillt an und fällt wieder (zwei überlappende Fahrten).
         // Die Mitte wechselt leicht, damit es nicht bei jedem Vorbeiziehen gleich klingt.
@@ -888,6 +902,167 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Wüstenexpress ---
+      case 'whistle': {
+        // Die Lok pfeift (ortsfest an der Lok, je Zug alle 11 s, bis ~220 m zu hören; ~1,1 s).
+        // Eine Dampfpfeife als Zweiklang in kleiner Terz, die zwei Töne gegeneinander leicht
+        // verstimmt (Verhältnis 1,19 statt 1,189) und mit eigenem, langsamem Vibrato (5,3 und
+        // 6,1 Hz, ±0,4 %), damit sie schweben. Die Tonhöhen liegen absichtlich etwa einen
+        // Viertelton neben den Tönen von A-mixolydisch (dem Rennstück der Strecke) – wie eine
+        // echte Pfeife, die nicht nach der Musik gestimmt ist; so verdeckt die Musik sie nicht.
+        // Ablauf: Anblasen (0–0,15 s) – ein Hauch breites Rauschen, enge Rauschbänder gleiten von
+        // einer kleinen Terz darunter in den Ton; dann steht der Ton (Sinus und leises Dreieck mit
+        // Halten, darum herum enges Rauschen mit Güte 7, gestaffelt in drei Schichten zu 0,3 s,
+        // weil eine Rauschschicht kein Halten kennt), und viel Luft: ein breites Band um 2,3 kHz
+        // und feines Zischen über 5 kHz. Ab 0,7 s fällt die Tonhöhe um gut drei Halbtöne, ab 0,85 s
+        // reißt der Ton ab, und der Dampf zischt kurz nach. Drei Fassungen reihum (Tonhöhen),
+        // denn die vier Züge pfeifen nacheinander. Abgrenzung: 'honk' sind zwei kurze, kantige
+        // Stöße aus Pulswellen (große Terz F/A, 0,36 s) ohne Rauschen; die Pfeife ist lang,
+        // rund, hauchig, eine Oktave höher und gleitet am Ende hinab.
+        // Gemessen (vor dem Mischpult): −19,4 bis −19,6 LUFS (Hupe −20,7), Spitze 0,36–0,4,
+        // nach 0,15 s voll, ±1 dB bis 0,85 s, Dauer 1,1 s; Anteil über 2 kHz 12–13 % (Luft),
+        // Tonalität 16–17 dB (Hupe 14,5, Böe 6). Im Spiel-Mix (Motor und Rennstück) aus 0 m
+        // (Faktor 0,55) liegen die beiden Töne in ±1 %-Bändern 21/24 dB über Motor und Musik
+        // (Hupe 18/24 dB); fern (Faktor 0,2 · 0,55 = 0,11) noch 8/10 dB darüber – ein leiser,
+        // aber erkennbarer Ton.
+        const k = this.whistleTick++ % 3;
+        const [f1, f2] = WHISTLE_HZ[k];
+        // Anblasen: ein Hauch breites Rauschen, die engen Bänder gleiten in den Ton hinein.
+        v.noise(900, 2600, 0.16, 0.22, { q: 0.8, attack: 0.025 })
+          .noise(f1 * 0.86, f1, 0.14, 0.3, { q: 10, attack: 0.05 })
+          .noise(f2 * 0.86, f2, 0.14, 0.24, { q: 10, attack: 0.05 });
+        // Die zwei Pfeifentöne: Sinus und leises Dreieck, halten und fallen am Ende.
+        for (const [f, g, vib] of [[f1, 1, 5.3], [f2, 0.8, 6.1]] as const) {
+          v.tone('sine', f, f * 0.79, 1.0, 0.07 * g, { at: 0.05, attack: 0.08, hold: 0.66, sustain: 0.8, vibHz: vib, vibDepth: 0.004 })
+            .tone('triangle', f, f * 0.79, 1.0, 0.035 * g, { at: 0.05, attack: 0.1, hold: 0.66, sustain: 0.78, vibHz: vib, vibDepth: 0.004 });
+          for (let i = 0; i < 3; i++) {
+            const last = i === 2;
+            v.noise(f, last ? f * 0.8 : f * 0.995, last ? 0.42 : 0.55, 0.32 * g, { q: 7, attack: last ? 0.08 : 0.2, at: 0.06 + i * 0.3 });
+          }
+        }
+        // Luft im Ton: breites Band um 2,3 kHz und feines Zischen, ebenfalls gestaffelt.
+        for (let i = 0; i < 3; i++) {
+          v.noise(2100, 2500, 0.55, 0.3, { q: 0.9, attack: 0.2, at: 0.05 + i * 0.3 })
+            .noise(5200, 6200, 0.5, 0.05, { type: 'highpass', attack: 0.2, at: 0.08 + i * 0.3 });
+        }
+        // Abreißen: der Dampf zischt kurz nach.
+        v.noise(3600, 1700, 0.2, 0.1, { q: 0.9, attack: 0.02, at: 0.92 });
+        break;
+      }
+      case 'trainpass': {
+        // Ein Zug rollt dicht am eigenen Kart vorbei (ortsfest am nächsten Wagen, etwa alle
+        // 0,45 s erneut: raceScene alle 27 Ticks). Jeder Aufruf ist ein Stück Rollen von ~0,8 s:
+        // fünf Schichten braunes Rauschen (Tiefpass 170–290 Hz) um je 0,09 s versetzt und drei
+        // breite Bänder um 0,45–0,9 kHz (das Dröhnen von Eisen auf Eisen) um je 0,15 s versetzt –
+        // fünfmal 0,09 und dreimal 0,15 ergeben genau den Aufrufabstand, so liegen auch über die
+        // Aufrufe hinweg die Gipfel gleichmäßig, und die Folge verschmilzt. Tonhöhen der Schichten
+        // je Aufruf zufällig: das Rollen wandert, ohne zu pumpen. Darin der Schienenstoß „ta-tack“:
+        // ein Doppelschlag (Achsabstand 0,10–0,15 s, der zweite lauter) an zufälliger Stelle des
+        // Aufrufs – kurzer, tiefer Stoß, ein enges Klirrband (1,5–2,4 kHz) und zwei unharmonische
+        // Dreieckstöne als Stahlklang. Der Stoß ist bewusst leicht im Vergleich zum Rollen (sonst
+        // hört man das 0,45-s-Raster als Löcher dazwischen); bei jedem vierten Aufruf etwa singt
+        // kurz ein Spurkranz (enges Rauschen um 3–3,8 kHz).
+        // Gemessen, 10 Aufrufe zu 0,45 s mit Faktor 0,5 (dicht neben dem Zug: 0,55 · (1 − 4/42)),
+        // gemittelt über 12 Durchläufe: Welligkeit 3,1 dB, tiefster Wert 1,3 dB unter dem Median,
+        // keine periodischen Einbrüche über 3 dB (mit ±17 ms Zittern ebenso: 1,4 dB); 40 Aufrufe:
+        // Anfang und Ende gleich laut (±0,1 dB), nichts schaukelt sich auf. Pegel −35,3 LUFS
+        // (Stromschnellen −35,5); 65–70 % der Leistung unter 150 Hz, Schwerpunkt ≈ 0,2 kHz.
+        const r = Math.random;
+        const lo = 170 + 60 * r();
+        for (let i = 0; i < 5; i++) v.noise(lo + 15 * i, lo * 0.75, 0.62, 0.2, { type: 'lowpass', brown: true, attack: 0.2, at: i * 0.09 });
+        const mid = 520 + 260 * r();
+        for (let i = 0; i < 3; i++) v.noise(mid * (0.85 + 0.3 * r()), mid * (0.85 + 0.3 * r()), 0.5, 0.13, { q: 1, attack: 0.18, at: 0.03 + i * 0.15 });
+        const t0 = 0.03 + 0.24 * r();
+        const gap = 0.1 + 0.05 * r();
+        for (let j = 0; j < 2; j++) {
+          const at = t0 + j * gap;
+          const s = (j === 0 ? 0.75 : 1) * (0.85 + 0.15 * r());
+          const fm = 1500 + 900 * r();
+          v.tone('sine', 105, 48, 0.08, 0.2 * s, { at })
+            .noise(600, 150, 0.07, 0.18 * s, { type: 'lowpass', brown: true, at })
+            .noise(fm, fm * 0.8, 0.035, 0.22 * s, { q: 2.5, at, attack: 0.002 })
+            .tone('triangle', 1180 + 120 * j, 1170 + 120 * j, 0.07, 0.06 * s, { at, attack: 0.002 })
+            .tone('triangle', 2730 + 200 * j, 2710 + 200 * j, 0.05, 0.03 * s, { at, attack: 0.002 });
+        }
+        if (r() < 0.25) {
+          const fs = 3000 + 800 * r();
+          v.noise(fs, fs * 1.04, 0.4, 0.04, { q: 25, attack: 0.15, at: 0.05 });
+        }
+        break;
+      }
+      case 'rattle': {
+        // Das eigene Kart fährt über die Wagendächer (etwa alle 0,3 s erneut). Man ist jetzt AUF
+        // dem Zug: heller, näher, hohler als 'trainpass'. Der Körper sind zwei Resonanzen des
+        // hohlen Wagenkastens (enge Rauschbänder, Güte 3, um 380–460 Hz und 0,9–1,1 kHz, je Aufruf
+        // zufällig gestimmt), viermal um 0,075 s versetzt (= 0,3 s); darunter nur leise das Rollen
+        // des Zugs (braunes Rauschen um 200 Hz). Das Rattern sind fünf bis acht kurze Klopfer der
+        // Räder auf Bohlen und Blech in unregelmäßigen Abständen (35–65 ms), jeder ein kurzes
+        // Rauschband (0,6–1,3 kHz) mit einem hölzernen Dreieckston eine Oktave tiefer, etwa jeder
+        // dritte mit einem blechernen Klirren (2,3–3,2 kHz und ein unharmonischer Teilton ×1,47);
+        // ab und zu ein dumpfer Stoß von unten. Die Klopfer reichen bis knapp in den nächsten
+        // Aufruf, damit am Ende jedes Aufrufs kein Loch entsteht (vorher −4,7 dB).
+        // Gemessen, 14 Aufrufe zu 0,3 s (gemittelt über 12 Durchläufe): Welligkeit 3,2 dB,
+        // tiefster Wert 1,5 dB unter dem Median (mit ±17 ms Zittern ebenso); 40 Aufrufe: kein
+        // Aufschaukeln (±0,1 dB). Pegel −34,1 LUFS (Sturm −33,9); Schwerpunkt 0,7–0,8 kHz
+        // (Rollen am Zug 0,2 kHz), unter 150 Hz nur 17–24 % (Rollen 65–70 %).
+        const r = Math.random;
+        const h1 = 380 + 80 * r();
+        const h2 = 900 + 200 * r();
+        for (let i = 0; i < 4; i++) {
+          v.noise(h1, h1 * 0.95, 0.42, 0.12, { q: 3, attack: 0.14, at: i * 0.075 })
+            .noise(h2, h2 * 1.05, 0.42, 0.08, { q: 3, attack: 0.14, at: i * 0.075 + 0.03 });
+        }
+        for (let i = 0; i < 3; i++) v.noise(210, 160, 0.45, 0.035, { type: 'lowpass', brown: true, attack: 0.15, at: i * 0.1 });
+        let t = 0.005 + 0.04 * r();
+        const n = 5 + Math.floor(r() * 4);
+        for (let i = 0; i < n && t < 0.33; i++) {
+          const f = 600 + 700 * r();
+          const s = 0.6 + 0.4 * r();
+          v.noise(f, f * 0.8, 0.03, 0.3 * s, { q: 3.5, at: t, attack: 0.002 }).tone('triangle', f * 0.5, f * 0.48, 0.04, 0.08 * s, { at: t, attack: 0.002 });
+          if (r() < 0.3) {
+            const m = 2300 + 900 * r();
+            v.tone('triangle', m, m * 0.99, 0.05, 0.04, { at: t, attack: 0.001 }).tone('sine', m * 1.47, m * 1.46, 0.04, 0.02, { at: t, attack: 0.001 });
+          }
+          t += 0.035 + 0.03 * r();
+        }
+        if (r() < 0.4) v.tone('sine', 130, 70, 0.07, 0.08, { at: 0.1 + 0.15 * r() });
+        break;
+      }
+      case 'board': {
+        // Ein Kart rollt über die Rampe aufs Wagendach (am Kart; das eigene laut, fremde leiser),
+        // ~0,5 s. Erst das Scheppern beim Auffahren: ein breiter Klirrschlag, Zischen und drei
+        // unharmonische Teiltöne eines Blechs (×1, ×2,32, ×4,25 über 380–445 Hz), die gut
+        // 0,2 s nachklingen, mit einem tiefen Stoß. Dann poltern die Räder über die Blechkante:
+        // drei dumpfe, leiser werdende Schläge (tiefer Sinus, braunes Rauschen, ein kurzes
+        // Klappern). Zuletzt ein kurzer heller Akzent – zwei Dreieckstöne, eine Quarte aufwärts
+        // (E6 → A6), mit leisem Glanz: „geschafft, ich bin oben“. Drei Fassungen reihum
+        // (Blechton, Zeitpunkte). Abgrenzung: 'land'/'raft' sind ein einzelner dumpfer Schlag
+        // (0,15 s), 'press' ein schwerer Schlag mit Zischen davor.
+        // Gemessen (vor dem Mischpult): −20,3 bis −20,9 LUFS (Landung −18,1, Floß −27,1),
+        // Spitze 0,9–1,2 (Landung 1,3); im Spiel-Mix trägt es −25,8 LUFS bei (Landung −27,4,
+        // Floß −32,9).
+        const k = this.boardTick++ % 3;
+        const p = BOARD_PATTERN[k];
+        const f = p[0];
+        v.noise(2600, 1200, 0.07, 0.5, { q: 1.2, attack: 0.002 })
+          .noise(5200, 3400, 0.05, 0.15, { type: 'highpass', attack: 0.002 })
+          .tone('triangle', f, f * 0.985, 0.3, 0.22, { attack: 0.002 })
+          .tone('triangle', f * 2.32, f * 2.3, 0.22, 0.14, { attack: 0.002 })
+          .tone('sine', f * 4.25, f * 4.2, 0.16, 0.07, { attack: 0.002 })
+          .tone('sine', 140, 60, 0.12, 0.3);
+        for (let i = 1; i < 4; i++) {
+          const at = p[i];
+          const s = 1 - 0.15 * (i - 1);
+          v.tone('sine', 115, 50, 0.09, 0.32 * s, { at })
+            .noise(450, 140, 0.08, 0.3 * s, { type: 'lowpass', brown: true, at })
+            .noise(1600, 1200, 0.025, 0.12 * s, { q: 3, at, attack: 0.002 });
+        }
+        const a = p[4];
+        v.tone('triangle', 1319, 1316, 0.06, 0.1, { at: a, attack: 0.003 })
+          .tone('triangle', 1760, 1755, 0.16, 0.11, { at: a + 0.055, attack: 0.003 })
+          .tone('sine', 1760 * 2.76, 1760 * 2.75, 0.08, 0.025, { at: a + 0.055, attack: 0.002 });
+        break;
+      }
       // --- Maschinen und Wasser ---
       case 'press':
         // Stampfpresse: ganz kurz zischt die Hydraulik, dann (ab 0,06 s) der Schlag –
@@ -938,9 +1113,6 @@ export class SfxPlayer {
         v.noise(700, 320, 0.11, 0.3, { q: 1.2 }).tone('sine', 118, 58, 0.1, 0.38);
         break;
       // Dschungel-Fluss (vorläufig: wie die Landung)
-      // Wüstenexpress (vorläufig: wie das Floß)
-      case 'board':
-      case 'rattle':
       case 'raft':
       case 'land':
         v.noise(320, 120, 0.16, 0.5, { type: 'lowpass', brown: true }).tone('sine', 96, 46, 0.14, 0.42).noise(2200, 900, 0.05, 0.1, { q: 1 });
