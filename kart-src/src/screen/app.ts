@@ -1491,6 +1491,21 @@ export class App {
           pontoons: TRACK.pontoons.map((p) => ({ ...where(p.first), length: p.count * TRACK.step, amp: p.amp, period: p.period / 60, lift: pontoonLift(p, time) })),
         };
       },
+      // Was sich an der Strecke nach Plan ändert, zur Rennzeit dieses Bildschirms: Bruchstellen (Meter ab Start bzw. ab
+      // Gabelung, seitliche Lage, ob gerade weggebrochen, wann sie zum ersten Mal bricht) und Tore (Abzweigung, ob gesperrt).
+      changes: () => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = view ? view.race(performance.now() / 1000).time : 0;
+        const where = (seg: number) => {
+          const branch = TRACK.branchOf[seg];
+          return { branch, at: (branch < 0 ? seg : seg - TRACK.branches[branch].first) * TRACK.step };
+        };
+        return {
+          time,
+          holes: TRACK.holes.map((h) => ({ ...where(h.first), length: h.count * TRACK.step, lat0: h.lat0, lat1: h.lat1, open: planActive(h.plan, time), breaksAt: h.plan.spans[0] / 60 })),
+          gates: TRACK.gates.map((g) => ({ branch: TRACK.branchOf[g.first], shut: planActive(g.plan, time) })),
+        };
+      },
       // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
       dive: () => {
         let from = -1;

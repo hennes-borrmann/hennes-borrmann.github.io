@@ -924,7 +924,7 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte, Böe und Ponton');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte, Böe und Ponton, Bruchstelle und Tor');
     // (&alle=1: auch die Strecken, die die Lobby noch nicht anbietet – ihre Mechanik wird trotzdem geprüft.)
     const h7 = await openScreen('host7', '&laps=2&alle=1');
     const code7 = await createLobby(h7, 'Anna');
@@ -1361,9 +1361,63 @@ async function main() {
     const ponHubC = ponSwing[1][1] - ponSwing[1][0];
     check('Ponton: Ben hebt und senkt sich mit dem Seegang – beim Host und auf seinem eigenen Bildschirm', !ponSank && ponHubH > ponH.amp * 1.5 && ponHubC > ponH.amp * 1.5 && ponHubH < ponH.amp * 2.6, `Hub ${ponHubH.toFixed(2)} / ${ponHubC.toFixed(2)} m bei Ausschlag ±${ponH.amp} m`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Vulkaninsel: Die Strecke verändert sich nach Plan – auf beiden Bildschirmen gleich. Ben (Mitspieler) steht auf
+    // einer Platte, als sie wegbricht.
+    await h7.page.locator('.track-card').nth(9).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 9, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 9, null, { timeout: 30000 });
+    // Stand beider Bildschirme zur selben Rennzeit: die Uhr des Mitspielers folgt dem Host nach einem Zeitsprung erst nach einem Moment.
+    const changesAt = async (sec) => {
+      await kart(h7.page, `clock(${sec})`);
+      const until = Date.now() + 8000;
+      let pair = null;
+      while (Date.now() < until) {
+        const [a, b] = await Promise.all([kart(h7.page, 'changes()'), kart(c7.page, 'changes()')]);
+        pair = [a, b];
+        if (Math.abs(a.time - b.time) < 30 && a.time >= sec * 60) break;
+        await sleep(150);
+      }
+      return pair;
+    };
+    const state = (x) => `${x.holes.map((h) => (h.open ? 1 : 0)).join('')}/${x.gates.map((g) => (g.shut ? 1 : 0)).join('')}`;
+    const tubeV = (x) => x.gates.find((g) => g.branch === 0);
+    const bridgeV = (x) => x.gates.find((g) => g.branch === 1);
+    const [v0h, v0c] = await changesAt(5);
+    check('Vulkaninsel hat Bruchstellen und zwei Tore; zu Beginn trägt alles, die Lavaröhre ist zu, die Hängebrücke offen', v0h.holes.length >= 12 && v0h.holes.every((h) => !h.open) && tubeV(v0h).shut && !bridgeV(v0h).shut && state(v0h) === state(v0c), `${v0h.holes.length} Bruchstellen · ${state(v0h)} / ${state(v0c)}`);
+    // Ben auf die erste Platte des Kraterrands, kurz bevor sie bricht.
+    const slab = v0h.holes.filter((h) => h.branch === -1).sort((a, b) => a.breaksAt - b.breaksAt)[0];
+    const slabLat = (Math.max(slab.lat0, -9) + Math.min(slab.lat1, 9)) / 2;
+    await kart(h7.page, `clock(${slab.breaksAt - 2.5})`);
+    await kart(h7.page, `place(1, ${slab.at + slab.length / 2}, ${slabLat})`);
+    await sleep(700);
+    const standing = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
+    let fellV = [false, false];
+    let fellAtV = -1;
+    const untilV9 = Date.now() + 9000;
+    while (Date.now() < untilV9 && !(fellV[0] && fellV[1])) {
+      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
+      if (eh.find((e) => e.slot === 1).respawn > 0 && !fellV[0]) {
+        fellV[0] = true;
+        fellAtV = ch.time / 60;
+      }
+      if (ec.find((e) => e.slot === 1).respawn > 0) fellV[1] = true;
+      await sleep(50);
+    }
+    check('Die Platte trägt, bis ihre Zeit gekommen ist', standing.respawn === 0 && !(standing.flags & 8), `Ben steht bei ${(slab.breaksAt - 2.5).toFixed(1)} s`);
+    check('Platte bricht: Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellV[0] && fellV[1] && fellAtV >= slab.breaksAt, `Sturz bei ${fellAtV.toFixed(1)} s (Bruch ${slab.breaksAt} s)`);
+    const [v1h, v1c] = await changesAt(60);
+    check('Nach 50 Sekunden ist die Lavaröhre frei – auf beiden Bildschirmen', !tubeV(v1h).shut && !tubeV(v1c).shut && !bridgeV(v1h).shut && state(v1h) === state(v1c), `${state(v1h)} / ${state(v1c)}`);
+    const [v2h, v2c] = await changesAt(95);
+    check('Nach 84 Sekunden ist die Hängebrücke gesperrt und eingestürzt – auf beiden Bildschirmen', bridgeV(v2h).shut && bridgeV(v2c).shut && v2h.holes.filter((h) => h.branch === 1).every((h) => h.open) && state(v2h) === state(v2c), `${state(v2h)} / ${state(v2c)}`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die neun großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die zehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 
