@@ -796,7 +796,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Zwölf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 12);
+    check('Dreizehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 13);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1290,7 +1290,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen zwölf Strecken zur Wahl', cards === 12, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen dreizehn Strecken zur Wahl', cards === 13, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1602,9 +1602,75 @@ async function main() {
     }
     check('Blitzableiter: Im Ladefeld bekommt Ben Schub statt eines Treffers – beim Host und auf seinem eigenen Bildschirm', boostB[0] > 0 && boostB[1] > 0 && spinInField === 0, `Schub ${boostB[0]} / ${boostB[1]} Ticks, Ladefeld bei ${chargeAt.toFixed(1)} s`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Dschungel-Fluss: Flöße treiben nach Fahrplan – auf beiden Bildschirmen gleich –, tragen und nehmen mit; dazwischen ist Wasser.
+    await h7.page.locator('.track-card').nth(12).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 12, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 12, null, { timeout: 30000 });
+    const [rvH, rvC] = await Promise.all([kart(h7.page, 'river(20, 40)'), kart(c7.page, 'river(20, 40)')]);
+    const lanesH = rvH.rivers.length === 1 ? rvH.rivers[0].lanes : [];
+    const lanesC = rvC.rivers.length === 1 ? rvC.rivers[0].lanes : [];
+    check(
+      'Dschungel-Fluss hat einen Fluss mit drei Bahnen (Kette in der Mitte, Lücken außen) – und beide Bildschirme rechnen dieselben Flöße',
+      lanesH.length === 3 &&
+        lanesC.length === 3 &&
+        lanesH[0].gap === 0 &&
+        lanesH[1].gap > 0 &&
+        lanesH[2].gap > 0 &&
+        lanesH[1].speed > lanesH[0].speed &&
+        Math.abs(lanesH[2].drift - lanesH[2].speed * 20) < 1e-6 &&
+        lanesH.every((l, i) => Math.abs(l.drift - lanesC[i].drift) < 1e-6 && l.raft === lanesC[i].raft),
+      lanesH.map((l) => `${l.speed} m/s, nach 20 s ${l.drift.toFixed(0)} m${l.raft ? ', Floß' : ', Lücke'}`).join(' · '),
+    );
+    // Ben steht mitten auf einem Floß der schnellen Bahn rechts – berechnet und hingestellt im selben Augenblick, damit
+    // eine Denkpause der Seite nichts verschiebt. Er gibt kein Gas: Das Floß trägt ihn und nimmt ihn mit.
+    const spot = (gapToo) => `(() => {
+      const r = window.__kart.river().rivers[0];
+      const l = r.lanes[2];
+      const pitch = l.length + l.gap;
+      let a = l.phase + l.drift + (${gapToo} ? l.length + l.gap / 2 : l.length / 2);
+      a -= Math.floor((a - 40) / pitch) * pitch;
+      window.__kart.place(1, r.at + a, (l.lat0 + l.lat1) / 2);
+      const s = window.__kart.authoritative(1);
+      return { a, x: s.x, z: s.z, time: window.__kart.race().time, speed: l.speed };
+    })()`;
+    const read = `(() => { const s = window.__kart.authoritative(1); return { x: s.x, z: s.z, respawn: s.respawn, time: window.__kart.race().time }; })()`;
+    const raft0 = await h7.page.evaluate(spot(false));
+    let raft1 = raft0;
+    const untilRaft = Date.now() + 12000;
+    while (Date.now() < untilRaft && raft1.time - raft0.time < 150) {
+      await sleep(100);
+      raft1 = await h7.page.evaluate(read);
+      if (raft1.respawn > 0) break;
+    }
+    const rode = Math.hypot(raft1.x - raft0.x, raft1.z - raft0.z);
+    const rodeFor = (raft1.time - raft0.time) / 60;
+    const benC = (await kart(c7.page, 'entities()')).find((e) => e.slot === 1);
+    const seenC = Math.hypot(benC.x - raft0.x, benC.z - raft0.z);
+    check(
+      'Floß trägt und nimmt mit: Ben treibt ohne Gas mit dem Tempo der schnellen Bahn flussab – auch auf seinem eigenen Bildschirm',
+      raft1.respawn === 0 && rodeFor >= 2.4 && rode > raft0.speed * rodeFor * 0.8 && rode < raft0.speed * rodeFor * 1.25 && benC.respawn === 0 && seenC > raft0.speed * rodeFor * 0.5,
+      `${rode.toFixed(1)} m in ${rodeFor.toFixed(1)} s (Bahn ${raft0.speed} m/s), bei ihm ${seenC.toFixed(1)} m`,
+    );
+    // … und in der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt.
+    await h7.page.evaluate(spot(true));
+    const drowned = [0, 0];
+    const untilDrowned = Date.now() + 10000;
+    while (Date.now() < untilDrowned && !(drowned[0] > 0 && drowned[1] > 0)) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      drowned[0] = Math.max(drowned[0], eh.find((e) => e.slot === 1).respawn);
+      drowned[1] = Math.max(drowned[1], ec.find((e) => e.slot === 1).respawn);
+      await sleep(50);
+    }
+    check('In der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt – beim Host und auf seinem eigenen Bildschirm', drowned[0] > 0 && drowned[1] > 0, `Rücksetzen ${drowned[0]} / ${drowned[1]} Ticks`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die zwölf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die dreizehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

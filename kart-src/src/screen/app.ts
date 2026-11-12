@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, raftAt, raftDrift, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1476,6 +1476,21 @@ export class App {
         const view = this.hostGame ?? this.clientGame;
         const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
         return { dark: TRACK.dark, time, light: stormLight(TRACK.pulses, TRACK.flashes, time), flashes: TRACK.flashes.length };
+      },
+      // Dschungel-Fluss, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Flussstücke
+      // (Meter ab Start, Länge) mit ihren Bahnen – wie weit die Flöße getrieben sind (drift, Meter) und ob an der Stelle
+      // probe (Meter ab Flussanfang) gerade ein Floß liegt.
+      river: (seconds?: number, probe = 40) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        return {
+          time,
+          rivers: TRACK.rivers.map((r) => ({
+            at: r.first * TRACK.step,
+            length: r.count * TRACK.step,
+            lanes: r.lanes.map((l) => ({ lat0: l.lat0, lat1: l.lat1, length: l.length, gap: l.gap, speed: l.speed, phase: l.phase, drift: raftDrift(l, time), raft: raftAt(l, probe, time) })),
+          })),
+        };
       },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {

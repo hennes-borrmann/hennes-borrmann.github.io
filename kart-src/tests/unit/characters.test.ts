@@ -128,5 +128,6 @@ describe('Figuren', () => {
     expect(worst).toBeLessThan(0.016);
     // Über alle Strecken gemittelt ist keine Figur mehr als 0,8 % langsamer als die beste.
     expect(Math.max(...avg) - Math.min(...avg)).toBeLessThan(0.008);
-  });
+    // (fährt jede Strecke mit jeder Figur: Mit jeder neuen Strecke dauert das länger – eigenes Zeitlimit.)
+  }, 240000);
 });
