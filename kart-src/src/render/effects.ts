@@ -485,10 +485,10 @@ export class LightPools {
   private count = 0;
 
   constructor(capacity: number) {
-    // Fächer in der Ebene y = 0, Spitze bei z = 0, nach +z (Fahrtrichtung) 15 m lang; drei Ringe, fünf Strahlen.
-    const rows = [0.9, 5, 10, 15];
-    const half = [0.7, 2.3, 3.6, 4.6];
-    const glow = [0.62, 0.5, 0.24, 0];
+    // Fächer in der Ebene y = 0, Spitze bei z = 0, nach +z (Fahrtrichtung) 22 m lang; vier Ringe, fünf Strahlen.
+    const rows = [1.3, 4, 8, 14, 22];
+    const half = [0.8, 2.0, 3.3, 4.6, 5.6];
+    const glow = [0.34, 0.44, 0.36, 0.18, 0];
     const cols = 5;
     const pos: number[] = [];
     const col: number[] = [];
