@@ -1332,7 +1332,17 @@ export function newVehiclePose(): VehiclePose {
 export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
   const lap = t.n * t.step;
   let s = vehicleAt(v, time, lap);
-  if (car > 0) {
+  if (car > 0 && v.roofs) {
+    // Ein langer Zug reicht durch mehrere Kurven: Jeder Wagen folgt dem vor ihm im Abstand der Kupplung, gemessen
+    // auf der eigenen Spur an der Stelle, an der er gerade ist – sonst klafften die Kupplungen in einer S-Kurve
+    // meterweit auf (und wer über die Dächer fährt, fiele hinein).
+    for (let c = 0; c < car; c++) {
+      const at = Math.min(t.n - 1, Math.floor(s / t.step));
+      const scale = Math.max(0.6, Math.min(1.6, 1 - ((v.lat * t.rh[at]) / t.def.roadHalf) * t.curv[at]));
+      s -= v.pitch / scale;
+      if (s < 0) s += lap;
+    }
+  } else if (car > 0) {
     // Hintere Wagen folgen im Abstand der Kupplung – gemessen auf der eigenen Spur, nicht auf der
     // Mittellinie: außen in der Kurve ist der Weg länger, innen kürzer (curv > 0 = Rechtskurve).
     const lead = Math.min(t.n - 1, Math.floor(s / t.step));

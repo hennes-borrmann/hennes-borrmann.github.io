@@ -64,7 +64,7 @@ export const VEHICLE_SPECS: VehicleSpec[] = [
 /** So weit unter der Dachkante gilt ein Kart noch als „auf dem Dach“ (Meter) – darunter ist der Wagen eine Wand. */
 export const ROOF_STEP = 0.45;
 /** Die Dächer reichen ein Stück über die Kupplungen (Meter je Wagenende) und seitlich über die Wagenkante. */
-export const ROOF_OVERHANG = 0.35;
+export const ROOF_OVERHANG = 0.7;
 export const ROOF_EDGE = 0.15;
 
 /** Höhe des Dachs von Wagen car über der Fahrbahn an der Stelle du (Meter vor der Wagenmitte, zum Bug positiv). */

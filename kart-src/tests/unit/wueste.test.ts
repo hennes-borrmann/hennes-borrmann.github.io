@@ -130,7 +130,8 @@ describe('Wüstenexpress', () => {
         let cars = 0;
         let landed = -1;
         let bad = 0;
-        for (let i = 0; i < 60 * 10 && landed < 0; i++) {
+        // (bis zu 18 s: Auf dem Pflaster am Bahnhof holt das Kart den Zug nur langsam ein.)
+        for (let i = 0; i < 60 * 18 && landed < 0; i++) {
           const x0 = s.x;
           const z0 = s.z;
           const ev = drive(s, lane, time0 + i, last);
