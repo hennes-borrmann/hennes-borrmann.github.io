@@ -18,6 +18,7 @@ import { buildMirrors } from './mechanics/mirrors';
 import { buildMoon } from './mechanics/moon';
 import { buildRift } from './mechanics/rift';
 import { buildRiver } from './mechanics/river';
+import { buildDrum } from './mechanics/drum';
 import { buildRails } from './mechanics/rails';
 import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
@@ -69,7 +70,9 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.portals.length > 0) out.push(buildMirrors(track, detail));
   if (track.sizers.length > 0) out.push(buildSizers(track, detail));
   if (track.rails.length > 0) out.push(buildRails(track, detail));
+  if (track.drums.length > 0) out.push(buildDrum(track, detail));
   if (track.era) out.push(buildRift(track, detail));
-  else if (track.holes.length > 0 || track.gates.some((g) => g.only === 0)) out.push(buildVolcano(track, detail));
+  // (Im Magnetwerk zeichnet die Trommel ihre Magnetplatten selbst.)
+  else if (track.drums.length === 0 && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
   return out;
 }

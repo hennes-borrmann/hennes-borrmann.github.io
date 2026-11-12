@@ -70,6 +70,44 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Magnetwerk: Fabrikgelände am späten Abend – über dem Werk schon Nachtblau, am Horizont glüht der Abend nach;
+  // flaches Licht aus Westen, Beton und Stahl. Die Signalfarben (Blau an, Gelb gleich aus, Dunkelrot aus) gehören
+  // den Magnetplatten: Bande und Randsteine bleiben deshalb grau und weiß.
+  magnet: {
+    sky: [0x172045, 0x4d4f8a, 0xf0a072],
+    fog: 0x6d6788,
+    fogNear: 160,
+    fogFar: 720,
+    sunDir: [-0.72, 0.3, 0.32],
+    sunColor: 0xffbe8a,
+    sunIntensity: 1.75,
+    hemiSky: 0x9aa4d8,
+    hemiGround: 0x4a4646,
+    hemiIntensity: 1.45,
+    disc: 0xffc890,
+    discSize: 30,
+    clouds: 0xe2a8a8,
+    cloudShade: 0x5c5679,
+    stars: false,
+    road: 0x50545e,
+    roadAlt: 0x484c56,
+    line: 0xf0f0f0,
+    kerbA: 0xe6e2d8,
+    kerbB: 0x5a5e68,
+    shoulder: 0x6a6460,
+    wallA: 0x8c939c,
+    wallB: 0xe2ded4,
+    wallCap: 0x3b404a,
+    deck: 0x8a8e98,
+    deckDark: 0x5a5e68,
+    pillar: 0x9aa0aa,
+    ground: [0x666668, 0x5c5c60, 0x6f6e6c, 0x57585a],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: 1,
+    rough: 0.5,
+  },
   // Achterbahn-Rummel: Jahrmarkt am frühen Abend – der Himmel glüht orange bis violett, die tief stehende Sonne färbt alles warm, die Bahn ist noch gut zu sehen.
   rummel: {
     sky: [0x2c2f78, 0xc0649c, 0xffa868],

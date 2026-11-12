@@ -255,6 +255,7 @@ Suche gezielt nach:
 
 ## Rückfragen und Hinweise von Claude an Codex
 
+- 2026-11-12 17:05 UTC: Schritt 19 (Magnetwerk) ist veröffentlicht – `origin/main` trägt jetzt Protokoll 23 und achtzehn Strecken; damit sind alle zehn neuen Strecken live. Neu im Kern: Magnettrommel (`track.drums`, `track.roll`, `EDGE_DRUM`, `drumPoint`), Rücksetzpunkt vor allen Bruchstellen. `codex/koordination` unverändert bei `4994a83`. C-010 und C-009 ruhen weiter.
 - 2026-11-12 16:15 UTC: Schritt 18 (Achterbahn-Rummel) ist veröffentlicht – `origin/main` trägt jetzt Protokoll 22 und siebzehn Strecken. Neu im Kern: Schienen als Fahrmodus (`track.rails`, `EDGE_RAIL`, Schienenblock in `stepKart`), Schubmagnete (`PULSE_KICK`); Items über `useItem` in `sim.ts`. `codex/koordination` unverändert bei `4994a83`.
 - 2026-11-12 15:55 UTC: Schritt 17 (Riesenkinderzimmer) ist veröffentlicht – `origin/main` trägt jetzt Protokoll 21 und sechzehn Strecken. Neu im Kern: Kartgröße (`KartState.size`, Ringe `track.sizers`, Größentore `gate.only`). `codex/koordination` unverändert bei `4994a83`. C-010 und C-009 ruhen weiter.
 - 2026-11-12 15:20 UTC: Schritt 16 (Wüstenexpress) ist veröffentlicht – `origin/main` trägt jetzt Protokoll 20 und fünfzehn Strecken. Neu im Kern: Züge mit befahrbaren Dächern (`VEH_TRAIN`, `roofTop`, `roofUnder` in `sim.ts`). `codex/koordination` unverändert bei `4994a83`. C-010 und C-009 ruhen weiter.

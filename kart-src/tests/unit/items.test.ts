@@ -359,9 +359,10 @@ describe('Neue Items', () => {
         let top = 0;
         // Lässt der Drache kurz vor einer Absprungkante los, fliegt das Kart danach selbst – dann lenkt ein Fahrer
         // (sonst flöge es geradeaus aus dem Korridor). Über einer Flugstrecke lässt der Drache erst hinter der
-        // Landung los – deshalb die großzügige Frist.
+        // Landung los – deshalb die großzügige Frist. (In der Magnettrommel des Magnetwerks hält er bis zu ihrem Ende fest,
+        // gut 330 m – er setzt dort nicht über einer Deckenplatte ab.)
         const pilot = newBrain(0);
-        for (let i = 0; i < TOW_TICKS + 480 && (s.tow > 0 || s.flags & FLAG_AIR); i++) {
+        for (let i = 0; i < TOW_TICKS + 900 && (s.tow > 0 || s.flags & FLAG_AIR); i++) {
           const x = s.x;
           const z = s.z;
           ev |= stepKart(s, s.tow > 0 ? NEUTRAL : botCmd(s, pilot, [], true, { tick: i, time: 0, place: 1, smoke: false }), ENV);

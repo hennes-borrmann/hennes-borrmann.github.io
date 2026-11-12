@@ -14,7 +14,7 @@ import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
 import { PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
-import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
+import { EDGE_DRUM, EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -1542,6 +1542,20 @@ export class App {
           time,
           rails: TRACK.rails.map((r) => ({ at: m(r.first), length: r.count * TRACK.step, lanes: r.lanes, lifts: r.lifts.map((l) => [m(l[0]), m(l[1]), l[2]]), brakes: r.brakes.map((b) => [m(b[0]), m(b[1]), b[2]]) })),
           kicks: TRACK.pulses.filter((p) => p.kind === PULSE_KICK).map((p) => ({ at: m(p.seg), lat: p.lat, on: pulseCycle(p, time) < p.on })),
+        };
+      },
+      // Magnetwerk, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Trommel (Meter ab Start,
+      // Länge, Halbmesser), die Verdrehung an einer Stelle (Meter ab Start, in Grad) und die Deckenplatten (Meter, Lage,
+      // ob abgeschaltet).
+      drum: (seconds?: number, probe = 0) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const seg = Math.max(0, Math.min(TRACK.n - 1, Math.round(probe / TRACK.step)));
+        return {
+          time,
+          drums: TRACK.drums.map((d) => ({ at: d.first * TRACK.step, length: d.count * TRACK.step, radius: d.radius })),
+          roll: (TRACK.roll[seg] * 180) / Math.PI,
+          plates: TRACK.holes.filter((h) => (TRACK.edge[h.first] & EDGE_DRUM) !== 0).map((h) => ({ at: h.first * TRACK.step, lat0: h.lat0, lat1: h.lat1, off: planActive(h.plan, time) })),
         };
       },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.

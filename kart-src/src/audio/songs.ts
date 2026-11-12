@@ -18,6 +18,7 @@ import { NEUE_STUECKE } from './songs-neu';
 import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
 import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { MAGNET_STUECK } from './stuecke/magnet';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
@@ -441,6 +442,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   zimmer: ZIMMER_STUECK,
   // Achterbahn-Rummel: eigenes Stück (stuecke/rummel.ts)
   rummel: RUMMEL_STUECK,
+  // Magnetwerk: eigenes Stück (stuecke/magnet.ts)
+  magnet: MAGNET_STUECK,
   results: RESULTS,
 };
 

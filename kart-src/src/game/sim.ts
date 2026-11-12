@@ -95,8 +95,11 @@ import {
   RAIL_VGAS,
   RAIL_VMAX,
   RAIL_VMIN,
+  DRUM_GRIP,
+  DRUM_SAG,
 } from './mechanics';
 import {
+  EDGE_DRUM,
   EDGE_FLOAT,
   EDGE_RAIL,
   EDGE_RIVER,
@@ -967,7 +970,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         if (t.edge[g] & EDGE_GAP) gapSoon = true;
       }
       // … und nicht auf schwankenden Pontons: dort käme das Kart mit vollem Zug auf schmalem, nassem Stahl an.
-      if (gapSoon || (t.edge[s.seg] & EDGE_FLOAT) !== 0 || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
+      // … und nicht in der Magnettrommel: Dort könnte er es über einer Deckenplatte absetzen, die gerade abgeschaltet ist.
+      if (gapSoon || (t.edge[s.seg] & (EDGE_FLOAT | EDGE_DRUM)) !== 0 || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
       else {
         s.tow = 0;
         s.boost = Math.max(s.boost, 45);
@@ -1115,7 +1119,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
   // Tauchen: unter dem Meeresspiegel einer Tauchstrecke trägt das Wasser (siehe mechanics.ts).
   const diving = t.deep[seg0] !== 0 && y0 < t.sea;
-  const hold = A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
+  // Magnettrommel: An Wand und Decke halten die Reifen schlechter (an der Decke DRUM_GRIP, am Boden voll).
+  const drumGrip = (t.edge[seg0] & EDGE_DRUM) !== 0 ? 1 - ((1 - DRUM_GRIP) * (1 - Math.cos(t.roll[seg0]))) / 2 : 1;
+  const hold = drumGrip * A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
   const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
   const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? (diving ? DIVE_STEER : t.gravity < 1 ? LOWG_STEER : AIR_STEER) : 1);
@@ -1149,7 +1155,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // (geringe Haftung) rutscht das Heck sichtbar nach außen.
     const speed = Math.hypot(vf, vl);
     // Auf losem Grund rutscht das Kart länger quer, bevor es wieder spurt.
-    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip * (diving ? DIVE_GRIP : 1);
+    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip * (diving ? DIVE_GRIP : 1) * drumGrip;
     vl *= Math.exp(-grip * DT);
     vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
 
@@ -1269,6 +1275,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       s.x += t.tx[seg0] * lane.speed * DT;
       s.z += t.tz[seg0] * lane.speed * DT;
     }
+  }
+
+  // Magnettrommel: Die Schwerkraft zieht weiter zum Hallenboden – an der Wand sackt das Kart seitlich ab (an der rechten
+  // Wand nach links, an der linken nach rechts), an der Decke zieht sie es nur von der Bahn weg (das halten die Magnete).
+  if (t.drums.length > 0 && (t.edge[seg0] & EDGE_DRUM) !== 0) {
+    const sag = -DRUM_SAG * Math.sin(t.roll[seg0]);
+    s.x += rightX(t, seg0) * sag * DT;
+    s.z += rightZ(t, seg0) * sag * DT;
   }
 
   // Böe: schiebt quer, am Boden wie in der Luft. Im Windschatten und an den Enden ihres Bereichs läuft sie aus.

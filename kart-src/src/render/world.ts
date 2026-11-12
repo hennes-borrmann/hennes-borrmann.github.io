@@ -778,7 +778,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall

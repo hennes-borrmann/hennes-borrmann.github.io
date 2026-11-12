@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -88,6 +88,10 @@ export type SfxName =
   | 'chain' // Achterbahn-Rummel: die Kette des Lifthügels rattert unter dem eigenen Kart: trockenes Klack-klack der Rücklaufsperre über leisem Kettensurren, 1–3 kHz (wird etwa alle 0,22 s aufgerufen)
   | 'kick' // Achterbahn-Rummel: ein Schubmagnet zieht an und ruckt das Kart nach vorn (zusätzlich zum Schub-Geräusch): brummender Magnet-Einsatz, der in einen hellen Schnalzer umschlägt, „Zzzack“ (~0,4 s)
   | 'crest' // Achterbahn-Rummel: das eigene Kart kippt schnell über eine Kuppe in die Abfahrt: Luftholen (Rauschen steigt), dann fallendes „Whuuu“ wie eine Lotusflöte (~0,7 s)
+  | 'clamp' // Magnetwerk: das eigene Kart fährt in die Magnettrommel ein, die Magnete packen es: sattes, metallisches „Klonk“ mit kurzem Zupacken des Felds (~0,3 s)
+  | 'hum' // Magnetwerk: das eigene Kart fährt in der Trommel: tiefes Netzbrummen der Magnete mit Obertönen, das leicht schwebt (wird etwa alle 0,4 s aufgerufen und verschmilzt zu einem Bett; der Pegel des Aufrufs trägt die Verdrehung – an der Decke lauter und heller)
+  | 'magnetoff' // Magnetwerk: eine Deckenplatte schaltet ab (ortsfest, bis ~120 m zu hören): Klack des Schützes, dann ein fallender elektrischer Seufzer (~0,6 s)
+  | 'magneton' // Magnetwerk: die Deckenplatte schaltet wieder an (ortsfest): ein steigender Einschaltton, der in einen hellen Klack des Ankers mündet (~0,35 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

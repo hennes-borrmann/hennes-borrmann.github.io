@@ -274,6 +274,17 @@ const SHOTS = {
       [2, 440, 2],
     ],
   },
+  // Magnetwerk: in der Magnettrommel, kurz bevor die Bahn an die Decke geht – vorn ein Kart an der Wand, dahinter die
+  // Deckenplatten; die Halle steht im Bild auf dem Kopf.
+  magnet: {
+    from: [496, 0, 3.6],
+    to: [560, 0, 1.5],
+    fov: 60,
+    karts: [
+      [1, 512, -2],
+      [2, 530, 2.5],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
