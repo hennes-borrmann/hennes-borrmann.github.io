@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 18;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -376,7 +376,8 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
   v.setUint32(1, snap.tick);
   v.setUint8(5, snap.raceId & 0xff);
   v.setUint8(6, snap.phase);
-  v.setUint32(7, snap.goTick);
+  // (Mit Vorzeichen: der Test-Haken, der die Rennzeit vorstellt, legt „Los“ auch vor den Beginn der Sitzung.)
+  v.setInt32(7, snap.goTick);
   v.setUint8(11, snap.laps);
   v.setUint32(12, snap.boxes >>> 0);
   v.setUint8(16, snap.track);
@@ -419,7 +420,7 @@ export function decodeSnapshot(view: DataView): Snapshot | null {
     tick: view.getUint32(1),
     raceId: view.getUint8(5),
     phase: view.getUint8(6),
-    goTick: view.getUint32(7),
+    goTick: view.getInt32(7),
     laps: view.getUint8(11),
     boxes: view.getUint32(12),
     track: view.getUint8(16),
