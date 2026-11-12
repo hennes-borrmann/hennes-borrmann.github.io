@@ -740,7 +740,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Neun Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 9);
+    check('Zehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 10);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1221,7 +1221,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen neun Strecken zur Wahl', cards === 9, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen zehn Strecken zur Wahl', cards === 10, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');

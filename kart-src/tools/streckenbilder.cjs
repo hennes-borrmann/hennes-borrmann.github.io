@@ -175,6 +175,19 @@ const SHOTS = {
     ],
     when: "window.__kart.harbor().winds.some((w) => w.branch === -1 && w.at > 880 && w.at < 960 && w.strength > 0.95)",
   },
+  // Vulkaninsel: der Kraterrand nach gut einer Minute – drei Platten sind schon weggebrochen, die vierte bricht
+  // gerade; Blick von der Kraterseite über Lavasee und Steg hinaus aufs Meer. (Die Rennzeit wird dafür vorgestellt.)
+  vulkan: {
+    from: [770, -14, 12],
+    to: [840, 4, 0],
+    fov: 52,
+    karts: [
+      [1, 800, -3],
+      [2, 822, 4],
+      [3, 846, -2],
+    ],
+    when: '(window.__vk || (window.__vk = performance.now(), window.__kart.clock(67.2)), performance.now() - window.__vk > 1500)',
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
