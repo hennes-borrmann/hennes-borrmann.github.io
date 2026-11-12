@@ -131,8 +131,10 @@ function trackImage(t: Track): string {
 }
 
 export function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const rest = sec - m * 60;
+  // Erst auf Zehntel runden, dann zerlegen – sonst wird aus 69,96 s „1:010.0“ und aus 59,96 s „0:60.0“.
+  const tenths = Math.round(Math.max(0, sec) * 10);
+  const m = Math.floor(tenths / 600);
+  const rest = (tenths - m * 600) / 10;
   return `${m}:${rest < 10 ? '0' : ''}${rest.toFixed(1)}`;
 }
 

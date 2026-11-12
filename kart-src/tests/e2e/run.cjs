@@ -1795,14 +1795,21 @@ async function main() {
         const s = window.__kart.authoritative(0);
         return { x: s.x, z: s.z, time: window.__kart.race().time };
       })()`;
+      // (Lage auf dem Wagen: längs (du) und quer (dw) zur Fahrtrichtung des Wagens – die zeigt von Wagen 4 zu Wagen 2.)
       const stillOn = `(() => {
-        const c = window.__kart.trains()[0].cars[3];
+        const cars = window.__kart.trains()[0].cars;
+        const c = cars[3];
         const s = window.__kart.authoritative(0);
-        return { x: s.x, y: s.y, z: s.z, off: Math.hypot(s.x - c.x, s.z - c.z), above: s.y - c.y, time: window.__kart.race().time };
+        const fx = cars[2].x - cars[4].x;
+        const fz = cars[2].z - cars[4].z;
+        const n = Math.hypot(fx, fz) || 1;
+        const du = ((s.x - c.x) * fx + (s.z - c.z) * fz) / n;
+        const dw = ((s.x - c.x) * fz - (s.z - c.z) * fx) / n;
+        return { x: s.x, y: s.y, z: s.z, du, dw, above: s.y - c.y, time: window.__kart.race().time };
       })()`;
       await watch(0);
       const roof0 = await h7.page.evaluate(onRoof);
-      let roof1 = { ...roof0, off: 0, above: 0 };
+      let roof1 = { ...roof0, du: 0, dw: 0, above: 0 };
       for (const until = Date.now() + 12000; Date.now() < until && roof1.time - roof0.time < 160; ) {
         await sleep(100);
         roof1 = await h7.page.evaluate(stillOn);
@@ -1815,8 +1822,8 @@ async function main() {
       const fellOff = await h7.page.evaluate(() => window.__seen.respawn);
       check(
         'Der Zug nimmt mit: Anna steht ohne Gas auf dem Dach eines Flachwagens und fährt mit ihm – auch auf dem Bildschirm des Mitspielers',
-        fellOff === null && carriedFor >= 2.5 && carried > 14 * carriedFor * 0.8 && carried < 14 * carriedFor * 1.2 && roof1.off < 2.5 && roof1.above > 1.2 && offC < 8,
-        `${carried.toFixed(1)} m in ${carriedFor.toFixed(1)} s (Zug 14 m/s), ${roof1.off.toFixed(2)} m neben der Wagenmitte, ${roof1.above.toFixed(2)} m über dem Gleis; beim Mitspieler ${offC.toFixed(1)} m neben der Wagenmitte`,
+        fellOff === null && carriedFor >= 2.5 && carried > 14 * carriedFor * 0.8 && carried < 14 * carriedFor * 1.2 && Math.abs(roof1.du) < 6 && Math.abs(roof1.dw) < 1.9 && roof1.above > 1.2 && offC < 8,
+        `${carried.toFixed(1)} m in ${carriedFor.toFixed(1)} s (Zug 14 m/s), auf dem Wagen ${roof1.du.toFixed(1)} m längs und ${roof1.dw.toFixed(2)} m quer zur Mitte (Wagen 12 × 3,8 m), ${roof1.above.toFixed(2)} m über dem Gleis; beim Mitspieler ${offC.toFixed(1)} m neben der Wagenmitte`,
       );
     }
     await toLobby(h7.page);
