@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Achterbahn-Rummel: Jahrmarkt am frühen Abend – der Himmel glüht orange bis violett, die Bahn ist noch gut zu sehen. (VORLÄUFIG)
+  rummel: {
+    sky: [0x3a3f8f, 0xb86aa8, 0xffb070],
+    fog: 0xd9a08c,
+    fogNear: 170,
+    fogFar: 760,
+    sunDir: [-0.55, 0.42, 0.35],
+    sunColor: 0xffc890,
+    sunIntensity: 2.3,
+    hemiSky: 0xc8b4ff,
+    hemiGround: 0x7a5a48,
+    hemiIntensity: 1.5,
+    disc: 0xffe0a0,
+    discSize: 26,
+    clouds: 0xffd0b8,
+    cloudShade: 0xb878a8,
+    stars: false,
+    road: 0x565a66,
+    roadAlt: 0x4e525e,
+    line: 0xf6f0dc,
+    kerbA: 0xe2483a,
+    kerbB: 0xf6f0dc,
+    shoulder: 0x6f8f5a,
+    wallA: 0xe2483a,
+    wallB: 0xf6f0dc,
+    wallCap: 0xffd23a,
+    deck: 0xc9a06a,
+    deckDark: 0x8a6440,
+    pillar: 0xf2efe6,
+    ground: [0x6f9a58, 0x5f8a4c, 0x8a7a5a, 0x7fa864],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: 2,
+    rough: 1.2,
+  },
   // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
   // Riesenkinderzimmer: warmes Lampenlicht am Nachmittag – Holzboden, bunter Teppich, Tapete in der Ferne. (VORLÄUFIG)
   zimmer: {

@@ -429,6 +429,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   wueste: WERKSHOF,
   // Riesenkinderzimmer: eigenes Stück (stuecke/zimmer.ts)
   zimmer: ZIMMER_STUECK,
+  // Achterbahn-Rummel: VORLÄUFIG das Stück der Wolkenbahn
+  rummel: NEUE_STUECKE.wolken,
   results: RESULTS,
 };
 

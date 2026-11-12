@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
