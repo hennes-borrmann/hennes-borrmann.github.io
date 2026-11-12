@@ -3,6 +3,7 @@ import { SONGS, compileSong, type Song, type SongDef } from '../../src/audio/son
 import { NEUE_STUECKE } from '../../src/audio/songs-neu';
 import { HAFEN_STUECK } from '../../src/audio/stuecke/hafen';
 import { VULKAN_STUECK } from '../../src/audio/stuecke/vulkan';
+import { RUINE_STUECK } from '../../src/audio/stuecke/ruine';
 import type { MusicId } from '../../src/audio/types';
 
 // Jedes Stück aus src/audio/stuecke/ steht hier mit seinem Schlüssel in SONGS.
@@ -10,6 +11,7 @@ import type { MusicId } from '../../src/audio/types';
 const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'hafen', def: HAFEN_STUECK },
   { schluessel: 'vulkan', def: VULKAN_STUECK },
+  { schluessel: 'ruine', def: RUINE_STUECK },
 ];
 
 // Maßstab sind die vier ursprünglichen Rennstücke (in songs.ts) – weder die aus songs-neu.ts

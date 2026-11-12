@@ -789,7 +789,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Zehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 10);
+    check('Elf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 11);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1277,7 +1277,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen zehn Strecken zur Wahl', cards === 10, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen elf Strecken zur Wahl', cards === 11, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1471,9 +1471,61 @@ async function main() {
     const [v2h, v2c] = await changesAt(95);
     check('Nach 84 Sekunden ist die Hängebrücke gesperrt und eingestürzt – auf beiden Bildschirmen', bridgeV(v2h).shut && bridgeV(v2c).shut && v2h.holes.filter((h) => h.branch === 1).every((h) => h.open) && state(v2h) === state(v2c), `${state(v2h)} / ${state(v2c)}`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Zeitriss-Ruine: zwei Zeitalter im Wechsel – auf beiden Bildschirmen gleich. Ben steht auf einer Hallenplatte,
+    // als die Zeit ins Jetzt springt.
+    await h7.page.locator('.track-card').nth(10).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 10, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 10, null, { timeout: 30000 });
+    const eraState = (x) => `${x.era ? x.era.name : '–'} ${state(x)}`;
+    const gateOf = (x, b) => x.gates.find((g) => g.branch === b);
+    const [r0h, r0c] = await changesAt(5);
+    check(
+      'Zeitriss-Ruine beginnt im Einst: Halle und Aquädukt tragen, die Schatzkammer ist zu, das Aquädukt offen',
+      !!r0h.era && r0h.era.now === 0 && r0h.holes.length >= 8 && r0h.holes.every((h) => !h.open) && gateOf(r0h, 0).shut && !gateOf(r0h, 1).shut && eraState(r0h) === eraState(r0c),
+      `${r0h.holes.length} Bruchstellen · ${eraState(r0h)} / ${eraState(r0c)}`,
+    );
+    // Ben auf eine Platte der Großen Halle, zweieinhalb Sekunden vor dem Sprung.
+    const hallSlab = r0h.holes.filter((h) => h.branch === -1).sort((a, b) => a.breaksAt - b.breaksAt)[0];
+    const hallLat = (Math.max(hallSlab.lat0, -9) + Math.min(hallSlab.lat1, 9)) / 2;
+    await kart(h7.page, `clock(${hallSlab.breaksAt - 2.5})`);
+    await kart(h7.page, `place(1, ${hallSlab.at + hallSlab.length / 2}, ${hallLat})`);
+    await sleep(700);
+    const standingR = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
+    const fellR = [false, false];
+    let fellAtR = -1;
+    const untilR = Date.now() + 9000;
+    while (Date.now() < untilR && !(fellR[0] && fellR[1])) {
+      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
+      if (eh.find((e) => e.slot === 1).respawn > 0 && !fellR[0]) {
+        fellR[0] = true;
+        fellAtR = ch.time / 60;
+      }
+      if (ec.find((e) => e.slot === 1).respawn > 0) fellR[1] = true;
+      await sleep(50);
+    }
+    check('Im Einst trägt die Hallenplatte', standingR.respawn === 0 && !(standingR.flags & 8), `Ben steht bei ${(hallSlab.breaksAt - 2.5).toFixed(1)} s`);
+    check('Die Zeit springt ins Jetzt: Die Platte ist fort, Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellR[0] && fellR[1] && fellAtR >= hallSlab.breaksAt, `Sturz bei ${fellAtR.toFixed(1)} s (Sprung ${hallSlab.breaksAt} s)`);
+    const [r1h, r1c] = await changesAt(r0h.era.split + 9);
+    check(
+      'Im Jetzt – auf beiden Bildschirmen: Löcher in der Halle, das Aquädukt eingestürzt und gesperrt, die Bresche der Schatzkammer offen',
+      r1h.era.now === 1 && r1h.holes.every((h) => h.open) && !gateOf(r1h, 0).shut && gateOf(r1h, 1).shut && eraState(r1h) === eraState(r1c),
+      `${eraState(r1h)} / ${eraState(r1c)}`,
+    );
+    const [r2h, r2c] = await changesAt(r0h.era.period + 5);
+    check(
+      'Eine Periode später gilt wieder das Einst: alles trägt wieder, die Schatzkammer ist wieder zu',
+      r2h.era.now === 0 && r2h.holes.every((h) => !h.open) && gateOf(r2h, 0).shut && !gateOf(r2h, 1).shut && eraState(r2h) === eraState(r2c),
+      `${eraState(r2h)} / ${eraState(r2c)}`,
+    );
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die zehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die elf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 
