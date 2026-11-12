@@ -68,6 +68,20 @@ const COASTER_WOOD = [
   [420, 360, 450],
   [360, 410, 390],
 ];
+/**
+ * Magnettrommel: 'hum' trägt die Verdrehung im Pegel des Aufrufs. Die Szene meldet es ortsfest (local: false,
+ * Pegel HUM_FLOOR … 1 von unten bis zur Decke), sound.ts nimmt Ortsfestes mit 0,55 (HUM_TOP) – hier wird daraus
+ * wieder die Stärke 0 (unten) … 1 (Decke), nach der das Rezept seine Klangfarbe wählt.
+ */
+const HUM_TOP = 0.55;
+const HUM_FLOOR = 0.75;
+function humStrength(v: Voice): number {
+  return clamp((v.out.gain.value / LEVEL.hum / HUM_TOP - HUM_FLOOR) / (1 - HUM_FLOOR), 0, 1);
+}
+/** Magnettrommel: leichte Verstimmung der Brummbänder je Aufruf (drei Fassungen reihum) – das Netz „schwebt“. */
+const HUM_DRIFT = [1, 1.006, 0.995];
+/** Deckenplatte schaltet ab: Anfangston (Hz) des fallenden Seufzers, drei Fassungen reihum. */
+const MAGNET_SIGH = [300, 276, 328];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -173,6 +187,13 @@ const LEVEL: Record<SfxName, number> = {
   chain: 1,
   kick: 3,
   crest: 2,
+  // Magnetwerk (Runde 19), gemessen wie oben: Zupacken ≈ −17,9 LUFS (Einrasten −17,6); die Folge des Brummens unten
+  // ≈ −33,7 wie das Rollen (Decke −31,5); Abschalten ≈ −9,6 und Einschalten ≈ −13,6 bei Pegel 1 – sie kommen ortsfest mit
+  // höchstens 0,55 an und müssen sich aus 30 m gegen Motor und Musik behaupten (Messwerte bei den Rezepten).
+  clamp: 2.4,
+  hum: 1.2,
+  magnetoff: 3.3,
+  magneton: 3.4,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -351,6 +372,8 @@ export class SfxPlayer {
   private smashTick = 0;
   private latchTick = 0;
   private coasterTick = 0;
+  private humTick = 0;
+  private magnetTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -1125,6 +1148,102 @@ export class SfxPlayer {
           .tone('sine', 1180, 330, 0.44, 0.16, { at: 0.27, attack: 0.02, hold: 0.15, sustain: 0.5, vibHz: 7, vibDepth: 0.015 })
           .tone('triangle', 1770, 495, 0.4, 0.04, { at: 0.28, attack: 0.03, hold: 0.15, sustain: 0.4 })
           .noise(260, 140, 0.4, 0.12, { type: 'lowpass', brown: true, attack: 0.1, at: 0.3 });
+        break;
+      // --- Magnetwerk ---
+      // Vier Geräusche aus einer Familie: Netzbrummen (100 Hz, die doppelte Netzfrequenz, mit der ein Magnet brummt) und
+      // das Klacken von Schützen. 'magnetoff' und 'magneton' sind ein Paar in entgegengesetzter Richtung: Beim Abschalten
+      // klackt zuerst das Schütz, dann fällt das Feld in sich zusammen (alles fährt hinab); beim Einschalten baut sich das
+      // Feld auf (alles fährt hinauf), und zuletzt zieht der Anker hell klackend an.
+      case 'clamp':
+        // Die Magnete packen das Kart (0,27 s): ein sattes, hohles „Klonk“ – tiefer Sinus (150 → 55 Hz) und braunes
+        // Rauschen als Bauch, ein kurzer Anschlag im Mittenband, darüber der Körper eines Stahlkessels: ein Dreieck um
+        // 330 Hz mit den schiefen Teiltönen ×1,59 und ×2,14 einer eingespannten Platte, leicht absackend; gleichzeitig
+        // greift das Feld (ein kurzes 100-Hz-Brummen aus Sägezahn, 0,13 s). Abgrenzung: 'latch' ist hell und stählern
+        // (40 % über 2 kHz), 'guard-block' ein heller Klang um 1,5 kHz, 'press' ein schwerer Schlag mit Zischen davor.
+        // Gemessen (vor dem Mischpult): −17,9 LUFS (Einrasten −17,6, Landung −18,1), 0,27 s, Schwerpunkt 250 Hz;
+        // im Spiel-Mix trägt es −25,5 LUFS bei (Einrasten −24,6), am meisten bei 125–250 Hz.
+        v.tone('sine', 150, 55, 0.24, 0.32)
+          .noise(600, 120, 0.16, 0.3, { type: 'lowpass', brown: true })
+          .noise(1500, 800, 0.03, 0.3, { q: 1.5, attack: 0.001 })
+          .tone('triangle', 330, 312, 0.3, 0.26, { attack: 0.002 })
+          .tone('sine', 525, 500, 0.22, 0.1, { attack: 0.002 })
+          .tone('sine', 706, 680, 0.16, 0.07, { attack: 0.002 })
+          .tone('sawtooth', 100, 98, 0.13, 0.07, { attack: 0.004, sustain: 0.5 });
+        break;
+      case 'hum': {
+        // Brummen der Magnete, alle 0,4 s aufgerufen, solange das eigene Kart in der Trommel fährt (bis gut 5 s am Stück):
+        // ein Bett. Die Teiltöne sind keine Oszillatoren, sondern sehr schmale Rauschbänder (Güte 30–40, also 3–15 Hz
+        // breit) um 100, 150, 200, 300, 400 Hz – sie klingen als Ton, schweben aber von selbst leicht in Pegel und
+        // Phase, und Schichten aus überlappenden Aufrufen addieren sich in der Leistung, statt sich wie gleich hohe
+        // Sinusse mal zu verstärken, mal auszulöschen. Je Aufruf liegt jedes Band zweimal an (0,2 s versetzt), die Bänder
+        // gegeneinander versetzt, mit 0,42 s Anstieg und langem Ausklang – nichts pumpt im Aufruftakt. Drei leicht
+        // verstimmte Fassungen reihum (HUM_DRIFT, ±0,5 %) lassen das Netz zusätzlich schweben. Mit der Verdrehung (Stärke k
+        // aus dem Pegel des Aufrufs, humStrength) kommen die hellen Teiltöne dazu – 600 Hz von 30 auf 100 %, 1,2 kHz erst
+        // ab der Wand –, und der Pegel steigt um 2,5 dB: an der Decke lauter und heller.
+        // Gemessen, 30 Aufrufe (8 Durchläufe gemittelt, 50 ms): unten −33,7 LUFS (Rollen 'coaster' −33,7), Wand −33,1,
+        // Decke −31,5 (±0,05 s Zittern: −30,8); Pumpen im Aufruftakt 0,5–1,1 dB (coaster 3,8), letztes gegen erstes
+        // Drittel −0,1 … +0,1 dB (kein Aufschaukeln), gemittelt höchstens 1,5 dB unter dem Median; ein einzelner
+        // Durchlauf schwebt stärker (5-%-Wert 2,5–2,9 dB, tiefster 50-ms-Wert 4,2–4,7 dB unter dem Median; coaster
+        // 1,9 bzw. 3,0) – das ist das Schweben der schmalen Bänder, kein Loch im Takt. Oktave 1 kHz unten 26, Decke 47 dB.
+        // Nach dem letzten Aufruf hält es gut 0,6 s und fällt dann in 0,3 s um 20 dB.
+        const k = humStrength(v);
+        const d = HUM_DRIFT[this.humTick++ % HUM_DRIFT.length];
+        for (let i = 0; i < 2; i++) {
+          const at = i * 0.2;
+          v.noise(100 * d, 100.4 * d, 1.5, 0.75, { q: 30, brown: true, attack: 0.42, at })
+            .noise(150 * d, 150.5 * d, 1.5, 0.55, { q: 30, brown: true, attack: 0.42, at: at + 0.1 })
+            .noise(200 * d, 200.6 * d, 1.5, 1.05, { q: 35, brown: true, attack: 0.42, at: at + 0.03 })
+            .noise(300 * d, 300.6 * d, 1.5, 1.05, { q: 40, brown: true, attack: 0.42, at: at + 0.13 })
+            .noise(400 * d, 400.8 * d, 1.5, 0.9, { q: 40, brown: true, attack: 0.42, at: at + 0.07 })
+            .noise(600 * d, 601 * d, 1.5, 0.3 * (0.3 + 0.7 * k), { q: 40, attack: 0.42, at: at + 0.17 });
+          if (k > 0.05) v.noise(1200 * d, 1203 * d, 1.5, 0.28 * k, { q: 30, attack: 0.42, at: at + 0.05 });
+        }
+        break;
+      }
+      case 'magnetoff': {
+        // Eine Deckenplatte schaltet ab (0,55 s), ortsfest – das Warnsignal der Trommel. Zuerst öffnet das Schütz: ein
+        // Abreißfunke (Hochpass-Rauschen, 1 ms Anstieg), ein Klack im Mittenband und ein kurzes Blech (Dreieck 1,4 kHz
+        // mit dem Teilton ×2,76) über einem kleinen tiefen Stoß. Dann bricht das Feld zusammen: ein fallender Seufzer –
+        // Sinus von 1,8·f auf 0,45·f mit 7-Hz-Schlingern, darüber ein Sägezahn eine Oktave über f und ein Dreieck bei
+        // 6·f, die mitfallen (sie tragen ihn im Band 1–4 kHz über Motor und Musik), dazu ein Rechteck im Tritonus für das
+        // Unbehagen, und ein Rauschband, das von 3,2 kHz auf 280 Hz sinkt. Alles bleibt unter 4 kHz: deutlich, nicht
+        // schrill. Weil die drei Plattenpaare um je eine halbe Sekunde versetzt abschalten, drei Fassungen reihum
+        // (MAGNET_SIGH: f = 300/276/328 Hz).
+        // Gemessen: −9,6 LUFS vor dem Mischpult bei Pegel 1 (ortsfest kommt höchstens 0,55 an: ≈ −14,8; Böe −10, Geysir
+        // −11), Frequenzschwerpunkt je 60 ms 1070 → 740 → 560 → 390 → 320 → 280 Hz (−6,5 … −7,6 Oktaven/s). Im Spiel-Mix
+        // (Motor, Magnetwerk-Stück) aus 0 m: Beitrag −20,2 LUFS, hebt die Oktaven 500 Hz/2/4/8 kHz um 4,9/1,6/2,7/6,9 dB;
+        // aus 30 m −22,0 LUFS (3,7/1,1/2,0/5,6 dB), aus 60 m noch −24,9; über dem Brummen in der Trommel unverändert.
+        const f = MAGNET_SIGH[this.magnetTick++ % MAGNET_SIGH.length];
+        v.noise(6000, 3200, 0.03, 0.26, { type: 'highpass', attack: 0.001 })
+          .noise(2100, 1400, 0.03, 0.34, { q: 2.4, attack: 0.0008 })
+          .tone('triangle', 1420, 1390, 0.08, 0.1, { attack: 0.001 })
+          .tone('sine', 3920, 3880, 0.04, 0.03, { attack: 0.001 })
+          .tone('sine', 190, 80, 0.07, 0.18)
+          .tone('sine', f * 1.8, f * 0.45, 0.56, 0.2, { at: 0.03, attack: 0.012, hold: 0.06, sustain: 0.35, vibHz: 7, vibDepth: 0.02 })
+          .tone('sawtooth', f * 2, f * 0.5, 0.42, 0.08, { at: 0.03, attack: 0.012, hold: 0.06, sustain: 0.3, vibHz: 7, vibDepth: 0.02 })
+          .tone('triangle', f * 6, f * 1.5, 0.4, 0.06, { at: 0.03, attack: 0.012, hold: 0.06, sustain: 0.3, vibHz: 7, vibDepth: 0.02 })
+          .tone('square', f * 1.414, f * 0.6, 0.26, 0.03, { at: 0.03, attack: 0.012, hold: 0.1 })
+          .noise(3200, 280, 0.52, 0.32, { q: 2, at: 0.03, attack: 0.02 });
+        break;
+      }
+      case 'magneton':
+        // Die Platte schaltet wieder an (0,35 s), das Gegenstück zu 'magnetoff': Das Feld baut sich auf – ein Dreieck
+        // steigt von 90 auf 360 Hz, ein Sägezahn eine Oktave und ein Dreieck drei Oktaven darüber steigen mit, ein
+        // Rauschband fährt von 300 Hz auf 2,6 kHz –, und bei 0,21 s zieht der Anker an: ein heller Klack (Hochpass-
+        // Rauschen, Mittenband, ein kurzes Blech um 2,1 kHz mit Teilton ×2,76, ein kleiner Stoß). Kein Seufzer, kein Tritonus:
+        // erleichtert statt unheimlich, und kürzer.
+        // Gemessen: −13,6 LUFS vor dem Mischpult bei Pegel 1, Schwerpunkt je 60 ms 730 → 850 → 1150 → 1900 → 2160 Hz
+        // (+8,7 … +11,9 Oktaven/s; 'magnetoff' fällt mit −6,5 … −7,6). Im Spiel-Mix aus 0 m Beitrag −23,4 LUFS, aus 30 m
+        // −25,4 – gut 3 dB unter dem Abschalten.
+        v.tone('triangle', 90, 360, 0.24, 0.16, { attack: 0.03, sustain: 0.8 })
+          .tone('sawtooth', 180, 720, 0.24, 0.06, { attack: 0.05, sustain: 0.8 })
+          .tone('triangle', 540, 2160, 0.22, 0.05, { attack: 0.08, sustain: 0.8 })
+          .noise(300, 2600, 0.22, 0.2, { q: 2.5, attack: 0.15 })
+          .noise(6500, 4000, 0.03, 0.24, { type: 'highpass', at: 0.21, attack: 0.0008 })
+          .noise(2600, 1900, 0.03, 0.3, { q: 2.4, at: 0.21, attack: 0.0008 })
+          .tone('triangle', 2100, 2060, 0.12, 0.09, { at: 0.21, attack: 0.001 })
+          .tone('sine', 5800, 5760, 0.06, 0.025, { at: 0.21, attack: 0.001 })
+          .tone('sine', 150, 90, 0.05, 0.1, { at: 0.21 });
         break;
       // --- Maschinen und Wasser ---
       case 'press':

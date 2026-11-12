@@ -16,6 +16,7 @@
 
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { MAGNET_STUECK } from './stuecke/magnet';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import type { MusicId } from './types';
@@ -432,8 +433,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   zimmer: ZIMMER_STUECK,
   // Achterbahn-Rummel: eigenes Stück (stuecke/rummel.ts)
   rummel: RUMMEL_STUECK,
-  // Magnetwerk: VORLÄUFIG das Stück der Nachtschicht
-  magnet: NACHT,
+  // Magnetwerk: eigenes Stück (stuecke/magnet.ts)
+  magnet: MAGNET_STUECK,
   results: RESULTS,
 };
 

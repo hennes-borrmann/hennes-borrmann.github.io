@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SONGS, compileSong, type Song, type SongDef } from '../../src/audio/songs';
 import { NEUE_STUECKE } from '../../src/audio/songs-neu';
 import { HAFEN_STUECK } from '../../src/audio/stuecke/hafen';
+import { MAGNET_STUECK } from '../../src/audio/stuecke/magnet';
 import { RUMMEL_STUECK } from '../../src/audio/stuecke/rummel';
 import { ZIMMER_STUECK } from '../../src/audio/stuecke/zimmer';
 import type { MusicId } from '../../src/audio/types';
@@ -12,6 +13,7 @@ const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'hafen', def: HAFEN_STUECK },
   { schluessel: 'zimmer', def: ZIMMER_STUECK },
   { schluessel: 'rummel', def: RUMMEL_STUECK },
+  { schluessel: 'magnet', def: MAGNET_STUECK },
 ];
 
 // Maßstab sind die vier ursprünglichen Rennstücke (in songs.ts) – weder die aus songs-neu.ts

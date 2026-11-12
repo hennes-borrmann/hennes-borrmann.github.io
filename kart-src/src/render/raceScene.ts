@@ -58,7 +58,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { EDGE_GAP, EDGE_RAIL, EDGE_RIVER, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -194,7 +194,16 @@ export interface SceneEvent {
     | 'coaster'
     | 'chain'
     | 'kick'
-    | 'crest';
+    | 'crest'
+    /**
+     * Magnetwerk: die Magnete packen das eigene Kart beim Einfahren in die Trommel / das eigene Kart fährt in der Trommel
+     * (wiederholt; ortsfest gemeldet, damit der Pegel – er trägt die Verdrehung – ankommt) / eine Deckenplatte schaltet ab
+     * bzw. wieder an (ortsfest, slot −1).
+     */
+    | 'clamp'
+    | 'hum'
+    | 'magnetoff'
+    | 'magneton';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -273,6 +282,9 @@ interface KartView {
   chainWait: number;
   slopeWas: number;
   boostWas: number;
+  /** Magnetwerk: in der Magnettrommel im letzten Bild; Zeit bis zum nächsten Brummen des eigenen Karts. */
+  drum: boolean;
+  humWait: number;
   /** Riesenkinderzimmer: Größenklasse im letzten Bild (−1/0/1) und der gezeigte Maßstab (weich nachgeführt). */
   sizeWas: number;
   sizeK: number;
@@ -865,6 +877,8 @@ export class RaceScene {
       chainWait: 0,
       slopeWas: 0,
       boostWas: 0,
+      drum: false,
+      humWait: 0,
       sizeWas: 0,
       sizeK: 1,
       inCastle: false,
@@ -938,6 +952,8 @@ export class RaceScene {
       // Vulkaninsel: Platten bröckeln und brechen, Wege schließen und öffnen sich.
       // (Mit Zeitaltern geschieht beim Sprung alles auf einmal – das sagt der Riss; einzeln zu hören ist nur, was mit Verzögerung einstürzt.)
       for (const h of t.holes) {
+        // (Die Deckenplatten der Magnettrommel melden sich selbst, unten.)
+        if (t.edge[h.first] & EDGE_DRUM) continue;
         const warned = !era && planActive(h.plan, time + h.warn) && !planActive(h.plan, before + h.warn);
         const broke = !flip && planActive(h.plan, time) && !planActive(h.plan, before);
         if (!warned && !broke) continue;
@@ -971,6 +987,18 @@ export class RaceScene {
         if (!open && t.portals.some((q) => q !== p && q.seg === p.seg && q.lat0 === p.lat0)) continue;
         const lat = (p.lat0 + p.lat1) / 2;
         this.emitAt('shimmer', t.px[p.seg] + rightX(t, p.seg) * lat, t.py[p.seg] + 2, t.pz[p.seg] + rightZ(t, p.seg) * lat, 110);
+      }
+      // Magnetwerk: eine Deckenplatte der Trommel schaltet ab bzw. wieder an – zu hören an der Mitte der Platte (je Platte;
+      // die beiden eines Paars schalten nie zugleich, die Paare um eine halbe Sekunde versetzt). Ein Zeitsprung meldet nichts (steady).
+      if (t.drums.length > 0) {
+        for (const h of t.holes) {
+          if ((t.edge[h.first] & EDGE_DRUM) === 0) continue;
+          const off = planActive(h.plan, time);
+          if (off === planActive(h.plan, before)) continue;
+          const mid = h.first + (h.count >> 1);
+          const lat = (Math.max(h.lat0, -t.wh[mid]) + Math.min(h.lat1, t.wh[mid])) / 2;
+          this.emitAt(off ? 'magnetoff' : 'magneton', t.px[mid] + rightX(t, mid) * lat, t.py[mid] + 0.2, t.pz[mid] + rightZ(t, mid) * lat, 120);
+        }
       }
       // Dschungel-Fluss: der Wasserfall tost – hörbar, solange man in seiner Nähe ist (alle halbe Sekunde ein Schwall).
       if (t.rivers.length > 0 && Math.floor(time / 30) !== Math.floor(before / 30)) {
@@ -1311,6 +1339,24 @@ export class RaceScene {
       }
       if (!air) k.rail = rail !== null;
       k.boostWas = e.boost;
+    }
+    // Magnetwerk: Beim Einfahren in die Magnettrommel packen die Magnete das eigene Kart („Klonk“, auch nach dem Neuaufsetzen
+    // vor der Decke); solange es darin ist, brummen sie – je weiter die Bahn verdreht ist, desto lauter und heller. Die Stärke
+    // 0 (Hallenboden) … 1 (Decke) kommt als Pegel 0,75 … 1 an (sfx.ts: HUM_FLOOR) – darum ortsfest gemeldet, wie sound.ts es
+    // nur dort weitergibt.
+    if (this.track.drums.length > 0) {
+      const tr = this.track;
+      const inDrum = e.respawn === 0 && e.seg < tr.total && (tr.edge[e.seg] & EDGE_DRUM) !== 0;
+      if (local && inDrum) {
+        if (!k.drum && !k.fresh) this.emit('clamp', k, true);
+        k.humWait -= dt;
+        if (k.humWait <= 0) {
+          k.humWait = 0.4;
+          const lean = (1 - Math.cos(tr.roll[e.seg])) / 2;
+          this.onEvent?.({ kind: 'hum', slot: k.slot, local: false, pan: 0, gain: 0.75 + 0.25 * lean });
+        }
+      } else k.humWait = 0;
+      k.drum = inDrum;
     }
     // Sturmhafen: schiebt gerade eine Böe? Das eigene Kart meldet sich regelmäßig (Heulen); Schleier und Gischt zeichnet mechanics/harbor.ts.
     if (this.track.winds.length > 0) {
