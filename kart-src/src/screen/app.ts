@@ -1517,6 +1517,20 @@ export class App {
             }),
           }));
       },
+      // Riesenkinderzimmer: die Ringe (Meter ab Start, seitliche Lage, ob er wachsen lässt), welche Größe jede Abzweigung
+      // verlangt (−1 winzig, 1 riesig, 0 jede) – und wo ein Kart gerade ist (Abzweigung oder −1, Abschnitt, Meter ab Start
+      // bzw. ab der Gabelung, Größe in Ticks).
+      sizers: () => ({
+        rings: TRACK.sizers.map((z) => ({ at: TRACK.prog[z.seg] * TRACK.step, lat0: z.lat0, lat1: z.lat1, grow: z.grow })),
+        only: Array.from(TRACK.branchOnly),
+      }),
+      whereIs: (slot: number) => {
+        const s = this.hostGame?.authoritative(slot);
+        if (!s) return null;
+        const branch = s.seg < TRACK.total ? TRACK.branchOf[s.seg] : -1;
+        // at: Meter ab Start bzw. ab der Gabelung
+        return { branch, seg: s.seg, at: (branch < 0 ? s.seg : s.seg - TRACK.branches[branch].first) * TRACK.step, size: s.size };
+      },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
         const glides: { from: number; to: number }[] = [];
