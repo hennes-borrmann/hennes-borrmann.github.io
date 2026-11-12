@@ -15,6 +15,7 @@
 // Hat eine Stimme weniger Takte als der Abschnitt, wird sie wiederholt.
 
 import { NEUE_STUECKE } from './songs-neu';
+import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
@@ -421,7 +422,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   vulkan: GLUT,
   ruine: KLIPPE,
   gewitter: NACHT,
-  dschungel: KLIPPE,
+  dschungel: DSCHUNGEL_STUECK,
   results: RESULTS,
 };
 

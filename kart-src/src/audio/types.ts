@@ -62,9 +62,9 @@ export type SfxName =
   | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest) – VORLÄUFIG
   | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest) – VORLÄUFIG
   | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
-  | 'raft' // Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß – hohles Holzrumpeln – VORLÄUFIG
-  | 'rapids' // Dschungel-Fluss: das eigene Kart fährt auf dem Fluss (wird etwa alle 0,35 s aufgerufen) – VORLÄUFIG
-  | 'falls' // Dschungel-Fluss: das Tosen des Wasserfalls (ortsfest, in der Nähe etwa alle 0,5 s aufgerufen) – VORLÄUFIG
+  | 'raft' // Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß – hohles Holzrumpeln: zwei, drei dumpfe Holzschläge, Wasserschwapp (~0,32 s)
+  | 'rapids' // Dschungel-Fluss: das eigene Kart fährt auf dem Fluss: Wasserrauschen mit Gluckern und Plätschern (wird etwa alle 0,35 s aufgerufen und verschmilzt zu einem Bett)
+  | 'falls' // Dschungel-Fluss: das Tosen des Wasserfalls (ortsfest, in der Nähe etwa alle 0,5 s aufgerufen und verschmilzt zu einem tiefen, breiten Donnern)
   | 'thunder' // Gewitterkamm: ein Blitz schlägt auf der Bahn ein (ortsfest, auf dem ganzen Kamm zu hören) – VORLÄUFIG
   | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest) – VORLÄUFIG
   | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall) – VORLÄUFIG
