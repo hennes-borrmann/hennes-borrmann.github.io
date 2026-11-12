@@ -57,8 +57,13 @@ import {
   AVALANCHE_PUSH,
   PULSE_AVALANCHE,
   LOWG_STEER,
+  WIND_AIR,
+  WIND_EDGE,
+  WIND_ENDS,
+  gustStrength,
 } from './mechanics';
 import {
+  EDGE_FLOAT,
   EDGE_GAP,
   EDGE_GLIDE,
   EDGE_OPEN_L,
@@ -68,6 +73,8 @@ import {
   centerHeight,
   gridPosition,
   groundAt,
+  groundNow,
+  heaveAt,
   newVehiclePose,
   proj,
   projectOnTrack,
@@ -235,6 +242,8 @@ export const EV_BUBBLE = 1 << 25;
 export const EV_SNOW = 1 << 26;
 /** Von einer Sprungplatte hochgeschleudert. */
 export const EV_LAUNCH = 1 << 27;
+/** In einer Böe (wird alle paar Ticks gemeldet, solange sie das Kart schiebt). */
+export const EV_WIND = 1 << 28;
 export const EV_USE_ANY =
   EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
 
@@ -741,6 +750,31 @@ export function thermalLift(t: Track, seg: number, lat: number, x: number, y: nu
   return lift;
 }
 
+/**
+ * Seitlicher Schub des Winds an dieser Stelle zur Rennzeit time, in m/s (nach rechts positiv).
+ * Dieselbe Rechnung für die Physik, die KI und die Anzeige.
+ */
+export function windPush(t: Track, seg: number, along: number, lat: number, time: number): number {
+  let blow = 0;
+  for (const w of t.winds) {
+    if (seg < w.first || seg >= w.first + w.count) continue;
+    const k = gustStrength(w, time);
+    if (k <= 0) continue;
+    const u = (seg - w.first) * t.step + along;
+    const ends = Math.min(u + t.step * 0.5, w.count * t.step - u - t.step * 0.5) / WIND_ENDS;
+    if (ends <= 0) continue;
+    let open = 1;
+    for (const l of w.lee) {
+      if (seg < l.first || seg > l.last) continue;
+      const across = Math.min(lat - l.lat0, l.lat1 - lat) / WIND_EDGE;
+      const lengthwise = Math.min((seg - l.first) * t.step + along + t.step * 0.5, (l.last - seg) * t.step - along + t.step * 0.5) / WIND_ENDS;
+      if (across > 0 && lengthwise > 0) open = Math.min(open, 1 - Math.min(1, across) * Math.min(1, lengthwise));
+    }
+    blow += w.push * k * Math.min(1, ends) * open;
+  }
+  return blow;
+}
+
 export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const t = TRACK;
   let ev = 0;
@@ -809,7 +843,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       tlat = side * tlimit;
     }
     // Schwebt eine Armlänge über der Fahrbahn – auch über Lücken hinweg.
-    const hover = centerHeight(t, s.seg, proj.along) + tlat * t.bank[s.seg] + TOW_LIFT;
+    const hover = centerHeight(t, s.seg, proj.along) + tlat * t.bank[s.seg] + heaveAt(t, s.seg, proj.along, env.time) + TOW_LIFT;
     s.y += (hover - s.y) * Math.min(1, 7 * DT);
     s.vy = 0;
     // Ende: abgelaufen oder mit der Bremse gekappt – aber nie über einem Abgrund.
@@ -821,7 +855,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         g = t.next[g];
         if (t.edge[g] & EDGE_GAP) gapSoon = true;
       }
-      if (gapSoon || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
+      // … und nicht auf schwankenden Pontons: dort käme das Kart mit vollem Zug auf schmalem, nassem Stahl an.
+      if (gapSoon || (t.edge[s.seg] & EDGE_FLOAT) !== 0 || groundAt(t, s.seg, proj.along, tlat) === NO_GROUND) s.tow = Math.max(s.tow, 4);
       else {
         s.tow = 0;
         s.boost = Math.max(s.boost, 45);
@@ -849,7 +884,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const seg0 = proj.seg;
   const lat0 = proj.lat;
   const along0 = proj.along;
-  const g0 = groundAt(t, seg0, along0, lat0);
+  // (Auf Pontons zählt der Seegang mit – und zwar der vom vorigen Tick: so steckt in der Höhenänderung
+  // auch die Bewegung des Pontons selbst, und das Kart hebt ab, wenn er unter ihm wegsackt.)
+  const g0 = groundNow(t, seg0, along0, lat0, env.time - 1);
 
   let fx = Math.sin(s.heading);
   let fz = Math.cos(s.heading);
@@ -1012,6 +1049,17 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  // Böe: schiebt quer, am Boden wie in der Luft. Im Windschatten und an den Enden ihres Bereichs läuft sie aus.
+  if (t.winds.length > 0 && env.canDrive) {
+    const blow = windPush(t, seg0, along0, lat0, env.time);
+    if (blow !== 0) {
+      const f = wasAir ? WIND_AIR : 1;
+      s.x += rightX(t, seg0) * blow * f * DT;
+      s.z += rightZ(t, seg0) * blow * f * DT;
+      if (Math.abs(blow) > 1.5 && ((env.time % 20) + 20) % 20 === 0) ev |= EV_WIND;
+    }
+  }
+
   // --- Strecke: Abschnitt, Bande ---
   projectOnTrack(t, s.x, s.z, s.seg);
   s.seg = proj.seg;
@@ -1019,7 +1067,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   let along = proj.along;
   let flags = itemBtn ? FLAG_ITEM_HELD : 0;
   // Wer schon unter die Fahrbahn gefallen ist, stößt nirgends mehr an.
-  const sunk = y0 < centerHeight(t, s.seg, along) + lat * t.bank[s.seg] - STEP_MAX;
+  const sunk = y0 < centerHeight(t, s.seg, along) + lat * t.bank[s.seg] + heaveAt(t, s.seg, along, env.time) - STEP_MAX;
   const side = lat > 0 ? 1 : -1;
   const limit = sideLimit(t, s.seg, side) - KART_RADIUS;
   if (!sunk && Math.abs(lat) > limit) {
@@ -1071,7 +1119,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   } else s.draft = 0;
 
   // --- Boden: Stufen, Schwerkraft, Abheben und Landen ---
-  let g = sunk ? NO_GROUND : groundAt(t, s.seg, along, lat);
+  let g = sunk ? NO_GROUND : groundNow(t, s.seg, along, lat, env.time);
   if (g > y0 + STEP_MAX) {
     if (g0 > y0 + STEP_MAX) {
       // Schon an der alten Stelle unter der Fahrbahn: weiter fallen.

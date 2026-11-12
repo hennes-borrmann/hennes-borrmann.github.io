@@ -27,12 +27,14 @@ import {
   thermalLift,
   turboStage,
   lavaAt,
+  windPush,
 } from '../game/sim';
 import {
   DRAFT_FULL,
   DRAFT_PULL_FROM,
   FLOOD_FROM,
   PULSE_AVALANCHE,
+  gustStrength,
   PULSE_BUBBLE,
   PULSE_ICICLE,
   PULSE_METEOR,
@@ -46,7 +48,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { NO_GROUND, TRACK, groundAt, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { NO_GROUND, TRACK, groundNow, newVehiclePose, proj, projectOnTrack, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -123,7 +125,10 @@ export interface SceneEvent {
     | 'icicle'
     /** Mond: von einer Sprungplatte hochgeschleudert, ein Meteorit schlägt ein (slot −1). */
     | 'launch'
-    | 'meteor';
+    | 'meteor'
+    /** Sturmhafen: eine Böe setzt ein (slot −1, ortsfest), das eigene Kart steckt in der Böe (wiederholt). */
+    | 'gust'
+    | 'storm';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -182,6 +187,9 @@ interface KartView {
   /** In einer Lawine im letzten Bild; Pause bis zur nächsten Meldung. */
   snowed: boolean;
   snowWait: number;
+  /** Sturmhafen: steckt gerade in einer Böe / Zeit bis zur nächsten Meldung. */
+  gusty: boolean;
+  gustWait: number;
   roulette: number;
   item: number;
   flags: number;
@@ -584,6 +592,7 @@ export class RaceScene {
       ['ZIEL!', 'warm'],
       ['SOG!', 'cool'],
       ['PLATT!', 'white'],
+      ['HUI!', 'cool'],
     ]);
     this.applyLevel();
   }
@@ -742,6 +751,8 @@ export class RaceScene {
       blown: false,
       snowed: false,
       snowWait: 0,
+      gusty: false,
+      gustWait: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -791,6 +802,13 @@ export class RaceScene {
     // Nur bei stetig laufender Zeit – nicht über einen Neustart oder Sprung hinweg.
     const steady = time > before && time - before < 30;
     if (steady) {
+      // Sturmhafen: eine Böe setzt ein – zu hören von der Mitte ihres Bereichs.
+      for (const w of t.winds) {
+        if (gustStrength(w, time) > 0 && gustStrength(w, before) === 0) {
+          const mid = w.first + (w.count >> 1);
+          this.emitAt('gust', t.px[mid], t.py[mid], t.pz[mid]);
+        }
+      }
       for (const p of t.pulses) {
         // Der Zyklus ist seit dem letzten Bild über null gelaufen: Ausbruch bzw. Einschlag.
         if (pulseCycle(p, time) < pulseCycle(p, before)) {
@@ -962,6 +980,25 @@ export class RaceScene {
       if (!k.snowed && !k.fresh) this.pop('LAWINE!', e, 'white', 3.6);
     } else k.snowWait = 0;
     k.snowed = snowed;
+    // Sturmhafen: schiebt gerade eine Böe? Das eigene Kart meldet sich regelmäßig (Heulen); Schleier und Gischt zeichnet mechanics/harbor.ts.
+    if (this.track.winds.length > 0) {
+      const tr = this.track;
+      let blow = 0;
+      if (e.respawn === 0) {
+        projectOnTrack(tr, e.x, e.z, e.seg);
+        blow = windPush(tr, proj.seg, proj.along, proj.lat, this.mechTime);
+      }
+      const gusty = Math.abs(blow) > 1.5;
+      if (gusty) {
+        k.gustWait -= dt;
+        if (k.gustWait <= 0) {
+          k.gustWait = 0.3;
+          if (local) this.emit('storm', k, true);
+        }
+        if (!k.gusty && !k.fresh && Math.abs(blow) > 3) this.pop('HUI!', e, 'cool', 3);
+      } else k.gustWait = 0;
+      k.gusty = gusty;
+    }
     // Mond: von einer Sprungplatte hochgeschleudert? (Abheben mit viel Steigen dicht hinter einer Platte)
     if (!k.fresh && air && !wasAir && e.vy > 6 && this.track.launchers.length > 0) {
       for (const l of this.track.launchers) {
@@ -1200,7 +1237,7 @@ export class RaceScene {
       // Boden unter dem Kart und dessen Neigung
       projectOnTrack(t, e.x, e.z, e.seg);
       const seg = proj.seg;
-      const ground = groundAt(t, seg, proj.along, proj.lat);
+      const ground = groundNow(t, seg, proj.along, proj.lat, this.mechTime);
       const slope = (t.py[t.next[seg]] - t.py[t.prev[seg]]) / (2 * t.step);
       const gx = slope * t.tx[seg] + t.bank[seg] * rightX(t, seg);
       const gz = slope * t.tz[seg] + t.bank[seg] * rightZ(t, seg);
@@ -1351,7 +1388,7 @@ export class RaceScene {
     const wake = me ? (me.draft >= DRAFT_PULL_FROM ? 0.8 : (me.draft / DRAFT_FULL) * 0.5) : 0;
     const fast = me ? Math.max(wake, me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
-    this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx);
+    this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx, this.mechTime);
     if (this.needsCompile) {
       // Neue Welt: ihr erstes Bild Teil für Teil vorbereiten. Solange das läuft, wird nichts gezeigt.
       if (this.stagedPending) this.beginWarmup();
@@ -1700,7 +1737,7 @@ export class RaceScene {
     let py = me.y + height - rise * 0.25;
     // Nie unter die Fahrbahn rutschen.
     projectOnTrack(t, px, pz, me.seg);
-    const g = groundAt(t, proj.seg, proj.along, proj.lat);
+    const g = groundNow(t, proj.seg, proj.along, proj.lat, this.mechTime);
     if (g !== NO_GROUND && py < g + 1.3) py = g + 1.3;
 
     if (!this.camReady) {

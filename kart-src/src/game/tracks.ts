@@ -6,6 +6,7 @@
 import type { TrackDef } from './track';
 import { EIS } from './tracks/eis';
 import { GLUT } from './tracks/glut';
+import { HAFEN } from './tracks/hafen';
 import { KLIPPE } from './tracks/klippe';
 import { MOND } from './tracks/mond';
 import { NACHT } from './tracks/nacht';
@@ -13,11 +14,11 @@ import { RIFF } from './tracks/riff';
 import { WERKSHOF } from './tracks/werkshof';
 import { WOLKEN } from './tracks/wolken';
 
-export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS, MOND];
+export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS, MOND, HAFEN];
 
 /**
  * So viele Strecken (von vorn gezählt) stehen in der Lobby zur Wahl. Was dahinter
  * stünde, wäre noch in Arbeit – zu erreichen nur mit dem Test-Schalter ?alle=1.
- * Zurzeit sind alle acht freigegeben.
+ * Zurzeit sind die ersten neun freigegeben.
  */
-export const RELEASED_TRACKS = 8;
+export const RELEASED_TRACKS = 9;

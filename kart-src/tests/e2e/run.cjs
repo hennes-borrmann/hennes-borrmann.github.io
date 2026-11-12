@@ -740,7 +740,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Acht Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 8);
+    check('Neun Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 9);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -924,7 +924,7 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte, Böe und Ponton');
     // (&alle=1: auch die Strecken, die die Lobby noch nicht anbietet – ihre Mechanik wird trotzdem geprüft.)
     const h7 = await openScreen('host7', '&laps=2&alle=1');
     const code7 = await createLobby(h7, 'Anna');
@@ -945,10 +945,26 @@ async function main() {
     // Derselbe Verkehr auf beiden Bildschirmen: gleiche Rennzeit, gleiche Orte.
     // "at" rechnet die Abfragezeit heraus: wo stünde das Fahrzeug zur Rennzeit 0?
     const sample = (s) => s.page.evaluate(() => window.__kart.traffic().map((v) => ({ ...v, at0: v.at - (v.speed * v.time) / 60, wall: performance.timeOrigin + performance.now() })));
-    const [tH, tC] = await Promise.all([sample(h7), sample(c7)]);
+    // Ohne Grafikkarte baut der Mitspieler seine Welt erst auf, während das Rennen schon läuft: sein Bildschirm steht
+    // bis kurz nach „Los“ und holt die Uhr dann erst ein. Gemessen wird der eingeschwungene Zustand – deshalb erst
+    // warten, dann dreimal messen und die beste Messung nehmen (ein einzelner Hänger darf eine Messung treffen).
+    await sleep(2500);
+    let tH = [];
+    let tC = [];
+    let skew = Infinity;
+    for (let n = 0; n < 3; n++) {
+      const [a, b] = await Promise.all([sample(h7), sample(c7)]);
+      // Rennzeit beider Bildschirme auf denselben Augenblick umgerechnet (der Mitspieler eilt um die Laufzeit seiner Eingaben voraus)
+      const d = a.length > 0 && b.length > 0 ? Math.abs(a[0].time + ((b[0].wall - a[0].wall) / 1000) * 60 - b[0].time) : Infinity;
+      if (d < skew || n === 0) {
+        skew = d;
+        tH = a;
+        tC = b;
+      }
+      if (skew < 12) break;
+      await sleep(700);
+    }
     check('Beide Bildschirme haben denselben Verkehr', tH.length > 30 && tH.length === tC.length, `${tH.length} / ${tC.length} Fahrzeuge`);
-    // Rennzeit beider Bildschirme auf denselben Augenblick umgerechnet (der Mitspieler eilt um die Laufzeit seiner Eingaben voraus)
-    const skew = Math.abs(tH[0].time + ((tC[0].wall - tH[0].wall) / 1000) * 60 - tC[0].time);
     check('Rennzeit des Mitspielers läuft mit der des Hosts (Abweichung < 0,2 s)', skew < 12, `${(skew / 60).toFixed(3)} s`);
     const lapLen = (await kart(h7.page, 'track()')).length;
     const drift = Math.max(...tH.map((v, i) => { const d = Math.abs(v.at0 - tC[i].at0) % lapLen; return Math.min(d, lapLen - d); }));
@@ -960,8 +976,17 @@ async function main() {
     let peak = 0;
     for (let attempt = 0; attempt < 3 && (crash[0] === 0 || crash[1] === 0); attempt++) {
       const buses = (await kart(h7.page, 'traffic()')).filter((v) => v.kind === 2);
-      // Ein Bus auf der Startgeraden oder einem anderen geraden Stück ist nicht nötig – 18 m dahinter reicht in jeder Lage.
-      const bus = buses[attempt % buses.length];
+      // Ben gibt nur Gas und lenkt nicht: Der Bus muss auf einem Stück fahren, das die nächsten 60 m gerade bleibt –
+      // sonst fährt Ben in der Kurve an ihm vorbei in die Bande. Also die Busse nach der Krümmung vor ihnen ordnen.
+      const bend = async (v) => {
+        const [p0, p1, p2] = await Promise.all([kart(h7.page, `spot(${v.at - 20}, 0)`), kart(h7.page, `spot(${v.at + 10}, 0)`), kart(h7.page, `spot(${v.at + 45}, 0)`)]);
+        const a1 = Math.atan2(p1[0] - p0[0], p1[2] - p0[2]);
+        const a2 = Math.atan2(p2[0] - p1[0], p2[2] - p1[2]);
+        return Math.abs(Math.atan2(Math.sin(a2 - a1), Math.cos(a2 - a1)));
+      };
+      const bends = await Promise.all(buses.map(bend));
+      const order = buses.map((v, i) => i).sort((x, y) => bends[x] - bends[y]);
+      const bus = buses[order[attempt % order.length]];
       await kart(h7.page, `place(1, ${bus.at - bus.half - 18}, ${bus.lat})`);
       await sleep(250);
       await c7.page.keyboard.down('ArrowUp');
@@ -1196,7 +1221,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen acht Strecken zur Wahl', cards === 8, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen neun Strecken zur Wahl', cards === 9, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1262,9 +1287,83 @@ async function main() {
     check('Sprungplatte: Ben fliegt weit und hoch – beim Host und auf seinem eigenen Bildschirm', airM[0] > 12 && airM[1] > 12 && topM > 2.5, `${airM[0]} / ${airM[1]} Abfragen in der Luft, ${topM.toFixed(1)} m über der Absprunghöhe`);
     check('Ben landet jenseits der Schlucht', landedM && !fellM, landedM ? 'gelandet' : fellM ? 'abgestürzt' : 'weder noch');
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Sturmhafen: Eine Böe schiebt Ben (Mitspieler) quer über die Bahn, Anna steht im Windschatten ruhig; ein Ponton hebt und senkt Ben.
+    await h7.page.locator('.track-card').nth(8).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 8, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 8, null, { timeout: 30000 });
+    const harborH = await kart(h7.page, 'harbor()');
+    const alleyIdx = harborH.winds.findIndex((w) => w.branch === -1 && w.lee.length > 0);
+    const alleyH = harborH.winds[alleyIdx];
+    check(
+      'Sturmhafen hat Böen mit Windschatten und Pontons auf beiden Wegen',
+      !!alleyH && harborH.winds.length >= 4 && harborH.pontoons.some((p) => p.branch === -1) && harborH.pontoons.some((p) => p.branch >= 0),
+      `${harborH.winds.length} Böen, ${harborH.pontoons.length} Pontons`,
+    );
+    // Ben mitten in die Lücke zwischen zwei Containerstapeln, Anna hinter den ersten Stapel.
+    const openAtH = (alleyH.lee[0].to + alleyH.lee[1].from) / 2;
+    const leeAtH = (alleyH.lee[0].from + alleyH.lee[0].to) / 2;
+    const leeLatH = (alleyH.lee[0].lat0 + alleyH.lee[0].lat1) / 2;
+    const latFrame = async (m) => {
+      const [p0, p1] = await Promise.all([kart(h7.page, `spot(${m}, 0)`), kart(h7.page, `spot(${m}, 1)`)]);
+      return (e) => (e.x - p0[0]) * (p1[0] - p0[0]) + (e.z - p0[2]) * (p1[2] - p0[2]);
+    };
+    const latOpenH = await latFrame(openAtH);
+    const latLeeH = await latFrame(leeAtH);
+    // Flaute abwarten, dann beide hinstellen und die nächste Böe ganz mitnehmen.
+    const untilCalmH = Date.now() + 12000;
+    while (Date.now() < untilCalmH) {
+      const w = (await kart(h7.page, 'harbor()')).winds[alleyIdx];
+      if (w.strength === 0 && w.warning === 0) break;
+      await sleep(60);
+    }
+    await kart(h7.page, `place(1, ${openAtH}, 0)`);
+    await kart(h7.page, `place(0, ${leeAtH}, ${leeLatH})`);
+    await sleep(400);
+    let gusted = [0, 0];
+    let leeShift = 0;
+    let gustSeen = 0;
+    const untilGustH = Date.now() + (alleyH.period + 3) * 1000;
+    while (Date.now() < untilGustH) {
+      const [eh, ec, now] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'harbor()')]);
+      const k = now.winds[alleyIdx].strength;
+      gustSeen = Math.max(gustSeen, k);
+      gusted[0] = Math.max(gusted[0], Math.sign(alleyH.push) * latOpenH(eh.find((e) => e.slot === 1)));
+      gusted[1] = Math.max(gusted[1], Math.sign(alleyH.push) * latOpenH(ec.find((e) => e.slot === 1)));
+      leeShift = Math.max(leeShift, Math.abs(latLeeH(eh.find((e) => e.slot === 0)) - leeLatH));
+      if (gustSeen > 0.9 && k === 0) break;
+      await sleep(50);
+    }
+    check('Böe: Ben wird quer über die Bahn geschoben – beim Host und auf seinem eigenen Bildschirm', gustSeen > 0.9 && gusted[0] > 2 && gusted[1] > 2, `${gusted[0].toFixed(1)} / ${gusted[1].toFixed(1)} m, Stärke ${gustSeen.toFixed(2)}`);
+    check('Windschatten: Anna steht hinter den Containern ruhig', gustSeen > 0.9 && leeShift < 0.4, `${leeShift.toFixed(2)} m`);
+    // Ponton der Hafeneinfahrt: eine ganze Periode lang mitschwanken.
+    const ponH = harborH.pontoons.find((p) => p.branch === -1);
+    await kart(h7.page, `place(1, ${ponH.at + ponH.length / 2}, 0)`);
+    await sleep(500);
+    const ponSwing = [[Infinity, -Infinity], [Infinity, -Infinity]];
+    let ponSank = false;
+    const untilPon = Date.now() + (ponH.period + 0.8) * 1000;
+    while (Date.now() < untilPon) {
+      const [eh, ec] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()')]);
+      [eh, ec].forEach((list, n) => {
+        const b = list.find((e) => e.slot === 1);
+        ponSwing[n][0] = Math.min(ponSwing[n][0], b.y);
+        ponSwing[n][1] = Math.max(ponSwing[n][1], b.y);
+        if (b.respawn > 0) ponSank = true;
+      });
+      await sleep(50);
+    }
+    const ponHubH = ponSwing[0][1] - ponSwing[0][0];
+    const ponHubC = ponSwing[1][1] - ponSwing[1][0];
+    check('Ponton: Ben hebt und senkt sich mit dem Seegang – beim Host und auf seinem eigenen Bildschirm', !ponSank && ponHubH > ponH.amp * 1.5 && ponHubC > ponH.amp * 1.5 && ponHubH < ponH.amp * 2.6, `Hub ${ponHubH.toFixed(2)} / ${ponHubC.toFixed(2)} m bei Ausschlag ±${ponH.amp} m`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die acht großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die neun großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

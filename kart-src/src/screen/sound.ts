@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
@@ -58,6 +58,7 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'icicle',
   'launch',
   'meteor',
+  'gust',
 ]);
 
 export class Sound {

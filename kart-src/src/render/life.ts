@@ -11,6 +11,7 @@ import { buildEisLife } from './life/eis';
 import { buildGlutLife } from './life/glut';
 import { buildKlippeLife } from './life/klippe';
 import { buildMondLife } from './life/mond';
+import { buildHafenLife } from './life/hafen';
 import { buildNachtLife } from './life/nacht';
 import { buildRiffLife } from './life/riff';
 import { buildWerkshofLife } from './life/werkshof';
@@ -45,6 +46,8 @@ export function buildLife(world: World): Life | null {
       return buildEisLife(world);
     case 'mond':
       return buildMondLife(world);
+    case 'hafen':
+      return buildHafenLife(world);
     default:
       return null;
   }

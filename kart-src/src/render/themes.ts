@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Sturmhafen: tiefe Wolken, nasser Asphalt, graugrüne See mit Schaumkronen.
+  hafen: {
+    sky: [0x1d2430, 0x46525f, 0x97a6ae],
+    fog: 0x84939b,
+    fogNear: 90,
+    fogFar: 460,
+    sunDir: [-0.35, 0.7, 0.45],
+    sunColor: 0xdde8ef,
+    sunIntensity: 1.6,
+    hemiSky: 0xbccbd6,
+    hemiGround: 0x4a535b,
+    hemiIntensity: 1.35,
+    disc: 0xc9d4dc,
+    discSize: 18,
+    clouds: 0x5d6774,
+    cloudShade: 0x39414c,
+    stars: false,
+    road: 0x3c414c,
+    roadAlt: 0x444a56,
+    line: 0xffd23f,
+    kerbA: 0xe5483a,
+    kerbB: 0xf2efe6,
+    shoulder: 0x5c626c,
+    wallA: 0xf2c230,
+    wallB: 0x23262d,
+    wallCap: 0x23262d,
+    deck: 0x7a8088,
+    deckDark: 0x4b5058,
+    pillar: 0x3b3f46,
+    ground: [0x6b7179, 0x57616b, 0x49515b, 0x8b939b],
+    liquidY: -3.2,
+    liquid: [0x1d3746, 0x2e5363, 0xcfe3ea],
+    liquidGlow: false,
+    farY: -10,
+    rough: 0.6,
+  },
   // Industriehof in der Abendsonne: warmes Orange, lange Schatten, Türkis als Gegenfarbe.
   werkshof: {
     sky: [0x3f6fc4, 0xf2a765, 0xffe2a8],
