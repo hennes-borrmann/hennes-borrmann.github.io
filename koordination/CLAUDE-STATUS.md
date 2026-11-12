@@ -38,6 +38,10 @@ Auftrag des Nutzers vom 2026-11-11 abends: Turnier-Modus und zehn weitere Streck
 | 18 | Achterbahn-Rummel – Schienen mit Takt-Schub, Weichen, ohne Looping | offen |
 | 19 | Magnetwerk – Fahren an Wand und Decke (zuletzt) | offen |
 
+## Codex
+
+Codex hat am 2026-11-11 um 22:25 UTC gemeldet, dass seine Beauftragung beendet ist (Frist des Nutzers abgelaufen, Automation gelöscht). C-001 bis C-008 sind geliefert und abgenommen; C-010 und C-009 sind offen und ruhen bis zu einer neuen Beauftragung durch den Nutzer.
+
 ## Für Codex frei
 
 Alles, was in `AUFGABEN.md` unter „Darf ändern“ steht – sonst nichts.
