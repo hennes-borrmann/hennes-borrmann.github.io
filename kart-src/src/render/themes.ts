@@ -70,6 +70,44 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Vulkaninsel im Ausbruch: tiefe Abendsonne über dem Meer, unten heller Küstenfels und
+  // grüne Macchia, oben schwarze Schlacke; über dem Krater ein Aschehimmel mit Glutschein.
+  // Die Fahrbahn bleibt überall heller bzw. kühler als das Gelände daneben.
+  vulkan: {
+    sky: [0x2a1d3c, 0x9a4652, 0xffb066],
+    fog: 0xc0786a,
+    fogNear: 150,
+    fogFar: 640,
+    sunDir: [-0.55, 0.36, -0.62],
+    sunColor: 0xffcf9a,
+    sunIntensity: 2.5,
+    hemiSky: 0xd6c0d8,
+    hemiGround: 0xff8a4a,
+    hemiIntensity: 1.15,
+    disc: 0xffe0a8,
+    discSize: 30,
+    clouds: 0x6a5260,
+    cloudShade: 0x3a2a36,
+    stars: false,
+    road: 0x4d5266,
+    roadAlt: 0x565b70,
+    line: 0xfff1cc,
+    kerbA: 0xff6a1f,
+    kerbB: 0xf4efe4,
+    shoulder: 0xd9c08c,
+    wallA: 0xf4efe4,
+    wallB: 0xff6a1f,
+    wallCap: 0x2a2430,
+    deck: 0x6c6470,
+    deckDark: 0x3a333d,
+    pillar: 0x2e2a33,
+    ground: [0xe6cf98, 0x74a64c, 0xb0806a, 0x2b2429],
+    liquidY: -4,
+    liquid: [0x173a5c, 0x2a6a96, 0xf2b48e],
+    liquidGlow: false,
+    farY: -11,
+    rough: 6,
+  },
   // Sturmhafen: tiefe Wolken, nasser Asphalt, graugrüne See mit Schaumkronen.
   hafen: {
     sky: [0x1d2430, 0x46525f, 0x97a6ae],

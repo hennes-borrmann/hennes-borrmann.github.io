@@ -94,6 +94,17 @@ async function openPhone(name, pairUrl, device = devices['iPhone 13'], side = 1,
       );
     }, 1000 / 60);
   });
+  // Jede Rückmeldung (Randblitz) mit Zeitpunkt mitschreiben: Das Handy zeigt immer nur die jüngste – ein einzelner
+  // Blick nach fester Wartezeit übersieht sie, sobald eine weitere (Bande, Landung) folgt oder die Seite kurz hängt.
+  await ctx.addInitScript(() => {
+    window.__tones = [];
+    const watch = () => {
+      const el = document.getElementById('flash');
+      if (!el) return void setTimeout(watch, 30);
+      new MutationObserver(() => window.__tones.push({ tone: el.dataset.tone, at: performance.now() })).observe(el, { attributes: true, attributeFilter: ['data-tone'] });
+    };
+    watch();
+  });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log(`   [${name}] SEITENFEHLER ${e.message}`));
   const cdp = await ctx.newCDPSession(page);
@@ -115,6 +126,22 @@ async function openPhone(name, pairUrl, device = devices['iPhone 13'], side = 1,
   await apply();
   return phone;
 }
+
+/** Uhr des Handys (für sawTone). */
+const phoneNow = (phone) => phone.page.evaluate(() => performance.now());
+
+/** Hat das Handy seit since (seine Uhr) eine Rückmeldung dieser Sorte gezeigt? Wartet bis zu timeout ms darauf. */
+async function sawTone(phone, tone, since, timeout = 2000) {
+  const seen = () => phone.page.evaluate(([t, a]) => window.__tones.some((x) => x.tone === t && x.at >= a), [tone, since]);
+  for (const until = Date.now() + timeout; Date.now() < until; ) {
+    if (await seen()) return true;
+    await sleep(60);
+  }
+  return seen();
+}
+
+/** Die Rückmeldungen des Handys seit since, als Text für die Ausgabe. */
+const tonesSince = (phone, since) => phone.page.evaluate((a) => window.__tones.filter((x) => x.at >= a).map((x) => `${x.tone}@${Math.round(x.at - a)}`).join(' ') || 'keine', since);
 
 async function startPhone(phone) {
   await phone.page.waitForSelector('#ctl[data-screen="start"]');
@@ -336,13 +363,21 @@ async function main() {
     await kart(host.page, 'giveItem(1, 1)');
     await phoneB.page.waitForFunction(() => window.__ctl.hud() && window.__ctl.hud().item === 1, null, { timeout: 3000 });
     check('Bens Handy zeigt das Item an', (await phoneB.page.textContent('#pad-item-name')) === 'Zisch');
+    const tipAt = await phoneNow(phoneB);
     await press(phoneB, 'item');
     await sleep(80);
     await release(phoneB, 'item');
-    await sleep(350);
-    const boosted = await kart(host.page, 'authoritative(1)');
-    check('Tipp auf Item: Schub wirkt beim Host', boosted.boost > 0 && boosted.item === 0, `noch ${boosted.boost} Ticks`);
-    check('… und Bens Handy bekommt die Rückmeldung', (await ctl(phoneB.page, 'lastFlash()')) === 'boost');
+    // Der Tipp läuft vom Handy über Bens Bildschirm zum Host; ohne Grafikkarte hängen die Seiten dabei gelegentlich
+    // einige Zehntelsekunden. Gemessen wird, dass er ankommt und wirkt – nicht, dass er nach genau 430 ms gewirkt hat.
+    let boosted = await kart(host.page, 'authoritative(1)');
+    const tipSent = Date.now();
+    while (Date.now() - tipSent < 2500 && !(boosted.boost > 0 && (boosted.item === 0 || boosted.roulette > 0))) {
+      await sleep(50);
+      boosted = await kart(host.page, 'authoritative(1)');
+    }
+    // (Das Item ist verbraucht, wenn der Schub läuft – fährt Ben inzwischen durch eine Kiste, läuft schon das nächste Roulette.)
+    check('Tipp auf Item: Schub wirkt beim Host', boosted.boost > 0 && (boosted.item === 0 || boosted.roulette > 0), `noch ${boosted.boost} Ticks, Item ${boosted.item}, nach ${Date.now() - tipSent + 80} ms`);
+    check('… und Bens Handy bekommt die Rückmeldung', await sawTone(phoneB, 'boost', tipAt), await tonesSince(phoneB, tipAt));
 
     // Rollreifen von Anna: erscheint auf beiden Bildschirmen
     await kart(host.page, 'giveItem(0, 2)');
@@ -415,20 +450,26 @@ async function main() {
     // Treffer: nur der Host weiß davon – Ben dreht sich auf beiden Bildschirmen, sein Handy meldet es
     await release(phoneA, 'gas');
     await release(phoneB, 'gas');
+    // Wer gerade getroffen wurde (Annas Rollreifen, eine Presse, ein Item der KI), ist kurz unverwundbar – dann bliebe
+    // der Treffer hier ohne Wirkung und ohne Rückmeldung. Erst abwarten, bis Ben wieder verwundbar ist.
+    let benBefore = await kart(host.page, 'authoritative(1)');
+    const wasShielded = benBefore.shield > 0 || benBefore.spin > 0;
+    for (const until = Date.now() + 6000; Date.now() < until && (benBefore.shield > 0 || benBefore.spin > 0 || benBefore.respawn > 0 || benBefore.tow > 0 || benBefore.guard > 0); ) {
+      await sleep(100);
+      benBefore = await kart(host.page, 'authoritative(1)');
+    }
+    const hitAt = await phoneNow(phoneB);
     await kart(host.page, 'debugHit(1)');
     // Die Anzeige folgt mit dem nächsten gezeichneten Bild; mehrmals nachsehen.
     const spinSeen = [0, 0];
-    let hitFlash = false;
-    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0 && hitFlash); i++) {
+    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0); i++) {
       await sleep(100);
-      // Das Handy zeigt immer nur das jüngste Zeichen – gleich mit nachsehen, bevor ein anderes folgt.
-      if ((await ctl(phoneB.page, 'lastFlash()')) === 'bad') hitFlash = true;
       const [eh, ec] = await Promise.all([kart(host.page, 'entities()'), kart(client.page, 'entities()')]);
       spinSeen[0] = Math.max(spinSeen[0], eh.find((e) => e.slot === 1).spin);
       spinSeen[1] = Math.max(spinSeen[1], ec.find((e) => e.slot === 1).spin);
     }
     check('Treffer: Ben schleudert beim Host und auf seinem eigenen Bildschirm', spinSeen[0] > 0 && spinSeen[1] > 0, `${spinSeen[0]} / ${spinSeen[1]} Ticks`);
-    check('… und sein Handy meldet den Treffer', hitFlash || (await ctl(phoneB.page, 'lastFlash()')) === 'bad');
+    check('… und sein Handy meldet den Treffer', await sawTone(phoneB, 'bad', hitAt), `${await tonesSince(phoneB, hitAt)}${wasShielded ? ' (Ben war kurz zuvor getroffen worden: abgewartet)' : ''}`);
 
     // Anhalten: danach müssen beide Bildschirme exakt dasselbe zeigen.
     await sleep(3500);
@@ -625,8 +666,16 @@ async function main() {
     await late.page.waitForSelector('#modal:not([hidden])', { timeout: 20000 });
     check('Beitritt während des Rennens: klare Absage', (await late.page.textContent('#modal-title')).includes('läuft'));
     await late.ctx.close();
+    if (process.env.VERBOSE) console.log('        vor „Zur Lobby“: Host', await kart(host.page, 'role()'), await kart(host.page, 'view()'), '· Mitspieler', await kart(client.page, 'role()'), await kart(client.page, 'clientStatus()'), await kart(client.page, 'view()'));
     await toLobby(host.page);
-    await client.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+    if (process.env.VERBOSE) {
+      for (let i = 0; i < 16; i++) {
+        console.log('        ', i * 500, 'ms · Host', await kart(host.page, 'role()'), await kart(host.page, 'view()'), JSON.stringify((await kart(host.page, 'lobby()'))?.players?.map((p) => [p.name, p.online])), '· Mitspieler', await kart(client.page, 'role()'), await kart(client.page, 'clientStatus()'), await kart(client.page, 'view()'));
+        await sleep(500);
+      }
+    }
+    // Vier Bildschirme teilen sich hier einen Rechner ohne Grafikkarte: Der Mitspieler braucht unter Last länger als 5 s.
+    await client.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     check('Host holt alle zurück in die Lobby', true);
   }
 
@@ -740,7 +789,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Neun Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 9);
+    check('Zehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 10);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -924,7 +973,7 @@ async function main() {
 
   if (wants('mechanics')) {
     // === Streckenmechanik ====================================================
-    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte, Böe und Ponton');
+    section('Streckenmechanik: Verkehr auf zwei Bildschirmen, Auffahrunfall, Geysir, Stampfpresse, Gezeiten, Fliegen, Tauchen, Lawine, Sprungplatte, Böe und Ponton, Bruchstelle und Tor');
     // (&alle=1: auch die Strecken, die die Lobby noch nicht anbietet – ihre Mechanik wird trotzdem geprüft.)
     const h7 = await openScreen('host7', '&laps=2&alle=1');
     const code7 = await createLobby(h7, 'Anna');
@@ -1093,7 +1142,14 @@ async function main() {
     };
     const [tideH0, tideC0] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
     check('Das Rennen beginnt bei Ebbe', tideH0 && tideH0.phase === 0, tideH0 ? `Stand ${tideH0.phase}, Wasser ${tideH0.level.toFixed(2)} m` : 'keine Gezeit');
-    const skewT = tideH0 && tideC0 ? Math.abs(tideH0.time + ((tideC0.wall - tideH0.wall) / 1000) * 60 - tideC0.time) : 999;
+    // Wie beim Verkehr: Der Mitspieler baut seine Welt ohne Grafikkarte erst auf, während das Rennen schon läuft, und holt
+    // die Uhr dann ein. Gemessen wird der eingeschwungene Zustand – bis zu dreimal, die beste Messung zählt.
+    let skewT = tideH0 && tideC0 ? Math.abs(tideH0.time + ((tideC0.wall - tideH0.wall) / 1000) * 60 - tideC0.time) : 999;
+    for (let n = 0; n < 3 && skewT >= 12 && tideH0 && tideC0; n++) {
+      await sleep(n === 0 ? 2500 : 700);
+      const [a, b] = await Promise.all([kart(h7.page, 'tide()'), kart(c7.page, 'tide()')]);
+      skewT = Math.min(skewT, Math.abs(a.time + ((b.wall - a.wall) / 1000) * 60 - b.time));
+    }
     check('Gezeit des Mitspielers läuft mit der des Hosts (Abweichung < 0,2 s)', skewT < 12, `${(skewT / 60).toFixed(3)} s`);
     const dry = await dip();
     await h7.page.waitForFunction(() => window.__kart.tide().phase === 1, null, { timeout: 40000 });
@@ -1221,7 +1277,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen neun Strecken zur Wahl', cards === 9, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen zehn Strecken zur Wahl', cards === 10, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1361,9 +1417,63 @@ async function main() {
     const ponHubC = ponSwing[1][1] - ponSwing[1][0];
     check('Ponton: Ben hebt und senkt sich mit dem Seegang – beim Host und auf seinem eigenen Bildschirm', !ponSank && ponHubH > ponH.amp * 1.5 && ponHubC > ponH.amp * 1.5 && ponHubH < ponH.amp * 2.6, `Hub ${ponHubH.toFixed(2)} / ${ponHubC.toFixed(2)} m bei Ausschlag ±${ponH.amp} m`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
+
+    // Vulkaninsel: Die Strecke verändert sich nach Plan – auf beiden Bildschirmen gleich. Ben (Mitspieler) steht auf
+    // einer Platte, als sie wegbricht.
+    await h7.page.locator('.track-card').nth(9).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 9, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 9, null, { timeout: 30000 });
+    // Stand beider Bildschirme zur selben Rennzeit: die Uhr des Mitspielers folgt dem Host nach einem Zeitsprung erst nach einem Moment.
+    const changesAt = async (sec) => {
+      await kart(h7.page, `clock(${sec})`);
+      const until = Date.now() + 8000;
+      let pair = null;
+      while (Date.now() < until) {
+        const [a, b] = await Promise.all([kart(h7.page, 'changes()'), kart(c7.page, 'changes()')]);
+        pair = [a, b];
+        if (Math.abs(a.time - b.time) < 30 && a.time >= sec * 60) break;
+        await sleep(150);
+      }
+      return pair;
+    };
+    const state = (x) => `${x.holes.map((h) => (h.open ? 1 : 0)).join('')}/${x.gates.map((g) => (g.shut ? 1 : 0)).join('')}`;
+    const tubeV = (x) => x.gates.find((g) => g.branch === 0);
+    const bridgeV = (x) => x.gates.find((g) => g.branch === 1);
+    const [v0h, v0c] = await changesAt(5);
+    check('Vulkaninsel hat Bruchstellen und zwei Tore; zu Beginn trägt alles, die Lavaröhre ist zu, die Hängebrücke offen', v0h.holes.length >= 12 && v0h.holes.every((h) => !h.open) && tubeV(v0h).shut && !bridgeV(v0h).shut && state(v0h) === state(v0c), `${v0h.holes.length} Bruchstellen · ${state(v0h)} / ${state(v0c)}`);
+    // Ben auf die erste Platte des Kraterrands, kurz bevor sie bricht.
+    const slab = v0h.holes.filter((h) => h.branch === -1).sort((a, b) => a.breaksAt - b.breaksAt)[0];
+    const slabLat = (Math.max(slab.lat0, -9) + Math.min(slab.lat1, 9)) / 2;
+    await kart(h7.page, `clock(${slab.breaksAt - 2.5})`);
+    await kart(h7.page, `place(1, ${slab.at + slab.length / 2}, ${slabLat})`);
+    await sleep(700);
+    const standing = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
+    let fellV = [false, false];
+    let fellAtV = -1;
+    const untilV9 = Date.now() + 9000;
+    while (Date.now() < untilV9 && !(fellV[0] && fellV[1])) {
+      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
+      if (eh.find((e) => e.slot === 1).respawn > 0 && !fellV[0]) {
+        fellV[0] = true;
+        fellAtV = ch.time / 60;
+      }
+      if (ec.find((e) => e.slot === 1).respawn > 0) fellV[1] = true;
+      await sleep(50);
+    }
+    check('Die Platte trägt, bis ihre Zeit gekommen ist', standing.respawn === 0 && !(standing.flags & 8), `Ben steht bei ${(slab.breaksAt - 2.5).toFixed(1)} s`);
+    check('Platte bricht: Ben stürzt – beim Host und auf seinem eigenen Bildschirm', fellV[0] && fellV[1] && fellAtV >= slab.breaksAt, `Sturz bei ${fellAtV.toFixed(1)} s (Bruch ${slab.breaksAt} s)`);
+    const [v1h, v1c] = await changesAt(60);
+    check('Nach 50 Sekunden ist die Lavaröhre frei – auf beiden Bildschirmen', !tubeV(v1h).shut && !tubeV(v1c).shut && !bridgeV(v1h).shut && state(v1h) === state(v1c), `${state(v1h)} / ${state(v1c)}`);
+    const [v2h, v2c] = await changesAt(95);
+    check('Nach 84 Sekunden ist die Hängebrücke gesperrt und eingestürzt – auf beiden Bildschirmen', bridgeV(v2h).shut && bridgeV(v2c).shut && v2h.holes.filter((h) => h.branch === 1).every((h) => h.open) && state(v2h) === state(v2c), `${state(v2h)} / ${state(v2c)}`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die neun großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die zehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 
@@ -1531,7 +1641,7 @@ async function whereAreThePages() {
           page.evaluate(() => {
             const k = window.__kart;
             const el = document.getElementById('app');
-            return JSON.stringify({ view: el && el.dataset.view, race: k && k.race ? k.race() : null, scene: k && k.scene ? k.scene() : null, start: !!document.getElementById('btn-start'), modal: document.getElementById('modal') ? !document.getElementById('modal').hidden : null });
+            return JSON.stringify({ role: k && k.role ? k.role() : null, clientStatus: k && k.clientStatus ? k.clientStatus() : null, lobby: k && k.lobby ? (() => { try { const l = k.lobby(); return l ? { phase: l.phase, players: l.players.map((p) => [p.slot, p.name, p.online]) } : null; } catch (e) { return String(e); } })() : null, view: el && el.dataset.view, race: k && k.race ? k.race() : null, scene: k && k.scene ? k.scene() : null, start: !!document.getElementById('btn-start'), modal: document.getElementById('modal') ? !document.getElementById('modal').hidden : null, modalTitle: document.getElementById('modal-title') ? document.getElementById('modal-title').textContent : null, modalText: document.getElementById('modal-body') ? document.getElementById('modal-body').textContent.slice(0, 200) : null });
           }),
           sleep(5000).then(() => 'antwortet nicht binnen 5 s'),
         ]).catch((err) => 'Fehler: ' + err.message);

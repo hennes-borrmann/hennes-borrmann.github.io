@@ -41,6 +41,7 @@ import {
   PULSE_PRESS,
   PULSE_VENT,
   WATER_FROM,
+  planActive,
   pulseCycle,
   tideLevel,
   vehicleAt,
@@ -128,7 +129,15 @@ export interface SceneEvent {
     | 'meteor'
     /** Sturmhafen: eine Böe setzt ein (slot −1, ortsfest), das eigene Kart steckt in der Böe (wiederholt). */
     | 'gust'
-    | 'storm';
+    | 'storm'
+    /**
+     * Vulkaninsel (alle ortsfest, slot −1): eine Platte beginnt zu bröckeln / bricht weg;
+     * ein Weg schließt sich (die Brücke stürzt ein) / öffnet sich (die Lavaröhre läuft leer).
+     */
+    | 'crumble'
+    | 'crack'
+    | 'collapse'
+    | 'drain';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -807,6 +816,34 @@ export class RaceScene {
         if (gustStrength(w, time) > 0 && gustStrength(w, before) === 0) {
           const mid = w.first + (w.count >> 1);
           this.emitAt('gust', t.px[mid], t.py[mid], t.pz[mid]);
+        }
+      }
+      // Vulkaninsel: Platten bröckeln und brechen, Wege schließen und öffnen sich.
+      for (const h of t.holes) {
+        const warned = planActive(h.plan, time + h.warn) && !planActive(h.plan, before + h.warn);
+        const broke = planActive(h.plan, time) && !planActive(h.plan, before);
+        if (!warned && !broke) continue;
+        const mid = h.first + (h.count >> 1);
+        // Die Hängebrücke ist aus Holz: ihr Einsturz hat einen eigenen Klang ('collapse', beim Schließen des Tors) –
+        // das Bröckeln und Brechen von Stein passt dort nicht.
+        if (SURFACES[t.surf[mid]]?.id === 'wood') continue;
+        const lat = (Math.max(h.lat0, -t.wh[mid]) + Math.min(h.lat1, t.wh[mid])) / 2;
+        const hx = t.px[mid] + rightX(t, mid) * lat;
+        const hz = t.pz[mid] + rightZ(t, mid) * lat;
+        this.emitAt(broke ? 'crack' : 'crumble', hx, t.py[mid], hz, broke ? 140 : 90);
+        if (broke && me) {
+          const d = Math.hypot(me.x - hx, me.z - hz);
+          if (d < 50) this.shake = Math.max(this.shake, 0.5 * (1 - d / 50));
+        }
+      }
+      for (const g of t.gates) {
+        const shut = planActive(g.plan, time);
+        if (shut === planActive(g.plan, before)) continue;
+        // Das hört die ganze Insel – in der Ferne leise.
+        this.emitAt(shut ? 'collapse' : 'drain', t.px[g.first], t.py[g.first], t.pz[g.first], 600);
+        if (shut && me) {
+          const d = Math.hypot(me.x - t.px[g.first], me.z - t.pz[g.first]);
+          if (d < 80) this.shake = Math.max(this.shake, 0.6 * (1 - d / 80));
         }
       }
       for (const p of t.pulses) {

@@ -1,15 +1,16 @@
 # Stand Claude
 
-Zuletzt aktualisiert: 2026-11-12 00:40 UTC · geschrieben nur von Claude
+Zuletzt aktualisiert: 2026-11-12 05:45 UTC · geschrieben nur von Claude
 
 ## Woran gerade gearbeitet wird
 
 | Wer | Aufgabe | Bereich (für Codex gesperrt) |
 | --- | --- | --- |
-| Claude | Zehn weitere Strecken, siehe Plan: Schritt 11 (Vulkaninsel) – Spielseite fertig, Darstellung/Kulisse/Ton in Arbeit; Schritt 12 (Zeitriss-Ruine) – Spielseite fertig, Darstellung offen. Beides in eigenen Arbeitszweigen, noch nicht auf `main`. | `kart-src/src/**`, `kart-src/tests/**`, `kart-src/tools/**`, `kart-src/public/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
+| Claude | Zehn weitere Strecken, siehe Plan: Schritt 12 (Zeitriss-Ruine) – alle Teile fertig, wird zusammengeführt und geprüft; Schritt 13 (Gewitterkamm) – Spielseite fertig, Darstellung/Kulisse/Ton in Arbeit; Schritt 14 (Dschungel-Fluss) und 15 (Spiegelkabinett) – Spielseite fertig, Darstellung offen. Alles in eigenen Arbeitszweigen, noch nicht auf `main`. | `kart-src/src/**`, `kart-src/tests/**`, `kart-src/tools/**`, `kart-src/public/**` (außer den Dateien, die in `AUFGABEN.md` freigegeben sind), `kart/**` |
 
 ## Veröffentlicht
 
+- Schritt 11 (2026-11-12, Version 261112-0116, Protokoll 15, zehn Strecken): Vulkaninsel – die Strecke zerbricht nach festem Zeitplan: Platten am Kraterrand und auf der Basaltbrücke bröckeln (2,5 s Vorwarnung) und stürzen in den Glutgraben; die Hängebrücke stürzt nach 84 s ein, die Lavaröhre läuft nach 50 s leer und öffnet sich; Ampeln an beiden Gabelungen; KI plant um. Eigene Kulisse (Fischerdorf, Küste, Krater mit Lavasee und Aschesäule), vier Geräusche, eigenes Rennstück. Netz: Die Rennzeit darf negativ sein (Startzeitpunkt als Int32). Geprüft: 361 Unit-Tests; Browser-Test (Chromium, Software-Rendering) auf der unbelasteten Maschine 170 von 172 – die zwei offenen Prüfungen (Rückmeldung am Handy nach Item-Tipp und nach Treffer) lagen an den Prüfungen selbst: Sie sahen nur einmal nach fester Wartezeit nach bzw. trafen ein Kart, das kurz zuvor schon getroffen und deshalb unverwundbar war. Jetzt schreibt der Test jede Rückmeldung des Handys mit Zeitpunkt mit und wartet, bis das Kart verwundbar ist; der Abschnitt lief danach fünfmal hintereinander fehlerfrei (41 von 41). Nicht geprüft: Safari/iPad, Höreindruck.
 - Schritt 10 (2026-11-12, Version 261111-2057, Protokoll 14, neun Strecken): Sturmhafen – Böen mit Vorwarnung (Windsäcke mit Ampel, Böenschleier) und Windschatten hinter Containerstapeln; schwankende Pontons (Pontonbrücke mit Geländer, Pontonkette ohne); pendelnde Container am Kran; eigene Kulisse, Geräusche und Musik. Geprüft: 329 Unit-Tests; Browser-Test 165 von 167 im ganzen Lauf, der Abschnitt Streckenmechanik danach 60 von 60 (siehe nächste Zeile). Nicht geprüft: Safari/iPad.
 - Korrektur an zwei Browser-Prüfungen (2026-11-12): „Rennzeit des Mitspielers“ und „Auffahrunfall“ scheiterten seit dem Turnier-Stand in jedem Lauf. Ursache war die Prüfung, nicht das Spiel: Ohne Grafikkarte steht der Bildschirm des Mitspielers vom Klick auf Start bis etwa 5,5 s nach „Los“ (gemessen: 11,5–12,3 s, in Version 261111-1008 und im neuen Stand gleich), die Uhr wurde genau in diesem Moment verglichen; und das Test-Kart wurde hinter einen Bus gesetzt, der auch in einer Kurve fahren konnte. Jetzt wird im eingeschwungenen Zustand gemessen (Abweichung 0,02 s) und ein Bus auf gerader Strecke gewählt. Die Aussage beim Turnier-Stand („Messumgebung“) war damit im Ergebnis richtig, aber nicht sauber belegt – das ist nachgeholt.
 - Turnier-Modus (2026-11-11, Version 261111-2006, Protokoll 13): In der Lobby wählt der Host „Einzelrennen“ oder „Turnier“ mit 3, 5 oder 10 Rennen. Vor jedem Rennen wird die Strecke ausgelost – ein Streifen mit den Bildern aller Strecken läuft auf allen Bildschirmen von rechts nach links durch und bleibt an der Marke stehen (keine Strecke zweimal, bevor alle dran waren). Sterne je Rennen: einer für jedes Kart, das man hinter sich lässt (höchstens 3); Gesamtwertung nach Sternen, dann Siegen, dann letztem Rennen. Streckenbilder liegen als JPG in `kart-src/public/karten/` und entstehen mit `kart-src/tools/streckenbilder.cjs`. Geprüft: 299 Unit-Tests; Browser-Test 161 von 163 – die zwei offenen (Uhrenabgleich und Auffahrunfall im Abschnitt Streckenmechanik) scheitern unter derselben Maschinenlast genauso an der zuvor veröffentlichten Version 261111-1008, sind also Messumgebung. Nicht geprüft: Safari/iPad.
@@ -28,15 +29,19 @@ Auftrag des Nutzers vom 2026-11-11 abends: Turnier-Modus und zehn weitere Streck
 | --- | --- | --- |
 | T | Turnier-Modus | veröffentlicht (261111-2006) |
 | 10 | Sturmhafen – Wind (Böen, Windschatten hinter Containern), schwankende Pontons | veröffentlicht (261111-2057) |
-| 11 | Vulkaninsel im Ausbruch – Platten brechen nach Plan weg, die Hängebrücke stürzt ein, die Lavaröhre läuft leer und öffnet sich | in Arbeit |
-| 12 | Zeitriss-Ruine – alle 18 s springt die Welt zwischen „Einst“ und „Jetzt“: Hallenboden, Aquädukt und Schatzkammer wechseln | in Arbeit |
-| 13 | Gewitterkamm – Dunkelheit (Sicht über Nebel, kein neuer Shader), Blitze, Blitzableiter | offen |
-| 14 | Dschungel-Fluss – Flöße und Stämme, Strömung, Wasserfall-Sprung | offen |
-| 15 | Spiegelkabinett – Portale | offen |
+| 11 | Vulkaninsel im Ausbruch – Platten brechen nach Plan weg, die Hängebrücke stürzt ein, die Lavaröhre läuft leer und öffnet sich | veröffentlicht (261112-0116) |
+| 12 | Zeitriss-Ruine – alle 18 s springt die Welt zwischen „Einst“ und „Jetzt“: Hallenboden, Aquädukt und Schatzkammer wechseln | alle Teile fertig, Zusammenführung und Prüfung laufen |
+| 13 | Gewitterkamm – Dunkelheit (Sicht über Nebel, kein neuer Shader), Blitze, Blitzableiter mit Ladefeld | in Arbeit (Spielseite fertig) |
+| 14 | Dschungel-Fluss – Flöße und Stämme, Strömung, Wasserfall-Sprung | in Arbeit (Spielseite fertig) |
+| 15 | Spiegelkabinett – Portale (Spiegel, die vorwärts führen oder zurückwerfen) | in Arbeit (Spielseite fertig) |
 | 16 | Wüstenexpress – fahrender Zug, auf und neben den Waggons | offen |
 | 17 | Riesenkinderzimmer – Schrumpfen und Wachsen | offen |
 | 18 | Achterbahn-Rummel – Schienen mit Takt-Schub, Weichen, ohne Looping | offen |
 | 19 | Magnetwerk – Fahren an Wand und Decke (zuletzt) | offen |
+
+## Codex
+
+Codex hat am 2026-11-11 um 22:25 UTC gemeldet, dass seine Beauftragung beendet ist (Frist des Nutzers abgelaufen, Automation gelöscht). C-001 bis C-008 sind geliefert und abgenommen; C-010 und C-009 sind offen und ruhen bis zu einer neuen Beauftragung durch den Nutzer.
 
 ## Für Codex frei
 

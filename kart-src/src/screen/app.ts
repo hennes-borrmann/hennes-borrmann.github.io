@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, gustStrength, gustWarning, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, gustStrength, gustWarning, planActive, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1150,6 +1150,21 @@ export class App {
       } else this.wrongWaySince = 0;
     } else this.wrongWaySince = 0;
     const names = new Map(this.drivers(state).map((d) => [d.slot, d.name]));
+    // Die Strecke verändert sich (ein Tor geht auf oder zu): drei Sekunden lang melden.
+    let trackNote: string | null = null;
+    let trackNoteBad = false;
+    if (race.phase === RACE_RUNNING && TRACK.gates.length > 0) {
+      const ticks = -race.untilGo * TICK_RATE;
+      for (const g of TRACK.gates) {
+        const shut = planActive(g.plan, ticks);
+        if (ticks < 180 || shut === planActive(g.plan, ticks - 180)) continue;
+        const note = shut ? g.noteShut : g.noteOpen;
+        if (note) {
+          trackNote = note;
+          trackNoteBad = shut;
+        }
+      }
+    }
 
     const count = this.ents.length;
     this.ui.renderRaceHud({
@@ -1170,8 +1185,8 @@ export class App {
         me: st.slot === view.localSlot,
         done: st.finished,
       })),
-      banner: wrongWay ? 'Falsch herum!' : threat > 0 ? 'Kreisel im Anflug!' : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
-      bannerTone: wrongWay || threat > 0 ? 'bad' : 'info',
+      banner: wrongWay ? 'Falsch herum!' : threat > 0 ? 'Kreisel im Anflug!' : trackNote ? trackNote : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
+      bannerTone: wrongWay || threat > 0 || (trackNote !== null && trackNoteBad) ? 'bad' : 'info',
       fps: this.showFps && this.scene ? this.scene.stats.fps : null,
       smoke: this.scene?.smoke ?? 0,
     });
@@ -1476,6 +1491,21 @@ export class App {
           pontoons: TRACK.pontoons.map((p) => ({ ...where(p.first), length: p.count * TRACK.step, amp: p.amp, period: p.period / 60, lift: pontoonLift(p, time) })),
         };
       },
+      // Was sich an der Strecke nach Plan ändert, zur Rennzeit dieses Bildschirms: Bruchstellen (Meter ab Start bzw. ab
+      // Gabelung, seitliche Lage, ob gerade weggebrochen, wann sie zum ersten Mal bricht) und Tore (Abzweigung, ob gesperrt).
+      changes: () => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = view ? view.race(performance.now() / 1000).time : 0;
+        const where = (seg: number) => {
+          const branch = TRACK.branchOf[seg];
+          return { branch, at: (branch < 0 ? seg : seg - TRACK.branches[branch].first) * TRACK.step };
+        };
+        return {
+          time,
+          holes: TRACK.holes.map((h) => ({ ...where(h.first), length: h.count * TRACK.step, lat0: h.lat0, lat1: h.lat1, open: planActive(h.plan, time), breaksAt: h.plan.spans[0] / 60 })),
+          gates: TRACK.gates.map((g) => ({ branch: TRACK.branchOf[g.first], shut: planActive(g.plan, time) })),
+        };
+      },
       // Tauchen: Meeresspiegel, erster Streckenmeter unter Wasser (Hauptstrecke), Zahl der Strömungen und Blasenschlote.
       dive: () => {
         let from = -1;
@@ -1496,6 +1526,8 @@ export class App {
       place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),
       // Nur Host, nur für Tests: das Rennen sofort beenden, Zieleinlauf in der genannten Reihenfolge der Plätze.
       finish: (order?: number[]) => this.hostGame?.debugFinish(order),
+      // Nur Host, nur für Tests: die Rennzeit auf so viele Sekunden nach „Los“ stellen.
+      clock: (seconds: number) => this.hostGame?.debugClock(seconds),
       // Fotokamera für die Streckenbilder (tools/streckenbilder.cjs): Standort, Blickpunkt, Bildwinkel; ohne Angaben = aus.
       photo: (from?: number[], to?: number[], fov = 50) => {
         if (this.scene) this.scene.photo = from && to ? { from, to, fov } : null;

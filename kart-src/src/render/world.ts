@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { SURFACES } from '../game/surface';
 import {
+  EDGE_BROKEN,
   EDGE_DECK,
   EDGE_FLOAT,
   EDGE_FREE_L,
@@ -30,6 +31,25 @@ import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './too
 const WALL_H = 0.95;
 const WALL_T = 0.5;
 const DECK_D = 1.1;
+/** So breit bleibt unter der Bande ein Sims stehen, wenn daneben die Fahrbahn wegbricht (auch mechanics/volcano.ts). */
+export const HOLE_RIM = 0.5;
+/** So tief liegt das Gelände unter einem Steg, dessen Platten wegbrechen können: der Glutgraben (auch life/vulkan.ts). */
+export const PIT_D = 6;
+
+/** Krater der Vulkaninsel: Mitte, Halbmesser bis zur Mitte der Fahrbahn am Kraterrand, deren Höhe und halbe Breite; der Lavasee. */
+export interface Crater {
+  x: number;
+  z: number;
+  /** Abstand der Fahrbahnmitte am Kraterrand von der Kratermitte */
+  road: number;
+  /** Höhe der Fahrbahn am Kraterrand */
+  y: number;
+  /** halbe Breite der Fahrbahn dort (bis zur Bande) */
+  wh: number;
+  /** Halbmesser des Bodens, auf dem der Lavasee liegt, und die Höhe dieses Bodens */
+  floor: number;
+  floorY: number;
+}
 /** So wird ein Untergrund gezeichnet. */
 interface SurfaceLook {
   /** Zwei Töne der Fahrbahn im Wechsel alle band Abschnitte, c = Farbe der Einzelheiten. */
@@ -160,6 +180,8 @@ export class World {
   private nonDeck: number[] = [];
   private deckSegs: number[] = [];
   private idwSegs: number[] = [];
+  /** Vulkaninsel: der Krater, um dessen halben Rand die Strecke läuft (sonst null). */
+  crater: Crater | null = null;
   private life: Life | null = null;
   buildTimes: number[] = [];
 
@@ -185,8 +207,14 @@ export class World {
       if ((t.edge[i] & EDGE_DECK) === 0) {
         this.nonDeck.push(i);
         if (i % 8 === 0) this.idwSegs.push(i);
-      } else if (i % 2 === 0) this.deckSegs.push(i);
+      } else {
+        if (i % 2 === 0) this.deckSegs.push(i);
+        // Ein Steg, dessen Platten wegbrechen, liegt nicht frei in der Luft, sondern über einem Graben im Berg:
+        // die Form der Insel folgt ihm wie einer Fahrbahn am Boden.
+        if (i % 8 === 0 && this.pitAt(i)) this.idwSegs.push(i);
+      }
     }
+    if (t.def.theme === 'vulkan') this.crater = this.findCrater();
     this.center.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     this.radius = Math.hypot(maxX - minX, maxZ - minZ) / 2;
 
@@ -307,7 +335,7 @@ export class World {
     // Aussehen der Untergründe (Reihenfolge wie SURFACES in game/surface.ts).
     const dark = th.stars ? 0.72 : 1;
     const col = (hex: number): RGB => shade(rgb(hex), dark);
-    const crack = t.def.theme === 'glut' ? rgb(0xff8a2a) : t.def.theme === 'nacht' ? rgb(0x4ef0ff) : rgb(0x9a8fa3);
+    const crack = t.def.theme === 'glut' || t.def.theme === 'vulkan' ? rgb(0xff8a2a) : t.def.theme === 'nacht' ? rgb(0x4ef0ff) : rgb(0x9a8fa3);
     const wood: [RGB, RGB] = [col(0xa8794a), col(0x7a5a3c)];
     const looks: SurfaceLook[] = SURFACES.map((sf): SurfaceLook => {
       switch (sf.id) {
@@ -375,16 +403,68 @@ export class World {
       else b.quad(this.P(i, 0, -ui, dy), this.P(i, 0, -u0, dy), this.P(j, 0, -u0, dy), this.P(j, 0, -uj, dy), c);
     };
 
+    // Bruchstellen (Vulkaninsel): Was wegbrechen kann, zeichnet die Darstellung der Mechanik
+    // (mechanics/volcano.ts) – es bewegt sich. Hier bleibt in der Fahrbahn ein Loch genau dieser Form;
+    // nur ein schmaler Sims unter der Bande bleibt stehen (dorthin kommt kein Kart: sein Radius ist größer).
+    // Wo die Bruchstellen die ganze Breite nehmen (die Hängebrücke), gibt es gar keine feste Fahrbahn –
+    // das zählt wie eine Lücke.
+    const cuts: ([number, number][] | null)[] = new Array(t.total).fill(null);
+    const noRoad = new Uint8Array(t.total);
+    for (const h of t.holes) {
+      for (let seg = h.first; seg < h.first + h.count; seg++) {
+        const open = (t.edge[seg] & (EDGE_OPEN_L | EDGE_OPEN_R)) !== 0;
+        const rim = open ? 0 : HOLE_RIM;
+        const lo = Math.max(h.lat0, -t.wh[seg] + rim);
+        const hi = Math.min(h.lat1, t.wh[seg] - rim);
+        if (h.lat0 <= -t.wh[seg] && h.lat1 >= t.wh[seg]) noRoad[seg] = 1;
+        if (hi > lo) (cuts[seg] ??= []).push([lo, hi]);
+      }
+    }
+    /** Wie top, lässt aber die Bruchstellen aus: die erste Hälfte des Stücks gehört zum Abschnitt i, die zweite zum nächsten. */
+    const topH = (b: MeshBuilder, i: number, f0: number, f1: number, l0: number, l1: number, dy: number, c: RGB): void => {
+      const ci = cuts[i];
+      const cj = cuts[t.next[i]];
+      if (!ci && !cj) {
+        top(b, i, f0, f1, l0, l1, dy, c);
+        return;
+      }
+      for (let half = 0; half < 2; half++) {
+        const fa = half === 0 ? f0 : Math.max(f0, 0.5);
+        const fb = half === 0 ? Math.min(f1, 0.5) : f1;
+        if (fb <= fa) continue;
+        const cc = half === 0 ? ci : cj;
+        if (!cc) {
+          top(b, i, fa, fb, l0, l1, dy, c);
+          continue;
+        }
+        // seitlich: [l0, l1] ohne die Löcher
+        let rest: [number, number][] = [[l0, l1]];
+        for (const [lo, hi] of cc) {
+          const next: [number, number][] = [];
+          for (const [a, z] of rest) {
+            if (hi <= a || lo >= z) next.push([a, z]);
+            else {
+              if (lo > a) next.push([a, lo]);
+              if (hi < z) next.push([hi, z]);
+            }
+          }
+          rest = next;
+        }
+        for (const [a, z] of rest) if (z - a > 0.01) top(b, i, fa, fb, a, z, dy, c);
+      }
+    };
+
     /** Abschnitte, deren Zaun bzw. Leitplanke schon von einem längeren Stück abgedeckt ist (links, rechts). */
     const railL = new Uint8Array(t.total);
     const railR = new Uint8Array(t.total);
 
     for (let i = 0; i < t.total; i++) {
       const j = t.next[i];
-      // Wie eine Lücke gezeichnet wird auch, was schwimmt (EDGE_FLOAT): Pontons und ihre Übergänge
-      // zeichnet die Darstellung der Mechanik (sie bewegen sich), hier endet die feste Fahrbahn.
-      const gapI = (t.edge[i] & (EDGE_GAP | EDGE_FLOAT)) !== 0;
-      const gapJ = (t.edge[j] & (EDGE_GAP | EDGE_FLOAT)) !== 0;
+      // Wie eine Lücke gezeichnet wird auch, was schwimmt (EDGE_FLOAT) oder über die ganze Breite wegbrechen
+      // kann (noRoad): das zeichnet die Darstellung der Mechanik (es bewegt sich), hier endet die feste Fahrbahn.
+      const gapI = (t.edge[i] & (EDGE_GAP | EDGE_FLOAT)) !== 0 || noRoad[i] === 1;
+      const gapJ = (t.edge[j] & (EDGE_GAP | EDGE_FLOAT)) !== 0 || noRoad[j] === 1;
+      const holed = cuts[i] !== null || cuts[j] !== null;
       if (gapI && gapJ) continue;
       // Die Fahrbahn endet genau dort, wo für die Physik der Boden endet: auf halbem Weg zum Lückenabschnitt.
       const f0 = gapI ? 0.5 : 0;
@@ -418,7 +498,7 @@ export class World {
       const clipped = roadI !== Infinity || roadJ !== Infinity;
       const lane = (l0: number, l1: number, c: RGB): void => {
         if (clipped) topCut(solid, i, l0, l1, lower, c, fs, roadI, roadJ);
-        else top(solid, i, f0, f1, l0, l1, lower, c);
+        else topH(solid, i, f0, f1, l0, l1, lower, c);
       };
       if (look.detail === 'cobble' && !ramp) {
         // Pflaster: vier Bahnen im Schachbrett
@@ -428,8 +508,8 @@ export class World {
       for (const sgn of [-1, 1]) {
         const l0 = sgn < 0 ? -wh : rh;
         const l1 = sgn < 0 ? -rh : wh;
-        if (sgn !== fs) top(solid, i, f0, f1, l0, l1, 0, sh);
-        else if (!cut) top(solid, i, f0, f1, l0, l1, -0.025, sh);
+        if (sgn !== fs) topH(solid, i, f0, f1, l0, l1, 0, sh);
+        else if (!cut) topH(solid, i, f0, f1, l0, l1, -0.025, sh);
         else {
           const a = cutSh[i] === Infinity ? cutSh[j] : cutSh[i];
           const b = cutSh[j] === Infinity ? cutSh[i] : cutSh[j];
@@ -438,7 +518,7 @@ export class World {
       }
 
       // Was den Untergrund ausmacht: Fugen, Fahrrinnen, Nähte, Risse
-      if (!ramp && lower === 0 && f0 === 0 && f1 === 1) {
+      if (!ramp && lower === 0 && f0 === 0 && f1 === 1 && !holed) {
         const d = look.detail;
         if (d === 'planks') top(solid, i, 0, 0.14, -rh, rh, 0.012, look.c);
         else if (d === 'ruts') {
@@ -466,15 +546,15 @@ export class World {
             const wedge = Math.min(cutSh[i], cutSh[j]) > rh + 0.3;
             if (!wedge && (t.branchOf[i] >= 0 || i % 4 >= 2)) continue;
           }
-          if (sgn < 0) top(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cl);
-          else top(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cl);
+          if (sgn < 0) topH(paint, i, f0, f1, -rh + 0.25, -rh + 0.5, 0.03, cl);
+          else topH(paint, i, f0, f1, rh - 0.5, rh - 0.25, 0.03, cl);
         }
-        if (i % 8 < 3 && lower === 0 && look.plain) top(paint, i, f0, f1, -0.14, 0.14, 0.03, look.center ?? cl);
+        if (i % 8 < 3 && lower === 0 && look.plain) topH(paint, i, f0, f1, -0.14, 0.14, 0.03, look.center ?? cl);
       }
       if (!ramp && look.kerbs && Math.abs(t.curv[q]) > 1 / 46) {
         const kerb = Math.floor(i / 2) % 2 === 0 ? (look.kerbA ?? cKerbA) : (look.kerbB ?? cKerbB);
-        if (!freeL) top(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
-        if (!freeR) top(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
+        if (!freeL) topH(paint, i, f0, f1, -rh - 0.75, -rh + 0.1, 0.05, kerb);
+        if (!freeR) topH(paint, i, f0, f1, rh - 0.1, rh + 0.75, 0.05, kerb);
       }
 
       // Begrenzung bzw. offene Kante
@@ -690,7 +770,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -891,6 +971,44 @@ export class World {
     return inside;
   }
 
+  /** Liegt unter diesem Abschnitt ein Glutgraben? (Steg mit Bande, auf dem – oder dicht bei dem – Platten wegbrechen können.) */
+  private pitAt(i: number): boolean {
+    const t = this.track;
+    if (t.holes.length === 0 || (t.edge[i] & EDGE_DECK) === 0 || (t.edge[i] & (EDGE_OPEN_L | EDGE_OPEN_R)) !== 0) return false;
+    for (const h of t.holes) if (t.branchOf[h.first] === t.branchOf[i] && i >= h.first - 14 && i < h.first + h.count + 14) return true;
+    return false;
+  }
+
+  /** Vulkaninsel: der Kreis, auf dem die breite, brüchige Fahrbahn am Kraterrand liegt. */
+  private findCrater(): Crater | null {
+    const t = this.track;
+    let first = -1;
+    let last = -1;
+    for (let i = 0; i < t.n; i++) {
+      if ((t.edge[i] & EDGE_BROKEN) === 0 || t.wh[i] < 9.5) continue;
+      if (first < 0) first = i;
+      last = i;
+    }
+    if (first < 0 || last - first < 40) return null;
+    const mid = (first + last) >> 1;
+    // Kreis durch Anfang, Mitte und Ende
+    const ax = t.px[first];
+    const az = t.pz[first];
+    const bx = t.px[mid];
+    const bz = t.pz[mid];
+    const cx = t.px[last];
+    const cz = t.pz[last];
+    const d = 2 * (ax * (bz - cz) + bx * (cz - az) + cx * (az - bz));
+    if (Math.abs(d) < 1e-6) return null;
+    const x = ((ax * ax + az * az) * (bz - cz) + (bx * bx + bz * bz) * (cz - az) + (cx * cx + cz * cz) * (az - bz)) / d;
+    const z = ((ax * ax + az * az) * (cx - bx) + (bx * bx + bz * bz) * (ax - cx) + (cx * cx + cz * cz) * (bx - ax)) / d;
+    // Die Fahrbahn folgt dem Kreis nur ungefähr: innen zählt ihr kleinster Abstand.
+    let road = Infinity;
+    for (let i = first; i <= last; i++) road = Math.min(road, Math.hypot(t.px[i] - x, t.pz[i] - z));
+    const wh = t.wh[mid];
+    return { x, z, road, y: t.py[mid], wh, floor: road - wh - 15, floorY: t.py[mid] - 9.5 };
+  }
+
   /** Höhe des Geländes an einer beliebigen Stelle. */
   heightAt(x: number, z: number): number {
     const t = this.track;
@@ -959,12 +1077,21 @@ export class World {
     const k = smooth((d - whb - 1.2) / 24);
     const bumps = (noise(x * 0.045, z * 0.045) - 0.5) * 2 * th.rough + (noise(x * 0.13 + 9, z * 0.13) - 0.5) * th.rough * 0.5;
     let h = roadY + (base + bumps - roadY) * k;
+    const cr = this.crater;
+    if (cr) {
+      // Vulkaninsel: rings um den Krater steigt das Gelände zum Rand an, innen fällt es zum Lavasee ab.
+      const dc = Math.hypot(x - cr.x, z - cr.z);
+      const inner = cr.road - cr.wh - 1;
+      if (dc >= inner) h = Math.max(h, cr.y - 1 - (dc - inner) * 0.5);
+      else h = Math.min(Math.max(h, cr.y - 1), cr.y - 2 - (cr.y - 2 - cr.floorY) * (1 - smooth((dc - cr.floor) / (inner - cr.floor))));
+    }
     // Unter Brücken und Stegen bleibt das Gelände unter der Fahrbahn – auch wenn
-    // gleich daneben eine höhere Fahrbahn am Boden verläuft.
+    // gleich daneben eine höhere Fahrbahn am Boden verläuft. Unter Stegen, deren Platten
+    // wegbrechen können, liegt ein tiefer Graben: dort glüht die Lava.
     // Sturmhafen: die Lücke hinter der Schanze ist eine Ladeluke – das Gelände darunter liegt tief (über dem Meeresspiegel).
     const gapPit = t.def.theme === 'hafen' ? 3.4 : 0;
     for (const i of this.deckSegs) {
-      const cap = t.py[i] - (gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
+      const cap = t.py[i] - (this.pitAt(i) ? PIT_D : gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
       if (h <= cap) continue;
       const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
       if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
