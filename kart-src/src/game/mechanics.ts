@@ -440,8 +440,8 @@ export interface Plan {
 
 function planClock(p: Plan, time: number): number {
   if (p.period <= 0) return time;
-  const c = time % p.period;
-  return c < 0 ? c + p.period : c;
+  // Vor dem Start steht ein wiederkehrender Plan still – auf dem Stand, mit dem das Rennen beginnt.
+  return time <= 0 ? 0 : time % p.period;
 }
 
 export function planActive(p: Plan, time: number): boolean {
@@ -499,6 +499,45 @@ export interface Gate {
 /** So lange vorher kündigt sich ein Bruch bzw. das Schließen eines Tors an (Ticks). */
 export const HOLE_WARN = 150;
 export const GATE_WARN = 300;
+
+// --- Zeitalter -----------------------------------------------------------------------
+// Die Zeitriss-Ruine springt im festen Takt zwischen zwei Zeitaltern: „Einst“ (der Tempel steht)
+// und „Jetzt“ (er ist zerfallen). Bruchstellen und Tore hängen an einem der beiden – ihre Pläne
+// werden beim Bau der Strecke daraus abgeleitet (track.ts), hier steht nur die Uhr.
+
+/** Zeitalter 0 gilt in jeder Periode die ersten split Ticks, Zeitalter 1 den Rest. */
+export interface Era {
+  period: number;
+  split: number;
+  /** Kurzname je Zeitalter (Anzeige, Uhr an der Strecke). */
+  names: [string, string];
+  /** Was die Anzeige meldet, wenn das Zeitalter beginnt. */
+  notes: [string, string];
+}
+
+/** So lange vorher kündigt sich der Sprung an (Ticks): Gong, Flimmern. */
+export const ERA_WARN = 180;
+
+function eraClock(e: Era, time: number): number {
+  return time <= 0 ? 0 : time % e.period;
+}
+
+/** Welches Zeitalter gilt zur Rennzeit time? (Vor dem Start: das, mit dem das Rennen beginnt.) */
+export function eraAt(e: Era, time: number): 0 | 1 {
+  return eraClock(e, time) < e.split ? 0 : 1;
+}
+
+/** Ticks bis zum nächsten Sprung. */
+export function eraUntil(e: Era, time: number): number {
+  const c = eraClock(e, time);
+  return c < e.split ? e.split - c : e.period - c;
+}
+
+/** Ticks, seit das geltende Zeitalter begann. */
+export function eraSince(e: Era, time: number): number {
+  const c = eraClock(e, time);
+  return c < e.split ? c : c - e.split;
+}
 
 // --- Geringe Schwerkraft -------------------------------------------------------------
 // Auf dem Mond (Track.gravity < 1) fällt alles langsam: jeder Buckel wird zum hohen,

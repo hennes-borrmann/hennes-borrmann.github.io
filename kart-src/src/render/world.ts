@@ -364,6 +364,9 @@ export class World {
           return { a: col(0xf3f7fc), b: col(0xe6eef7), c: col(0xc9d8e8), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdde8f3), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'ice':
           return { a: col(0xbfe6f5), b: col(0xa9dbef), c: col(0xf2fdff), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xd7edf8), detail: 'cracks', barrier: 'rock', wallA: col(0xd9eef8), wallB: col(0xa7cde4) };
+        case 'marble':
+          // Tempelplatten: heller Sandstein mit Fugen, Brüstung aus Quadern
+          return { a: col(0xe6d6ac), b: col(0xd9c798), c: col(0xa9966a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xbcaa80), detail: 'plates', barrier: 'stone', wallA: col(0xdccb9e), wallB: col(0xc4b286) };
         default:
           return { a: cRoad, b: cRoadAlt, c: cInk, band: 4, plain: true, lines: true, kerbs: true, shoulder: null, detail: 'none', barrier: 'block' };
       }
@@ -769,7 +772,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall

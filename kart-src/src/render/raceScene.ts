@@ -41,6 +41,9 @@ import {
   PULSE_PRESS,
   PULSE_VENT,
   WATER_FROM,
+  ERA_WARN,
+  eraSince,
+  eraUntil,
   planActive,
   pulseCycle,
   tideLevel,
@@ -137,7 +140,10 @@ export interface SceneEvent {
     | 'crumble'
     | 'crack'
     | 'collapse'
-    | 'drain';
+    | 'drain'
+    /** Zeitriss-Ruine (überall zu hören): der Sprung der Zeit kündigt sich an (Gong) / die Zeit reißt. */
+    | 'riftwarn'
+    | 'rift';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -818,10 +824,22 @@ export class RaceScene {
           this.emitAt('gust', t.px[mid], t.py[mid], t.pz[mid]);
         }
       }
+      // Zeitriss-Ruine: der Sprung zwischen den Zeitaltern – drei Sekunden vorher der Gong, dann reißt die Zeit.
+      const era = t.era;
+      let flip = false;
+      if (era && time > 0) {
+        if (eraUntil(era, time) <= ERA_WARN && eraUntil(era, before) > ERA_WARN) this.onEvent?.({ kind: 'riftwarn', slot: -1, local: true, pan: 0, gain: 1 });
+        if (eraSince(era, time) < eraSince(era, before)) {
+          flip = true;
+          this.onEvent?.({ kind: 'rift', slot: -1, local: true, pan: 0, gain: 1 });
+          this.shake = Math.max(this.shake, 0.3);
+        }
+      }
       // Vulkaninsel: Platten bröckeln und brechen, Wege schließen und öffnen sich.
+      // (Mit Zeitaltern geschieht beim Sprung alles auf einmal – das sagt der Riss; einzeln zu hören ist nur, was mit Verzögerung einstürzt.)
       for (const h of t.holes) {
-        const warned = planActive(h.plan, time + h.warn) && !planActive(h.plan, before + h.warn);
-        const broke = planActive(h.plan, time) && !planActive(h.plan, before);
+        const warned = !era && planActive(h.plan, time + h.warn) && !planActive(h.plan, before + h.warn);
+        const broke = !flip && planActive(h.plan, time) && !planActive(h.plan, before);
         if (!warned && !broke) continue;
         const mid = h.first + (h.count >> 1);
         const lat = (Math.max(h.lat0, -t.wh[mid]) + Math.min(h.lat1, t.wh[mid])) / 2;
@@ -834,6 +852,7 @@ export class RaceScene {
         }
       }
       for (const g of t.gates) {
+        if (era) break;
         const shut = planActive(g.plan, time);
         if (shut === planActive(g.plan, before)) continue;
         // Das hört die ganze Insel – in der Ferne leise.

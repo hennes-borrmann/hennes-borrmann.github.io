@@ -305,8 +305,14 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         // Ein Tor auf einem der beiden Wege: Ist es bei der Ankunft zu, bleibt nur der andere.
         // (Das sieht jeder – auch die leichte KI fährt nicht vor eine Wand.)
         for (const g of t.gates) {
+          // (Ein Tor sperrt nur die Mündung, und was dahinter einstürzt, tut es mit Verzögerung: wer knapp vor dem
+          // Schließen einfährt, kommt durch. Die halbe Sekunde Abstand gilt der Unsicherheit der eigenen Schätzung.)
           const arrive = ctx.time + ((DECIDE_AT + 12) * t.step * 60) / Math.max(v, 12);
-          if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 240)) continue;
+          if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 30)) {
+            // Offen – und das ist es nicht immer: Wer aufpasst, nimmt den Weg meistens, solange es ihn gibt.
+            if (t.branchOf[g.first] === k && b.level > 0 && !take) take = random(b) < 0.6;
+            continue;
+          }
           if (t.branchOf[g.first] === k) take = false;
           else if (t.branchOf[g.first] < 0 && segDelta(t, t.branches[k].from, g.first) >= 0 && segDelta(t, g.first, t.branches[k].to) > 0) take = true;
         }

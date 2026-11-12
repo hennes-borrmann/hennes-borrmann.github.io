@@ -120,6 +120,9 @@ const LEVEL: Record<SfxName, number> = {
   // Sturmhafen (vorläufig)
   gust: 1.6,
   storm: 0.9,
+  // Zeitriss-Ruine (vorläufig)
+  riftwarn: 1.6,
+  rift: 1.8,
   // Vulkaninsel (vorläufig)
   crumble: 1.2,
   crack: 1.6,
@@ -691,6 +694,9 @@ export class SfxPlayer {
       // Vulkaninsel (vorläufig: brechen und leerlaufen wie der Einschlag)
       case 'crack':
       case 'drain':
+      // Zeitriss-Ruine (vorläufig)
+      case 'riftwarn':
+      case 'rift':
       case 'meteor': {
         // Meteorit: ein kurzes, fallendes Heulen (Sinus mit schnellem Flattern und ein
         // enges Rauschband, das mit hinabfährt – im Comic pfeift es auch ohne Luft), dann

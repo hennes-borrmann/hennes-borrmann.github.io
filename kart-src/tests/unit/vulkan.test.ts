@@ -86,13 +86,16 @@ describe('Zeitpläne', () => {
 });
 
 describe('Vulkaninsel: Bruchstellen', () => {
-  it('nur die Vulkaninsel bricht auseinander und hat Tore', () => {
+  it('nur die Vulkaninsel bricht für immer auseinander', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
       if (i === VULKAN) {
         expect(t.def.name).toBe('Vulkaninsel');
         expect(t.holes.length).toBeGreaterThanOrEqual(12);
         expect(t.gates.length).toBe(2);
+      } else if (t.era) {
+        // Die Zeitriss-Ruine hat ihre eigenen Bruchstellen und Tore: sie hängen an den Zeitaltern (ruine.test.ts).
+        for (const h of t.holes) expect(h.plan.period).toBe(t.era.period);
       } else {
         expect(t.holes.length).toBe(0);
         expect(t.gates.length).toBe(0);
@@ -368,7 +371,8 @@ describe('Vulkaninsel: die KI', () => {
       for (const level of [AI_HARD, AI_EASY]) {
         const s = gridState(slot);
         const brain = newBrain(slot + (level === AI_HARD ? 0 : 4), level);
-        let laps = 0;
+        // Die Karts stehen hinter der Linie: die erste Überfahrt ist der Start, nicht das Ende einer Runde.
+        let laps = -1;
         let before = s.seg;
         let wasTube = false;
         let wasBridge = false;

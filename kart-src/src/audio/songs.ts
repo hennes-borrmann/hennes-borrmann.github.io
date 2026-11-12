@@ -418,6 +418,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   // (vorläufig das Stück des Werkshofs, bis das eigene da ist)
   hafen: WERKSHOF,
   vulkan: GLUT,
+  ruine: KLIPPE,
   results: RESULTS,
 };
 
