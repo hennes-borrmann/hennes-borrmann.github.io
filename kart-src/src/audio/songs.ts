@@ -17,6 +17,7 @@
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import { RUINE_STUECK } from './stuecke/ruine';
+import { VULKAN_STUECK } from './stuecke/vulkan';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -418,8 +419,9 @@ export const SONGS: Record<MusicId, SongDef> = {
   eis: NEUE_STUECKE.eis,
   mond: NEUE_STUECKE.mond,
   hafen: HAFEN_STUECK,
-  // (vorläufig, bis die eigenen Stücke da sind)
-  vulkan: GLUT,
+  // Vulkaninsel: eigenes Stück (stuecke/vulkan.ts)
+  vulkan: VULKAN_STUECK,
+  // Zeitriss-Ruine: eigenes Stück (stuecke/ruine.ts)
   ruine: RUINE_STUECK,
   results: RESULTS,
 };

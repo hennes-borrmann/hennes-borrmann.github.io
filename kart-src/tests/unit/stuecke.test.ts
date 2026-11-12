@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SONGS, compileSong, type Song, type SongDef } from '../../src/audio/songs';
 import { NEUE_STUECKE } from '../../src/audio/songs-neu';
 import { HAFEN_STUECK } from '../../src/audio/stuecke/hafen';
+import { VULKAN_STUECK } from '../../src/audio/stuecke/vulkan';
 import { RUINE_STUECK } from '../../src/audio/stuecke/ruine';
 import type { MusicId } from '../../src/audio/types';
 
@@ -9,6 +10,7 @@ import type { MusicId } from '../../src/audio/types';
 // Ein neues Stück muss nur in diese Liste eingetragen werden.
 const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'hafen', def: HAFEN_STUECK },
+  { schluessel: 'vulkan', def: VULKAN_STUECK },
   { schluessel: 'ruine', def: RUINE_STUECK },
 ];
 
