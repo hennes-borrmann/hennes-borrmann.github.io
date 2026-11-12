@@ -559,6 +559,44 @@ export interface Gate {
 export const HOLE_WARN = 150;
 export const GATE_WARN = 300;
 
+// --- Fluss und Flöße -----------------------------------------------------------------
+// Auf einem Flussstück ist die Fahrbahn Wasser. Darauf treiben in Bahnen nebeneinander Flöße flussab – in
+// Fahrtrichtung. Boden ist nur, wo gerade ein Floß liegt; wer daneben gerät, geht unter. Ein Floß nimmt mit,
+// was auf ihm steht: Zum eigenen Tempo kommt das der Strömung seiner Bahn. Alles hängt allein an der Rennzeit.
+
+/**
+ * Eine Bahn von Flößen: seitlich lat0 … lat1 (Meter von der Mitte), Flöße der Länge length mit dem Abstand gap
+ * (gap = 0: eine durchgehende Kette), Tempo speed in m/s flussab, Versatz phase in Metern.
+ */
+export interface RaftLane {
+  lat0: number;
+  lat1: number;
+  length: number;
+  gap: number;
+  speed: number;
+  phase: number;
+}
+
+/** Flussstück: Abschnitte first … first+count−1, darauf die Bahnen. */
+export interface River {
+  first: number;
+  count: number;
+  lanes: RaftLane[];
+}
+
+/** Wie weit die Flöße einer Bahn bis zur Rennzeit time getrieben sind (Meter). Vor dem Start liegen sie still. */
+export function raftDrift(l: RaftLane, time: number): number {
+  return (l.speed * Math.max(0, time)) / 60;
+}
+
+/** Liegt in dieser Bahn an der Stelle a (Meter ab Flussanfang) zur Rennzeit time ein Floß? */
+export function raftAt(l: RaftLane, a: number, time: number): boolean {
+  if (l.gap <= 0) return true;
+  const pitch = l.length + l.gap;
+  const u = (a - l.phase - raftDrift(l, time)) % pitch;
+  return (u < 0 ? u + pitch : u) < l.length;
+}
+
 // --- Zeitalter -----------------------------------------------------------------------
 // Die Zeitriss-Ruine springt im festen Takt zwischen zwei Zeitaltern: „Einst“ (der Tempel steht)
 // und „Jetzt“ (er ist zerfallen). Bruchstellen und Tore hängen an einem der beiden – ihre Pläne

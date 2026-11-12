@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
+  dschungel: {
+    sky: [0x3fa3c8, 0xa8dcc8, 0xfdf0c0],
+    fog: 0xcfe6c4,
+    fogNear: 120,
+    fogFar: 520,
+    sunDir: [-0.5, 0.62, 0.42],
+    sunColor: 0xffe9b8,
+    sunIntensity: 2.2,
+    hemiSky: 0xc8ecd8,
+    hemiGround: 0x4f7a3a,
+    hemiIntensity: 1.3,
+    disc: 0xfff2c8,
+    discSize: 22,
+    clouds: 0xf8f4e0,
+    cloudShade: 0xc4d8c0,
+    stars: false,
+    road: 0x9c7a52,
+    roadAlt: 0x8f6e48,
+    line: 0xfff3d0,
+    kerbA: 0xf2c53d,
+    kerbB: 0x3a2c1c,
+    shoulder: 0x7d6240,
+    wallA: 0x6a4a2c,
+    wallB: 0xf2c53d,
+    wallCap: 0x3a2c1c,
+    deck: 0xb08a58,
+    deckDark: 0x6a4e30,
+    pillar: 0x7a5a38,
+    ground: [0x3f9440, 0x2f7a38, 0x7a6a48, 0x58a84a],
+    liquidY: -1.2,
+    liquid: [0x3f7a5a, 0x5fa27a, 0xd8f2c8],
+    liquidGlow: false,
+    farY: -6,
+    rough: 6,
+  },
   // Gewitterkamm: Nacht im Gewitter über dem Gebirge. Finster – was man sieht, zeigen Scheinwerfer, Leitpfosten
   // und die Blitze (render/mechanics/storm.ts hellt Licht und Dunst im Takt des Wetterleuchtens auf).
   gewitter: {

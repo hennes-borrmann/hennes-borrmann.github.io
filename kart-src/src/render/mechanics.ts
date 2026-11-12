@@ -15,6 +15,7 @@ import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
 import { buildMoon } from './mechanics/moon';
 import { buildRift } from './mechanics/rift';
+import { buildRiver } from './mechanics/river';
 import { buildSnow } from './mechanics/snow';
 import { buildStorm } from './mechanics/storm';
 import { buildTide } from './mechanics/tide';
@@ -43,7 +44,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.vehicles.length > 0) out.push(buildTraffic(track, detail));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
-  if (track.belts.some((b) => !b.swim) || presses) out.push(buildMachines(track, detail));
+  // (Im Dschungel ist ein „Band“ die Querströmung der Furt: die zeichnet mechanics/river.ts.)
+  if ((track.belts.some((b) => !b.swim) && track.def.theme !== 'dschungel') || presses) out.push(buildMachines(track, detail));
   if (track.tide) out.push(buildTide(track, detail, world));
   if (track.thermals.length > 0 || track.rings.length > 0 || hasGlide(track)) out.push(buildFlight(track, detail));
   if (track.belts.some((b) => b.swim) || track.pulses.some((p) => p.kind === PULSE_BUBBLE)) out.push(buildDive(track, detail));
@@ -51,6 +53,7 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.launchers.length > 0 || track.pulses.some((p) => p.kind === PULSE_METEOR)) out.push(buildMoon(track, detail));
   if (track.winds.length > 0 || track.pontoons.length > 0) out.push(buildHarbor(track, detail));
   if (track.dark) out.push(buildStorm(track, detail, world));
+  if (track.rivers.length > 0) out.push(buildRiver(track, detail));
   if (track.era) out.push(buildRift(track, detail));
   else if (track.holes.length > 0 || track.gates.length > 0) out.push(buildVolcano(track, detail));
   return out;

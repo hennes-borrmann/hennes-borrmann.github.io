@@ -52,11 +52,14 @@ import {
   type Gate,
   type Hole,
   type Plan,
+  type RaftLane,
+  type River,
+  raftAt,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -151,6 +154,11 @@ export interface PathFeatures {
    * period und phase in Sekunden (ohne Angabe 3,4 und 0). Die Enden sind gelenkige Übergänge.
    */
   pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number }[];
+  /**
+   * Flussstücke: von … bis ist die Fahrbahn Wasser; darauf treiben Flöße in Bahnen (mechanics.ts, RaftLane:
+   * seitlich lat0 … lat1, Länge und Abstand in Metern, Tempo in m/s, Versatz in Metern).
+   */
+  rivers?: { from: number; to: number; lanes: { lat0: number; lat1: number; length: number; gap: number; speed: number; phase?: number }[] }[];
   /**
    * Bruchstellen: das Stück [from, to], seitlich lat0 … lat1 (Meter), bricht zur Rennzeit at (Sekunden)
    * weg und bleibt weg – oder, mit until, bis zu dieser Rennzeit. Mit every (Sekunden) wiederholt sich das.
@@ -276,6 +284,11 @@ export const EDGE_FLOAT = 512;
  */
 export const EDGE_BROKEN = 1024;
 /**
+ * Fluss: hier ist die Fahrbahn Wasser, Boden gibt es nur auf den Flößen, die darauf treiben (Track.rivers).
+ * Wasser und Flöße zeichnet die Darstellung der Mechanik; Banden gibt es keine.
+ */
+export const EDGE_RIVER = 2048;
+/**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
  */
@@ -388,6 +401,8 @@ export interface Track {
   sea: number;
   /** Böen (mechanics.ts). */
   winds: Wind[];
+  /** Flussstücke mit ihren Floßbahnen (mechanics.ts). */
+  rivers: River[];
   /**
    * Pontons und je Abschnitt, welche (höchstens zwei) seine Höhe bestimmen und mit welchem Gewicht:
    * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
@@ -1004,6 +1019,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     deep: new Uint8Array(total),
     sea: def.sea ?? 0,
     winds: [],
+    rivers: [],
     pontoons: [],
     floatA: new Int16Array(total).fill(-1),
     floatB: new Int16Array(total).fill(-1),
@@ -1115,6 +1131,23 @@ export function buildTrack(def: TrackDef, index = 0): Track {
           track.floatB[seg] = id;
           track.floatWB[seg] = w;
         }
+      }
+    }
+    for (const r of p.f.rivers ?? []) {
+      const first = segAt(p, r.from);
+      const last = segAt(p, r.to);
+      const count = Math.max(1, last - first + 1);
+      track.rivers.push({
+        first,
+        count,
+        lanes: r.lanes.map((l) => ({ lat0: Math.min(l.lat0, l.lat1), lat1: Math.max(l.lat0, l.lat1), length: l.length, gap: l.gap, speed: l.speed, phase: l.phase ?? 0 })),
+      });
+      // Wasser hat keine Bande und steht frei über dem Flussbett; wer hineinfällt, wird vor dem Fluss aufgesetzt.
+      let back = first;
+      for (let k = 0; k < 6; k++) back = prev[back];
+      for (let k = 0; k < count; k++) {
+        edge[first + k] |= EDGE_RIVER | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
+        respawn[first + k] = respawn[back];
       }
     }
     for (const c of p.f.cracks ?? []) {
@@ -1510,11 +1543,32 @@ export function gateAt(t: Track, seg: number, time: number): boolean {
   return false;
 }
 
+/** Das Flussstück, zu dem dieser Abschnitt gehört (sonst null). */
+export function riverOf(t: Track, seg: number): River | null {
+  if ((t.edge[seg] & EDGE_RIVER) === 0) return null;
+  for (const r of t.rivers) if (seg >= r.first && seg < r.first + r.count) return r;
+  return null;
+}
+
+/**
+ * Die Floßbahn, auf deren Floß diese Stelle zur Rennzeit time liegt – null, wenn dort Wasser ist
+ * (oder kein Fluss). Das Floß nimmt mit: lane.speed in m/s flussab.
+ */
+export function raftLane(t: Track, seg: number, along: number, lat: number, time: number): RaftLane | null {
+  const r = riverOf(t, seg);
+  if (!r) return null;
+  const a = (seg - r.first) * t.step + along;
+  for (const l of r.lanes) if (lat >= l.lat0 && lat <= l.lat1 && raftAt(l, a, time)) return l;
+  return null;
+}
+
 /** Höhe des Bodens zur Rennzeit time: wie groundAt, auf Pontons samt Seegang – und ohne das, was weggebrochen ist. */
 export function groundNow(t: Track, seg: number, along: number, lat: number, time: number): number {
   const g = groundAt(t, seg, along, lat);
   if (g === NO_GROUND) return g;
   if (t.holes.length > 0 && holeAt(t, seg, lat, time)) return NO_GROUND;
+  // (Ohne Flussstücke – so messen die Tests den bloßen Verlauf – trägt die Fläche überall.)
+  if ((t.edge[seg] & EDGE_RIVER) !== 0 && t.rivers.length > 0 && raftLane(t, seg, along, lat, time) === null) return NO_GROUND;
   return t.pontoons.length === 0 ? g : g + heaveAt(t, seg, along, time);
 }
 

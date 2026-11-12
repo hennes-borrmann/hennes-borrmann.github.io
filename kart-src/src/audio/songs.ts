@@ -421,6 +421,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   vulkan: GLUT,
   ruine: KLIPPE,
   gewitter: NACHT,
+  dschungel: KLIPPE,
   results: RESULTS,
 };
 
