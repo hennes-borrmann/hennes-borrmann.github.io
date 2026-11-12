@@ -70,6 +70,43 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Gewitterkamm: Nacht im Gewitter über dem Gebirge. Finster – was man sieht, zeigen Scheinwerfer, Leitpfosten
+  // und die Blitze (render/mechanics/storm.ts hellt Licht und Dunst im Takt des Wetterleuchtens auf).
+  gewitter: {
+    sky: [0x05070f, 0x0d1424, 0x1c2740],
+    fog: 0x0a0f1c,
+    fogNear: 22,
+    fogFar: 135,
+    sunDir: [-0.3, 0.8, 0.4],
+    sunColor: 0x9db4e8,
+    sunIntensity: 0.55,
+    hemiSky: 0x55668f,
+    hemiGround: 0x1a1f33,
+    hemiIntensity: 0.7,
+    disc: 0x1c2740,
+    discSize: 1,
+    clouds: 0x1a2236,
+    cloudShade: 0x0b101c,
+    stars: false,
+    road: 0x3d4353,
+    roadAlt: 0x464c5e,
+    line: 0xf2f6ff,
+    kerbA: 0xffd23f,
+    kerbB: 0x1a1f2c,
+    shoulder: 0x565d70,
+    wallA: 0x2a3040,
+    wallB: 0xffd23f,
+    wallCap: 0x12161f,
+    deck: 0x5a6274,
+    deckDark: 0x30364a,
+    pillar: 0x444b5e,
+    ground: [0x3e5a4a, 0x35483f, 0x4a4f5e, 0x8a93a8],
+    liquidY: null,
+    liquid: [0x0a1220, 0x16233a, 0x9db4e8],
+    liquidGlow: false,
+    farY: -30,
+    rough: 9,
+  },
   // Zeitriss-Ruine: Tempel im Dschungel, warmes Vormittagslicht durch Dunst; heller Sandstein vor sattem Grün.
   ruine: {
     sky: [0x2f8fa8, 0x8fd0c4, 0xf4e6b8],

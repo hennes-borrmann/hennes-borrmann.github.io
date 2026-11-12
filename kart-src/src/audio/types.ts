@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -65,6 +65,10 @@ export type SfxName =
   | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören): Gurgeln, das nach unten abzieht, Zischen, zum Schluss ein heller aufsteigender Glanz (~2 s)
   | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – tiefer, schwebender Gong, ein Uhrwerk zieht immer schneller auf, ein Glaston steigt (überall gleich laut, ~2,7 s)
   | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter – heller Riss nach oben, schimmernder Nachhall gleitet hinab, weicher Tiefton-Stoß (überall gleich laut, ~1 s)
+  | 'thunder' // Gewitterkamm: ein Blitz schlägt auf der Bahn ein (ortsfest, auf dem ganzen Kamm zu hören): heller, peitschender Knall, sofort rollendes, dunkles Krachen und Poltern (~1,5 s)
+  | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest): dünner Knall, nachklingender Mast, surrendes, absteigendes Britzeln (~0,9 s)
+  | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall gleich laut): tiefes, weiches Rollen ohne Knall, an- und abschwellend (~2,2 s)
+  | 'charge' // Gewitterkamm: das Kart wird im Ladefeld aufgeladen (Schub): aufsteigendes, knisterndes, surrendes „Bzzzing“ (~0,56 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

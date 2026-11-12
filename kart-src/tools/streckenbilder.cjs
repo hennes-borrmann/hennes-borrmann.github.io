@@ -201,6 +201,19 @@ const SHOTS = {
     ],
     when: '(window.__rk || (window.__rk = performance.now(), window.__kart.clock(15.2)), performance.now() - window.__rk > 1500)',
   },
+  // Gewitterkamm: der Gipfelgrat im Wetterleuchten – für einen Augenblick sieht man Gipfelkranz, Wolken und
+  // Sendemast; vorn glüht eine Einschlagstelle, dahinter steht das Ladefeld eines Blitzableiters. (Die Rennzeit
+  // wird auf den Augenblick des Wetterleuchtens gestellt und dort festgehalten: Es dauert nur 0,4 s.)
+  kamm: {
+    from: [772, -3, 5],
+    to: [840, 1.5, 3],
+    fov: 56,
+    karts: [
+      [1, 796, -3],
+      [2, 812, 3.5],
+    ],
+    when: '(window.__gh || (window.__gh = setInterval(() => window.__kart.clock(17.45), 50)), (window.__gn = (window.__gn || 0) + 1) > 20)',
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

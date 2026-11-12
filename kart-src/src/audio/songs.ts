@@ -15,6 +15,7 @@
 // Hat eine Stimme weniger Takte als der Abschnitt, wird sie wiederholt.
 
 import { NEUE_STUECKE } from './songs-neu';
+import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import { RUINE_STUECK } from './stuecke/ruine';
 import { VULKAN_STUECK } from './stuecke/vulkan';
@@ -423,6 +424,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   vulkan: VULKAN_STUECK,
   // Zeitriss-Ruine: eigenes Stück (stuecke/ruine.ts)
   ruine: RUINE_STUECK,
+  // Gewitterkamm: eigenes Stück (stuecke/gewitter.ts)
+  gewitter: GEWITTER_STUECK,
   results: RESULTS,
 };
 

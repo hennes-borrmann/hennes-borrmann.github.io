@@ -796,7 +796,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Elf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 11);
+    check('Zwölf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 12);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1290,7 +1290,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen elf Strecken zur Wahl', cards === 11, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen zwölf Strecken zur Wahl', cards === 12, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1544,9 +1544,67 @@ async function main() {
       `${eraState(r2h)} / ${eraState(r2c)}`,
     );
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Gewitterkamm: Dunkelheit, Blitze nach Fahrplan, Blitzableiter mit Ladefeld – auf beiden Bildschirmen gleich.
+    await h7.page.locator('.track-card').nth(11).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 11, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 11, null, { timeout: 30000 });
+    const stormPulses = await kart(h7.page, 'pulses()');
+    const bolts = stormPulses.filter((p) => p.kind === 7);
+    const rods = stormPulses.filter((p) => p.kind === 8);
+    const [stH, stC] = await Promise.all([kart(h7.page, 'storm(17.4)'), kart(c7.page, 'storm(17.4)')]);
+    const [stH0, stC0] = await Promise.all([kart(h7.page, 'storm(14.9)'), kart(c7.page, 'storm(14.9)')]);
+    check(
+      'Gewitterkamm ist dunkel, hat Blitze und Blitzableiter – und beide Bildschirme rechnen dasselbe Wetterleuchten',
+      stH.dark === true && stC.dark === true && bolts.length >= 6 && rods.length >= 4 && stH.light > 0.5 && Math.abs(stH.light - stC.light) < 1e-6 && stH0.light < 0.05 && Math.abs(stH0.light - stC0.light) < 1e-6,
+      `${bolts.length} Blitze, ${rods.length} Ableiter · Licht bei 17,4 s ${stH.light.toFixed(2)} / ${stC.light.toFixed(2)}, bei 14,9 s ${stH0.light.toFixed(2)} / ${stC0.light.toFixed(2)}`,
+    );
+    // Ben steht auf einer Einschlagstelle: Sechs Sekunden vorher hingestellt, beim Einschlag schleudert er.
+    const bolt = bolts[0];
+    const strikeAt = bolt.strike + bolt.period;
+    await changesAt(strikeAt - 6);
+    await kart(h7.page, `place(1, ${bolt.at}, ${bolt.lat})`);
+    await sleep(700);
+    const waitingB = (await kart(h7.page, 'entities()')).find((e) => e.slot === 1);
+    const spunB = [0, 0];
+    let spunAtB = -1;
+    const untilB = Date.now() + 16000;
+    while (Date.now() < untilB && !(spunB[0] > 0 && spunB[1] > 0)) {
+      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      if (bh.spin > 0 && spunB[0] === 0) spunAtB = ch.time / 60;
+      spunB[0] = Math.max(spunB[0], bh.spin);
+      spunB[1] = Math.max(spunB[1], ec.find((e) => e.slot === 1).spin);
+      await sleep(50);
+    }
+    check('Vor dem Einschlag steht Ben unbehelligt auf der Stelle', waitingB.spin === 0 && waitingB.respawn === 0, `ab ${(strikeAt - 6).toFixed(1)} s`);
+    check('Blitz schlägt ein: Ben schleudert – beim Host und auf seinem eigenen Bildschirm', spunB[0] > 0 && spunB[1] > 0 && spunAtB >= strikeAt - 0.1, `Treffer bei ${spunAtB.toFixed(1)} s (Einschlag ${strikeAt.toFixed(1)} s)`);
+    // Ben steht im Feld eines Blitzableiters, als der Blitz hineinfährt: Schub statt Treffer.
+    const rod = rods[0];
+    const chargeAt = rod.strike + rod.period * 3;
+    await changesAt(chargeAt - 6);
+    // (erst warten, bis Ben nach dem Treffer wieder verwundbar und ohne Dreher ist – sonst sähe man den Schub nicht)
+    await kart(h7.page, `place(1, ${rod.at}, 0)`);
+    let boostB = [0, 0];
+    let spinInField = 0;
+    const untilR13 = Date.now() + 16000;
+    while (Date.now() < untilR13 && !(boostB[0] > 0 && boostB[1] > 0)) {
+      const [eh, ec, ch] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'changes()')]);
+      const bh = eh.find((e) => e.slot === 1);
+      if (ch.time / 60 >= chargeAt - 0.2) spinInField = Math.max(spinInField, bh.spin);
+      boostB[0] = Math.max(boostB[0], bh.boost);
+      boostB[1] = Math.max(boostB[1], ec.find((e) => e.slot === 1).boost);
+      await sleep(50);
+    }
+    check('Blitzableiter: Im Ladefeld bekommt Ben Schub statt eines Treffers – beim Host und auf seinem eigenen Bildschirm', boostB[0] > 0 && boostB[1] > 0 && spinInField === 0, `Schub ${boostB[0]} / ${boostB[1]} Ticks, Ladefeld bei ${chargeAt.toFixed(1)} s`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die elf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die zwölf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 
