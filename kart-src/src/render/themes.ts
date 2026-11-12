@@ -74,8 +74,8 @@ export const THEMES: Record<ThemeId, Theme> = {
   ruine: {
     sky: [0x2f8fa8, 0x8fd0c4, 0xf4e6b8],
     fog: 0xc9dcc0,
-    fogNear: 130,
-    fogFar: 540,
+    fogNear: 170,
+    fogFar: 720,
     sunDir: [0.5, 0.72, 0.35],
     sunColor: 0xfff0c8,
     sunIntensity: 2.3,
