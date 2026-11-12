@@ -94,6 +94,17 @@ async function openPhone(name, pairUrl, device = devices['iPhone 13'], side = 1,
       );
     }, 1000 / 60);
   });
+  // Jede Rückmeldung (Randblitz) mit Zeitpunkt mitschreiben: Das Handy zeigt immer nur die jüngste – ein einzelner
+  // Blick nach fester Wartezeit übersieht sie, sobald eine weitere (Bande, Landung) folgt oder die Seite kurz hängt.
+  await ctx.addInitScript(() => {
+    window.__tones = [];
+    const watch = () => {
+      const el = document.getElementById('flash');
+      if (!el) return void setTimeout(watch, 30);
+      new MutationObserver(() => window.__tones.push({ tone: el.dataset.tone, at: performance.now() })).observe(el, { attributes: true, attributeFilter: ['data-tone'] });
+    };
+    watch();
+  });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log(`   [${name}] SEITENFEHLER ${e.message}`));
   const cdp = await ctx.newCDPSession(page);
@@ -115,6 +126,22 @@ async function openPhone(name, pairUrl, device = devices['iPhone 13'], side = 1,
   await apply();
   return phone;
 }
+
+/** Uhr des Handys (für sawTone). */
+const phoneNow = (phone) => phone.page.evaluate(() => performance.now());
+
+/** Hat das Handy seit since (seine Uhr) eine Rückmeldung dieser Sorte gezeigt? Wartet bis zu timeout ms darauf. */
+async function sawTone(phone, tone, since, timeout = 2000) {
+  const seen = () => phone.page.evaluate(([t, a]) => window.__tones.some((x) => x.tone === t && x.at >= a), [tone, since]);
+  for (const until = Date.now() + timeout; Date.now() < until; ) {
+    if (await seen()) return true;
+    await sleep(60);
+  }
+  return seen();
+}
+
+/** Die Rückmeldungen des Handys seit since, als Text für die Ausgabe. */
+const tonesSince = (phone, since) => phone.page.evaluate((a) => window.__tones.filter((x) => x.at >= a).map((x) => `${x.tone}@${Math.round(x.at - a)}`).join(' ') || 'keine', since);
 
 async function startPhone(phone) {
   await phone.page.waitForSelector('#ctl[data-screen="start"]');
@@ -336,13 +363,21 @@ async function main() {
     await kart(host.page, 'giveItem(1, 1)');
     await phoneB.page.waitForFunction(() => window.__ctl.hud() && window.__ctl.hud().item === 1, null, { timeout: 3000 });
     check('Bens Handy zeigt das Item an', (await phoneB.page.textContent('#pad-item-name')) === 'Zisch');
+    const tipAt = await phoneNow(phoneB);
     await press(phoneB, 'item');
     await sleep(80);
     await release(phoneB, 'item');
-    await sleep(350);
-    const boosted = await kart(host.page, 'authoritative(1)');
-    check('Tipp auf Item: Schub wirkt beim Host', boosted.boost > 0 && boosted.item === 0, `noch ${boosted.boost} Ticks`);
-    check('… und Bens Handy bekommt die Rückmeldung', (await ctl(phoneB.page, 'lastFlash()')) === 'boost');
+    // Der Tipp läuft vom Handy über Bens Bildschirm zum Host; ohne Grafikkarte hängen die Seiten dabei gelegentlich
+    // einige Zehntelsekunden. Gemessen wird, dass er ankommt und wirkt – nicht, dass er nach genau 430 ms gewirkt hat.
+    let boosted = await kart(host.page, 'authoritative(1)');
+    const tipSent = Date.now();
+    while (Date.now() - tipSent < 2500 && !(boosted.boost > 0 && (boosted.item === 0 || boosted.roulette > 0))) {
+      await sleep(50);
+      boosted = await kart(host.page, 'authoritative(1)');
+    }
+    // (Das Item ist verbraucht, wenn der Schub läuft – fährt Ben inzwischen durch eine Kiste, läuft schon das nächste Roulette.)
+    check('Tipp auf Item: Schub wirkt beim Host', boosted.boost > 0 && (boosted.item === 0 || boosted.roulette > 0), `noch ${boosted.boost} Ticks, Item ${boosted.item}, nach ${Date.now() - tipSent + 80} ms`);
+    check('… und Bens Handy bekommt die Rückmeldung', await sawTone(phoneB, 'boost', tipAt), await tonesSince(phoneB, tipAt));
 
     // Rollreifen von Anna: erscheint auf beiden Bildschirmen
     await kart(host.page, 'giveItem(0, 2)');
@@ -415,20 +450,26 @@ async function main() {
     // Treffer: nur der Host weiß davon – Ben dreht sich auf beiden Bildschirmen, sein Handy meldet es
     await release(phoneA, 'gas');
     await release(phoneB, 'gas');
+    // Wer gerade getroffen wurde (Annas Rollreifen, eine Presse, ein Item der KI), ist kurz unverwundbar – dann bliebe
+    // der Treffer hier ohne Wirkung und ohne Rückmeldung. Erst abwarten, bis Ben wieder verwundbar ist.
+    let benBefore = await kart(host.page, 'authoritative(1)');
+    const wasShielded = benBefore.shield > 0 || benBefore.spin > 0;
+    for (const until = Date.now() + 6000; Date.now() < until && (benBefore.shield > 0 || benBefore.spin > 0 || benBefore.respawn > 0 || benBefore.tow > 0 || benBefore.guard > 0); ) {
+      await sleep(100);
+      benBefore = await kart(host.page, 'authoritative(1)');
+    }
+    const hitAt = await phoneNow(phoneB);
     await kart(host.page, 'debugHit(1)');
     // Die Anzeige folgt mit dem nächsten gezeichneten Bild; mehrmals nachsehen.
     const spinSeen = [0, 0];
-    let hitFlash = false;
-    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0 && hitFlash); i++) {
+    for (let i = 0; i < 10 && !(spinSeen[0] > 0 && spinSeen[1] > 0); i++) {
       await sleep(100);
-      // Das Handy zeigt immer nur das jüngste Zeichen – gleich mit nachsehen, bevor ein anderes folgt.
-      if ((await ctl(phoneB.page, 'lastFlash()')) === 'bad') hitFlash = true;
       const [eh, ec] = await Promise.all([kart(host.page, 'entities()'), kart(client.page, 'entities()')]);
       spinSeen[0] = Math.max(spinSeen[0], eh.find((e) => e.slot === 1).spin);
       spinSeen[1] = Math.max(spinSeen[1], ec.find((e) => e.slot === 1).spin);
     }
     check('Treffer: Ben schleudert beim Host und auf seinem eigenen Bildschirm', spinSeen[0] > 0 && spinSeen[1] > 0, `${spinSeen[0]} / ${spinSeen[1]} Ticks`);
-    check('… und sein Handy meldet den Treffer', hitFlash || (await ctl(phoneB.page, 'lastFlash()')) === 'bad');
+    check('… und sein Handy meldet den Treffer', await sawTone(phoneB, 'bad', hitAt), `${await tonesSince(phoneB, hitAt)}${wasShielded ? ' (Ben war kurz zuvor getroffen worden: abgewartet)' : ''}`);
 
     // Anhalten: danach müssen beide Bildschirme exakt dasselbe zeigen.
     await sleep(3500);
