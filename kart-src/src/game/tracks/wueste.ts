@@ -1,6 +1,6 @@
 // 15 · Wüstenexpress – die Strecke folgt einer Bahnlinie durch die Wüste, und der Express fährt mit.
 //
-// Auf der linken Spur liegt das Gleis. Darauf fahren vier Züge im Kreis – langsamer als ein Kart, aber sie halten
+// Die Runde ist ein großer Rechtsbogen; auf der rechten Spur – innen – liegt das Gleis. Darauf fahren vier Züge im Kreis – langsamer als ein Kart, aber sie halten
 // nie an (mechanics.ts: VEH_TRAIN). Von der Seite ist ein Zug eine fahrende Wand. Von hinten aber endet er in
 // einem Rampenwagen: Wer auf dem Gleis auffährt, rollt die Rampe hinauf, fährt über die Dächer der Flachwagen –
 // und der Zug nimmt mit, was auf ihm steht –, über den Keilwagen auf die Lok und springt vorn von ihr ab.
@@ -13,7 +13,7 @@ export const WUESTE: TrackDef = {
   name: 'Wüstenexpress',
   theme: 'wueste',
   blurb: 'Bahnhof der Wüstenstadt, Canyon hinauf, Holzviadukt über die Schlucht, Hochebene, Tunnel durch den Tafelberg, zurück zum Bahnhof – immer am Gleis entlang.',
-  twist: 'Links fährt der Zug mit. Von der Seite ist er eine Wand – von hinten kommt man über die Rampe aufs Dach: Der Zug nimmt einen mit, und vorn springt man von der Lok.',
+  twist: 'Rechts, auf der Innenspur, fährt der Zug mit. Von der Seite ist er eine Wand – von hinten kommt man über die Rampe aufs Dach: Der Zug nimmt einen mit, und vorn springt man von der Lok.',
   grade: 2,
   scale: 1.85,
   surface: 'dirt',
@@ -21,8 +21,9 @@ export const WUESTE: TrackDef = {
   traffic: {
     lanes: [
       {
-        // Das Gleis liegt unmittelbar an der linken Bande: Zwischen Zug und Bande passt kein Kart (dort säße es fest).
-        lat: -6.7,
+        // Das Gleis liegt unmittelbar an der rechten Bande (in den Kurven innen – der Zug besetzt die Ideallinie):
+        // Zwischen Zug und Bande passt kein Kart (dort säße es fest).
+        lat: 6.7,
         speed: 14,
         cars: [
           [VEH_TRAIN, 190],
@@ -38,16 +39,16 @@ export const WUESTE: TrackDef = {
     [-90, -120, 6],
     [-30, -126, 6],
     [30, -122, 6],
-    // 3–6: der Canyon hinauf, in weitem Bogen nach Norden
+    // 3–6: der Canyon hinauf, in weitem Rechtsbogen
     [84, -98, 6.5],
     [118, -52, 8],
     [124, 4, 10],
     [104, 56, 12],
-    // 7–9: Holzviadukt über die Schlucht, nach Westen
+    // 7–9: Holzviadukt über die Schlucht
     [62, 92, 12.5],
     [8, 104, 12],
     [-46, 96, 11],
-    // 10–11: Hochebene, hinab nach Süden
+    // 10–11: Hochebene, hinab
     [-92, 70, 9],
     [-118, 26, 7],
     // 12: Tunnel durch den Tafelberg
@@ -69,12 +70,12 @@ export const WUESTE: TrackDef = {
   ],
   decks: [[7.6, 9.4]],
   tunnels: [[11.55, 12.45]],
-  // (rechts vom Gleis)
+  // (links vom Gleis)
   pads: [
-    { at: 2.5, lat: 2.6, halfWidth: 2.6 },
-    { at: 6.4, lat: 2.6, halfWidth: 2.6 },
-    { at: 10.4, lat: 2.6, halfWidth: 2.6 },
-    { at: 13.4, lat: 2.6, halfWidth: 2.6 },
+    { at: 2.5, lat: -2.6, halfWidth: 2.6 },
+    { at: 6.4, lat: -2.6, halfWidth: 2.6 },
+    { at: 10.4, lat: -2.6, halfWidth: 2.6 },
+    { at: 13.4, lat: -2.6, halfWidth: 2.6 },
   ],
   boxRows: [1.5, 4.5, 8.5, 11.2],
 };

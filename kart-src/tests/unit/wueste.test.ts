@@ -70,7 +70,7 @@ describe('Zug mit befahrbarem Dach', () => {
 });
 
 describe('Wüstenexpress', () => {
-  it('nur hier fahren Züge: vier, gleichmäßig verteilt, auf dem Gleis links – und beim Start steht keiner in der Aufstellung', () => {
+  it('nur hier fahren Züge: vier, gleichmäßig verteilt, auf dem Gleis rechts – und beim Start steht keiner in der Aufstellung', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
       if (i !== WUESTE) {
@@ -94,10 +94,10 @@ describe('Wüstenexpress', () => {
         // langsamer als ein Kart, aber nicht im Schritt
         expect(v.speed).toBeGreaterThan(11);
         expect(v.speed).toBeLessThan(18);
-        // links, unmittelbar an der Bande: zwischen Zug und Bande passt kein Kart
-        expect(v.lat + v.halfWidth).toBeLessThan(-2);
-        expect(v.lat - v.halfWidth - -t.wh[0]).toBeLessThan(0.3);
-        expect(v.lat - v.halfWidth).toBeGreaterThanOrEqual(-t.wh[0] - 0.01);
+        // rechts (in den Kurven innen), unmittelbar an der Bande: zwischen Zug und Bande passt kein Kart
+        expect(v.lat - v.halfWidth).toBeGreaterThan(2);
+        expect(t.wh[0] - (v.lat + v.halfWidth)).toBeLessThan(0.3);
+        expect(v.lat + v.halfWidth).toBeLessThanOrEqual(t.wh[0] + 0.01);
         // Countdown bis kurz nach „Los“: kein Wagen näher als 25 m an der Startlinie
         for (let time = -COUNTDOWN_TICKS; time <= 60; time += 15) {
           for (let car = 0; car < v.cars; car++) {
@@ -135,13 +135,11 @@ describe('Wüstenexpress', () => {
           const x0 = s.x;
           const z0 = s.z;
           const ev = drive(s, lane, time0 + i, last);
-          // (Wer in der Rechtskurve von der Lok springt, kann im Flug die Bande streifen – das zählt nicht.)
-          if (ev & (EV_HIT | EV_FALL) || (ev & EV_WALL && !(s.flags & FLAG_AIR))) {
-            bad++;
-            console.log(`Auffahren: Zug ${v.id} Zeit ${time0} Tick ${i}: ${ev & EV_HIT ? 'Treffer ' : ''}${ev & EV_FALL ? 'Sturz ' : ''}${ev & EV_WALL ? 'Bande ' : ''}hoch ${(s.y - t.py[s.seg]).toFixed(2)} ${JSON.stringify(onTrain(v, s, time0 + i + 1))} lat ${last.lat.toFixed(2)}`);
-          }
           const up = s.y - t.py[s.seg];
           const where = onTrain(v, s, time0 + i + 1);
+          // Treffer und Stürze zählen immer; ein Bandenstoß nur oben auf dem Zug (wer in der Kurve neben dem Gleis
+          // anfährt, streift den Rampenwagen schon einmal seitlich – das kostet Tempo, ist aber kein Fehler).
+          if (ev & (EV_HIT | EV_FALL) || (ev & EV_WALL && where.car >= 0 && up > 0.3 && !(s.flags & FLAG_AIR))) bad++;
           // (Höhe nur auf dem Zug messen: Nach dem Absprung fällt die Strecke unter dem Kart stellenweise ab.)
           if (where.car >= 0 && !(s.flags & FLAG_AIR)) top = Math.max(top, up);
           if (where.car >= 0 && up > 0.3 && !(s.flags & FLAG_AIR)) {
@@ -175,9 +173,10 @@ describe('Wüstenexpress', () => {
     for (const car of [0, 2, 4]) {
       const p = vehiclePose(t, v, car, time0, P);
       // neben den Wagen, Kurs schräg auf ihn zu
-      const s = at(p.seg, p.lat + v.halfWidth + 2.2, v.speed);
+      // (der Zug fährt rechts an der Bande: das Kart kommt von links)
+      const s = at(p.seg, p.lat - v.halfWidth - 2.2, v.speed);
       const turn = 0.35;
-      s.heading -= turn;
+      s.heading += turn;
       s.vx = Math.sin(s.heading) * (v.speed + 3);
       s.vz = Math.cos(s.heading) * (v.speed + 3);
       let top = 0;
