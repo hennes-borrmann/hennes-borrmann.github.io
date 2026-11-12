@@ -16,6 +16,7 @@
 
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { RUINE_STUECK } from './stuecke/ruine';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -419,7 +420,7 @@ export const SONGS: Record<MusicId, SongDef> = {
   hafen: HAFEN_STUECK,
   // (vorläufig, bis die eigenen Stücke da sind)
   vulkan: GLUT,
-  ruine: KLIPPE,
+  ruine: RUINE_STUECK,
   results: RESULTS,
 };
 

@@ -128,9 +128,14 @@ const LEVEL: Record<SfxName, number> = {
   // der Sturm-Aufrufe ≈ −34 LUFS wie der Fahrtwind im Gleitflug – ein Bett, kein Hauptdarsteller.
   gust: 4.5,
   storm: 0.85,
-  // Zeitriss-Ruine (vorläufig)
-  riftwarn: 1.6,
-  rift: 1.8,
+  // Zeitriss-Ruine (Runde 12). Beide kommen mit Faktor 1 (überall gleich laut). Vor dem
+  // Mischpult: Gong ≈ −15,7 LUFS (Spitze 0,6), Riss ≈ −14,1 (Sprungplatte −13). Im Spiel-Mix
+  // (Motor und Werkshof-Musik, Regler 0,5/0,8) als Beitrag gemessen, lautestes 400- bzw.
+  // 100-ms-Fenster: Gong −21,6/−19,9 LUFS – deutlich zu hören (+1,1 LU, wie die Sprungplatte),
+  // aber im kurzen Fenster unter dem Treffer (−22,6/−16,8: kurz und hart); Riss −19,6/−17,3
+  // wie die Sprungplatte (−20,2/−17,3). Beide 3 s nacheinander: Ausgangsspitze 0,45.
+  riftwarn: 1.4,
+  rift: 1.2,
   // Vulkaninsel (vorläufig)
   crumble: 1.2,
   crack: 1.6,
@@ -703,9 +708,6 @@ export class SfxPlayer {
       // Vulkaninsel (vorläufig: brechen und leerlaufen wie der Einschlag)
       case 'crack':
       case 'drain':
-      // Zeitriss-Ruine (vorläufig)
-      case 'riftwarn':
-      case 'rift':
       case 'meteor': {
         // Meteorit: ein kurzes, fallendes Heulen (Sinus mit schnellem Flattern und ein
         // enges Rauschband, das mit hinabfährt – im Comic pfeift es auch ohne Luft), dann
@@ -731,6 +733,93 @@ export class SfxPlayer {
         }
         break;
       }
+      // --- Zeitriss-Ruine ---
+      // Beide kommen überall gleich laut (Mitte, Faktor 1), alle 18 s – das Paar eines Sprungs
+      // liegt 3 s auseinander, zusammen also gut 4 s Ton je Sprung, neunmal in einem Rennen.
+      case 'riftwarn': {
+        // Drei Sekunden vor dem Sprung der Zeit (endet knapp davor). Ein tiefer Gong auf A2
+        // (110 Hz, der Grundton des Rennstücks), mit einem weichen Schlegel angeschlagen: kurzer,
+        // dumpfer Anschlag (tiefpassgefiltertes Rauschen, ein Sinus-Stoß) statt eines Knalls.
+        // Die Teiltöne: Grundton, Oktave und Duodezime fast harmonisch – darum ein klarer Ton –,
+        // dazu drei unharmonische (×2,76, ×4,17, ×5,4), die schnell vergehen und den Anschlag
+        // metallisch machen. Grundton und Oktave haben je einen um ~1 Hz verstimmten Zwilling:
+        // Sie schweben (Schwebung ~1 Hz), wie ein großer Gong. Weil eine Exponentialrampe bis
+        // −80 dB über die ganze Dauer zu früh leise wird, klingt jeder dieser Teiltöne in zwei
+        // Schichten: eine kurze, laute vom Anschlag und eine, die in 0,35 s aufblüht (große Gongs
+        // „blühen" nach dem Schlag), bis 1,5 s hält und dann bis 2,95 s verklingt.
+        // Darüber zieht ein Uhrwerk auf: leise, abwechselnd hohe und tiefere Klicks (Rauschen um
+        // 6 bzw. 4,3 kHz, 12 ms), deren Abstand von 0,3 s je Klick um 10 % schrumpft (bis
+        // 65 ms) und die dabei lauter werden – die Spannung steigt, je näher der Sprung ist.
+        // Und ein dünner Glaston steigt in 2,4 s eine Oktave (A5 → A6) und schwillt dabei an,
+        // mit einem leicht verstimmten Oberton, der schimmert.
+        // Abgrenzung: 'ring' ist ein kurzer heller Zweiklang mit Schubrauschen (0,45 s), 'gust'
+        // ein Fauchen, 'count' ein kurzer Piepton; einen tiefen, langen Gong gibt es sonst nicht.
+        // Gemessen (vor dem Mischpult): hörbar bis 2,65 s, stärkste Linie 108 Hz (FFT-Raster
+        // 21,5 Hz) über die ganze Dauer, Tonalität 16,4 dB (Glocke 'ring' 17, Lawine 12);
+        // Hüllkurve −12 dB beim Schlag, dann schwebend zwischen −22 (0,45 s) und −16 (Blüte,
+        // 0,7–1,0 s), −21 bei 1,6 s, ab 2 s −27 (Glaston und Ausklang). Die
+        // Klicks (Hochband > 5 kHz) kommen nach 0,36 · 0,63 · 0,87 · 1,09 … 2,63 s: 18 Stück,
+        // Abstände 0,27 → 0,065 s, und werden um ≈ 5 dB lauter.
+        const f = 110;
+        v.noise(900, 180, 0.07, 0.12, { type: 'lowpass', q: 0.8, attack: 0.002 })
+          .tone('sine', 72, 52, 0.22, 0.2, { attack: 0.004 })
+          // Grundton: Anschlag, Blüte, schwebender Zwilling
+          .tone('sine', f, f * 0.985, 1.5, 0.26, { attack: 0.006 })
+          .tone('sine', f * 0.997, f * 0.99, 2.95, 0.08, { attack: 0.25, sustain: 0.5 })
+          .tone('sine', f + 0.9, (f + 0.9) * 0.99, 2.95, 0.06, { attack: 0.35, sustain: 0.5 })
+          // Oktave
+          .tone('sine', f * 2, f * 1.98, 1.1, 0.14, { attack: 0.005 })
+          .tone('sine', f * 2, f * 1.985, 2.8, 0.045, { attack: 0.25, sustain: 0.45 })
+          .tone('sine', f * 2 + 1.3, (f * 2 + 1.3) * 0.985, 2.8, 0.035, { attack: 0.35, sustain: 0.45 })
+          // Duodezime (blüht etwas später auf)
+          .tone('sine', f * 3, f * 2.98, 2.2, 0.06, { attack: 0.2, sustain: 0.3 })
+          // unharmonische Teiltöne des Anschlags
+          .tone('sine', f * 2.76, f * 2.74, 1.1, 0.05, { attack: 0.004 })
+          .tone('sine', f * 4.17, f * 4.13, 0.75, 0.035, { attack: 0.004 })
+          .tone('sine', f * 5.4, f * 5.35, 0.5, 0.025, { attack: 0.004 })
+          // Glaston
+          .tone('sine', 880, 1760, 2.45, 0.045, { at: 0.25, attack: 1.4, sustain: 0.9, vibHz: 5.5, vibDepth: 0.003 })
+          .tone('sine', 1765, 3530, 2.4, 0.012, { at: 0.3, attack: 1.5, sustain: 0.85 });
+        let t = 0.3;
+        let gap = 0.3;
+        for (let i = 0; t < 2.62; i++) {
+          const fc = i % 2 === 0 ? 6000 : 4300;
+          const vol = 0.045 + 0.05 * Math.min(1, t / 2.4);
+          v.noise(fc, fc * 0.85, 0.012, vol, { q: 2.2, at: t, attack: 0.001 });
+          gap = Math.max(0.065, gap * 0.9);
+          t += gap;
+        }
+        break;
+      }
+      case 'rift':
+        // Der Sprung: Die Zeit reißt auf wie Glas, das auseinandergezogen wird. Ein breites
+        // Rauschband fährt in 0,16 s von 350 Hz bis 9 kHz hinauf (der Riss), mit einem leisen
+        // Dreieck, das mitzieht, und endet in einem feinen, hellen Knistern (Hochpass). Dann
+        // schimmert es: vier hohe Sinustöne (A6, Cis7, E7, A7 – ein A-Dur-Klang, passend zum
+        // Rennstück), je mit einem leicht verstimmten Zwilling, gleiten in 0,95 s eine Oktave
+        // hinab und verklingen, darüber ein dünnes Rauschen, das ebenso hinabsinkt (der Nachhall).
+        // Darunter ein weicher Tiefton-Stoß (Sinus 110 → 55 Hz und braunes Rauschen, beide mit
+        // 30–50 ms Anstieg, also ein Schub und kein Schlag). Abgrenzung: 'meteor', 'bomb' und
+        // 'crack' beginnen mit einem harten Schlag und poltern dann tief; 'ring' gleitet hinauf
+        // in einen Glanz, 'icicle' klirrt kurz in Splittern abwärts. Hier steigt erst alles in
+        // die Höhe und sinkt dann als langer, klingender Schimmer ab – die Welt klappt um.
+        // Der Schimmer hält ein Drittel seiner Dauer (sustain), sonst wäre er nach 0,4 s fort.
+        // Gemessen (vor dem Mischpult): lautestes 50-ms-Fenster bei 0,2 s (−13 dB), −16 bis
+        // 0,45 s, −25 bei 0,55 s, hörbar bis 0,92 s; zwei Drittel der Leistung zwischen 1,5 und
+        // 4 kHz, ein Fünftel unter 150 Hz (der Stoß).
+        v.noise(350, 9000, 0.16, 0.42, { q: 1.1, attack: 0.025 })
+          .tone('triangle', 300, 2400, 0.15, 0.07, { attack: 0.03 })
+          .noise(9000, 6000, 0.06, 0.14, { type: 'highpass', at: 0.13, attack: 0.002 })
+          .tone('sine', 1760, 880, 1.0, 0.13, { at: 0.14, attack: 0.02, sustain: 0.3, vibHz: 7, vibDepth: 0.005 })
+          .tone('sine', 1771, 886, 0.9, 0.08, { at: 0.14, attack: 0.03 })
+          .tone('sine', 2217, 1109, 0.85, 0.1, { at: 0.145, attack: 0.02, sustain: 0.3, vibHz: 7.4, vibDepth: 0.005 })
+          .tone('sine', 2637, 1319, 0.8, 0.09, { at: 0.15, attack: 0.02, sustain: 0.3, vibHz: 6.6, vibDepth: 0.005 })
+          .tone('sine', 2652, 1326, 0.75, 0.06, { at: 0.15, attack: 0.03 })
+          .tone('sine', 3520, 1760, 0.7, 0.05, { at: 0.155, attack: 0.02 })
+          .noise(7000, 2200, 0.95, 0.1, { q: 0.9, attack: 0.05, at: 0.14 })
+          .tone('sine', 110, 55, 0.45, 0.32, { at: 0.1, attack: 0.03 })
+          .noise(260, 90, 0.4, 0.18, { type: 'lowpass', brown: true, attack: 0.05, at: 0.1 });
+        break;
       // --- Fliegen ---
       case 'wings':
         // Ausklappen: zwei schnelle Stoff-Schnapper (enges Rauschen, der zweite tiefer),
