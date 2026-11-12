@@ -1421,9 +1421,17 @@ async function main() {
       const [eh, ec, now] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'harbor()')]);
       const k = now.winds[alleyIdx].strength;
       gustSeen = Math.max(gustSeen, k);
-      gusted[0] = Math.max(gusted[0], Math.sign(alleyH.push) * latOpenH(eh.find((e) => e.slot === 1)));
-      gusted[1] = Math.max(gusted[1], Math.sign(alleyH.push) * latOpenH(ec.find((e) => e.slot === 1)));
-      leeShift = Math.max(leeShift, Math.abs(latLeeH(eh.find((e) => e.slot === 0)) - leeLatH));
+      // (Hängt der Bildschirm des Mitspielers noch beim Aufbau der Welt, kennt er die Karts noch nicht – diese Abfrage auslassen.)
+      const benH = eh.find((e) => e.slot === 1);
+      const benC = ec.find((e) => e.slot === 1);
+      const annaH = eh.find((e) => e.slot === 0);
+      if (!benH || !benC || !annaH) {
+        await sleep(50);
+        continue;
+      }
+      gusted[0] = Math.max(gusted[0], Math.sign(alleyH.push) * latOpenH(benH));
+      gusted[1] = Math.max(gusted[1], Math.sign(alleyH.push) * latOpenH(benC));
+      leeShift = Math.max(leeShift, Math.abs(latLeeH(annaH) - leeLatH));
       if (gustSeen > 0.9 && k === 0) break;
       await sleep(50);
     }
@@ -1645,41 +1653,45 @@ async function main() {
         lanesH.every((l, i) => Math.abs(l.drift - lanesC[i].drift) < 1e-6 && l.raft === lanesC[i].raft),
       lanesH.map((l) => `${l.speed} m/s, nach 20 s ${l.drift.toFixed(0)} m${l.raft ? ', Floß' : ', Lücke'}`).join(' · '),
     );
-    // Ben steht mitten auf einem Floß der schnellen Bahn rechts – berechnet und hingestellt im selben Augenblick, damit
-    // eine Denkpause der Seite nichts verschiebt. Er gibt kein Gas: Das Floß trägt ihn und nimmt ihn mit.
+    // Anna (das Kart des Hosts) steht mitten auf einem Floß der schnellen Bahn rechts – berechnet und hingestellt im selben
+    // Augenblick, damit eine Denkpause der Seite nichts verschiebt. Sie gibt kein Gas: Das Floß trägt sie und nimmt sie mit.
+    // (Gemessen wird am Kart des Hosts: Es rechnet genau einen Schritt je Tick. Das Kart eines Mitspielers holt nach
+    // einem Hänger seiner Seite mehrere Schritte je Tick nach – dann wäre es in derselben Rennzeit weiter getrieben.)
     const spot = (gapToo) => `(() => {
       const r = window.__kart.river().rivers[0];
       const l = r.lanes[2];
       const pitch = l.length + l.gap;
       let a = l.phase + l.drift + (${gapToo} ? l.length + l.gap / 2 : l.length / 2);
       a -= Math.floor((a - 40) / pitch) * pitch;
-      window.__kart.place(1, r.at + a, (l.lat0 + l.lat1) / 2);
-      const s = window.__kart.authoritative(1);
+      window.__kart.place(0, r.at + a, (l.lat0 + l.lat1) / 2);
+      const s = window.__kart.authoritative(0);
       return { a, x: s.x, z: s.z, time: window.__kart.race().time, speed: l.speed };
     })()`;
-    const read = `(() => { const s = window.__kart.authoritative(1); return { x: s.x, z: s.z, respawn: s.respawn, time: window.__kart.race().time }; })()`;
+    const read = `(() => { const s = window.__kart.authoritative(0); return { x: s.x, z: s.z, time: window.__kart.race().time }; })()`;
+    await watch(0);
     const raft0 = await h7.page.evaluate(spot(false));
     let raft1 = raft0;
     const untilRaft = Date.now() + 12000;
     while (Date.now() < untilRaft && raft1.time - raft0.time < 150) {
       await sleep(100);
       raft1 = await h7.page.evaluate(read);
-      if (raft1.respawn > 0) break;
     }
     const rode = Math.hypot(raft1.x - raft0.x, raft1.z - raft0.z);
     const rodeFor = (raft1.time - raft0.time) / 60;
-    const benC = (await kart(c7.page, 'entities()')).find((e) => e.slot === 1);
-    const seenC = Math.hypot(benC.x - raft0.x, benC.z - raft0.z);
+    await sleep(400);
+    const annaC = (await kart(c7.page, 'entities()')).find((e) => e.slot === 0);
+    const seenC = Math.hypot(annaC.x - raft0.x, annaC.z - raft0.z);
+    const sankOnRaft = await h7.page.evaluate(() => window.__seen.respawn);
     check(
-      'Floß trägt und nimmt mit: Ben treibt ohne Gas mit dem Tempo der schnellen Bahn flussab – auch auf seinem eigenen Bildschirm',
-      raft1.respawn === 0 && rodeFor >= 2.4 && rode > raft0.speed * rodeFor * 0.8 && rode < raft0.speed * rodeFor * 1.25 && benC.respawn === 0 && seenC > raft0.speed * rodeFor * 0.5,
-      `${rode.toFixed(1)} m in ${rodeFor.toFixed(1)} s (Bahn ${raft0.speed} m/s), bei ihm ${seenC.toFixed(1)} m`,
+      'Floß trägt und nimmt mit: Anna treibt ohne Gas mit dem Tempo der schnellen Bahn flussab – auch auf dem Bildschirm des Mitspielers',
+      sankOnRaft === null && rodeFor >= 2.4 && rode > raft0.speed * rodeFor * 0.85 && rode < raft0.speed * rodeFor * 1.15 && seenC > raft0.speed * rodeFor * 0.7,
+      `${rode.toFixed(1)} m in ${rodeFor.toFixed(1)} s (Bahn ${raft0.speed} m/s), beim Mitspieler ${seenC.toFixed(1)} m${sankOnRaft === null ? '' : `, untergegangen bei ${at(sankOnRaft)}`}`,
     );
-    // … und in der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt.
-    await watch(1);
+    // … und in der Lücke zwischen zwei Flößen ist Wasser: Anna geht unter und wird neu aufgesetzt.
+    await watch(0);
     await h7.page.evaluate(spot(true));
     const drowned = await seenOnBoth('respawn', 12000);
-    check('In der Lücke zwischen zwei Flößen ist Wasser: Ben geht unter und wird neu aufgesetzt – beim Host und auf seinem eigenen Bildschirm', drowned[0] !== null && drowned[1] !== null, `Rücksetzen bei ${at(drowned[0])} / ${at(drowned[1])}`);
+    check('In der Lücke zwischen zwei Flößen ist Wasser: Anna geht unter und wird neu aufgesetzt – beim Host und auf dem Bildschirm des Mitspielers', drowned[0] !== null && drowned[1] !== null, `Rücksetzen bei ${at(drowned[0])} / ${at(drowned[1])}`);
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
