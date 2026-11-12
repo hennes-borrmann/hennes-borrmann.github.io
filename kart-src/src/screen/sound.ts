@@ -73,6 +73,10 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'shimmer',
   'portal',
   'mirror',
+  // Wüstenexpress: Pfeife und Vorbeifahrt des Zugs sind ortsfest; fremde Karts hört man aufs Dach springen
+  'whistle',
+  'trainpass',
+  'board',
 ]);
 
 export class Sound {
