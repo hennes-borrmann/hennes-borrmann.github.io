@@ -56,6 +56,7 @@ import {
   type Portal,
   type RaftLane,
   type Sizer,
+  type Drum,
   type Rail,
   type River,
   raftAt,
@@ -63,7 +64,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -158,6 +159,13 @@ export interface PathFeatures {
    * period und phase in Sekunden (ohne Angabe 3,4 und 0). Die Enden sind gelenkige Übergänge.
    */
   pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number }[];
+  /**
+   * Magnettrommel (Magnetwerk): Von from bis to läuft die Fahrbahn an der Innenwand einer liegenden Trommel entlang
+   * (radius = Halbmesser, ohne Angabe 26 m) und schraubt sich an ihr hoch. turns = Stützstellen [Stelle, Winkel in
+   * Grad] (0 = unten, 90 = rechte Wand, 180 = Decke, 360 = wieder unten), dazwischen weich; vor der ersten und nach
+   * der letzten gilt deren Winkel. Nur auf der Hauptstrecke.
+   */
+  drums?: { from: number; to: number; radius?: number; turns: [number, number][] }[];
   /**
    * Schienen (Achterbahn): von … bis sitzt das Kart auf einer der Schienen (lanes = seitliche Lage in Metern) und rollt
    * wie ein Achterbahnwagen (mechanics.ts, Rail). lifts = Kettenlifte, brakes = Bremsstrecken: je [von, bis, Tempo in m/s].
@@ -314,6 +322,8 @@ export const EDGE_RIVER = 2048;
  * Banden gibt es keine, die Schienen stehen frei auf ihrem Gerüst.
  */
 export const EDGE_RAIL = 4096;
+/** Magnettrommel: Die Fahrbahn läuft an der Innenwand einer Trommel (Track.drums, Track.roll). */
+export const EDGE_DRUM = 8192;
 /**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
@@ -431,6 +441,9 @@ export interface Track {
   rivers: River[];
   /** Schienenstücke (mechanics.ts). */
   rails: Rail[];
+  /** Magnettrommeln (mechanics.ts) und die Verdrehung je Abschnitt (Radiant; außerhalb 0). */
+  drums: Drum[];
+  roll: Float32Array;
   /** Portale (mechanics.ts). */
   portals: Portal[];
   /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
@@ -1057,6 +1070,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     winds: [],
     rivers: [],
     rails: [],
+    drums: [],
+    roll: new Float32Array(total),
     portals: [],
     roofed: false,
     sizers: [],
@@ -1185,6 +1200,27 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       // vorwärts oder zurück? (der kürzere Weg um die Runde entscheidet; auf einer Abzweigung gilt es als vorwärts)
       const ahead = p.closed ? (((to - seg) % n) + n) % n : 0;
       track.portals.push({ seg, lat0: Math.min(q.lat0, q.lat1), lat1: Math.max(q.lat0, q.lat1), to, plan, kind: ahead <= n / 2 ? 0 : 1 });
+    }
+    for (const d of p.f.drums ?? []) {
+      const first = segAt(p, d.from);
+      const last = segAt(p, d.to);
+      const count = Math.max(1, last - first + 1);
+      track.drums.push({ first, count, radius: d.radius ?? 26 });
+      const turns = d.turns.map(([at, deg]) => [segAt(p, at), (deg * Math.PI) / 180]).sort((a, b) => a[0] - b[0]);
+      for (let k = 0; k < count; k++) {
+        const seg = first + k;
+        edge[seg] |= EDGE_DRUM;
+        let angle = turns[0][1];
+        if (seg >= turns[turns.length - 1][0]) angle = turns[turns.length - 1][1];
+        else {
+          for (let i = 0; i + 1 < turns.length; i++) {
+            if (seg < turns[i][0] || seg >= turns[i + 1][0]) continue;
+            const u = (seg - turns[i][0]) / Math.max(1, turns[i + 1][0] - turns[i][0]);
+            angle = turns[i][1] + (turns[i + 1][1] - turns[i][1]) * u * u * (3 - 2 * u);
+          }
+        }
+        track.roll[seg] = angle;
+      }
     }
     for (const r of p.f.rails ?? []) {
       const first = segAt(p, r.from);
@@ -1638,6 +1674,29 @@ export function gateShut(t: Track, seg: number, time: number, size: number): boo
 }
 
 /** Das Flussstück, zu dem dieser Abschnitt gehört (sonst null). */
+/** Die Magnettrommel, zu der der Abschnitt gehört – oder null. */
+export function drumOf(t: Track, seg: number): Drum | null {
+  if ((t.edge[seg] & EDGE_DRUM) === 0) return null;
+  for (const d of t.drums) if (seg >= d.first && seg < d.first + d.count) return d;
+  return null;
+}
+
+/**
+ * Magnettrommel, für die Darstellung: Wo liegt – im Bild, das die Fahrbahn aufrecht zeigt – der Punkt der Halle, der
+ * am Abschnitt seg unter dem Hallenwinkel theta (Radiant: 0 = Hallenboden unten, π/2 = rechte Wand, π = Decke) im
+ * Abstand dist von der Trommelachse liegt? Die Achse verläuft radius über der Fahrbahnmitte; die Bahn selbst klebt
+ * unter dem Hallenwinkel roll[seg] an der Innenwand. along verschiebt längs (Meter, in Fahrtrichtung).
+ */
+export function drumPoint(t: Track, seg: number, theta: number, dist: number, radius: number, out: { x: number; y: number; z: number }, along = 0): { x: number; y: number; z: number } {
+  const a = theta - t.roll[seg];
+  const side = Math.sin(a) * dist;
+  const down = Math.cos(a) * dist;
+  out.x = t.px[seg] + t.tx[seg] * along + rightX(t, seg) * side;
+  out.y = t.py[seg] + radius - down;
+  out.z = t.pz[seg] + t.tz[seg] * along + rightZ(t, seg) * side;
+  return out;
+}
+
 /** Das Schienenstück, zu dem der Abschnitt gehört – oder null. */
 export function railOf(t: Track, seg: number): Rail | null {
   if ((t.edge[seg] & EDGE_RAIL) === 0) return null;

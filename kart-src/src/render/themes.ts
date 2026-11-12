@@ -70,6 +70,42 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Magnetwerk: Fabrikgelände am späten Abend – stahlblauer Himmel, Natriumlicht, Beton und Stahl. (VORLÄUFIG)
+  magnet: {
+    sky: [0x1f2a4a, 0x4a5a86, 0xd99a6a],
+    fog: 0x6a6a86,
+    fogNear: 150,
+    fogFar: 700,
+    sunDir: [0.5, 0.45, -0.4],
+    sunColor: 0xffd0a0,
+    sunIntensity: 2.0,
+    hemiSky: 0xa8b8e0,
+    hemiGround: 0x4a4440,
+    hemiIntensity: 1.5,
+    disc: 0xffd8a8,
+    discSize: 20,
+    clouds: 0xb8b0c8,
+    cloudShade: 0x6a6480,
+    stars: false,
+    road: 0x50545e,
+    roadAlt: 0x484c56,
+    line: 0xf0f0f0,
+    kerbA: 0x2f7fe0,
+    kerbB: 0xf0f0f0,
+    shoulder: 0x6a6460,
+    wallA: 0x2f7fe0,
+    wallB: 0xd8dde6,
+    wallCap: 0xe24a3a,
+    deck: 0x8a8e98,
+    deckDark: 0x5a5e68,
+    pillar: 0x9aa0aa,
+    ground: [0x7a7468, 0x6a645a, 0x8a8478, 0x5f6a52],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: 1,
+    rough: 0.8,
+  },
   // Achterbahn-Rummel: Jahrmarkt am frühen Abend – der Himmel glüht orange bis violett, die Bahn ist noch gut zu sehen. (VORLÄUFIG)
   rummel: {
     sky: [0x3a3f8f, 0xb86aa8, 0xffb070],

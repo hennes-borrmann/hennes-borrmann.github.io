@@ -774,6 +774,29 @@ export const KICK_SPEED = 3;
 /** Mit Schub (Boost, Schubmagnet) zieht die Kette eines Lifts so viel schneller. */
 export const LIFT_BOOST = 1.6;
 
+// --- Magnettrommel -------------------------------------------------------------------
+// Im Magnetwerk läuft die Fahrbahn an der Innenwand einer riesigen, liegenden Trommel entlang und schraubt sich an ihr
+// hoch: erst die rechte Wand hinauf, über die Decke, die linke Wand wieder hinunter. Magnete halten die Karts auf der
+// Bahn – aber die Schwerkraft zieht weiter zum Hallenboden: An der Wand sackt das Kart seitlich ab, an der Decke
+// greifen die Reifen schlechter.
+//
+// Gerechnet wird wie überall auf der flachen Fahrbahn. Die Verdrehung (Track.roll, Radiant: 0 = unten, π/2 = rechte
+// Wand, π = Decke) ist für die Physik nur eine Kraft und ein Haftwert – und für die Darstellung der Winkel, um den
+// sich die Trommel mit allem, was an ihr hängt, um die Fahrbahn dreht (drumPoint in track.ts): Das Bild zeigt die
+// Bahn aufrecht und die Halle verdreht – für den Fahrer dasselbe, wie an Wand und Decke zu fahren.
+
+/** Trommelstück: Abschnitte first … first+count−1, Halbmesser der Trommel (Meter). */
+export interface Drum {
+  first: number;
+  count: number;
+  radius: number;
+}
+
+/** So schnell sackt ein Kart an der senkrechten Wand seitlich zum Hallenboden ab (m/s; mal Sinus der Verdrehung). */
+export const DRUM_SAG = 3.4;
+/** Halt der Reifen an der Decke (Anteil; an der Wand die Mitte zwischen 1 und diesem Wert). */
+export const DRUM_GRIP = 0.72;
+
 // --- Zeitalter -----------------------------------------------------------------------
 // Die Zeitriss-Ruine springt im festen Takt zwischen zwei Zeitaltern: „Einst“ (der Tempel steht)
 // und „Jetzt“ (er ist zerfallen). Bruchstellen und Tore hängen an einem der beiden – ihre Pläne

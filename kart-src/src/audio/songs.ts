@@ -432,6 +432,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   zimmer: ZIMMER_STUECK,
   // Achterbahn-Rummel: eigenes Stück (stuecke/rummel.ts)
   rummel: RUMMEL_STUECK,
+  // Magnetwerk: VORLÄUFIG das Stück der Nachtschicht
+  magnet: NACHT,
   results: RESULTS,
 };
 
