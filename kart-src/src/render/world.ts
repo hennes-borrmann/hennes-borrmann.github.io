@@ -14,6 +14,7 @@ import {
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   EDGE_RAMP,
+  EDGE_RIVER,
   EDGE_TUNNEL,
   heaveAt,
   rightX,
@@ -33,6 +34,9 @@ const WALL_T = 0.5;
 const DECK_D = 1.1;
 /** So breit bleibt unter der Bande ein Sims stehen, wenn daneben die Fahrbahn wegbricht (auch mechanics/volcano.ts). */
 export const HOLE_RIM = 0.5;
+/** So tief liegt das Flussbett unter der Höhe der Flöße (auch mechanics/river.ts); der Wasserspiegel liegt RIVER_WATER darunter. */
+export const RIVER_D = 3.2;
+export const RIVER_WATER = 0.45;
 /** So tief liegt das Gelände unter einem Steg, dessen Platten wegbrechen können: der Glutgraben (auch life/vulkan.ts). */
 export const PIT_D = 6;
 
@@ -463,10 +467,11 @@ export class World {
 
     for (let i = 0; i < t.total; i++) {
       const j = t.next[i];
+      // (Auch ein Fluss ist für die stehende Welt eine Lücke: Wasser und Flöße zeichnet mechanics/river.ts.)
       // Wie eine Lücke gezeichnet wird auch, was schwimmt (EDGE_FLOAT) oder über die ganze Breite wegbrechen
       // kann (noRoad): das zeichnet die Darstellung der Mechanik (es bewegt sich), hier endet die feste Fahrbahn.
-      const gapI = (t.edge[i] & (EDGE_GAP | EDGE_FLOAT)) !== 0 || noRoad[i] === 1;
-      const gapJ = (t.edge[j] & (EDGE_GAP | EDGE_FLOAT)) !== 0 || noRoad[j] === 1;
+      const gapI = (t.edge[i] & (EDGE_GAP | EDGE_FLOAT | EDGE_RIVER)) !== 0 || noRoad[i] === 1;
+      const gapJ = (t.edge[j] & (EDGE_GAP | EDGE_FLOAT | EDGE_RIVER)) !== 0 || noRoad[j] === 1;
       const holed = cuts[i] !== null || cuts[j] !== null;
       if (gapI && gapJ) continue;
       // Die Fahrbahn endet genau dort, wo für die Physik der Boden endet: auf halbem Weg zum Lückenabschnitt.
@@ -773,7 +778,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -1069,10 +1074,12 @@ export class World {
         if ((t.edge[i] & EDGE_DECK) === 0 || (t.edge[i] & (EDGE_OPEN_L | EDGE_OPEN_R)) === 0) continue;
         const dd = Math.hypot(x - t.px[i], z - t.pz[i]);
         if (dd > 36) continue;
-        const kk = 1 - smooth((dd - 11) / 25);
+        // Ein Fluss liegt in einem flachen Bett mit nahen Ufern – keine Schlucht.
+        const river = (t.edge[i] & EDGE_RIVER) !== 0;
+        const kk = river ? 1 - smooth((dd - t.wh[i] - 7) / 9) : 1 - smooth((dd - 11) / 25);
         if (kk > dropK) {
           dropK = kk;
-          drop = Math.max(th.farY, t.py[i] - 10);
+          drop = river ? t.py[i] - RIVER_D : Math.max(th.farY, t.py[i] - 10);
         }
       }
       if (dropK > 0 && drop < base) base += (drop - base) * dropK;
@@ -1094,10 +1101,34 @@ export class World {
     // Sturmhafen: die Lücke hinter der Schanze ist eine Ladeluke – das Gelände darunter liegt tief (über dem Meeresspiegel).
     const gapPit = t.def.theme === 'hafen' ? 3.4 : 0;
     for (const i of this.deckSegs) {
-      const cap = t.py[i] - (this.pitAt(i) ? PIT_D : gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
+      const cap = t.py[i] - (this.pitAt(i) ? PIT_D : (t.edge[i] & EDGE_RIVER) !== 0 ? RIVER_D : gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
       if (h <= cap) continue;
       const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
       if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
+    }
+    // Fluss: Wo das Land neben dem Flussbett tiefer liegt als der Wasserspiegel (am Hang zum Tiefland hin), bekommt
+    // der Fluss einen Uferdamm – sonst stünde das Wasser als Kante frei über dem Land. Der Damm liegt seitlich
+    // neben dem Fluss (nicht vor der Kante des Wasserfalls): gezählt wird nur, was quer zu einem Flussabschnitt liegt.
+    if (t.rivers.length > 0) {
+      let side = Infinity;
+      let top = 0;
+      for (const i of this.deckSegs) {
+        if ((t.edge[i] & EDGE_RIVER) === 0) continue;
+        const dx = x - t.px[i];
+        const dz = z - t.pz[i];
+        if (Math.abs(dx * t.tx[i] + dz * t.tz[i]) > 1.6) continue;
+        const dd = Math.abs(dx * rightX(t, i) + dz * rightZ(t, i)) - t.wh[i];
+        if (dd < side) {
+          side = dd;
+          top = t.py[i] + 0.35;
+        }
+      }
+      if (side < 34) {
+        // Bett bis 4 m neben der Kante, dann die Böschung hinauf, Dammkrone bis 21 m (so weit reicht das Wasser nicht), dahinter fällt er ab.
+        const bed = top - 0.35 - RIVER_D;
+        const want = side < 21 ? bed + (top - bed) * smooth((side - 4) / 4.5) : h + (top - h) * (1 - smooth((side - 21) / 13));
+        if (want > h) h = want;
+      }
     }
     return h;
   }

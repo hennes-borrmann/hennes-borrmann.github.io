@@ -34,7 +34,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, pulseCycle, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, pulseCycle, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_GAP,
@@ -50,6 +50,7 @@ import {
   rightZ,
   segDelta,
   walk,
+  raftLane,
 } from './track';
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
@@ -404,7 +405,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
-  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0) && !air) {
+  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0) && !air) {
     blocks = 0;
     projectOnTrack(t, s.x, s.z, s.seg);
     const here = proj.lat;
@@ -446,6 +447,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       }
     }
     let bubbleAt = 60;
+    // Fluss: die Bahn, auf die ich will (NaN = keine Vorliebe)
+    let riverWant = Number.NaN;
     for (const p of t.pulses) {
       let d = -1;
       for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
@@ -484,6 +487,52 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       // Ein Blitzableiter ist keine Gefahr (sein Ladefeld schiebt an) – und der Mast steht neben der Bahn.
       if (p.kind === PULSE_ROD) continue;
       if (c0 < p.on || c1 < p.on || c1 < c0) block(p.lat - p.radius - KART_HALF - 0.5, p.lat + p.radius + KART_HALF + 0.5, 1);
+    }
+    // Fluss: Wasser ist gesperrt – je Bahn dort, wo in der nächsten guten Sekunde kein Floß unter mir läge.
+    // (Mein Floß nimmt mich mit; die Flöße der anderen Bahnen treiben mit ihrem eigenen Tempo.)
+    for (const r of t.rivers) {
+      // Meter ab Flussanfang (negativ: so weit ist es noch bis dorthin)
+      let a0 = Number.NaN;
+      if (s.seg >= r.first && s.seg < r.first + r.count) a0 = (s.seg - r.first) * t.step;
+      else {
+        for (let k = 1; k < PATH.length && k * t.step <= 40; k++) {
+          if (PATH[k] === r.first) {
+            a0 = -k * t.step;
+            break;
+          }
+        }
+      }
+      if (a0 !== a0) continue;
+      const mine = a0 >= 0 ? raftLane(t, s.seg, 0, here, ctx.time) : null;
+      const carry = mine ? mine.speed : 0;
+      // Wer aufpasst, nimmt die schnellste Strömung, die in der nächsten guten Sekunde ein Floß unter sich hat
+      // (bei gleichem Tempo die nähere Bahn).
+      let fast: (typeof r.lanes)[number] | null = null;
+      for (const l of r.lanes) {
+        if (l.gap <= 0) {
+          if (b.level > 0 && a0 >= -12 && (!fast || l.speed > fast.speed)) fast = l;
+          continue;
+        }
+        let soon = Infinity;
+        for (let e = 6; e <= 84; e += 6) {
+          // Solange ich noch nicht auf dem Fluss bin, komme ich nur mit meinem eigenen Tempo voran.
+          const a = a0 + ((Math.max(v, 8) + (a0 >= 0 ? carry : 0)) * e) / 60;
+          if (a < 0 || a > r.count * t.step) continue;
+          if (!raftAt(l, a, ctx.time + e)) {
+            soon = e;
+            break;
+          }
+        }
+        // Gesperrt ist eine Bahn erst, wenn die Lücke nahe ist (0,7 s: so lange dauert der Wechsel zur Mitte);
+        // wer aufpasst, fährt auf eine schnelle Bahn, die noch eine gute Sekunde trägt.
+        if (soon <= 42) block(l.lat0 - 0.3, l.lat1 + 0.3, 1);
+        else if (b.level > 0 && a0 >= -12 && (soon > 66 || l === mine)) {
+          // (Wer schon auf einem schnellen Floß fährt, bleibt, bis die Sperre kommt.)
+          const mid = (l.lat0 + l.lat1) / 2;
+          if (!fast || l.speed > fast.speed || (l.speed === fast.speed && Math.abs(mid - here) < Math.abs((fast.lat0 + fast.lat1) / 2 - here))) fast = l;
+        }
+      }
+      if (fast) riverWant = (fast.lat0 + fast.lat1) / 2;
     }
     // Bruchstellen: was bei meiner Ankunft weggebrochen ist (oder gerade bricht), ist gesperrt.
     for (const h of t.holes) {
@@ -540,6 +589,14 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       if (!Number.isNaN(free)) lat = free;
       else if (t.vehicles.length > 0) jam = true;
       else if (shallow !== 0) lat = shallow * room;
+    }
+    // Fluss: Ausweichen hält sonst möglichst die Spur – die schnelle Bahn aber ist ein Ziel, kein Hindernis.
+    // (Der Weg dorthin führt über die Kette in der Mitte, die immer trägt.)
+    if (riverWant === riverWant) {
+      let open = true;
+      for (let k = 0; k < blocks; k++) if (BLOCK_W[k] >= 1 && riverWant > BLOCK_LO[k] && riverWant < BLOCK_HI[k]) open = false;
+      // (Auf dem Fluss gibt es keine Bande, vor der man Abstand hielte: die Bahnmitte liegt gut zwei Meter vom Wasser.)
+      if (open) lat = riverWant;
     }
   }
   AI_TRACE.lat = lat;

@@ -12,6 +12,7 @@ import { buildGlutLife } from './life/glut';
 import { buildKlippeLife } from './life/klippe';
 import { buildMondLife } from './life/mond';
 import { buildHafenLife } from './life/hafen';
+import { buildDschungelLife } from './life/dschungel';
 import { buildGewitterLife } from './life/gewitter';
 import { buildRuineLife } from './life/ruine';
 import { buildVulkanLife } from './life/vulkan';
@@ -59,6 +60,8 @@ export function buildLife(world: World): Life | null {
       return buildRuineLife(world);
     case 'gewitter':
       return buildGewitterLife(world);
+    case 'dschungel':
+      return buildDschungelLife(world);
     default:
       return null;
   }

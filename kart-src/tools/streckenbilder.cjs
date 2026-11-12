@@ -214,6 +214,19 @@ const SHOTS = {
     ],
     when: '(window.__gh || (window.__gh = setInterval(() => window.__kart.clock(17.45), 50)), (window.__gn = (window.__gn || 0) + 1) > 20)',
   },
+  // Dschungel-Fluss: der Fluss von schräg oben – in der Mitte die gelbe Kette, außen die langen Flöße der schnellen
+  // Strömung mit ihren Lücken. (Die Karts werden an ihrer Stelle festgehalten, die Flöße treiben unter ihnen durch:
+  // fotografiert wird, wenn unter dem Kart auf der Außenbahn gerade ein Floß liegt – und noch eine Sekunde bleibt.)
+  fluss: {
+    from: [486, -13, 9.5],
+    to: [552, 1, 0.5],
+    fov: 56,
+    karts: [
+      [1, 504, -0.6],
+      [2, 513, 5.2],
+    ],
+    when: 'window.__kart.river(undefined, 34).rivers[0].lanes[2].raft && window.__kart.river(undefined, 24).rivers[0].lanes[2].raft',
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

@@ -9,7 +9,7 @@ import { TRACK } from '../../src/game/track';
  */
 export function withoutMechanics<T>(fn: () => T): T {
   const t = TRACK;
-  const keep = { vehicles: t.vehicles, pulses: t.pulses, floods: t.floods, belts: t.belts, tide: t.tide, winds: t.winds, pontoons: t.pontoons, holes: t.holes, gates: t.gates };
+  const keep = { vehicles: t.vehicles, pulses: t.pulses, floods: t.floods, belts: t.belts, tide: t.tide, winds: t.winds, pontoons: t.pontoons, holes: t.holes, gates: t.gates, rivers: t.rivers };
   t.vehicles = [];
   t.pulses = [];
   t.floods = [];
@@ -19,6 +19,7 @@ export function withoutMechanics<T>(fn: () => T): T {
   t.pontoons = [];
   t.holes = [];
   t.gates = [];
+  t.rivers = [];
   try {
     return fn();
   } finally {
@@ -31,5 +32,6 @@ export function withoutMechanics<T>(fn: () => T): T {
     t.pontoons = keep.pontoons;
     t.holes = keep.holes;
     t.gates = keep.gates;
+    t.rivers = keep.rivers;
   }
 }

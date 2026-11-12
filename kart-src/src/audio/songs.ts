@@ -15,6 +15,7 @@
 // Hat eine Stimme weniger Takte als der Abschnitt, wird sie wiederholt.
 
 import { NEUE_STUECKE } from './songs-neu';
+import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
 import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import { RUINE_STUECK } from './stuecke/ruine';
@@ -426,6 +427,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   ruine: RUINE_STUECK,
   // Gewitterkamm: eigenes Stück (stuecke/gewitter.ts)
   gewitter: GEWITTER_STUECK,
+  // Dschungel-Fluss: eigenes Stück (stuecke/dschungel.ts)
+  dschungel: DSCHUNGEL_STUECK,
   results: RESULTS,
 };
 

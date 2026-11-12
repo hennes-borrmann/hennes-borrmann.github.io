@@ -65,6 +65,7 @@ import {
 } from './mechanics';
 import {
   EDGE_FLOAT,
+  EDGE_RIVER,
   EDGE_GAP,
   EDGE_GLIDE,
   EDGE_OPEN_L,
@@ -80,6 +81,7 @@ import {
   newVehiclePose,
   proj,
   projectOnTrack,
+  raftLane,
   rightX,
   rightZ,
   samePath,
@@ -1050,6 +1052,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (carry !== 0 || push !== 0) {
       s.x += (t.tx[seg0] * carry + rightX(t, seg0) * push) * DT;
       s.z += (t.tz[seg0] * carry + rightZ(t, seg0) * push) * DT;
+    }
+  }
+
+  // Fluss: das Floß nimmt mit, was auf ihm steht – flussab, mit dem Tempo seiner Bahn.
+  if (!wasAir && (t.edge[seg0] & EDGE_RIVER) !== 0) {
+    const lane = raftLane(t, seg0, along0, lat0, env.time);
+    if (lane) {
+      s.x += t.tx[seg0] * lane.speed * DT;
+      s.z += t.tz[seg0] * lane.speed * DT;
     }
   }
 

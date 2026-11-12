@@ -798,7 +798,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Zwölf Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 12);
+    check('Dreizehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 13);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1304,7 +1304,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen zwölf Strecken zur Wahl', cards === 12, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen dreizehn Strecken zur Wahl', cards === 13, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1421,9 +1421,17 @@ async function main() {
       const [eh, ec, now] = await Promise.all([kart(h7.page, 'entities()'), kart(c7.page, 'entities()'), kart(h7.page, 'harbor()')]);
       const k = now.winds[alleyIdx].strength;
       gustSeen = Math.max(gustSeen, k);
-      gusted[0] = Math.max(gusted[0], Math.sign(alleyH.push) * latOpenH(eh.find((e) => e.slot === 1)));
-      gusted[1] = Math.max(gusted[1], Math.sign(alleyH.push) * latOpenH(ec.find((e) => e.slot === 1)));
-      leeShift = Math.max(leeShift, Math.abs(latLeeH(eh.find((e) => e.slot === 0)) - leeLatH));
+      // (Hängt der Bildschirm des Mitspielers noch beim Aufbau der Welt, kennt er die Karts noch nicht – diese Abfrage auslassen.)
+      const benH = eh.find((e) => e.slot === 1);
+      const benC = ec.find((e) => e.slot === 1);
+      const annaH = eh.find((e) => e.slot === 0);
+      if (!benH || !benC || !annaH) {
+        await sleep(50);
+        continue;
+      }
+      gusted[0] = Math.max(gusted[0], Math.sign(alleyH.push) * latOpenH(benH));
+      gusted[1] = Math.max(gusted[1], Math.sign(alleyH.push) * latOpenH(benC));
+      leeShift = Math.max(leeShift, Math.abs(latLeeH(annaH) - leeLatH));
       if (gustSeen > 0.9 && k === 0) break;
       await sleep(50);
     }
@@ -1621,9 +1629,73 @@ async function main() {
     const spinInField = spunLast !== null && spunLast >= chargeAt - 0.2;
     check('Blitzableiter: Im Ladefeld bekommt Ben Schub statt eines Treffers – beim Host und auf seinem eigenen Bildschirm', boostB[0] !== null && boostB[1] !== null && !spinInField && boostB[0] >= chargeAt - 0.2, `Schub bei ${at(boostB[0])} / ${at(boostB[1])}, Ladefeld bei ${chargeAt.toFixed(1)} s, letzter Dreher ${at(spunLast)}`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Dschungel-Fluss: Flöße treiben nach Fahrplan – auf beiden Bildschirmen gleich –, tragen und nehmen mit; dazwischen ist Wasser.
+    await h7.page.locator('.track-card').nth(12).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 12, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 12, null, { timeout: 30000 });
+    const [rvH, rvC] = await Promise.all([kart(h7.page, 'river(20, 40)'), kart(c7.page, 'river(20, 40)')]);
+    const lanesH = rvH.rivers.length === 1 ? rvH.rivers[0].lanes : [];
+    const lanesC = rvC.rivers.length === 1 ? rvC.rivers[0].lanes : [];
+    check(
+      'Dschungel-Fluss hat einen Fluss mit drei Bahnen (Kette in der Mitte, Lücken außen) – und beide Bildschirme rechnen dieselben Flöße',
+      lanesH.length === 3 &&
+        lanesC.length === 3 &&
+        lanesH[0].gap === 0 &&
+        lanesH[1].gap > 0 &&
+        lanesH[2].gap > 0 &&
+        lanesH[1].speed > lanesH[0].speed &&
+        Math.abs(lanesH[2].drift - lanesH[2].speed * 20) < 1e-6 &&
+        lanesH.every((l, i) => Math.abs(l.drift - lanesC[i].drift) < 1e-6 && l.raft === lanesC[i].raft),
+      lanesH.map((l) => `${l.speed} m/s, nach 20 s ${l.drift.toFixed(0)} m${l.raft ? ', Floß' : ', Lücke'}`).join(' · '),
+    );
+    // Anna (das Kart des Hosts) steht mitten auf einem Floß der schnellen Bahn rechts – berechnet und hingestellt im selben
+    // Augenblick, damit eine Denkpause der Seite nichts verschiebt. Sie gibt kein Gas: Das Floß trägt sie und nimmt sie mit.
+    // (Gemessen wird am Kart des Hosts: Es rechnet genau einen Schritt je Tick. Das Kart eines Mitspielers holt nach
+    // einem Hänger seiner Seite mehrere Schritte je Tick nach – dann wäre es in derselben Rennzeit weiter getrieben.)
+    const spot = (gapToo) => `(() => {
+      const r = window.__kart.river().rivers[0];
+      const l = r.lanes[2];
+      const pitch = l.length + l.gap;
+      let a = l.phase + l.drift + (${gapToo} ? l.length + l.gap / 2 : l.length / 2);
+      a -= Math.floor((a - 40) / pitch) * pitch;
+      window.__kart.place(0, r.at + a, (l.lat0 + l.lat1) / 2);
+      const s = window.__kart.authoritative(0);
+      return { a, x: s.x, z: s.z, time: window.__kart.race().time, speed: l.speed };
+    })()`;
+    const read = `(() => { const s = window.__kart.authoritative(0); return { x: s.x, z: s.z, time: window.__kart.race().time }; })()`;
+    await watch(0);
+    const raft0 = await h7.page.evaluate(spot(false));
+    let raft1 = raft0;
+    const untilRaft = Date.now() + 12000;
+    while (Date.now() < untilRaft && raft1.time - raft0.time < 150) {
+      await sleep(100);
+      raft1 = await h7.page.evaluate(read);
+    }
+    const rode = Math.hypot(raft1.x - raft0.x, raft1.z - raft0.z);
+    const rodeFor = (raft1.time - raft0.time) / 60;
+    await sleep(400);
+    const annaC = (await kart(c7.page, 'entities()')).find((e) => e.slot === 0);
+    const seenC = Math.hypot(annaC.x - raft0.x, annaC.z - raft0.z);
+    const sankOnRaft = await h7.page.evaluate(() => window.__seen.respawn);
+    check(
+      'Floß trägt und nimmt mit: Anna treibt ohne Gas mit dem Tempo der schnellen Bahn flussab – auch auf dem Bildschirm des Mitspielers',
+      sankOnRaft === null && rodeFor >= 2.4 && rode > raft0.speed * rodeFor * 0.85 && rode < raft0.speed * rodeFor * 1.15 && seenC > raft0.speed * rodeFor * 0.7,
+      `${rode.toFixed(1)} m in ${rodeFor.toFixed(1)} s (Bahn ${raft0.speed} m/s), beim Mitspieler ${seenC.toFixed(1)} m${sankOnRaft === null ? '' : `, untergegangen bei ${at(sankOnRaft)}`}`,
+    );
+    // … und in der Lücke zwischen zwei Flößen ist Wasser: Anna geht unter und wird neu aufgesetzt.
+    await watch(0);
+    await h7.page.evaluate(spot(true));
+    const drowned = await seenOnBoth('respawn', 12000);
+    check('In der Lücke zwischen zwei Flößen ist Wasser: Anna geht unter und wird neu aufgesetzt – beim Host und auf dem Bildschirm des Mitspielers', drowned[0] !== null && drowned[1] !== null, `Rücksetzen bei ${at(drowned[0])} / ${at(drowned[1])}`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die zwölf großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die dreizehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

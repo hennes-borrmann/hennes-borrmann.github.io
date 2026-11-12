@@ -99,6 +99,12 @@ const CHARGE_SPARKS = [
   [0.05, 2100, 0.11, 1900, 0.17, 2600, 0.22, 2400, 0.26, 3200, 0.3, 2900, 0.33, 3700, 0.36, 3500],
   [0.04, 1700, 0.09, 2500, 0.15, 2200, 0.2, 2700, 0.24, 3000, 0.28, 2800, 0.31, 3600, 0.345, 4000],
 ];
+/** Floß: je Fassung der Ton des hohlen Stamms (Hz), dann paarweise [Beginn (s), Tonhöhe als Faktor] der drei Holzschläge. */
+const RAFT_PATTERN = [
+  [205, 0, 1, 0.075, 0.87, 0.165, 1.13],
+  [182, 0, 1, 0.065, 1.1, 0.15, 0.9],
+  [232, 0, 1, 0.085, 0.84, 0.18, 1.06],
+];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -197,6 +203,13 @@ const LEVEL: Record<SfxName, number> = {
   // Schub (100-ms-Lautheit −18,2 gegen −18,8 beim Boost-Feld).
   thunder: 3,
   rod: 3.4,
+  // Dschungel-Fluss (Runde 14), gemessen wie oben: das Floß ≈ −20 LUFS (Landung −18; im
+  // Spiel-Mix trägt es aber 2,7 dB mehr bei als sie, weil es in den Mitten liegt – und es klingt
+  // bei jedem Wechsel der Bahn); die Folge der Fluss-Aufrufe ≈ −34 LUFS wie die Sturm-Folge (ein
+  // Bett); die Folge des Wasserfalls ≈ −12,5 LUFS wie die Lawine (−12) – aus der Nähe mächtig.
+  raft: 2.2,
+  rapids: 1.1,
+  falls: 7,
   rumble: 1.2,
   charge: 2,
 };
@@ -361,6 +374,7 @@ export class SfxPlayer {
   private icicleTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
+  private raftTick = 0;
   private crumbleTick = 0;
   private crackTick = 0;
 
@@ -995,6 +1009,109 @@ export class SfxPlayer {
             t += 0.042 + 0.03 * r();
           }
         }
+        break;
+      }
+      // --- Dschungel-Fluss ---
+      case 'raft': {
+        // Das Kart rollt auf ein (anderes) Floß: ein hohles, hölzernes „Tock-rumpel" (~0,32 s).
+        // Drei Holzschläge – Vorderräder, Hinterräder, ein leiseres Nachrumpeln, 65–85 ms
+        // auseinander –, jeder aus dem Ton des hohlen Stamms (Sinus, der in 0,12 s um gut
+        // eine Quarte nach unten sackt, 160–260 Hz), einem leisen, unharmonischen Holz-Oberton
+        // (Dreieck ×2,4), einem kurzen, breiten Anschlag („Tock", Band um 1,8 → 0,9 kHz) und
+        // braunem Rauschen als Bauch. Darunter der Resonanzkörper des ganzen Floßes (Sinus
+        // 88 → 56 Hz) und ab 80 ms ein kleiner Wasserschwapp (breites Band 1,1 → 0,4 kHz und
+        // tiefes Rauschen, weich einsetzend). Weil es bei jedem Wechsel der Bahn klingt, reihum
+        // drei Fassungen mit anderem Stammton (182/205/232 Hz), anderen Abständen und anderer
+        // Tonfolge der Schläge (tief-hoch, hoch-tief …). Abgrenzung: 'land' ist ein einzelner,
+        // tiefer Plumps (98 % unter 200 Hz), 'bump' ein kurzer Stoß; hier tragen die Schläge
+        // um 150–300 Hz (70 % zwischen 150 und 500 Hz). Gemessen (vor dem Mischpult): −20,0 bis
+        // −20,2 LUFS (Landung −18,1; 'land' liegt aber fast ganz unter 100 Hz, wo die
+        // Lautheitsbewertung wenig zählt), Spitze 0,85–1,0, Dauer 0,31–0,32 s; im Spiel-Mix
+        // trägt es −26,4 LUFS bei (Landung −29,1) – oft gespielt, darum nicht lauter.
+        const k = this.raftTick++ % 3;
+        const p = RAFT_PATTERN[k];
+        const f = p[0];
+        for (let i = 1; i < p.length; i += 2) {
+          const at = p[i];
+          const fh = f * p[i + 1];
+          const a = [1, 0.8, 0.5][(i - 1) >> 1];
+          v.tone('sine', fh * 1.3, fh, 0.12, 0.32 * a, { at, attack: 0.0015 })
+            .tone('triangle', fh * 2.45, fh * 2.35, 0.06, 0.1 * a, { at, attack: 0.001 })
+            .noise(1800, 900, 0.03, 0.36 * a, { q: 1.8, at, attack: 0.001 })
+            .noise(320, 130, 0.09, 0.3 * a, { type: 'lowpass', brown: true, at, attack: 0.003 });
+        }
+        v.tone('sine', 88, 56, 0.22, 0.18, { attack: 0.004 })
+          .noise(1100, 420, 0.26, 0.1, { q: 0.9, attack: 0.05, at: 0.08 })
+          .noise(480, 220, 0.25, 0.1, { type: 'lowpass', brown: true, attack: 0.05, at: 0.1 });
+        break;
+      }
+      case 'rapids': {
+        // Das eigene Kart fährt auf dem Fluss: Bugwelle und Strömung am Floß, etwa alle 0,35 s
+        // aufgerufen (raceScene: riverWait, je nach Bildrate 0,35–0,37 s). Ein Bett, kein
+        // Hauptdarsteller – gebaut wie 'storm': fünf Schichten braunes Rauschen (Wassermasse,
+        // Tiefpass 300–520 Hz) um je 0,075 s versetzt, mit 0,17 s Anstieg, so dass auch über die
+        // Aufrufe hinweg alle 0,075 s ein neuer Gipfel anliegt; darüber drei breite Bänder um
+        // 0,6–1,6 kHz (das Rauschen der Strömung) im Abstand von 0,125 s und ein leises
+        // Hochpass-Zischen (Gischt). Alle Mitten liegen bei jedem Aufruf zufällig etwas anders:
+        // das Wasser „wandert", ohne im Takt zu pumpen. Lebendig machen es zufällig verteilte
+        // Ereignisse ohne festes Raster: null bis drei Blasen (Sinus-Zirper, die nach oben
+        // springen, 280–900 Hz, je kleiner desto kürzer) als Gluckern und null bis zwei kurze
+        // Rauschtropfen (1,2–2,8 kHz) als Plätschern. Abgrenzung: 'splash' (Furt, Riff) ist
+        // heller (Bänder um 0,9–1,5 kHz) mit festem Platscher je Aufruf; 'storm' ist Wind mit
+        // Knattern, 'falls' das tiefe Tosen.
+        // Gemessen, 12 Aufrufe (systematische Welligkeit über 8–12 Durchläufe gemittelt, 50 ms):
+        // 2,1–3,0 dB bei 0,35 s, 2,3 dB bei 0,367 s, 2,5 dB bei 0,358 s ± 12 ms Zittern; tiefster
+        // Einbruch gegen die Nachbarn höchstens 1,9 dB; letztes gegen erstes Drittel ±0,3 dB
+        // (nichts schaukelt sich auf). Pegel der Folge −33,8 bis −34,4 LUFS ('storm' −34,3 bis
+        // −34,7); im Spiel-Mix trägt sie −36,4 LUFS bei ('storm' −37,2). Gluckern und
+        // Plätschern heben die 500-Hz-Oktave um 4 dB und die Folge um knapp 1 LU. Nach dem
+        // letzten Aufruf hält es noch ~0,35 s und fällt dann in 0,2 s um 40 dB.
+        const r = Math.random;
+        const lo = 300 + 120 * r();
+        const mid = 750 + 450 * r();
+        for (let i = 0; i < 5; i++) v.noise(lo + 25 * i, lo * 0.75, 0.37, 0.07, { type: 'lowpass', brown: true, attack: 0.17, at: i * 0.075 });
+        for (let i = 0; i < 3; i++) v.noise(mid * (0.8 + 0.4 * r()), mid * (0.8 + 0.4 * r()), 0.42, 0.05, { q: 0.55, attack: 0.2, at: 0.02 + i * 0.125 });
+        v.noise(3500 + 1500 * r(), 4500 + 1500 * r(), 0.6, 0.02, { type: 'highpass', attack: 0.28 });
+        // Gluckern: Blasen, zufällig verteilt
+        const nb = Math.floor(r() * 3.2);
+        for (let i = 0; i < nb; i++) {
+          const fb = 280 + 620 * r();
+          v.tone('sine', fb, fb * 1.6, 0.03 + 0.03 * (400 / fb), 0.05 + 0.03 * r(), { at: 0.02 + 0.32 * r(), attack: 0.004 });
+        }
+        // Plätschern: kurze Rauschtropfen
+        const ns = Math.floor(r() * 2.6);
+        for (let i = 0; i < ns; i++) {
+          const fs = 1200 + 1600 * r();
+          v.noise(fs, fs * 0.6, 0.05, 0.08 + 0.05 * r(), { q: 1.4, at: 0.02 + 0.32 * r(), attack: 0.004 });
+        }
+        break;
+      }
+      case 'falls': {
+        // Das Tosen des Wasserfalls, ortsfest an der Kante (raceScene: alle 30 Ticks = 0,5 s,
+        // Reichweite 170 m, aus der Ferne leiser). Die Aufrufe verschmelzen zu einem
+        // gleichmäßigen, breitbandigen, tiefen Donnern: fünf Schichten braunes Rauschen unter
+        // 150–210 Hz (die fallende Wassermasse) um je 0,1 s versetzt, mit 0,24 s Anstieg; weil
+        // kleine Lautsprecher dort wenig wiedergeben, tragen drei hellere Schichten (Tiefpass
+        // 420–580 Hz) im Abstand von 0,167 s den Körper; darüber drei breite Bänder um
+        // 0,7–1,6 kHz (das Rauschen) und ein Hochpass-Zischen (Gischt). Mitten zufällig je Aufruf.
+        // Kein Ton, kein Knall: aus der Nähe mächtig, aus der Ferne (geringer Pegel) bleibt
+        // gegen Motor und Musik nur das hohe Rauschen übrig.
+        // Gemessen, 12 Aufrufe (gemittelt über 8–12 Durchläufe, 50 ms): Welligkeit 2,6–2,8 dB bei
+        // 0,5 s (3,3 dB bei ±17 ms Zittern), tiefster Einbruch gegen die Nachbarn 1,7–1,8 dB,
+        // letztes gegen erstes Drittel ±0,15 dB. Pegel der Folge −12,4 bis −12,7 LUFS (Lawine
+        // −11,9 bis −12,3), 70 % der Leistung unter 150 Hz. Im Spiel-Mix aus 0 m (Faktor 0,55)
+        // trägt sie in 100 ms −20,6 LUFS bei (Lawine −20,5) und hebt die Oktaven 125 Hz /
+        // 4 kHz / 8 kHz um 2 / 3,8 / 13 dB; bei Faktor 0,2 nur noch −27,1 LUFS (8 kHz +6,5 dB,
+        // sonst ≤ 1 dB), bei 0,11 −31,7 LUFS (8 kHz +3,3 dB) – nur noch ein Rauschen. Nach dem
+        // letzten Aufruf hält es ~0,6 s und fällt dann in 0,2 s um 30 dB.
+        const r = Math.random;
+        for (let i = 0; i < 5; i++) v.noise(150 + 60 * r(), 110, 0.55, 0.16, { type: 'lowpass', brown: true, attack: 0.24, at: i * 0.1 });
+        for (let i = 0; i < 3; i++) v.noise(420 + 160 * r(), 300, 0.6, 0.13, { type: 'lowpass', brown: true, attack: 0.26, at: 0.05 + i * 0.167 });
+        for (let i = 0; i < 3; i++) {
+          const fm = 700 + 900 * r();
+          v.noise(fm, fm * (0.8 + 0.4 * r()), 0.6, 0.06, { q: 0.5, attack: 0.26, at: 0.03 + i * 0.167 });
+        }
+        v.noise(2600 + 1000 * r(), 4500 + 1000 * r(), 0.75, 0.025, { type: 'highpass', attack: 0.35 });
         break;
       }
       // --- Gewitterkamm ---

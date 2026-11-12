@@ -346,6 +346,21 @@ export class ThingVisuals {
         const len = 0.8 + (k % 3) * 0.22;
         put(b, new THREE.CylinderGeometry(0.1, 0.05, len, 5), k % 2 === 0 ? 0xc46ad6 : 0xff8fc8, Math.cos(a) * 0.7, 0.9 - len / 2, Math.sin(a) * 0.7);
       }
+    } else if (this.theme === 'dschungel') {
+      // Treibender Baumstamm: liegt längs zur Fahrtrichtung, pendelt quer durch die Furt; Aststümpfe, ein Büschel Blätter.
+      put(b, new THREE.CylinderGeometry(0.85, 0.95, 3.4, 9), 0x7a5230, 0, 0.75, 0, 1, 1, 1, Math.PI / 2);
+      put(b, new THREE.CylinderGeometry(0.87, 0.87, 0.5, 9), 0x5e3f24, 0, 0.75, -1.2, 1, 1, 1, Math.PI / 2);
+      put(b, new THREE.CylinderGeometry(0.89, 0.89, 0.4, 9), 0x5e3f24, 0, 0.75, 0.9, 1, 1, 1, Math.PI / 2);
+      // Schnittflächen mit hellen Jahresringen
+      put(b, new THREE.CylinderGeometry(0.7, 0.7, 0.06, 9), 0xe2c08a, 0, 0.75, 1.72, 1, 1, 1, Math.PI / 2);
+      put(b, new THREE.CylinderGeometry(0.62, 0.62, 0.06, 9), 0xe2c08a, 0, 0.75, -1.72, 1, 1, 1, Math.PI / 2);
+      // Aststümpfe und Blätter
+      put(b, new THREE.CylinderGeometry(0.16, 0.22, 0.9, 6), 0x6a4628, 0.55, 1.55, 0.4, 1, 1, 1, 0, 0, -0.5);
+      put(b, new THREE.CylinderGeometry(0.14, 0.2, 0.7, 6), 0x6a4628, -0.5, 1.45, -0.7, 1, 1, 1, 0, 0, 0.6);
+      put(b, new THREE.IcosahedronGeometry(0.42, 0), 0x4fae4a, 0.85, 2.05, 0.4, 1.2, 0.5, 1);
+      put(b, new THREE.IcosahedronGeometry(0.34, 0), 0x6fc85a, -0.8, 1.85, -0.7, 1.1, 0.5, 1);
+      // Warnband, damit er sich vom Wasser abhebt
+      put(b, new THREE.TorusGeometry(0.93, 0.08, 5, 10), 0xffd23f, 0, 0.75, 0.15);
     } else if (this.theme === 'hafen') {
       // Container am Kranhaken: pendelt knapp über dem Boden quer über die Bahn, die Seile laufen hinauf zur Laufkatze.
       b.box(0, 1.15, 0, 2.5, 1.7, 2.2, rgb(0xe8552e), 0, rgb(0xb93f20));
@@ -723,6 +738,11 @@ export class ThingVisuals {
         inner.position.y = 0.45 + 0.3 * Math.sin(time * 1.7 + i);
         inner.scale.set(1 + 0.09 * pump, 1 - 0.12 * pump, 1 + 0.09 * pump);
         inner.rotation.z = Math.sin(time * 1.1 + i) * 0.12;
+      } else if (this.theme === 'dschungel') {
+        // Der Stamm treibt: er rollt mit der Bewegung um seine Längsachse und dümpelt.
+        inner.position.y = -0.25 + 0.08 * Math.sin(time * 2.1 + i * 1.3);
+        inner.rotation.z = -lat * 0.35;
+        inner.rotation.y = Math.sin(time * 0.6 + i) * 0.12;
       } else if (this.theme === 'hafen') {
         // Die Last hängt: am Umkehrpunkt steht sie schräg, in der Mitte gerade; dazu dreht sie leicht am Seil.
         inner.position.y = 0.12 + 0.05 * Math.sin(time * 1.3 + i);

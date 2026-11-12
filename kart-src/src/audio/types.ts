@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -69,6 +69,9 @@ export type SfxName =
   | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest): dünner Knall, nachklingender Mast, surrendes, absteigendes Britzeln (~0,9 s)
   | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall gleich laut): tiefes, weiches Rollen ohne Knall, an- und abschwellend (~2,2 s)
   | 'charge' // Gewitterkamm: das Kart wird im Ladefeld aufgeladen (Schub): aufsteigendes, knisterndes, surrendes „Bzzzing“ (~0,56 s)
+  | 'raft' // Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß – hohles Holzrumpeln: zwei, drei dumpfe Holzschläge, Wasserschwapp (~0,32 s)
+  | 'rapids' // Dschungel-Fluss: das eigene Kart fährt auf dem Fluss: Wasserrauschen mit Gluckern und Plätschern (wird etwa alle 0,35 s aufgerufen und verschmilzt zu einem Bett)
+  | 'falls' // Dschungel-Fluss: das Tosen des Wasserfalls (ortsfest, in der Nähe etwa alle 0,5 s aufgerufen und verschmilzt zu einem tiefen, breiten Donnern)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten
