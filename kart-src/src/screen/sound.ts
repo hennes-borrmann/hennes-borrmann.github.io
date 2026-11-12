@@ -83,6 +83,9 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'shrink',
   'grow',
   'sizeend',
+  // Achterbahn-Rummel: fremde Karts hört man auf die Schienen rollen und von den Schubmagneten angeschoben werden
+  'latch',
+  'kick',
 ]);
 
 export class Sound {

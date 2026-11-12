@@ -83,6 +83,11 @@ export type SfxName =
   | 'grow' // Riesenkinderzimmer: ein Kart wächst (durch den orangen Ring gefahren): Gleitton rutscht hinab und wird breit, Zip, rundes Bwomm (~0,55 s)
   | 'sizeend' // Riesenkinderzimmer: ein Kart ist wieder normal groß: weiches Plopp mit kurzem Nachfedern (~0,25 s)
   | 'smash' // Riesenkinderzimmer: ein riesiges Kart bricht durch die Bauklotz-Mauer: dumpfer Stoß, elf helle Holzklötze poltern auseinander (~0,75 s)
+  | 'latch' // Achterbahn-Rummel: ein Kart rollt auf die Schienen und rastet ein – VORLÄUFIG
+  | 'coaster' // Achterbahn-Rummel: das eigene Kart rollt auf den Schienen (wird etwa alle 0,4 s aufgerufen, solange es darauf ist) – VORLÄUFIG
+  | 'chain' // Achterbahn-Rummel: die Kette des Lifthügels rattert unter dem eigenen Kart (wird etwa alle 0,22 s aufgerufen) – VORLÄUFIG
+  | 'kick' // Achterbahn-Rummel: ein Schubmagnet zieht an und ruckt das Kart nach vorn (zusätzlich zum Schub-Geräusch) – VORLÄUFIG
+  | 'crest' // Achterbahn-Rummel: das eigene Kart kippt schnell über eine Kuppe in die Abfahrt – VORLÄUFIG
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

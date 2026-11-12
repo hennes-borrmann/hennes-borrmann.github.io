@@ -156,6 +156,12 @@ const LEVEL: Record<SfxName, number> = {
   grow: 1.6,
   sizeend: 2.2,
   smash: 2.8,
+  // Achterbahn-Rummel (vorläufig)
+  latch: 1.2,
+  coaster: 0.7,
+  chain: 0.6,
+  kick: 1.2,
+  crest: 1.2,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -790,6 +796,9 @@ export class SfxPlayer {
       // Spiegelkabinett (vorläufig: wie der Schubring)
       case 'portal':
       case 'shimmer':
+      // Achterbahn-Rummel (vorläufig: wie der Schubring)
+      case 'kick':
+      case 'crest':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang
         // (G6 + D7, leicht schwebend) – Glocke statt Notenfolge wie beim Einsammeln;
@@ -1030,6 +1039,10 @@ export class SfxPlayer {
         break;
       // Dschungel-Fluss (vorläufig: wie die Landung)
       // Wüstenexpress (vorläufig: wie das Floß)
+      // Achterbahn-Rummel (vorläufig: wie das Floß)
+      case 'latch':
+      case 'coaster':
+      case 'chain':
       case 'board':
       case 'rattle':
       case 'raft':
