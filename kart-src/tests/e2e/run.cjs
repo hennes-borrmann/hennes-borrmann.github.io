@@ -988,6 +988,14 @@ async function main() {
     const code7 = await createLobby(h7, 'Anna');
     const c7 = await openScreen('client7', '&laps=2&alle=1');
     await joinLobby(c7, 'Ben', code7);
+    // Die KI-Gegner (Plätze 2 und 3) bekommen in diesem Abschnitt keine Gegenstände: Sonst trifft ein Störsender oder ein
+    // Rollreifen ein Kart, das für eine Prüfung still an einer Stelle steht – und die Prüfung misst den Treffer statt der Strecke.
+    await h7.page.evaluate(() => {
+      window.__noItems = setInterval(() => {
+        const k = window.__kart;
+        if (k && k.race && k.race()) for (const slot of [2, 3]) k.giveItem(slot, 0);
+      }, 50);
+    });
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
     check('Streckenwahl nennt die Eigenheit der Nachtschicht', /Stadtverkehr/.test(twist || ''), twist || '');
