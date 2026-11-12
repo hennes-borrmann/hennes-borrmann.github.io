@@ -16,6 +16,7 @@
 
 import { NEUE_STUECKE } from './songs-neu';
 import { HAFEN_STUECK } from './stuecke/hafen';
+import { SPIEGEL_STUECK } from './stuecke/spiegel';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -422,8 +423,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   ruine: KLIPPE,
   gewitter: NACHT,
   dschungel: KLIPPE,
-  // Spiegelkabinett: VORLÄUFIG das Stück der Wolkenbahn
-  spiegel: NEUE_STUECKE.wolken,
+  // Spiegelkabinett: das eigene Stück (stuecke/spiegel.ts)
+  spiegel: SPIEGEL_STUECK,
   results: RESULTS,
 };
 

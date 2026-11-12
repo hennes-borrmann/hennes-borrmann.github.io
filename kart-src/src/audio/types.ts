@@ -72,9 +72,9 @@ export type SfxName =
   | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – ein tiefer Gong (überall gleich laut) – VORLÄUFIG
   | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter (überall gleich laut) – VORLÄUFIG
   | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
-  | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung) – VORLÄUFIG
-  | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle) – VORLÄUFIG
-  | 'shimmer' // Spiegelkabinett: in einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, bis ~110 m zu hören) – VORLÄUFIG
+  | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung): Sog, dann ein gläserner Zweiklang, der aufwärts aufgeht (~0,6 s)
+  | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle): Sog, dann rutscht der gläserne Klang schwebend abwärts, dumpfer Plopp (~0,7 s)
+  | 'shimmer' // Spiegelkabinett: in einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, bis ~110 m zu hören): leises, zufällig gestreutes Glitzern hoher Glastöne (~0,45 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten
