@@ -188,6 +188,19 @@ const SHOTS = {
     ],
     when: '(window.__vk || (window.__vk = performance.now(), window.__kart.clock(67.2)), performance.now() - window.__vk > 1500)',
   },
+  // Zeitriss-Ruine: die Große Halle im Einst, Sekunden vor dem Sprung der Zeit – der Tempel steht in voller Pracht,
+  // aber durch die Mosaikplatten, die gleich fehlen werden, laufen schon türkise Risse. (Die Rennzeit wird dafür vorgestellt.)
+  ruine: {
+    from: [745, 0, 16],
+    to: [800, 0, 0],
+    fov: 50,
+    karts: [
+      [1, 760, -4],
+      [2, 780, -3.5],
+      [3, 801, 4.5],
+    ],
+    when: '(window.__rk || (window.__rk = performance.now(), window.__kart.clock(15.2)), performance.now() - window.__rk > 1500)',
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
