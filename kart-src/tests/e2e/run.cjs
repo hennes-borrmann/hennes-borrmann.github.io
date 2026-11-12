@@ -798,7 +798,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Vierzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 14);
+    check('Fünfzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 15);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -1304,7 +1304,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen vierzehn Strecken zur Wahl', cards === 14, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen fünfzehn Strecken zur Wahl', cards === 15, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1755,9 +1755,61 @@ async function main() {
       check('Spiegel zurück: Anna fährt in den pinken Zwillingsspiegel und steht 45 m weiter hinten', trap.kind === 1 && segTrap >= trap.to - 1.5 && segTrap < trap.at - 12, `Rahmen bei ${trap.at.toFixed(0)} m, Ausgang bei ${trap.to.toFixed(0)} m – Anna danach bei ${segTrap} m`);
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Wüstenexpress: Vier Züge fahren nach Fahrplan – auf beiden Bildschirmen gleich; wer auf einem Dach steht, fährt mit.
+    await h7.page.locator('.track-card').nth(14).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 14, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 14, null, { timeout: 30000 });
+    const [trH, trC] = await Promise.all([kart(h7.page, 'trains(30)'), kart(c7.page, 'trains(30)')]);
+    let trainSkew = 0;
+    for (let n = 0; n < trH.length && n < trC.length; n++)
+      for (let c = 0; c < trH[n].cars.length; c++) trainSkew = Math.max(trainSkew, Math.hypot(trH[n].cars[c].x - trC[n].cars[c].x, trH[n].cars[c].z - trC[n].cars[c].z));
+    check(
+      'Wüstenexpress hat vier Züge mit je sieben Wagen (Rampe hinten, Lok vorn) – und beide Bildschirme rechnen sie an dieselbe Stelle',
+      trH.length === 4 && trC.length === 4 && trH.every((t) => t.cars.length === 7) && trH[0].cars[6].roof[0] < 0.5 && trH[0].cars[0].roof[1] > 2.5 && trainSkew < 1e-6,
+      trH.length > 0 ? `${trH.length} Züge, Lok des ersten nach 30 s bei ${trH[0].cars[0].at.toFixed(0)} m, Dach ${trH[0].cars[6].roof[0]} … ${trH[0].cars[0].roof[1]} m, Abweichung ${trainSkew.toExponential(1)} m` : 'keine Züge',
+    );
+    if (trH.length === 4) {
+      // Anna (das Kart des Hosts) wird auf das Dach eines Flachwagens gesetzt – berechnet und hingestellt im selben
+      // Augenblick. Sie gibt kein Gas: Der Zug nimmt sie mit, nach gut zweieinhalb Sekunden steht sie noch auf demselben Wagen.
+      const onRoof = `(() => {
+        const c = window.__kart.trains()[0].cars[3];
+        window.__kart.place(0, c.at, c.lat, -1, (c.roof[0] + c.roof[1]) / 2 + 0.4);
+        const s = window.__kart.authoritative(0);
+        return { x: s.x, z: s.z, time: window.__kart.race().time };
+      })()`;
+      const stillOn = `(() => {
+        const c = window.__kart.trains()[0].cars[3];
+        const s = window.__kart.authoritative(0);
+        return { x: s.x, y: s.y, z: s.z, off: Math.hypot(s.x - c.x, s.z - c.z), above: s.y - c.y, time: window.__kart.race().time };
+      })()`;
+      await watch(0);
+      const roof0 = await h7.page.evaluate(onRoof);
+      let roof1 = { ...roof0, off: 0, above: 0 };
+      for (const until = Date.now() + 12000; Date.now() < until && roof1.time - roof0.time < 160; ) {
+        await sleep(100);
+        roof1 = await h7.page.evaluate(stillOn);
+      }
+      const carried = Math.hypot(roof1.x - roof0.x, roof1.z - roof0.z);
+      const carriedFor = (roof1.time - roof0.time) / 60;
+      await sleep(400);
+      const [annaT, carC] = await Promise.all([kart(c7.page, 'entities()').then((es) => es.find((e) => e.slot === 0)), kart(c7.page, 'trains()').then((ts) => ts[0].cars[3])]);
+      const offC = annaT ? Math.hypot(annaT.x - carC.x, annaT.z - carC.z) : 999;
+      const fellOff = await h7.page.evaluate(() => window.__seen.respawn);
+      check(
+        'Der Zug nimmt mit: Anna steht ohne Gas auf dem Dach eines Flachwagens und fährt mit ihm – auch auf dem Bildschirm des Mitspielers',
+        fellOff === null && carriedFor >= 2.5 && carried > 14 * carriedFor * 0.8 && carried < 14 * carriedFor * 1.2 && roof1.off < 2.5 && roof1.above > 1.2 && offC < 8,
+        `${carried.toFixed(1)} m in ${carriedFor.toFixed(1)} s (Zug 14 m/s), ${roof1.off.toFixed(2)} m neben der Wagenmitte, ${roof1.above.toFixed(2)} m über dem Gleis; beim Mitspieler ${offC.toFixed(1)} m neben der Wagenmitte`,
+      );
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die vierzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die fünfzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

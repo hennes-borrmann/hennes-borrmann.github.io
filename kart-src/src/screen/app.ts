@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1499,6 +1499,23 @@ export class App {
         const view = this.hostGame ?? this.clientGame;
         const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
         return TRACK.portals.map((p) => ({ at: TRACK.prog[p.seg] * TRACK.step, lat0: p.lat0, lat1: p.lat1, to: TRACK.prog[p.to] * TRACK.step, kind: p.kind, open: portalOpen(p, time), time }));
+      },
+      // Wüstenexpress, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): je Zug die Wagen von der
+      // Lok (0) bis zum Rampenwagen – Streckenmeter und seitliche Lage der Wagenmitte, Ort, Höhe des Dachs hinten und vorn.
+      trains: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const pose = newVehiclePose();
+        return TRACK.vehicles
+          .filter((v) => !!v.roofs)
+          .map((v) => ({
+            id: v.id,
+            time,
+            cars: Array.from({ length: v.cars }, (_, c) => {
+              const p = vehiclePose(TRACK, v, c, time, pose);
+              return { at: TRACK.prog[p.seg] * TRACK.step, lat: p.lat, x: p.x, y: p.y, z: p.z, roof: [roofTop(v, c, -v.half), roofTop(v, c, v.half)] };
+            }),
+          }));
       },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {

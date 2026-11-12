@@ -68,6 +68,8 @@ export interface PathFeatures {
   pads?: { at: number; lat: number; halfWidth?: number }[];
   /** Reihen von Item-Kisten. */
   boxRows?: number[];
+  /** Seitliche Lage der Kisten einer Reihe als Anteil der halben Fahrbahn (ohne Angabe: vier Kisten über die ganze Breite). */
+  boxLat?: number[];
   /**
    * Sprungschanzen: steigen über length Meter auf height an und enden abrupt.
    * gap = Länge der Lücke in der Fahrbahn direkt hinter der Kante (Meter).
@@ -1055,7 +1057,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     }
     for (const at of p.f.boxRows ?? []) {
       const seg = segAt(p, at);
-      for (const f of BOX_LATERALS) {
+      for (const f of p.f.boxLat ?? BOX_LATERALS) {
         const lat = f * rh[seg];
         track.boxes.push({
           x: px[seg] + rightX(track, seg) * lat,

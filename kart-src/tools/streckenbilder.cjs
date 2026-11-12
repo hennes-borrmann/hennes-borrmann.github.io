@@ -239,6 +239,19 @@ const SHOTS = {
     ],
     when: '(window.__sp || (window.__sp = setInterval(() => window.__kart.clock(2), 50)), (window.__sn = (window.__sn || 0) + 1) > 20)',
   },
+  // Wüstenexpress: hinter einem Zug am Bahnhof – der Rampenwagen mit seinen Winkeln, ein Kart schon auf dem Dach
+  // des Flachwagens, eines daneben auf der Straße. (Die Rennzeit wird bei 2 s festgehalten: Dann steht der Zug still
+  // im Bild, und das Kart auf dem Dach bleibt, wo es hingestellt wird.)
+  wueste: {
+    from: [133, 1.4, 3.1],
+    to: [166, 6.1, 1.7],
+    fov: 58,
+    karts: [
+      [1, 167, 6.7, -1, 1.95],
+      [2, 146, 2.4],
+    ],
+    when: '(window.__we || (window.__we = setInterval(() => window.__kart.clock(2), 50)), (window.__wn = (window.__wn || 0) + 1) > 20)',
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
