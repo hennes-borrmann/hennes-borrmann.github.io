@@ -69,6 +69,10 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'rod',
   'rumble',
   'falls',
+  // Spiegelkabinett: das Schimmern am Rahmen ist ortsfest (kommt nie als „eigenes“ Ereignis); fremde Karts hört man durch die Spiegel gehen
+  'shimmer',
+  'portal',
+  'mirror',
 ]);
 
 export class Sound {
