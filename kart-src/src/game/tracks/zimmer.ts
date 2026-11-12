@@ -17,7 +17,8 @@ export const ZIMMER: TrackDef = {
   twist: 'Ringe lassen schrumpfen (blau) oder wachsen (orange): Nur winzig passt man durchs Mauseloch, nur riesig bricht man durch die Bauklotz-Burg.',
   grade: 2,
   scale: 1.9,
-  surface: 'wood',
+  // Spielteppich mit aufgedruckter Straße (Asphalt); der Schreibtisch ist aus Holz
+  surface: 'asphalt',
   points: [
     // 0–2: Spielteppich mit aufgedruckter Straße, nach Osten (Start)
     [-70, -110, 2],
@@ -54,6 +55,7 @@ export const ZIMMER: TrackDef = {
   bank: 1.0,
   fallDepth: 6,
   landmarkAt: 4.6,
+  surfaces: [[10.6, 15.5, 'wood']],
   // unter dem Bett
   tunnels: [[3.9, 5.0]],
   // Schreibtisch
@@ -99,12 +101,14 @@ export const ZIMMER: TrackDef = {
       roadHalf: 6.4,
       shoulder: 2,
       decks: [[0, 4]],
+      surface: 'wood',
       gates: [{ only: 'big' }],
     },
   ],
   pads: [
     { at: 2.4, lat: 0 },
-    { at: 9.9, lat: 2.5, halfWidth: 2.5 },
+    // (auf der Bücherrampe, rechtzeitig vor dem Wachsring – der steht links)
+    { at: 9.15, lat: 0 },
     { at: 16.6, lat: 0 },
   ],
   boxRows: [1.5, 5.6, 8.0, 12.6],

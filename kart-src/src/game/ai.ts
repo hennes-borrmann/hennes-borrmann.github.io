@@ -649,9 +649,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       sizerNear = true;
       if (b.sizerSeg !== z.seg) {
         b.sizerSeg = z.seg;
-        // (Ein Rest der alten Größe, der bis zum Ring abläuft oder gerade ausklingt, zählt nicht.)
-        const left = Math.abs(s.size) - (d / Math.max(v, 8)) * 60;
-        b.sizerTake = (left <= 0 || Math.abs(s.size) <= SIZE_WARN) && random(b) < SIZE_DARE[b.level];
+        // (Ein Rest der alten Größe, der bis zum Ring abläuft oder gerade ausklingt, zählt nicht – und wer noch in
+        // der Größen-Abkürzung steckt, behält seine Größe nach dem Ausgang nur noch die Ankündigungszeit.)
+        let have = Math.abs(s.size);
+        const kb = t.branchOf[s.seg];
+        if (kb >= 0 && t.branchOnly[kb] !== 0) have = Math.min(have, SIZE_WARN);
+        const left = have - (d / Math.max(v, 8)) * 60;
+        b.sizerTake = (left <= 0 || have <= SIZE_WARN) && random(b) < SIZE_DARE[b.level];
       }
       if (b.sizerTake) sizerWant = (z.lat0 + z.lat1) / 2;
       else block(z.lat0 - KART_HALF - 0.4, z.lat1 + KART_HALF + 0.4, 1);
