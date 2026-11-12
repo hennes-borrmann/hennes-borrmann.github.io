@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { SONGS, compileSong, type Song, type SongDef } from '../../src/audio/songs';
 import { NEUE_STUECKE } from '../../src/audio/songs-neu';
+import { GEWITTER_STUECK } from '../../src/audio/stuecke/gewitter';
 import { DSCHUNGEL_STUECK } from '../../src/audio/stuecke/dschungel';
 import { HAFEN_STUECK } from '../../src/audio/stuecke/hafen';
+import { VULKAN_STUECK } from '../../src/audio/stuecke/vulkan';
+import { RUINE_STUECK } from '../../src/audio/stuecke/ruine';
 import type { MusicId } from '../../src/audio/types';
 
 // Jedes Stück aus src/audio/stuecke/ steht hier mit seinem Schlüssel in SONGS.
 // Ein neues Stück muss nur in diese Liste eingetragen werden.
 const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'hafen', def: HAFEN_STUECK },
+  { schluessel: 'vulkan', def: VULKAN_STUECK },
+  { schluessel: 'ruine', def: RUINE_STUECK },
+  { schluessel: 'gewitter', def: GEWITTER_STUECK },
   { schluessel: 'dschungel', def: DSCHUNGEL_STUECK },
 ];
 
