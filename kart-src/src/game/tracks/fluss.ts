@@ -1,5 +1,5 @@
 // 13 · Dschungel-Fluss – vom Stelzendorf durch den Regenwald, auf Flößen den Fluss hinab, mit einem
-// Sprung über den Wasserfall, durch die Furt (oder hinter dem Wasserfall durch die Grotte) und den Hang wieder hinauf.
+// Sprung über den Wasserfall, durch die Furt und den Hang wieder hinauf.
 //
 // Auf dem Fluss (mechanics.ts: River) ist die Fahrbahn Wasser: Boden gibt es nur auf den Flößen, die in drei
 // Bahnen flussab treiben – und die nehmen mit, was auf ihnen steht. In der Mitte treibt eine lückenlose Kette
@@ -11,7 +11,7 @@ export const FLUSS: TrackDef = {
   id: 'fluss',
   name: 'Dschungel-Fluss',
   theme: 'dschungel',
-  blurb: 'Stelzendorf, Regenwaldpfad, auf Flößen den Fluss hinab, Sprung über den Wasserfall, durch die Furt oder die Grotte dahinter, den Hang wieder hinauf.',
+  blurb: 'Stelzendorf, Regenwaldpfad, auf Flößen den Fluss hinab, Sprung über den Wasserfall, durch die Furt mit Querströmung und Treibholz, den Hang wieder hinauf.',
   twist: 'Auf dem Fluss fährt man über treibende Flöße: Die Kette in der Mitte ist sicher und langsam, außen reißt die Strömung mit – aber zwischen den Flößen ist Wasser.',
   grade: 3,
   scale: 1.4,

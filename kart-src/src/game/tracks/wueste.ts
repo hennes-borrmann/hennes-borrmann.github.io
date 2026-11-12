@@ -78,4 +78,6 @@ export const WUESTE: TrackDef = {
     { at: 13.4, lat: -2.6, halfWidth: 2.6 },
   ],
   boxRows: [1.5, 4.5, 8.5, 11.2],
+  // Kisten nur links und in der Mitte: Rechts fährt der Zug (ab 4,8 m neben der Mitte).
+  boxLat: [-0.72, -0.36, 0, 0.36],
 };

@@ -177,8 +177,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     const dirt = SURFACE_INDEX.dirt;
     const spots: Placement[] = [];
     // (Die Zeitriss-Ruine liegt im Dschungel: ihre Bäume pflanzt die eigene Kulisse.)
-    // (Ruine, Spiegelkabinett und Wüste bekommen ihre eigenen Pflanzen von der Kulisse – keine Kiefern.)
-    const cap = t.def.theme === 'ruine' || t.def.theme === 'spiegel' || t.def.theme === 'wueste' || t.def.theme === 'zimmer' || t.def.theme === 'rummel' ? 0 : Math.round(170 * dense);
+    // (Ruine, Dschungel-Fluss, Spiegelkabinett, Wüste, Kinderzimmer und Rummel bekommen ihre eigenen Pflanzen von der Kulisse – keine Kiefern.)
+    const cap = ['ruine', 'dschungel', 'spiegel', 'wueste', 'zimmer', 'rummel'].includes(t.def.theme) ? 0 : Math.round(170 * dense);
     for (let i = 0; i < t.total && spots.length < cap; i++) {
       if (t.surf[i] !== dirt || t.edge[i] & (EDGE_DECK | EDGE_TUNNEL)) continue;
       // Dicht an den Weg heran, dahinter lichter – auf jeder Seite etwa ein Baum alle drei Meter.
