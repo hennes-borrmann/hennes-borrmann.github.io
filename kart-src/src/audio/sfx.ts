@@ -54,6 +54,31 @@ const GUST_PATTERN = [
   [1040, 1490, 0.47, 2000, 0.6, 2600, 0.69, 1800, 0.9, 2300],
   [1310, 1770, 0.53, 2400, 0.62, 2000, 0.77, 2200, 0.84, 2700],
 ];
+/** Bröckeln: Eckfrequenzen (Hz) und Abstände (s) der Knackser im Stein, als feste Muster (je Fassung versetzt gelesen). */
+const CRUMBLE_GRIT_HZ = [2300, 1500, 3100, 1800, 2700, 1250, 3500, 2000, 1650, 2900, 1400, 2500, 3300];
+const CRUMBLE_GRIT_GAP = [0.15, 0.1, 0.19, 0.12, 0.08, 0.16, 0.11];
+/** Bröckeln: herabfallende Brocken je Fassung, paarweise [Beginn (s), Eckfrequenz (Hz)]. */
+const CRUMBLE_CHUNKS = [
+  [0.62, 430, 1.18, 360, 1.62, 480, 1.98, 400],
+  [0.55, 470, 1.08, 400, 1.55, 380, 1.93, 450],
+  [0.7, 390, 1.25, 450, 1.7, 420, 2.02, 360],
+];
+/** Bruch: polternde Schollen je Fassung, paarweise [Beginn (s), Eckfrequenz (Hz)] – immer tiefer, sie fallen weg. */
+const CRACK_RUBBLE = [
+  [0.07, 900, 0.13, 760, 0.2, 820, 0.28, 640, 0.36, 560, 0.45, 470, 0.53, 400],
+  [0.06, 820, 0.14, 880, 0.21, 700, 0.27, 620, 0.37, 580, 0.44, 430, 0.55, 380],
+  [0.08, 950, 0.12, 720, 0.19, 780, 0.29, 600, 0.35, 520, 0.46, 450, 0.52, 420],
+];
+/** Einsturz: Splittern des Holzes, Eckfrequenzen (Hz) und Abstände (s) der Splitter. */
+const SPLINTER_HZ = [2400, 1700, 3100, 1300, 2700, 1900, 3400, 1500];
+const SPLINTER_GAP = [0.028, 0.041, 0.022, 0.035, 0.05, 0.026];
+/** Einsturz: fallende Bohlen, je drei Werte [Beginn (s), Holzton (Hz), Doppelschlag 0/1]. */
+const COLLAPSE_PLANKS = [
+  0.72, 830, 1, 0.83, 660, 0, 0.92, 980, 1, 1.02, 580, 0, 1.1, 750, 1, 1.21, 530, 0, 1.3, 900, 0,
+  1.4, 640, 1, 1.52, 480, 0, 1.63, 720, 0, 1.76, 560, 1, 1.9, 450, 0, 2.02, 610, 0,
+];
+/** Leerlaufen: Gluckser der abfließenden Lava, paarweise [Beginn (s), Tonhöhe (Hz)], nach unten abziehend. */
+const DRAIN_GLUG = [0.06, 330, 0.17, 290, 0.3, 310, 0.41, 250, 0.55, 230, 0.66, 260, 0.8, 190, 0.93, 170, 1.06, 180, 1.18, 140, 1.3, 120];
 
 /**
  * Abgleich der Lautstärken untereinander. Die Rezepte unten sind nach Klang
@@ -128,11 +153,14 @@ const LEVEL: Record<SfxName, number> = {
   // der Sturm-Aufrufe ≈ −34 LUFS wie der Fahrtwind im Gleitflug – ein Bett, kein Hauptdarsteller.
   gust: 4.5,
   storm: 0.85,
-  // Vulkaninsel (vorläufig)
-  crumble: 1.2,
-  crack: 1.6,
-  collapse: 1.8,
-  drain: 1.6,
+  // Vulkaninsel (Runde 11), gemessen wie oben: der Bruch ≈ −11,6 LUFS wie Meteorit und Bombe;
+  // das Bröckeln beginnt gut 10 dB leiser und schwillt bis ≈ −14 LUFS an (knapp darunter);
+  // Einsturz ≈ −10,3 und Leerlaufen ≈ −10,7 LUFS – kräftig, denn man hört beide fast immer
+  // aus großer Entfernung (Reichweite 600 m).
+  crumble: 2.7,
+  crack: 4.6,
+  collapse: 5.4,
+  drain: 2.4,
 };
 
 interface ToneOpts {
@@ -295,6 +323,8 @@ export class SfxPlayer {
   private icicleTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
+  private crumbleTick = 0;
+  private crackTick = 0;
 
   constructor(private readonly mx: Mixer) {}
 
@@ -592,9 +622,6 @@ export class SfxPlayer {
           .tone('sine', 1100, 1600, 0.03, 0.05, { at: 0.375, attack: 0.003 });
         break;
       // --- Eis und Mond ---
-      // Vulkaninsel (vorläufig: bröckeln und einstürzen wie die Lawine)
-      case 'crumble':
-      case 'collapse':
       case 'avalanche': {
         // Lawine (läuft 140 Ticks ≈ 2,3 s): ein tiefes Grollen schwillt an und hält, darüber
         // rauscht der Schnee (breites Band, das langsam nach unten sinkt, und ein Hauch
@@ -697,9 +724,6 @@ export class SfxPlayer {
           .tone('sine', 377, 1508, 1.0, 0.04, { at: 0.12, attack: 0.25, sustain: 0.5, vibHz: 5.4, vibDepth: 0.02 })
           .tone('triangle', 500, 2000, 0.9, 0.025, { at: 0.16, attack: 0.3, sustain: 0.4 });
         break;
-      // Vulkaninsel (vorläufig: brechen und leerlaufen wie der Einschlag)
-      case 'crack':
-      case 'drain':
       case 'meteor': {
         // Meteorit: ein kurzes, fallendes Heulen (Sinus mit schnellem Flattern und ein
         // enges Rauschband, das mit hinabfährt – im Comic pfeift es auch ohne Luft), dann
@@ -846,6 +870,196 @@ export class SfxPlayer {
             t += 0.042 + 0.03 * r();
           }
         }
+        break;
+      }
+      // --- Vulkaninsel ---
+      // Alle vier sind ortsfest (raceScene.emitAt: Pegel 1 − Entfernung/Reichweite, dazu
+      // sound.ts × 0,55). Bröckeln und Bruch hört man nur in der Nähe (90 bzw. 140 m), den
+      // Einsturz der Brücke und die freie Lavaröhre auf der ganzen Insel (600 m) – meist also
+      // leise aus der Ferne; deshalb tragen bei diesen beiden die Mitten (0,3–3 kHz) den Klang.
+      case 'crumble': {
+        // Eine Platte beginnt zu bröckeln, 2,5 s vor dem Bruch – die Warnung, die man lernen
+        // soll. Darum steigt alles über die ganze Dauer: Ein tiefes Grollen (braunes Rauschen
+        // um 150 Hz und eine hellere Schicht bis ~480 Hz für kleine Lautsprecher) schwillt in
+        // sieben überlappenden Wellen an, je 0,27 s versetzt und jede um den Faktor 1,37 lauter
+        // (eine Rauschschicht kennt kein Halten); darunter ein Sinus um 50 Hz, der langsam
+        // einschwingt und hält. Im Stein knirscht es: ein enges Band um 1,1–1,7 kHz in fünf
+        // Wellen, darüber einzelne trockene Knackser (12–24 ms, 1,25–3,5 kHz), anfangs selten
+        // und leise, dann immer dichter (Abstand bis auf gut ein Drittel), lauter und ab der
+        // Mitte oft doppelt; manche mit einem dumpfen Klopfen darunter. Vier Brocken fallen
+        // herab (dumpfer Schlag, kurzes Klacken), jeder etwas lauter. Es endet nach ~2,3 s,
+        // kurz bevor die Platte bricht ('crack'). Abgrenzung zur Lawine: kein Schneerauschen,
+        // kein breites Band – hier tragen die einzelnen Knackser und das Grollen.
+        // Fassungen reihum (Knackser-Muster, Brocken), denn auf dem Kraterrand und der
+        // Hängebrücke bröckelt es mehrmals kurz nacheinander. Gemessen (vor dem Mischpult):
+        // Dauer 2,3 s, das letzte Drittel 11–12 dB über dem ersten, lautester Punkt bei 2,0 s,
+        // −13,5 bis −14,2 LUFS (Bruch −11,6): es schwillt bis knapp unter den Bruch an.
+        const k = this.crumbleTick++ % 3;
+        for (let i = 0; i < 7; i++) {
+          const at = i * 0.27;
+          const g = Math.pow(1.37, i);
+          v.noise(150, 110, 0.6, 0.025 * g, { type: 'lowpass', brown: true, attack: 0.3, at })
+            .noise(480 - 20 * i, 300, 0.6, 0.06 * g, { type: 'lowpass', brown: true, attack: 0.3, at: at + 0.13 });
+        }
+        for (let i = 0; i < 5; i++) {
+          v.noise(1100 + 80 * i, 1700, 0.6, 0.08 * Math.pow(1.45, i), { q: 1.3, attack: 0.3, at: 0.1 + i * 0.4 });
+        }
+        v.tone('sine', 48, 56, 2.25, 0.05, { attack: 1.12, sustain: 0.88, vibHz: 5, vibDepth: 0.06 });
+        let t = 0.05;
+        for (let i = 0; t < 2.2; i++) {
+          const grow = t / 2.2;
+          const f = CRUMBLE_GRIT_HZ[(i * 5 + k * 4) % CRUMBLE_GRIT_HZ.length];
+          const vol = 0.2 + 1.2 * grow * grow;
+          v.noise(f, f * 0.7, 0.012 + 0.006 * ((i + k) % 3), vol, { q: 2.2, at: t, attack: 0.0015 });
+          if (i % 4 === 1) v.noise(f * 0.32, f * 0.22, 0.03, vol * 0.8, { type: 'lowpass', q: 1.2, brown: true, at: t, attack: 0.002 });
+          if (grow > 0.45 && i % 3 === 0) v.noise(f * 1.3, f, 0.01, vol * 0.6, { q: 3, at: t + 0.013, attack: 0.001 });
+          t += CRUMBLE_GRIT_GAP[(i + k) % CRUMBLE_GRIT_GAP.length] * (1 - 0.62 * grow);
+        }
+        const ch = CRUMBLE_CHUNKS[k];
+        for (let i = 0; i < ch.length; i += 2) {
+          const at = ch[i];
+          const f = ch[i + 1];
+          const grow = 0.5 + at / 4;
+          v.noise(f, f * 0.5, 0.12, 0.3 * grow, { type: 'lowpass', q: 1.5, brown: true, at, attack: 0.004 })
+            .tone('sine', f * 0.42, f * 0.25, 0.08, 0.2 * grow, { at })
+            .noise(f * 4, f * 3, 0.025, 0.08 * grow, { q: 2.5, at, attack: 0.002 });
+        }
+        break;
+      }
+      case 'crack': {
+        // Die Platte bricht und stürzt in die Lava (~1,4 s). Erst der Bruch: hart, trocken,
+        // breitbandig und kurz – ein Knall aus hohem und mittlerem Rauschen (1 ms Anstieg),
+        // ein harter Klick und gut 30 ms später ein zweiter Riss; nur ein kleiner tiefer
+        // Schlag, denn hier schlägt nichts ein, es gibt etwas nach. Sofort danach poltern die
+        // Schollen: sieben dumpfe Brocken mit Klacken, die immer tiefer und leiser werden,
+        // und ein breites Band, das von 1,8 kHz auf 260 Hz hinabsinkt – sie fallen weg.
+        // Nach 0,6–0,72 s (je Fassung) kommt aus der Tiefe das Platschen: gedämpftes braunes
+        // Rauschen und ein weicher tiefer Sinus (gedämpft: 6 m tiefer, im Glutgraben), ein
+        // zäher Gluckser der Lava, eine zweite, kleinere Scholle; dann zischt es (Hochpass und
+        // ein Band um 2 kHz), dazwischen knistert es dreimal.
+        // Abgrenzung: 'meteor' heult erst und schlägt dann von oben dumpf ein; 'bomb' beginnt
+        // mit einem satten tiefen Schlag. Hier steht der helle, trockene Bruch am Anfang, das
+        // Tiefe kommt erst spät und gedämpft – etwas fällt nach unten weg. Gemessen: 1,35–1,5 s,
+        // −11,5 bis −11,7 LUFS (Meteorit −11,2, Bombe −11,0), Schwerpunkt 2,3–2,5 kHz
+        // (Meteorit 0,25, Bombe 0,3 kHz).
+        const k = this.crackTick++ % 3;
+        const rb = CRACK_RUBBLE[k];
+        const p = [0.6, 0.66, 0.72][k];
+        v.noise(9000, 4000, 0.025, 0.5, { type: 'highpass', attack: 0.001 })
+          .noise(3200, 1400, 0.05, 0.6, { q: 0.8, attack: 0.001 })
+          .tone('triangle', 1100, 380, 0.03, 0.25)
+          .noise(2600, 1100, 0.04, 0.35, { q: 1, at: 0.032, attack: 0.001 })
+          .noise(6000, 3000, 0.02, 0.2, { type: 'highpass', at: 0.034, attack: 0.001 })
+          .tone('sine', 120, 55, 0.22, 0.25, { at: 0.01 })
+          .noise(420, 150, 0.2, 0.25, { type: 'lowpass', brown: true, at: 0.01 })
+          .noise(1800, 260, 0.75, 0.18, { q: 0.7, attack: 0.06, at: 0.05 });
+        for (let i = 0; i < rb.length; i += 2) {
+          const f = rb[i + 1];
+          const vol = 0.5 - 0.04 * i;
+          v.noise(f, f * 0.55, 0.12, vol, { type: 'lowpass', q: 1.4, brown: true, at: rb[i], attack: 0.003 })
+            .noise(f * 2.6, f * 2, 0.03, vol * 0.35, { q: 2.5, at: rb[i], attack: 0.002 });
+        }
+        v.noise(600, 140, 0.45, 0.26, { type: 'lowpass', brown: true, attack: 0.012, at: p })
+          .tone('sine', 85, 38, 0.35, 0.14, { at: p, attack: 0.01 })
+          .tone('sine', 170, 270, 0.09, 0.12, { at: p + 0.05, attack: 0.008 })
+          .noise(450, 130, 0.3, 0.15, { type: 'lowpass', brown: true, attack: 0.01, at: p + 0.16 })
+          .tone('sine', 75, 40, 0.25, 0.1, { at: p + 0.16, attack: 0.01 })
+          .noise(5200, 2800, 0.85, 0.2, { type: 'highpass', attack: 0.07, at: p + 0.03 })
+          .noise(2400, 1500, 0.6, 0.06, { q: 1.2, attack: 0.1, at: p + 0.06 });
+        for (const d of [0.2, 0.33, 0.5]) v.noise(3800, 3200, 0.02, 0.08, { q: 4, at: p + d, attack: 0.002 });
+        break;
+      }
+      case 'collapse': {
+        // Die Hängebrücke stürzt ein (~2,2 s, einmal je Rennen). Holz, nicht Stein: Zuerst
+        // ächzt sie (ein leiser, knarrender Sägezahn mit 26-Hz-Flattern und ein enges
+        // Reibeband), dann reißen drei Seile – peitschende Schnalzer: ein Knall aus breitem
+        // Rauschen und ein Dreieckston, der in 90 ms von 1,7 kHz auf gut 200 Hz stürzt, jeder
+        // folgende etwas tiefer. Dazwischen splittert das Holz: ein schweres Brechen des
+        // Tragbalkens (bei 0,45 s, mit dumpfem Ruck) und dichte, kurze Splitter (1,3–3,4 kHz,
+        // alle 22–50 ms) bis knapp 1 s, dazu drei reißende Fasern. Dann die Kaskade: dreizehn
+        // Bohlen fallen klappernd in die Schlucht – hohle Holztöne (Dreieck 450–980 Hz mit
+        // einem unharmonischen Teilton ×2,3 und einem Klacken), manche doppelt, wenn eine
+        // Bohle auf die andere schlägt; sie werden leiser und dumpfer, ab 1,3 s wirft die
+        // Schlucht ein Echo zurück (0,14 s später, ein Drittel so laut), und bei ~1,55 s schlägt
+        // das Deck dumpf unten auf. Darunter rumpelt die Holzmasse (braunes Rauschen um 500 Hz).
+        // Abgrenzung: Stein ('crack', 'crumble') knackt trocken und hoch; Holz klingt hohl,
+        // mit Tonhöhe, und klappert. Gemessen: 2,27 s, ≈ −10,3 LUFS, knapp 60 % der Energie zwischen
+        // 0,5 und 1,5 kHz; im Spiel-Mix bei Faktor 0,3 heben die Seile und das Splittern
+        // die Oktaven 1/2/4/8 kHz um 1,6/1,1/4,3/10,8 dB über Motor und Musik (die Böe bei
+        // gleichem Faktor 1,1/1,9/6,1/17).
+        v.tone('sawtooth', 150, 118, 0.3, 0.05, { attack: 0.05, tremHz: 26 }).noise(900, 700, 0.3, 0.06, { q: 6, attack: 0.05 });
+        for (let i = 0; i < 3; i++) {
+          const s0 = [0.16, 0.34, 0.55][i];
+          const d = 1 - 0.12 * i;
+          v.noise(4500, 1800, 0.035, 0.45, { q: 1.2, attack: 0.001, at: s0 })
+            .tone('triangle', 1700 * d, 220 * d, 0.09, 0.22, { at: s0 })
+            .noise(1200 * d, 500 * d, 0.06, 0.2, { q: 2, at: s0 + 0.005 });
+        }
+        v.noise(2500, 900, 0.07, 0.4, { q: 0.9, at: 0.45, attack: 0.002 })
+          .tone('sine', 160, 70, 0.2, 0.25, { at: 0.45 })
+          .noise(500, 180, 0.9, 0.18, { type: 'lowpass', brown: true, attack: 0.15, at: 0.4 });
+        let t = 0.3;
+        for (let i = 0; t < 0.95; i++) {
+          const f = SPLINTER_HZ[i % SPLINTER_HZ.length];
+          v.noise(f, f * 0.75, 0.015 + 0.005 * (i % 3), 0.2 - 0.12 * (t - 0.3), { q: 3, at: t, attack: 0.001 });
+          t += SPLINTER_GAP[i % SPLINTER_GAP.length];
+        }
+        for (const [at, f] of [[0.38, 520], [0.6, 440], [0.8, 380]]) v.tone('triangle', f, f * 0.65, 0.05, 0.12, { at });
+        for (let i = 0; i < COLLAPSE_PLANKS.length; i += 3) {
+          const at = COLLAPSE_PLANKS[i];
+          const f = COLLAPSE_PLANKS[i + 1];
+          const far = (at - 0.72) / 1.3; // 0 … 1: die Bohlen fallen tiefer in die Schlucht
+          const vol = 0.4 - 0.22 * far;
+          const click = 1 - 0.5 * far;
+          v.tone('triangle', f, f * 0.94, 0.07, vol, { at, attack: 0.002 })
+            .tone('sine', f * 2.3, f * 2.25, 0.04, vol * 0.4, { at, attack: 0.002 })
+            .noise(f * 3 * click + 400, f * 2.3 * click + 300, 0.025, vol * 0.9, { q: 2.5, at, attack: 0.001 });
+          if (COLLAPSE_PLANKS[i + 2]) v.tone('triangle', f * 1.15, f * 1.08, 0.05, vol * 0.6, { at: at + 0.035, attack: 0.002 });
+          if (at > 1.3) v.tone('triangle', f * 0.98, f * 0.93, 0.07, vol * 0.33, { at: at + 0.14, attack: 0.004 });
+        }
+        v.noise(350, 120, 0.5, 0.2, { type: 'lowpass', brown: true, attack: 0.01, at: 1.55 }).tone('sine', 70, 40, 0.3, 0.16, { at: 1.55 });
+        break;
+      }
+      case 'drain': {
+        // Die Lavaröhre läuft leer und ist frei (~2 s) – die einzige gute Nachricht der vier.
+        // Erst gurgelt und schlürft es nach unten weg: ein enges Saugband von 900 auf 220 Hz,
+        // braunes Rauschen von 520 auf 120 Hz und ein Sinus, der von 190 auf 50 Hz abzieht;
+        // dazu elf zähe Gluckser (kurze Dreieck-Blasen mit einem engen Rauschband als
+        // „Schlund" um 0,4–1,5 kHz, jede steigt in sich um eine Quinte, die Folge aber
+        // sinkt von 330 auf 120 Hz und wird leiser) und bei 1,3 s ein letzter,
+        // großer Schluck. Ab 0,45 s zischt abkühlendes Gestein (Hochpass, langsam
+        // einschwingend), fünfmal knistert es. Zum Schluss, bei ~1,5 s, der einladende
+        // Akzent: Luft strömt in die leere Röhre (ein Band, das nach oben fährt), ein hohler
+        // Röhrenton steigt eine Quarte, und darüber gleitet ein heller Ton eine Quarte hinauf
+        // (A5 → E6) und klingt mit leiser Quinte darüber aus – ein einzelner aufsteigender
+        // Glanz, keine Notenfolge. Abgrenzung: 'ring' gleitet aus der Tiefe in einen
+        // G-D-Zweiklang mit Schubrauschen; hier ist es kürzer, tiefer angesetzt und folgt
+        // auf das Gurgeln. Gemessen: 1,96 s, −10,7 LUFS; im Spiel-Mix bei Faktor 0,3 hebt das
+        // Zischen die 8-kHz-Oktave um 13,6 dB und der Akzent die 1-kHz-Oktave um 4,5 dB; das
+        // tiefe Gurgeln selbst geht dort unter dem Motor fast unter.
+        for (let i = 0; i < 4; i++) {
+          const at = i * 0.35;
+          v.noise(520 - 110 * i, 400 - 85 * i, 0.7, 0.3 - 0.04 * i, { type: 'lowpass', brown: true, attack: 0.3, at });
+          if (i < 3) v.noise(1400 - 300 * i, 950 - 300 * i, 0.8, 0.3, { q: 2.5, attack: 0.35, at: at * 1.3 });
+        }
+        v.tone('sine', 190, 50, 1.4, 0.18, { attack: 0.2, sustain: 0.75 });
+        for (let i = 0; i < DRAIN_GLUG.length; i += 2) {
+          const f = DRAIN_GLUG[i + 1];
+          const vol = 0.26 - 0.012 * i;
+          v.tone('triangle', f, f * 1.45, 0.07, vol, { at: DRAIN_GLUG[i], attack: 0.005 })
+            .noise(f * 2.2, f * 1.6, 0.05, vol * 0.4, { q: 3, at: DRAIN_GLUG[i], attack: 0.004 })
+            .noise(f * 3.6, f * 4.6, 0.06, vol * 0.7, { q: 4, at: DRAIN_GLUG[i] + 0.01, attack: 0.006 });
+        }
+        v.noise(700, 150, 0.25, 0.25, { q: 1.5, attack: 0.01, at: 1.3 })
+          .tone('sine', 260, 80, 0.2, 0.2, { at: 1.3, attack: 0.008 })
+          .noise(5500, 3500, 1.2, 0.16, { type: 'highpass', attack: 0.35, at: 0.45 });
+        for (const [at, f] of [[0.7, 3600], [0.86, 4600], [1.05, 3100], [1.2, 4200], [1.4, 3400]]) v.noise(f, f * 0.85, 0.018, 0.07, { q: 4, at, attack: 0.002 });
+        const a = 1.52;
+        v.noise(500, 3200, 0.4, 0.16, { q: 1, attack: 0.18, at: a - 0.1 })
+          .tone('sine', 196, 262, 0.35, 0.12, { at: a, attack: 0.03 })
+          .tone('sine', 880, 1319, 0.06, 0.12, { at: a, attack: 0.004 })
+          .tone('sine', 1319, 1316, 0.45, 0.22, { at: a + 0.05, attack: 0.005, sustain: 0.2, vibHz: 5, vibDepth: 0.003 })
+          .tone('triangle', 1976, 1972, 0.3, 0.06, { at: a + 0.06, attack: 0.006 });
         break;
       }
       // --- Maschinen und Wasser ---

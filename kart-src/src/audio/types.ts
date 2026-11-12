@@ -59,10 +59,10 @@ export type SfxName =
   | 'meteor' // ein Meteorit schlägt ein (ortsfest): kurzes fallendes Heulen, ab 0,3 s dumpfer Einschlag, nachrieselndes Geröll (~1 s)
   | 'gust' // Sturmhafen: eine Böe setzt ein (ortsfest, auch aus der Ferne leise): Fauchen schwillt in ~0,5 s an, Pfeifen in der Takelage, klappernde Leinen, verweht (~1,2 s)
   | 'storm' // Sturmhafen: das eigene Kart steckt in der Böe: Windrauschen mit Druck und Knattern (wird etwa alle 0,3 s aufgerufen und verschmilzt zu einem Bett)
-  | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest) – VORLÄUFIG
-  | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest) – VORLÄUFIG
-  | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
-  | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
+  | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest): Knirschen und Knacken, immer dichter, anschwellendes Grollen, fallende Brocken (~2,3 s)
+  | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest): trockener Bruch, polternde Schollen, ab ~0,6 s dumpfes Platschen und Zischen aus der Tiefe (~1,4 s)
+  | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören): reißende Seile, splitterndes Holz, klappernd fallende Bohlen mit Echo (~2,2 s)
+  | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören): Gurgeln, das nach unten abzieht, Zischen, zum Schluss ein heller aufsteigender Glanz (~2 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

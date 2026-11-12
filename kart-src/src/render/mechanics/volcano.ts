@@ -234,7 +234,6 @@ export function buildVolcano(track: Track, detail: boolean): MechanicView {
   const group = new THREE.Group();
   group.name = 'vulkan';
   const disposables: { dispose(): void }[] = [];
-  const rand = seeded(9173);
 
   /** Punkt auf der Fahrbahn wie in world.ts: Abschnitt i, Anteil f zum nächsten, seitlich lat, dy darüber. */
   const P = (i: number, f: number, lat: number, dy = 0): V3 => {
@@ -483,11 +482,14 @@ export function buildVolcano(track: Track, detail: boolean): MechanicView {
         const dn = (p: V3): V3 => [p[0], p[1] - PLANK, p[2]];
         const f = fwd(s);
         const r = right(s);
-        face(S.mb, a0, b0, dn(b0), dn(a0), [-f[0], 0, -f[2]], WOOD_SIDE);
-        face(S.mb, a1, b1, dn(b1), dn(a1), f, WOOD_SIDE);
         face(S.mb, a0, a1, dn(a1), dn(a0), [-r[0], 0, -r[2]], WOOD_SIDE);
         face(S.mb, b0, b1, dn(b1), dn(b0), r, WOOD_SIDE);
-        face(S.mb, dn(a0), dn(a1), dn(b1), dn(b0), DOWN, POST_D);
+        if (detail) {
+          // Stirnseiten und Unterseite sieht man nur, wenn die Bohle fällt
+          face(S.mb, a0, b0, dn(b0), dn(a0), [-f[0], 0, -f[2]], WOOD_SIDE);
+          face(S.mb, a1, b1, dn(b1), dn(a1), f, WOOD_SIDE);
+          face(S.mb, dn(a0), dn(a1), dn(b1), dn(b0), DOWN, POST_D);
+        }
         // Schein beim Bröckeln
         addFlat(surfK(pl, k, k, lo, 0.03), surfK(pl, k, k + 1, lo, 0.03), surfK(pl, k, k + 1, hi, 0.03), surfK(pl, k, k, hi, 0.03), UP, WOOD_HEAT);
         const c = surfK(pl, k, k + 0.5, (lo + hi) / 2, -PLANK / 2);
@@ -734,7 +736,7 @@ export function buildVolcano(track: Track, detail: boolean): MechanicView {
   }
 
   for (let bi = 0; bi < t.branches.length; bi++) {
-    const pieces = plates.map((p, i) => i).filter((i) => plates[i].bridge && t.branchOf[plates[i].segs[0]] === bi);
+    const pieces = plates.map((_, i) => i).filter((i) => plates[i].bridge && t.branchOf[plates[i].segs[0]] === bi);
     if (pieces.length === 0) continue;
     pieces.sort((a, b) => plates[a].segs[0] - plates[b].segs[0]);
     bridgePieces.push(pieces);
@@ -788,7 +790,7 @@ export function buildVolcano(track: Track, detail: boolean): MechanicView {
     }
     const L = segIds.length - 1;
     const SAG = 3.6;
-    const linkStep = 3;
+    const linkStep = detail ? 3 : 4;
     for (const sg of [-1, 1]) {
       const lat = sg * (wh - 0.45);
       const pts: V3[] = [];
@@ -838,7 +840,7 @@ export function buildVolcano(track: Track, detail: boolean): MechanicView {
         ropes.push({ body, piece: pc, u: (i + 0.5) / (pts.length - 1), mode: isA || isB ? 1 : 0, dangle: isA ? angA : angB, phase: sg * 0.4 });
       }
       // Hänger vom Deck zum Seil, alle 4 Abschnitte
-      for (let i = 2; i < L - 1; i += 4) {
+      for (let i = 2; i < L - 1; i += detail ? 4 : 8) {
         const s = segIds[i];
         const pc = pieceAtSeg(s);
         if (s === sA || s === sB) continue;
@@ -933,9 +935,9 @@ export function buildVolcano(track: Track, detail: boolean): MechanicView {
     const sa = Math.sin(ang);
     const q = (a: number, b: number): V3 => {
       // a: entlang des Pfeils (nach oben gedreht), b: quer
-      const x = -sa * a + ca * b;
-      const y = ca * a + sa * b;
-      return T(x * (side > 0 ? -1 : 1) * -1, 3.25 + y, 0.16);
+      const x = sa * a + ca * b;
+      const y = ca * a - sa * b;
+      return T(x, 3.25 + y, 0.16);
     };
     face(deco, q(-1.05, -0.24), q(0.3, -0.24), q(0.3, 0.24), q(-1.05, 0.24), W, ARROW);
     const h0 = q(0.3, -0.62);
