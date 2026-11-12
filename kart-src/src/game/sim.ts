@@ -1047,6 +1047,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       s.driftDir = 0;
       s.driftCharge = 0;
       s.draft = 0;
+      // Items gehen auch auf der Schiene (der Schub wirkt über s.boost, der Drache zieht im nächsten Schritt).
+      if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && canSteer && s.item !== ITEM_NONE) ev |= useItem(s, false, true);
       s.flags = itemBtn ? FLAG_ITEM_HELD : 0;
       return ev;
     }
@@ -1636,53 +1638,65 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   // --- Item auslösen (bei Tastendruck, nicht beim Halten) ---
   if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && drive && s.item !== ITEM_NONE) {
-    let used = true;
-    switch (s.item) {
-      case ITEM_BOOST:
-        s.boost = Math.max(s.boost, ITEM_BOOST_TICKS);
-        ev |= EV_USE_BOOST;
-        break;
-      case ITEM_TIRE:
-        ev |= EV_USE_TIRE;
-        break;
-      case ITEM_OIL:
-        ev |= EV_USE_OIL;
-        break;
-      case ITEM_TOP:
-        ev |= EV_USE_TOP;
-        break;
-      case ITEM_GUARD:
-        s.guard = GUARD_TICKS;
-        ev |= EV_USE_GUARD;
-        break;
-      case ITEM_EMP:
-        ev |= EV_USE_EMP;
-        break;
-      case ITEM_SMOKE:
-        ev |= EV_USE_SMOKE;
-        break;
-      case ITEM_SPRING:
-        // Aus der Luft heraus geht kein zweiter Sprung – das Item bleibt.
-        if (air) used = false;
-        else {
-          s.vy = SPRING_SPEED;
-          s.y += AIR_EPS + 0.05;
-          flags |= FLAG_AIR;
-          ev |= EV_USE_SPRING | EV_TAKEOFF;
-        }
-        break;
-      case ITEM_KITE:
-        s.tow = TOW_TICKS;
-        s.boost = 0;
-        s.stall = 0;
-        ev |= EV_USE_KITE;
-        break;
-      default:
-        used = false;
-    }
-    if (used) s.item = ITEM_NONE;
+    const used = useItem(s, air);
+    ev |= used;
+    if (used & EV_USE_SPRING) flags |= FLAG_AIR;
   }
 
   s.flags = flags;
+  return ev;
+}
+
+/**
+ * Löst das gehaltene Item aus (Aufrufer prüft Tastenflanke und ob gefahren werden darf). Gibt die Ereignisse zurück;
+ * die Sprungfeder setzt dabei das Kart in die Luft (EV_TAKEOFF – der Aufrufer setzt FLAG_AIR).
+ * noSpring: Auf den Schienen der Achterbahn bleibt die Feder aufgehoben (sie würde das Kart vom Deck ohne Bande werfen).
+ */
+function useItem(s: KartState, air: boolean, noSpring = false): number {
+  let ev = 0;
+  let used = true;
+  switch (s.item) {
+    case ITEM_BOOST:
+      s.boost = Math.max(s.boost, ITEM_BOOST_TICKS);
+      ev |= EV_USE_BOOST;
+      break;
+    case ITEM_TIRE:
+      ev |= EV_USE_TIRE;
+      break;
+    case ITEM_OIL:
+      ev |= EV_USE_OIL;
+      break;
+    case ITEM_TOP:
+      ev |= EV_USE_TOP;
+      break;
+    case ITEM_GUARD:
+      s.guard = GUARD_TICKS;
+      ev |= EV_USE_GUARD;
+      break;
+    case ITEM_EMP:
+      ev |= EV_USE_EMP;
+      break;
+    case ITEM_SMOKE:
+      ev |= EV_USE_SMOKE;
+      break;
+    case ITEM_SPRING:
+      // Aus der Luft heraus geht kein zweiter Sprung – das Item bleibt.
+      if (air || noSpring) used = false;
+      else {
+        s.vy = SPRING_SPEED;
+        s.y += AIR_EPS + 0.05;
+        ev |= EV_USE_SPRING | EV_TAKEOFF;
+      }
+      break;
+    case ITEM_KITE:
+      s.tow = TOW_TICKS;
+      s.boost = 0;
+      s.stall = 0;
+      ev |= EV_USE_KITE;
+      break;
+    default:
+      used = false;
+  }
+  if (used) s.item = ITEM_NONE;
   return ev;
 }

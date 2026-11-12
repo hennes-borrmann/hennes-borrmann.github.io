@@ -59,26 +59,26 @@ export type SfxName =
   | 'meteor' // ein Meteorit schlägt ein (ortsfest): kurzes fallendes Heulen, ab 0,3 s dumpfer Einschlag, nachrieselndes Geröll (~1 s)
   | 'gust' // Sturmhafen: eine Böe setzt ein (ortsfest, auch aus der Ferne leise): Fauchen schwillt in ~0,5 s an, Pfeifen in der Takelage, klappernde Leinen, verweht (~1,2 s)
   | 'storm' // Sturmhafen: das eigene Kart steckt in der Böe: Windrauschen mit Druck und Knattern (wird etwa alle 0,3 s aufgerufen und verschmilzt zu einem Bett)
-  | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest) – VORLÄUFIG
-  | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest) – VORLÄUFIG
-  | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
-  | 'raft' // Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß – hohles Holzrumpeln – VORLÄUFIG
-  | 'rapids' // Dschungel-Fluss: das eigene Kart fährt auf dem Fluss (wird etwa alle 0,35 s aufgerufen) – VORLÄUFIG
-  | 'falls' // Dschungel-Fluss: das Tosen des Wasserfalls (ortsfest, in der Nähe etwa alle 0,5 s aufgerufen) – VORLÄUFIG
-  | 'thunder' // Gewitterkamm: ein Blitz schlägt auf der Bahn ein (ortsfest, auf dem ganzen Kamm zu hören) – VORLÄUFIG
-  | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest) – VORLÄUFIG
-  | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall) – VORLÄUFIG
-  | 'charge' // Gewitterkamm: das Kart wird im Ladefeld aufgeladen (Schub) – VORLÄUFIG
-  | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – ein tiefer Gong (überall gleich laut) – VORLÄUFIG
-  | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter (überall gleich laut) – VORLÄUFIG
-  | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören) – VORLÄUFIG
-  | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung) – VORLÄUFIG
-  | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle) – VORLÄUFIG
-  | 'shimmer' // Spiegelkabinett: in einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, bis ~110 m zu hören) – VORLÄUFIG
-  | 'whistle' // Wüstenexpress: die Lok pfeift (ortsfest an der Lok, alle 11 s, bis ~220 m zu hören) – VORLÄUFIG
-  | 'trainpass' // Wüstenexpress: ein Zug rollt dicht am eigenen Kart vorbei (ortsfest, etwa alle 0,45 s aufgerufen) – VORLÄUFIG
-  | 'board' // Wüstenexpress: ein Kart rollt über die Rampe aufs Wagendach – VORLÄUFIG
-  | 'rattle' // Wüstenexpress: das eigene Kart fährt über die Wagendächer (etwa alle 0,3 s aufgerufen) – VORLÄUFIG
+  | 'crumble' // Vulkaninsel: eine Platte der Fahrbahn beginnt zu bröckeln, 2,5 s bevor sie bricht (ortsfest): Knirschen und Knacken, immer dichter, anschwellendes Grollen, fallende Brocken (~2,3 s)
+  | 'crack' // Vulkaninsel: die Platte bricht weg und stürzt in die Lava (ortsfest): trockener Bruch, polternde Schollen, ab ~0,6 s dumpfes Platschen und Zischen aus der Tiefe (~1,4 s)
+  | 'collapse' // Vulkaninsel: die Hängebrücke stürzt ein (ortsfest, auf der ganzen Insel zu hören): reißende Seile, splitterndes Holz, klappernd fallende Bohlen mit Echo (~2,2 s)
+  | 'drain' // Vulkaninsel: die Lavaröhre läuft leer und ist frei (ortsfest, auf der ganzen Insel zu hören): Gurgeln, das nach unten abzieht, Zischen, zum Schluss ein heller aufsteigender Glanz (~2 s)
+  | 'riftwarn' // Zeitriss-Ruine: drei Sekunden vor dem Sprung der Zeit – tiefer, schwebender Gong, ein Uhrwerk zieht immer schneller auf, ein Glaston steigt (überall gleich laut, ~2,7 s)
+  | 'rift' // Zeitriss-Ruine: die Zeit reißt, die Welt springt ins andere Zeitalter – heller Riss nach oben, schimmernder Nachhall gleitet hinab, weicher Tiefton-Stoß (überall gleich laut, ~1 s)
+  | 'thunder' // Gewitterkamm: ein Blitz schlägt auf der Bahn ein (ortsfest, auf dem ganzen Kamm zu hören): heller, peitschender Knall, sofort rollendes, dunkles Krachen und Poltern (~1,5 s)
+  | 'rod' // Gewitterkamm: ein Blitz fährt in einen Blitzableiter, das Ladefeld steht (ortsfest): dünner Knall, nachklingender Mast, surrendes, absteigendes Britzeln (~0,9 s)
+  | 'rumble' // Gewitterkamm: fernes Donnergrollen nach einem Wetterleuchten (überall gleich laut): tiefes, weiches Rollen ohne Knall, an- und abschwellend (~2,2 s)
+  | 'charge' // Gewitterkamm: das Kart wird im Ladefeld aufgeladen (Schub): aufsteigendes, knisterndes, surrendes „Bzzzing“ (~0,56 s)
+  | 'raft' // Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß – hohles Holzrumpeln: zwei, drei dumpfe Holzschläge, Wasserschwapp (~0,32 s)
+  | 'rapids' // Dschungel-Fluss: das eigene Kart fährt auf dem Fluss: Wasserrauschen mit Gluckern und Plätschern (wird etwa alle 0,35 s aufgerufen und verschmilzt zu einem Bett)
+  | 'falls' // Dschungel-Fluss: das Tosen des Wasserfalls (ortsfest, in der Nähe etwa alle 0,5 s aufgerufen und verschmilzt zu einem tiefen, breiten Donnern)
+  | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung): Sog, dann ein gläserner Zweiklang, der aufwärts aufgeht (~0,6 s)
+  | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle): Sog, dann rutscht der gläserne Klang schwebend abwärts, dumpfer Plopp (~0,7 s)
+  | 'shimmer' // Spiegelkabinett: in einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, bis ~110 m zu hören): leises, zufällig gestreutes Glitzern hoher Glastöne (~0,45 s)
+  | 'whistle' // Wüstenexpress: die Lok pfeift (ortsfest an der Lok, alle 11 s, bis ~220 m zu hören): hauchiger Zweiklang in kleiner Terz, steht und gleitet abreißend hinab (~1,1 s)
+  | 'trainpass' // Wüstenexpress: ein Zug rollt dicht am eigenen Kart vorbei (ortsfest, etwa alle 0,45 s aufgerufen): tiefes Rollen mit „ta-tack“ der Schienenstöße, verschmilzt zu einem Bett
+  | 'board' // Wüstenexpress: ein Kart rollt über die Rampe aufs Wagendach: Blechscheppern, polternde Schläge, heller Akzent (~0,5 s)
+  | 'rattle' // Wüstenexpress: das eigene Kart fährt über die Wagendächer (etwa alle 0,3 s aufgerufen): hohles Rattern auf Bohlen und Blech, verschmilzt zu einem Bett
   | 'shrink' // Riesenkinderzimmer: ein Kart schrumpft (durch den blauen Ring gefahren): Gleitton rutscht hinauf und wird dünn, Zip, winziges Pling (~0,45 s)
   | 'grow' // Riesenkinderzimmer: ein Kart wächst (durch den orangen Ring gefahren): Gleitton rutscht hinab und wird breit, Zip, rundes Bwomm (~0,55 s)
   | 'sizeend' // Riesenkinderzimmer: ein Kart ist wieder normal groß: weiches Plopp mit kurzem Nachfedern (~0,25 s)

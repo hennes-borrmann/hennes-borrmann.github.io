@@ -15,10 +15,16 @@
 // Hat eine Stimme weniger Takte als der Abschnitt, wird sie wiederholt.
 
 import { NEUE_STUECKE } from './songs-neu';
+import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
+import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import { MAGNET_STUECK } from './stuecke/magnet';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
+import { WUESTE_STUECK } from './stuecke/wueste';
+import { SPIEGEL_STUECK } from './stuecke/spiegel';
+import { RUINE_STUECK } from './stuecke/ruine';
+import { VULKAN_STUECK } from './stuecke/vulkan';
 import type { MusicId } from './types';
 import type { Wave } from './mixer';
 
@@ -420,15 +426,18 @@ export const SONGS: Record<MusicId, SongDef> = {
   eis: NEUE_STUECKE.eis,
   mond: NEUE_STUECKE.mond,
   hafen: HAFEN_STUECK,
-  // (vorläufig, bis die eigenen Stücke da sind)
-  vulkan: GLUT,
-  ruine: KLIPPE,
-  gewitter: NACHT,
-  dschungel: KLIPPE,
-  // Spiegelkabinett: VORLÄUFIG das Stück der Wolkenbahn
-  spiegel: NEUE_STUECKE.wolken,
-  // Wüstenexpress: VORLÄUFIG das Stück des Werkshofs
-  wueste: WERKSHOF,
+  // Vulkaninsel: eigenes Stück (stuecke/vulkan.ts)
+  vulkan: VULKAN_STUECK,
+  // Zeitriss-Ruine: eigenes Stück (stuecke/ruine.ts)
+  ruine: RUINE_STUECK,
+  // Gewitterkamm: eigenes Stück (stuecke/gewitter.ts)
+  gewitter: GEWITTER_STUECK,
+  // Dschungel-Fluss: eigenes Stück (stuecke/dschungel.ts)
+  dschungel: DSCHUNGEL_STUECK,
+  // Spiegelkabinett: das eigene Stück (stuecke/spiegel.ts)
+  spiegel: SPIEGEL_STUECK,
+  // Wüstenexpress: eigenes Stück (stuecke/wueste.ts)
+  wueste: WUESTE_STUECK,
   // Riesenkinderzimmer: eigenes Stück (stuecke/zimmer.ts)
   zimmer: ZIMMER_STUECK,
   // Achterbahn-Rummel: eigenes Stück (stuecke/rummel.ts)

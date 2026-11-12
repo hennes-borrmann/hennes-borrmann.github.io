@@ -958,6 +958,9 @@ export class RaceScene {
         const broke = !flip && planActive(h.plan, time) && !planActive(h.plan, before);
         if (!warned && !broke) continue;
         const mid = h.first + (h.count >> 1);
+        // Die Hängebrücke ist aus Holz: ihr Einsturz hat einen eigenen Klang ('collapse', beim Schließen des Tors) –
+        // das Bröckeln und Brechen von Stein passt dort nicht.
+        if (SURFACES[t.surf[mid]]?.id === 'wood') continue;
         const lat = (Math.max(h.lat0, -t.wh[mid]) + Math.min(h.lat1, t.wh[mid])) / 2;
         const hx = t.px[mid] + rightX(t, mid) * lat;
         const hz = t.pz[mid] + rightZ(t, mid) * lat;
