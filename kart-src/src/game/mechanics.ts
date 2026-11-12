@@ -559,6 +559,45 @@ export interface Gate {
 export const HOLE_WARN = 150;
 export const GATE_WARN = 300;
 
+// --- Portale -------------------------------------------------------------------------
+// Ein Portal steht als Rahmen quer in der Fahrbahn (oder in einem Teil davon). Wer hindurchfährt, solange es
+// offen ist, kommt im selben Augenblick an einer anderen Stelle der Strecke heraus – mit demselben Tempo,
+// derselben seitlichen Lage und der Richtung der Strecke dort. Ist es zu, ist der Rahmen leer: man fährt
+// einfach hindurch. Wann es offen ist, steht in seinem Plan (Rennzeit).
+
+/**
+ * Portal am Abschnitt seg (genau: an dessen Ende), seitlich lat0 … lat1; Ausgang am Abschnitt to.
+ * plan = null: immer offen. kind 0 führt vorwärts (Abkürzung), 1 zurück (Falle).
+ */
+export interface Portal {
+  seg: number;
+  lat0: number;
+  lat1: number;
+  to: number;
+  plan: Plan | null;
+  kind: number;
+}
+
+/** So lange vorher kündigt ein Portal an, dass es aufgeht bzw. zugeht (Ticks). */
+export const PORTAL_WARN = 90;
+
+export function portalOpen(p: Portal, time: number): boolean {
+  return p.plan === null || planActive(p.plan, time);
+}
+
+/** Ticks, bis ein offenes Portal zugeht (Infinity = es bleibt offen; 0 = es ist zu). */
+export function portalLeft(p: Portal, time: number): number {
+  if (p.plan === null) return Infinity;
+  const c = planClock(p.plan, time);
+  for (let i = 0; i < p.plan.spans.length; i += 2) if (c >= p.plan.spans[i] && c < p.plan.spans[i + 1]) return p.plan.spans[i + 1] - c;
+  return 0;
+}
+
+/** Ticks, bis ein geschlossenes Portal aufgeht (0 = es ist offen; Infinity = nie mehr). */
+export function portalUntil(p: Portal, time: number): number {
+  return p.plan === null ? 0 : planUntil(p.plan, time);
+}
+
 // --- Fluss und Flöße -----------------------------------------------------------------
 // Auf einem Flussstück ist die Fahrbahn Wasser. Darauf treiben in Bahnen nebeneinander Flöße flussab – in
 // Fahrtrichtung. Boden ist nur, wo gerade ein Floß liegt; wer daneben gerät, geht unter. Ein Floß nimmt mit,

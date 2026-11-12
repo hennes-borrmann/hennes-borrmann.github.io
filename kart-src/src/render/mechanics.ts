@@ -13,6 +13,7 @@ import { buildFlight, hasGlide } from './mechanics/flight';
 import { buildHarbor } from './mechanics/harbor';
 import { buildLava } from './mechanics/lava';
 import { buildMachines } from './mechanics/machines';
+import { buildMirrors } from './mechanics/mirrors';
 import { buildMoon } from './mechanics/moon';
 import { buildRift } from './mechanics/rift';
 import { buildRiver } from './mechanics/river';
@@ -54,6 +55,7 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.winds.length > 0 || track.pontoons.length > 0) out.push(buildHarbor(track, detail));
   if (track.dark) out.push(buildStorm(track, detail, world));
   if (track.rivers.length > 0) out.push(buildRiver(track, detail));
+  if (track.portals.length > 0) out.push(buildMirrors(track, detail));
   if (track.era) out.push(buildRift(track, detail));
   else if (track.holes.length > 0 || track.gates.length > 0) out.push(buildVolcano(track, detail));
   return out;

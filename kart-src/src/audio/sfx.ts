@@ -210,6 +210,13 @@ const LEVEL: Record<SfxName, number> = {
   raft: 2.2,
   rapids: 1.1,
   falls: 7,
+  // Spiegelkabinett (Runde 15), gemessen wie oben: Portal ≈ −17,1 LUFS, Falle ≈ −17,2 (Schubring
+  // −17,3) – am eigenen Kart heben beide im Spiel-Mix die Oktaven 2/4/8 kHz um gut 5/3–4/6–8 dB über
+  // Motor und Musik (Schubring 5,3/0,9/7). Das Schimmern ≈ −24 LUFS, im Spiel aus 0 m (Faktor
+  // 0,55) ≈ −29, zwei zugleich ≈ −26 – ein Hinweis, 9 LU unter einem Portal.
+  portal: 2.1,
+  mirror: 2.8,
+  shimmer: 3.2,
   rumble: 1.2,
   charge: 2,
 };
@@ -357,6 +364,37 @@ class Voice {
   get length(): number {
     return this.end + 0.05;
   }
+}
+
+// --- Spiegelkabinett: Bausteine für 'portal', 'mirror' und 'shimmer' ---
+
+/** Aufglitzern: Tonvorrat (Hz) – E-lydisch wie das Rennstück, E7 bis Dis8. */
+const SCHIMMER_HZ = [2637, 2960, 3322, 3729, 3951, 4435, 4978];
+
+/**
+ * Der Sog beim Durchtauchen eines Spiegels (0–0,2 s): zwei enge Rauschbänder, eines von
+ * unten (600 Hz), eines von oben (4 kHz), schwellen an und laufen bei 1,5 kHz zusammen –
+ * das Rauschen „zieht sich zusammen" –, darüber ein Hauch Glanz. Weil die Hüllkurve nach dem
+ * langen Anschwellen sofort fällt, klingt es wie rückwärts gespielt: ein Einatmen, kein Stoß.
+ */
+function glasSog(v: Voice): void {
+  v.noise(600, 1500, 0.2, 0.16, { q: 2.6, attack: 0.16 })
+    .noise(4000, 1500, 0.2, 0.13, { q: 2.6, attack: 0.16 })
+    .noise(7000, 9000, 0.18, 0.015, { type: 'highpass', attack: 0.14 });
+}
+
+/**
+ * Ein gläserner Ton von f0 nach f1 (Hz): Sinus mit den unharmonischen Teiltönen eines
+ * Glases (×2,32 und ×4,25, leiser und kürzer). `hold` = Anteil der Dauer, bevor die Fahrt
+ * beginnt. Mit `drift` klingt eine zweite Stimme mit, die vom selben Ton ausgeht, aber bei
+ * f1 · (1 + drift) ankommt: die Schwebung beginnt bei null und wird immer schneller.
+ */
+function glasTon(v: Voice, f0: number, f1: number, at: number, dur: number, vol: number, hold: number, drift = 0): void {
+  const a = drift ? vol * 0.6 : vol;
+  v.tone('sine', f0, f1, dur, a, { at, attack: 0.004, hold })
+    .tone('sine', f0 * 2.32, f1 * 2.32, dur * 0.55, a * 0.3, { at, attack: 0.003, hold })
+    .tone('sine', f0 * 4.25, f1 * 4.25, dur * 0.3, a * 0.12, { at, attack: 0.002, hold });
+  if (drift) v.tone('sine', f0, f1 * (1 + drift), dur, a * 0.75, { at, attack: 0.004, hold });
 }
 
 export class SfxPlayer {
@@ -1008,6 +1046,57 @@ export class SfxPlayer {
             v.noise(f, f * 0.7, 0.035, 0.4 * (0.7 + 0.3 * r()), { q: 1.3, at: t, attack: 0.002 });
             t += 0.042 + 0.03 * r();
           }
+        }
+        break;
+      }
+      // --- Spiegelkabinett ---
+      case 'portal':
+        // Durch einen Spiegel, der vorwärts führt (am Kart, ~0,6 s): erst der Sog (glasSog) –
+        // man taucht ins Glas, ohne dass es bricht –, dann geht ein gläserner Zweiklang aufwärts
+        // auf: E6, dann Cis7 (große Sexte), jeder mit einem kleinen Schleifer von unten in den
+        // Ton und den Teiltönen eines Glases; der untere klingt eher aus als der obere, zuletzt
+        // ein Hauch Glanz ganz oben – so wandert der Klang nach oben, freundlich und offen.
+        // Abgrenzung: 'ring' ist ein Gleitton in einen Quint-Zweiklang (G6 + D7) mit Vibrato und
+        // breitem Schubrauschen, 'pickup' zwei Dreieckstöne im Quartsprung, 'boost' Rauschen mit
+        // Sägezahn und tiefem Schlag; hier: Sinus mit unharmonischen Glas-Teiltönen, ohne
+        // Vibrato, große Sexte, und das Rauschen zieht sich zusammen, statt aufzufahren.
+        glasSog(v);
+        glasTon(v, 1318.5 * 0.985, 1318.5, 0.16, 0.34, 0.22, 0.12);
+        glasTon(v, 2217.5 * 0.985, 2217.5, 0.23, 0.42, 0.2, 0.12);
+        v.noise(6500, 9500, 0.32, 0.03, { type: 'highpass', attack: 0.12, at: 0.26 });
+        break;
+      case 'mirror':
+        // Durch einen Spiegel, der zurückwirft (am Kart, ~0,7 s): derselbe Sog, dann kippt es –
+        // der Zweiklang ist gespiegelt (erst der obere Ton, dann der untere), und beide rutschen
+        // nach kurzem Halten um eine kleine Terz abwärts (Cis7 → Ais6, E6 → Cis6). Dabei läuft
+        // je eine zweite Stimme los, die immer weiter danebenliegt: Die Schwebung wird schneller
+        // (am Ende ≈ 10–14 Hz), der Klang „verstimmt sich". Zum Schluss ein weicher, dumpfer
+        // Plopp (Sinus 200 → 70 Hz mit etwas braunem Rauschen, kein harter Anschlag) – eindeutig
+        // „falsch", aber nicht schrill. Abgrenzung: 'stall' stottert mit Sägezähnen im Bass,
+        // 'fall' heult in einem großen Bogen abwärts; hier gläsern, kurz, mit Schwebung.
+        glasSog(v);
+        glasTon(v, 2217.5, 1864.7, 0.16, 0.4, 0.13, 0.3, 0.007);
+        glasTon(v, 1318.5, 1108.7, 0.23, 0.42, 0.14, 0.3, 0.012);
+        v.tone('sine', 200, 70, 0.13, 0.3, { at: 0.56, attack: 0.012 }).noise(520, 160, 0.1, 0.16, { type: 'lowpass', brown: true, at: 0.56, attack: 0.01 });
+        break;
+      case 'shimmer': {
+        // In einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, ~0,5 s): ein
+        // leises, kristallenes Aufglitzern – fünf bis sieben sehr kurze, hohe Glastöne aus dem
+        // E-lydischen Vorrat des Rennstücks (2,6–5 kHz), in zufälligen Abständen von 45–85 ms,
+        // erst lauter werdend, dann verklingend, über einem Hauch hohen Rauschens. Der Zufall
+        // (Tonhöhe, Abstand, Länge) ist Absicht: An den Zwillingsspiegeln melden sich zwei
+        // Rahmen 9 m nebeneinander im selben Augenblick; ihre Töne fallen nie zusammen, also
+        // verdoppeln sie sich nicht und schaukeln sich nicht auf, es glitzert nur dichter.
+        // Abgrenzung: 'icicle' knackt hart und klirrt abwärts, 'warn' ist ein Zweiklang im festen Takt.
+        const r = Math.random;
+        v.noise(7500, 10000, 0.46, 0.012, { type: 'highpass', attack: 0.2 });
+        let t = 0.005 + 0.03 * r();
+        for (let i = 0; i < 7 && t < 0.36; i++) {
+          const f = SCHIMMER_HZ[Math.floor(r() * SCHIMMER_HZ.length)];
+          const swell = i < 2 ? 0.6 + 0.2 * i : 1 - 0.1 * (i - 2);
+          v.tone('sine', f, f * 1.003, 0.045 + 0.04 * r(), (0.07 + 0.025 * r()) * swell, { at: t, attack: 0.003 })
+            .tone('sine', f * 2.32, f * 2.32, 0.03, 0.012 * swell, { at: t, attack: 0.002 });
+          t += 0.045 + 0.04 * r();
         }
         break;
       }

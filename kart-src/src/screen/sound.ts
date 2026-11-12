@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
@@ -69,6 +69,10 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'rod',
   'rumble',
   'falls',
+  // Spiegelkabinett: das Schimmern am Rahmen ist ortsfest (kommt nie als „eigenes“ Ereignis); fremde Karts hört man durch die Spiegel gehen
+  'shimmer',
+  'portal',
+  'mirror',
 ]);
 
 export class Sound {

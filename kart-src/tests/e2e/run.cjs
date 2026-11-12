@@ -798,7 +798,7 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    check('Dreizehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 13);
+    check('Vierzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 14);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await h6.page.locator('.track-card').nth(1).click();
     await h6.page.locator('#ai-level button[data-level="2"]').click();
@@ -988,6 +988,14 @@ async function main() {
     const code7 = await createLobby(h7, 'Anna');
     const c7 = await openScreen('client7', '&laps=2&alle=1');
     await joinLobby(c7, 'Ben', code7);
+    // Die KI-Gegner (Plätze 2 und 3) bekommen in diesem Abschnitt keine Gegenstände: Sonst trifft ein Störsender oder ein
+    // Rollreifen ein Kart, das für eine Prüfung still an einer Stelle steht – und die Prüfung misst den Treffer statt der Strecke.
+    await h7.page.evaluate(() => {
+      window.__noItems = setInterval(() => {
+        const k = window.__kart;
+        if (k && k.race && k.race()) for (const slot of [2, 3]) k.giveItem(slot, 0);
+      }, 50);
+    });
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
     check('Streckenwahl nennt die Eigenheit der Nachtschicht', /Stadtverkehr/.test(twist || ''), twist || '');
@@ -1304,7 +1312,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen dreizehn Strecken zur Wahl', cards === 13, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen vierzehn Strecken zur Wahl', cards === 14, `${cards} Karten`);
     await h7.page.locator('.track-card').nth(6).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await c7.page.click('#btn-ready');
@@ -1693,9 +1701,71 @@ async function main() {
     const drowned = await seenOnBoth('respawn', 12000);
     check('In der Lücke zwischen zwei Flößen ist Wasser: Anna geht unter und wird neu aufgesetzt – beim Host und auf dem Bildschirm des Mitspielers', drowned[0] !== null && drowned[1] !== null, `Rücksetzen bei ${at(drowned[0])} / ${at(drowned[1])}`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Spiegelkabinett: Spiegel stehen nach Fahrplan in den Rahmen – auf beiden Bildschirmen gleich. Wer durch einen fährt,
+    // kommt im selben Augenblick woanders heraus (vorwärts oder zurück); ein leerer Rahmen ist nur ein Tor.
+    await h7.page.locator('.track-card').nth(13).click();
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 13, null, { timeout: 5000 });
+    await c7.page.click('#btn-ready');
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await h7.page.click('#btn-start');
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 13, null, { timeout: 30000 });
+    const openAt = async (sec) => {
+      const [a, b] = await Promise.all([kart(h7.page, `portals(${sec})`), kart(c7.page, `portals(${sec})`)]);
+      return [a.map((p) => (p.open ? 1 : 0)).join(''), b.map((p) => (p.open ? 1 : 0)).join(''), a];
+    };
+    // (Reihenfolge: Zeitspiegel · Zwilling links vorwärts, links zurück, rechts vorwärts, rechts zurück · Randspiegel)
+    const [m2h, m2c, mirrors] = await openAt(2);
+    const [m5h, m5c] = await openAt(5);
+    const [m8h, m8c] = await openAt(8);
+    check(
+      'Spiegelkabinett hat sechs Spiegel in vier Rahmen – und beide Bildschirme rechnen denselben Fahrplan',
+      mirrors.length === 6 && m2h === '110011' && m5h === '010011' && m8h === '001101' && m2h === m2c && m5h === m5c && m8h === m8c,
+      `bei 2 s ${m2h} / ${m2c}, bei 5 s ${m5h} / ${m5c}, bei 8 s ${m8h} / ${m8c}`,
+    );
+    // Anna (das Kart des Hosts) fährt aus dem Stand mit Gas auf einen Rahmen zu. Wo sie danach ist, bleibt bestehen –
+    // die Abfrage darf also ruhig einen Augenblick zu spät kommen. (Abschnitte sind einen Meter lang: seg ≈ Streckenmeter.)
+    const through = async (clockSec, mirror, back) => {
+      const from = Math.round(mirror.at) - back;
+      await kart(h7.page, `clock(${clockSec})`);
+      await sleep(250);
+      await kart(h7.page, `place(0, ${from}, ${(mirror.lat0 + mirror.lat1) / 2})`);
+      await sleep(150);
+      await h7.page.keyboard.down('ArrowUp');
+      let seg = from;
+      for (const until = Date.now() + 9000; Date.now() < until; ) {
+        seg = (await kart(h7.page, 'authoritative(0)')).seg;
+        if (seg < from - 4 || seg > mirror.at + 1) break;
+        await sleep(40);
+      }
+      await h7.page.keyboard.up('ArrowUp');
+      return seg;
+    };
+    if (mirrors.length === 6) {
+      // Randspiegel (immer offen, vorwärts): Anna kommt hinter dem Bogen wieder heraus.
+      const rim = mirrors[5];
+      const segRim = await through(20, rim, 9);
+      await sleep(600);
+      const annaRim = (await kart(c7.page, 'entities()')).find((e) => e.slot === 0);
+      check(
+        'Spiegel vorwärts: Anna fährt in den Randspiegel und kommt im selben Augenblick weiter vorn heraus – auch auf dem Bildschirm des Mitspielers',
+        segRim >= rim.to - 1.5 && segRim < rim.to + 40 && annaRim.seg >= rim.to - 1.5 && annaRim.seg < rim.to + 60,
+        `Rahmen bei ${rim.at.toFixed(0)} m, Ausgang bei ${rim.to.toFixed(0)} m – Anna danach bei ${segRim} m, beim Mitspieler bei ${annaRim.seg} m`,
+      );
+      // Zeitspiegel, während kein Spiegel darin steht (4–10 s): Der Rahmen ist nur ein Tor.
+      const timed = mirrors[0];
+      const segTimed = await through(5, timed, 8);
+      check('Leerer Rahmen: Anna fährt einfach hindurch und bleibt auf der Strecke davor', segTimed > timed.at && segTimed < timed.at + 45 && segTimed < timed.to - 5, `Rahmen bei ${timed.at.toFixed(0)} m, Ausgang wäre bei ${timed.to.toFixed(0)} m – Anna danach bei ${segTimed} m`);
+      // Zwillingsspiegel rechts, in den ersten 5,5 s: ein Spiegel, der zurückwirft.
+      const trap = mirrors[4];
+      const segTrap = await through(1, trap, 9);
+      check('Spiegel zurück: Anna fährt in den pinken Zwillingsspiegel und steht 45 m weiter hinten', trap.kind === 1 && segTrap >= trap.to - 1.5 && segTrap < trap.at - 12, `Rahmen bei ${trap.at.toFixed(0)} m, Ausgang bei ${trap.to.toFixed(0)} m – Anna danach bei ${segTrap} m`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die dreizehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die vierzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

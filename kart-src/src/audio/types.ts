@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -72,6 +72,9 @@ export type SfxName =
   | 'raft' // Dschungel-Fluss: das Kart rollt auf ein (anderes) Floß – hohles Holzrumpeln: zwei, drei dumpfe Holzschläge, Wasserschwapp (~0,32 s)
   | 'rapids' // Dschungel-Fluss: das eigene Kart fährt auf dem Fluss: Wasserrauschen mit Gluckern und Plätschern (wird etwa alle 0,35 s aufgerufen und verschmilzt zu einem Bett)
   | 'falls' // Dschungel-Fluss: das Tosen des Wasserfalls (ortsfest, in der Nähe etwa alle 0,5 s aufgerufen und verschmilzt zu einem tiefen, breiten Donnern)
+  | 'portal' // Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt (Abkürzung): Sog, dann ein gläserner Zweiklang, der aufwärts aufgeht (~0,6 s)
+  | 'mirror' // Spiegelkabinett: ein Kart fährt durch ein Portal, das zurückwirft (Falle): Sog, dann rutscht der gläserne Klang schwebend abwärts, dumpfer Plopp (~0,7 s)
+  | 'shimmer' // Spiegelkabinett: in einem Rahmen erscheint oder verschwindet ein Spiegel (ortsfest, bis ~110 m zu hören): leises, zufällig gestreutes Glitzern hoher Glastöne (~0,45 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

@@ -47,6 +47,7 @@ import {
   eraSince,
   eraUntil,
   planActive,
+  portalOpen,
   pulseCycle,
   tideLevel,
   vehicleAt,
@@ -54,7 +55,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { EDGE_GAP, EDGE_RIVER, NO_GROUND, TRACK, groundNow, newVehiclePose, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { EDGE_GAP, EDGE_RIVER, NO_GROUND, TRACK, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -160,7 +161,12 @@ export interface SceneEvent {
      */
     | 'raft'
     | 'rapids'
-    | 'falls';
+    | 'falls'
+    /** Spiegelkabinett: ein Kart fährt durch ein Portal, das vorwärts führt / durch eines, das zurückwirft. */
+    | 'portal'
+    | 'mirror'
+    /** Spiegelkabinett (ortsfest, slot −1): in einem Rahmen erscheint oder verschwindet ein Spiegel. */
+    | 'shimmer';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -225,6 +231,11 @@ interface KartView {
   /** Dschungel-Fluss: auf welcher Floßbahn das Kart zuletzt stand (−1 = auf keiner) / Zeit bis zur nächsten Meldung. */
   raft: number;
   riverWait: number;
+  /** Spiegelkabinett: wo das Kart im letzten Bild stand (ein Sprung von dort ist eine Fahrt durchs Portal). */
+  lastX: number;
+  lastY: number;
+  lastZ: number;
+  lastSeg: number;
   roulette: number;
   item: number;
   flags: number;
@@ -633,6 +644,8 @@ export class RaceScene {
       ['PLATT!', 'white'],
       ['HUI!', 'cool'],
       ['GELADEN!', 'cool'],
+      ['HINDURCH!', 'violet'],
+      ['ZURÜCK!', 'hot'],
     ]);
     this.applyLevel();
   }
@@ -795,6 +808,10 @@ export class RaceScene {
       gustWait: 0,
       raft: -1,
       riverWait: 0,
+      lastX: 0,
+      lastY: 0,
+      lastZ: 0,
+      lastSeg: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -891,6 +908,16 @@ export class RaceScene {
           const d = Math.hypot(me.x - t.px[g.first], me.z - t.pz[g.first]);
           if (d < 80) this.shake = Math.max(this.shake, 0.6 * (1 - d / 80));
         }
+      }
+      // Spiegelkabinett: in einem Rahmen erscheint ein Spiegel oder er verschwindet – ein Schimmern am Ort des Rahmens.
+      // (Rahmen mit zwei Spiegeln im Wechsel melden sich je Tausch einmal: beim Erscheinen.)
+      for (const p of t.portals) {
+        if (p.plan === null) continue;
+        const open = portalOpen(p, time);
+        if (open === portalOpen(p, before)) continue;
+        if (!open && t.portals.some((q) => q !== p && q.seg === p.seg && q.lat0 === p.lat0)) continue;
+        const lat = (p.lat0 + p.lat1) / 2;
+        this.emitAt('shimmer', t.px[p.seg] + rightX(t, p.seg) * lat, t.py[p.seg] + 2, t.pz[p.seg] + rightZ(t, p.seg) * lat, 110);
       }
       // Dschungel-Fluss: der Wasserfall tost – hörbar, solange man in seiner Nähe ist (alle halbe Sekunde ein Schwall).
       if (t.rivers.length > 0 && Math.floor(time / 30) !== Math.floor(before / 30)) {
@@ -1380,6 +1407,27 @@ export class RaceScene {
       const local = e.slot === localSlot;
       const k = this.kartView(e.slot, e.char);
       k.seen = true;
+      // Spiegelkabinett: Wer durch ein Portal fährt, steht im selben Augenblick woanders. Das ist kein Fahren, sondern
+      // ein Schnitt – nichts wird dorthin geglättet, keine Bremsspur quer durch die Halle, die eigene Kamera springt mit.
+      if (t.portals.length > 0) {
+        if (!k.fresh && e.respawn === 0 && k.respawn === 0 && Math.abs(e.x - k.lastX) + Math.abs(e.z - k.lastZ) > 10) {
+          const forward = progDelta(t, k.lastSeg, e.seg) > 0;
+          const hex = forward ? 0x9fe8ff : 0xff7ad1;
+          this.burst(k.lastX, k.lastY + 0.8, k.lastZ, 10, 6, hex, true, 0.5, 0.45, 2);
+          this.burst(e.x, e.y + 0.8, e.z, 14, 7, hex, true, 0.5, 0.5, 2);
+          this.emit(forward ? 'portal' : 'mirror', k, local);
+          k.fresh = true;
+          k.hasTrail = false;
+          if (local) {
+            this.camReady = false;
+            this.pop(forward ? 'HINDURCH!' : 'ZURÜCK!', e, forward ? 'violet' : 'hot', 3.4);
+          }
+        }
+        k.lastX = e.x;
+        k.lastY = e.y;
+        k.lastZ = e.z;
+        k.lastSeg = e.seg < t.total ? e.seg : 0;
+      }
       const speed = Math.hypot(e.vx, e.vz);
       const fx = Math.sin(e.heading);
       const fz = Math.cos(e.heading);

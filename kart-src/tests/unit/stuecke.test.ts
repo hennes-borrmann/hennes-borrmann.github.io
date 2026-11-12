@@ -4,6 +4,7 @@ import { NEUE_STUECKE } from '../../src/audio/songs-neu';
 import { GEWITTER_STUECK } from '../../src/audio/stuecke/gewitter';
 import { DSCHUNGEL_STUECK } from '../../src/audio/stuecke/dschungel';
 import { HAFEN_STUECK } from '../../src/audio/stuecke/hafen';
+import { SPIEGEL_STUECK } from '../../src/audio/stuecke/spiegel';
 import { VULKAN_STUECK } from '../../src/audio/stuecke/vulkan';
 import { RUINE_STUECK } from '../../src/audio/stuecke/ruine';
 import type { MusicId } from '../../src/audio/types';
@@ -16,6 +17,7 @@ const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'ruine', def: RUINE_STUECK },
   { schluessel: 'gewitter', def: GEWITTER_STUECK },
   { schluessel: 'dschungel', def: DSCHUNGEL_STUECK },
+  { schluessel: 'spiegel', def: SPIEGEL_STUECK },
 ];
 
 // Maßstab sind die vier ursprünglichen Rennstücke (in songs.ts) – weder die aus songs-neu.ts
