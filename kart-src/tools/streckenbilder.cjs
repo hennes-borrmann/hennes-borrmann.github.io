@@ -227,6 +227,18 @@ const SHOTS = {
     ],
     when: 'window.__kart.river(undefined, 34).rivers[0].lanes[2].raft && window.__kart.river(undefined, 24).rivers[0].lanes[2].raft',
   },
+  // Spiegelkabinett: die Zwillingsspiegel im Glaspalast – links der türkise (vorwärts), rechts der pinke (zurück),
+  // davor ihre Teppiche. (Die Rennzeit wird bei 2 s festgehalten: Dann stehen beide Spiegel voll in den Rahmen.)
+  spiegel: {
+    from: [540, 0.4, 3.4],
+    to: [584, 0, 2.6],
+    fov: 58,
+    karts: [
+      [1, 556, -3.6],
+      [2, 563, 0.2],
+    ],
+    when: '(window.__sp || (window.__sp = setInterval(() => window.__kart.clock(2), 50)), (window.__sn = (window.__sn || 0) + 1) > 20)',
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

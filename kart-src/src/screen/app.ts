@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, raftAt, raftDrift, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
+import { PULSE_BUBBLE, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
 import { EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1491,6 +1491,14 @@ export class App {
             lanes: r.lanes.map((l) => ({ lat0: l.lat0, lat1: l.lat1, length: l.length, gap: l.gap, speed: l.speed, phase: l.phase, drift: raftDrift(l, time), raft: raftAt(l, probe, time) })),
           })),
         };
+      },
+      // Spiegelkabinett, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Rahmen (Meter ab
+      // Start, seitliche Lage), wohin ihr Spiegel führt (Meter ab Start), die Sorte (0 = vorwärts, 1 = zurück) und ob
+      // gerade ein Spiegel darin steht.
+      portals: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        return TRACK.portals.map((p) => ({ at: TRACK.prog[p.seg] * TRACK.step, lat0: p.lat0, lat1: p.lat1, to: TRACK.prog[p.to] * TRACK.step, kind: p.kind, open: portalOpen(p, time), time }));
       },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
