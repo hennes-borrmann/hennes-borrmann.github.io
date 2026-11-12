@@ -141,6 +141,10 @@ const LEVEL: Record<SfxName, number> = {
   trainpass: 0.8,
   board: 1.2,
   rattle: 0.8,
+  // Riesenkinderzimmer (vorläufig)
+  shrink: 1.3,
+  grow: 1.3,
+  sizeend: 1.0,
   // Gewitterkamm (vorläufig)
   thunder: 2.2,
   rod: 1.6,
@@ -773,6 +777,10 @@ export class SfxPlayer {
       case 'charge':
       // Spiegelkabinett (vorläufig: wie der Schubring)
       case 'portal':
+      // Riesenkinderzimmer (vorläufig: wie der Schubring)
+      case 'shrink':
+      case 'grow':
+      case 'sizeend':
       case 'shimmer':
       case 'ring':
         // Durch den Ring: ein steigender Gleitton zieht in einen hellen Glanz-Zweiklang

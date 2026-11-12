@@ -426,6 +426,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   spiegel: NEUE_STUECKE.wolken,
   // Wüstenexpress: VORLÄUFIG das Stück des Werkshofs
   wueste: WERKSHOF,
+  // Riesenkinderzimmer: VORLÄUFIG das Stück der Möwenklippe
+  zimmer: KLIPPE,
   results: RESULTS,
 };
 

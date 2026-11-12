@@ -98,7 +98,8 @@ describe('Vulkaninsel: Bruchstellen', () => {
         for (const h of t.holes) expect(h.plan.period).toBe(t.era.period);
       } else {
         expect(t.holes.length).toBe(0);
-        expect(t.gates.length).toBe(0);
+        // (Größentore – Riesenkinderzimmer – haben keinen Zeitplan: Sie hängen am Kart, nicht an der Rennzeit.)
+        expect(t.gates.filter((g) => g.only === 0).length).toBe(0);
         for (let k = 0; k < t.total; k++) expect(t.edge[k] & EDGE_BROKEN).toBe(0);
       }
     }

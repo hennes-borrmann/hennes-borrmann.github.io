@@ -22,6 +22,7 @@ import {
   type SnapshotThing,
 } from '../net/protocol';
 import { AI_MEDIUM, botCmd, newBrain, rubberBand, type BotBrain, type BotContext } from './ai';
+import { SIZE_MASS, sizeClass, sizeScale } from './mechanics';
 import { EntityInterp, lerpState } from './interp';
 import {
   EV_BLOCK,
@@ -60,6 +61,7 @@ import {
   V_MAX,
   copyState,
   gridState,
+  flattenKart,
   hitKart,
   newState,
   stallKart,
@@ -951,20 +953,32 @@ export class HostGame implements GameView {
         const dx = b.state.x - a.state.x;
         const dz = b.state.z - a.state.z;
         const d = Math.hypot(dx, dz);
-        const min = KART_RADIUS * 2;
+        // Riesenkinderzimmer: Ein riesiges Kart ist breiter und viel schwerer, ein winziges schmaler und leicht.
+        const sa = sizeClass(a.state.size);
+        const sb = sizeClass(b.state.size);
+        const min = sa === 0 && sb === 0 ? KART_RADIUS * 2 : KART_RADIUS * (sizeScale(a.state.size) + sizeScale(b.state.size));
         if (d >= min || d < 1e-6) continue;
         const nx = dx / d;
         const nz = dz / d;
-        const push = (min - d) / 2;
-        a.state.x -= nx * push;
-        a.state.z -= nz * push;
-        b.state.x += nx * push;
-        b.state.z += nz * push;
+        const wa = sa === sb ? 1 : sa > sb ? SIZE_MASS : 1 / SIZE_MASS;
+        // Gleich Große weichen einander zu gleichen Teilen aus; sonst weicht vor allem das kleinere.
+        const push = min - d;
+        a.state.x -= nx * push * (1 / (1 + wa));
+        a.state.z -= nz * push * (1 / (1 + wa));
+        b.state.x += nx * push * (wa / (1 + wa));
+        b.state.z += nz * push * (wa / (1 + wa));
         const rel = (b.state.vx - a.state.vx) * nx + (b.state.vz - a.state.vz) * nz;
         if (rel < 0) {
           // Schwere Figuren werden weniger weggeschoben als leichte.
-          const ma = (CHARACTERS[a.state.char] ?? CHARACTERS[0]).mass;
+          const ma = (CHARACTERS[a.state.char] ?? CHARACTERS[0]).mass * wa;
           const mb = (CHARACTERS[b.state.char] ?? CHARACTERS[0]).mass;
+          // Riesig trifft winzig mit Schwung: Das winzige Kart wird geplättet (wie unter einer Presse).
+          if (rel < -3 && Math.abs(sa - sb) === 2) {
+            const small = sa < sb ? a : b;
+            const r = flattenKart(small.state);
+            if (r === HIT_BLOCKED) this.fx(small, 'block');
+            else if (r !== HIT_NONE) this.fx(small, 'hit');
+          }
           const impulse = (-(1 + 0.45) * rel) / (1 / ma + 1 / mb);
           a.state.vx -= (impulse / ma) * nx;
           a.state.vz -= (impulse / ma) * nz;

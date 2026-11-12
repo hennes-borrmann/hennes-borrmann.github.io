@@ -17,6 +17,7 @@ import { buildMirrors } from './mechanics/mirrors';
 import { buildMoon } from './mechanics/moon';
 import { buildRift } from './mechanics/rift';
 import { buildRiver } from './mechanics/river';
+import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
 import { buildStorm } from './mechanics/storm';
 import { buildTide } from './mechanics/tide';
@@ -58,7 +59,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.dark) out.push(buildStorm(track, detail, world));
   if (track.rivers.length > 0) out.push(buildRiver(track, detail));
   if (track.portals.length > 0) out.push(buildMirrors(track, detail));
+  if (track.sizers.length > 0) out.push(buildSizers(track, detail));
   if (track.era) out.push(buildRift(track, detail));
-  else if (track.holes.length > 0 || track.gates.length > 0) out.push(buildVolcano(track, detail));
+  else if (track.holes.length > 0 || track.gates.some((g) => g.only === 0)) out.push(buildVolcano(track, detail));
   return out;
 }

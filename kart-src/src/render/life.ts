@@ -15,6 +15,7 @@ import { buildHafenLife } from './life/hafen';
 import { buildDschungelLife } from './life/dschungel';
 import { buildSpiegelLife } from './life/spiegel';
 import { buildWuesteLife } from './life/wueste';
+import { buildZimmerLife } from './life/zimmer';
 import { buildGewitterLife } from './life/gewitter';
 import { buildRuineLife } from './life/ruine';
 import { buildVulkanLife } from './life/vulkan';
@@ -68,6 +69,8 @@ export function buildLife(world: World): Life | null {
       return buildSpiegelLife(world);
     case 'wueste':
       return buildWuesteLife(world);
+    case 'zimmer':
+      return buildZimmerLife(world);
     default:
       return null;
   }

@@ -54,13 +54,14 @@ import {
   type Plan,
   type Portal,
   type RaftLane,
+  type Sizer,
   type River,
   raftAt,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -178,7 +179,12 @@ export interface PathFeatures {
    * bis opens (Sekunden) und/oder ab closes (Sekunden). Mit every (Sekunden) wiederholt sich der Plan; dann
    * ist das Tor in [closes, opens) zu.
    */
-  gates?: { at?: number; opens?: number; closes?: number; every?: number; noteOpen?: string; noteShut?: string; era?: 0 | 1 }[];
+  gates?: { at?: number; opens?: number; closes?: number; every?: number; noteOpen?: string; noteShut?: string; era?: 0 | 1; only?: 'small' | 'big' }[];
+  /**
+   * Größenringe (mechanics.ts, Sizer): Ring bei at, seitlich lat0 … lat1; grow = lässt wachsen, sonst schrumpfen.
+   * Ein Tor mit only ('small' | 'big') lässt an seiner Abzweigung nur Karts dieser Größe durch.
+   */
+  sizers?: { at: number; lat0: number; lat1: number; grow?: boolean }[];
 }
 
 /** Eine Abzweigung: verlässt die Hauptstrecke bei from und mündet bei to wieder ein. */
@@ -413,6 +419,10 @@ export interface Track {
   portals: Portal[];
   /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
   roofed: boolean;
+  /** Größenringe (mechanics.ts). */
+  sizers: Sizer[];
+  /** Je Abzweigung: 0 = für alle offen; −1 / +1 = nur für winzige bzw. riesige Karts (Größentor an der Mündung). */
+  branchOnly: Int8Array;
   /**
    * Pontons und je Abschnitt, welche (höchstens zwei) seine Höhe bestimmen und mit welchem Gewicht:
    * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
@@ -1032,6 +1042,8 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     rivers: [],
     portals: [],
     roofed: false,
+    sizers: [],
+    branchOnly: new Int8Array(def.branches?.length ?? 0),
     pontoons: [],
     floatA: new Int16Array(total).fill(-1),
     floatB: new Int16Array(total).fill(-1),
@@ -1145,6 +1157,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         }
       }
     }
+    for (const z of p.f.sizers ?? []) track.sizers.push({ seg: segAt(p, z.at), lat0: Math.min(z.lat0, z.lat1), lat1: Math.max(z.lat0, z.lat1), grow: z.grow === true });
     for (const q of p.f.portals ?? []) {
       // Ein Portal führt von diesem Weg auf die Hauptstrecke (to in deren Stützpunkt-Einheiten).
       const seg = segAt(p, q.at);
@@ -1217,7 +1230,14 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         if (g.opens !== undefined) spans.push(-1e9, Math.round(g.opens * 60));
         if (g.closes !== undefined) spans.push(Math.round(g.closes * 60), Infinity);
       }
-      track.gates.push({ first, count, plan: { period, spans }, warn: GATE_WARN, noteOpen: g.noteOpen ?? '', noteShut: g.noteShut ?? '' });
+      // Ein Größentor hat keinen Zeitplan: Ob es offen ist, hängt am Kart (gateShut).
+      const only = g.only === 'small' ? -1 : g.only === 'big' ? 1 : 0;
+      if (only !== 0) {
+        period = 0;
+        spans.length = 0;
+      }
+      track.gates.push({ first, count, plan: { period, spans }, warn: GATE_WARN, noteOpen: g.noteOpen ?? '', noteShut: g.noteShut ?? '', only });
+      if (only !== 0 && !p.closed && branchOf[first] >= 0) track.branchOnly[branchOf[first]] = only;
     }
     for (const [from, to] of p.f.dives ?? []) spanU(p, from, to, (seg) => (track.deep[seg] = 1));
     for (const [from, to] of p.f.tidal ?? []) spanU(p, from, to, (seg) => (track.tidal[seg] = 1));
@@ -1573,6 +1593,18 @@ export function holeAt(t: Track, seg: number, lat: number, time: number): boolea
 /** Sperrt zur Rennzeit time ein Tor diesen Abschnitt? */
 export function gateAt(t: Track, seg: number, time: number): boolean {
   for (const g of t.gates) if (seg >= g.first && seg < g.first + g.count && planActive(g.plan, time)) return true;
+  return false;
+}
+
+/**
+ * Ist das Tor an diesem Abschnitt für ein Kart der Größe size (KartState.size) zu? Tore mit Zeitplan wie gateAt;
+ * ein Größentor ist zu für jeden, der nicht die verlangte Größe hat.
+ */
+export function gateShut(t: Track, seg: number, time: number, size: number): boolean {
+  for (const g of t.gates) {
+    if (seg < g.first || seg >= g.first + g.count) continue;
+    if (g.only !== 0 ? (size > 0 ? 1 : size < 0 ? -1 : 0) !== g.only : planActive(g.plan, time)) return true;
+  }
   return false;
 }
 

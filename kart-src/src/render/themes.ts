@@ -71,6 +71,43 @@ export interface Theme {
 
 export const THEMES: Record<ThemeId, Theme> = {
   // Dschungel-Fluss: Regenwald am späten Nachmittag – feuchtwarmes Grün, lehmbraunes Wasser, goldenes Licht durch den Dunst.
+  // Riesenkinderzimmer: warmes Lampenlicht am Nachmittag – Holzboden, bunter Teppich, Tapete in der Ferne. (VORLÄUFIG)
+  zimmer: {
+    sky: [0x9fc4e8, 0xcfe0f0, 0xfff1d6],
+    fog: 0xf0dfc4,
+    fogNear: 160,
+    fogFar: 700,
+    sunDir: [0.35, 0.8, 0.3],
+    sunColor: 0xfff0d2,
+    sunIntensity: 2.2,
+    hemiSky: 0xfff4e0,
+    hemiGround: 0xc49a6a,
+    hemiIntensity: 1.5,
+    disc: 0xfff8e0,
+    discSize: 18,
+    clouds: 0xffffff,
+    cloudShade: 0xe6dccb,
+    noClouds: true,
+    stars: false,
+    road: 0x5a6068,
+    roadAlt: 0x525860,
+    line: 0xf6f0dc,
+    kerbA: 0xe2483a,
+    kerbB: 0xf6f0dc,
+    shoulder: 0x7aa85a,
+    wallA: 0xe8b93a,
+    wallB: 0x3f8fd6,
+    wallCap: 0xd9482f,
+    deck: 0xd9b27a,
+    deckDark: 0x9a7448,
+    pillar: 0xc79a62,
+    ground: [0xc9965a, 0xb98448, 0xa87238, 0xd4a56c],
+    liquidY: null,
+    liquid: [0x3f8fbf, 0x6fb8d8, 0xdff4ff],
+    liquidGlow: false,
+    farY: 0,
+    rough: 0.6,
+  },
   // Wüstenexpress: Mittagshitze im Canyonland – roter Fels, heller Sand, tiefblauer Himmel. (VORLÄUFIG)
   wueste: {
     sky: [0x2f7fd6, 0x8cc4ee, 0xf6dcae],

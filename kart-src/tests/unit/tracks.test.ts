@@ -146,8 +146,19 @@ describe('Alle Strecken', () => {
           best.push(sum / 4);
         }
         console.log(`${name}: Rundenzeit je Weg (Mittel der vier Fahrer, zweite Runde): ${best.map((x, r) => `${r.toString(2).padStart(t.branches.length, '0')} = ${x.toFixed(1)} s`).join(' · ')}\n${lines.join('\n')}`);
-        // Beide Wege sollen sich lohnen: höchstens zwei Sekunden Unterschied.
-        expect(Math.max(...best) - Math.min(...best)).toBeLessThan(2);
+        if (t.gates.some((g) => g.only !== 0)) {
+          // Größentore (Riesenkinderzimmer): Diese Abkürzungen stehen nur offen, wer vorher durch den passenden Ring
+          // gefahren ist – sie sollen sich lohnen. Jede für sich spart deutlich, aber nicht mehr als gut zweieinhalb
+          // Sekunden; beide zusammen höchstens viereinhalb.
+          for (let k = 0; k < t.branches.length; k++) {
+            expect(best[0] - best[1 << k]).toBeGreaterThan(0.8);
+            expect(best[0] - best[1 << k]).toBeLessThan(2.6);
+          }
+          expect(Math.max(...best) - Math.min(...best)).toBeLessThan(4.5);
+        } else {
+          // Beide Wege sollen sich lohnen: höchstens zwei Sekunden Unterschied.
+          expect(Math.max(...best) - Math.min(...best)).toBeLessThan(2);
+        }
       });
     }
   }
