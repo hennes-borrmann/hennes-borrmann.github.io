@@ -3,7 +3,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { AI_EASY, AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { BIG_VMAX, SIZE_TICKS, SIZE_WARN, SMALL_VMAX, sizeClass, sizeScale, type Sizer } from '../../src/game/mechanics';
-import { BTN_GAS, EV_FALL, EV_HIT, EV_WALL, gridState, stepKart, type KartState } from '../../src/game/sim';
+import { HostGame } from '../../src/game/hostGame';
+import { BTN_GAS, EV_FALL, EV_HIT, EV_WALL, gridState, stepKart, type Cmd, type KartState } from '../../src/game/sim';
+import { RACE_RUNNING } from '../../src/net/protocol';
 import { TRACK, TRACK_COUNT, addProgress, gateAt, gateShut, getTrack, proj, progDelta, projectOnTrack, rightX, rightZ, segDelta, setTrack, trackHeading } from '../../src/game/track';
 
 const ZIMMER = 15;
@@ -234,6 +236,56 @@ describe('Riesenkinderzimmer', () => {
     expect(used[AI_HARD][0]).toBeGreaterThanOrEqual(8);
     expect(used[AI_HARD][1]).toBeGreaterThanOrEqual(8);
     expect(used[AI_EASY][0] + used[AI_EASY][1]).toBeLessThan(used[AI_HARD][0] + used[AI_HARD][1]);
+  });
+});
+
+describe('Rempeln nach Größe', () => {
+  /** Kart 0 fährt mit Vollgas von hinten auf das stehende Kart 1 auf; Größen fest. Liefert Tempo beider danach und ob 1 geplättet wurde. */
+  function ram(size0: number, size1: number): { v0: number; v1: number; flat: number; gap: number } {
+    setTrack(ZIMMER);
+    const host = new HostGame(0);
+    host.setRoster([0, 1], false);
+    host.newRace();
+    const NEUTRAL: Cmd = { steer: 0, buttons: 0 };
+    while (host.phase !== RACE_RUNNING) host.step(NEUTRAL);
+    host.debugPlace(1, 150, 0);
+    host.debugPlace(0, 120, 0);
+    const a = host.authoritative(0)!;
+    const b = host.authoritative(1)!;
+    let v0 = 0;
+    let v1 = 0;
+    let flat = 0;
+    let touched = -1;
+    for (let i = 0; i < 60 * 4; i++) {
+      a.size = size0;
+      b.size = size1;
+      const before = Math.hypot(b.vx, b.vz);
+      host.step({ steer: 0, buttons: BTN_GAS });
+      flat = Math.max(flat, b.flat);
+      if (touched < 0 && Math.hypot(b.vx, b.vz) > before + 0.5) touched = i;
+      if (touched >= 0 && i === touched + 2) {
+        v0 = Math.hypot(a.vx, a.vz);
+        v1 = Math.hypot(b.vx, b.vz);
+      }
+    }
+    expect(touched).toBeGreaterThan(0);
+    return { v0, v1, flat, gap: Math.hypot(a.x - b.x, a.z - b.z) };
+  }
+
+  it('gleich große teilen sich den Stoß; ein riesiges schiebt ein winziges fast ungebremst weg und plättet es; ein winziges prallt an einem riesigen ab', () => {
+    const same = ram(0, 0);
+    const bigOnSmall = ram(500, -500);
+    const smallOnBig = ram(-500, 500);
+    // gleich groß: der Gerammte nimmt Fahrt auf, der Rammer verliert deutlich, niemand wird geplättet
+    expect(same.v1).toBeGreaterThan(4);
+    expect(same.flat).toBe(0);
+    // riesig auf winzig: der Winzige wird viel schneller weggeschleudert und ist platt; der Riese behält mehr Tempo
+    expect(bigOnSmall.flat).toBeGreaterThan(0);
+    expect(bigOnSmall.v1).toBeGreaterThan(same.v1 * 1.3);
+    expect(bigOnSmall.v0).toBeGreaterThan(same.v0 + 1);
+    // winzig auf riesig: der Riese rührt sich kaum, niemand wird geplättet (der Winzige ist ja der Rammer)
+    expect(smallOnBig.v1).toBeLessThan(same.v1 * 0.5);
+    expect(smallOnBig.flat).toBe(0);
   });
 });
 
