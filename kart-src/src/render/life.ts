@@ -24,9 +24,11 @@ export interface Life {
   readonly group: THREE.Group;
   /**
    * Pro Bild. time = Sekunden seit Aufbau der Szene, cam = Kameraposition,
-   * fx = Teilchen der Szene (Funken und Comic-Bällchen, siehe fxApi.ts).
+   * fx = Teilchen der Szene (Funken und Comic-Bällchen, siehe fxApi.ts),
+   * raceTime = Rennzeit in Ticks (60 je Sekunde, im Countdown negativ) – für Kulissen,
+   * die mit der Strecke gehen (die Zeitriss-Ruine wechselt mit dem Zeitalter ihr Gesicht).
    */
-  update(time: number, dt: number, cam: THREE.Vector3, fx: FxSink): void;
+  update(time: number, dt: number, cam: THREE.Vector3, fx: FxSink, raceTime?: number): void;
   dispose(): void;
 }
 

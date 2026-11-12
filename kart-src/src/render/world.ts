@@ -1390,7 +1390,7 @@ export class World {
   /** raceTime: Rennzeit in Ticks – für das Wenige, was hier mit der Strecke mitgeht (Kisten auf schwankenden Pontons). */
   update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink, raceTime = 0): void {
     for (const m of this.timed) m.uniforms.time.value = time;
-    this.life?.update(time, dt, camera, fx);
+    this.life?.update(time, dt, camera, fx, raceTime);
     // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund.
     const un = this.theme.under;
     if (un && this.theme.liquidY !== null) {
