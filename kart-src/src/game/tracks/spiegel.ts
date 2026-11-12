@@ -8,6 +8,8 @@
 // Drei Stellen: der Zeitspiegel im Spiegelsaal (nur vier von zehn Sekunden offen), die Zwillingsspiegel
 // (links und rechts tauschen alle sechs Sekunden vorwärts gegen zurück) und der Randspiegel auf der Galerie
 // (immer offen, aber ganz außen, wo das Geländer fehlt).
+//
+// (Lage: x nach Osten, z nach Süden – in Fahrtrichtung +z liegt rechts −x.)
 
 import type { TrackDef } from '../track';
 
@@ -25,31 +27,31 @@ export const SPIEGEL: TrackDef = {
     [-80, -132, 4],
     [-28, -134, 4],
     [24, -132, 4],
-    // 3–4: Bogen nach Norden, durchs Portal in den Palast
+    // 3–4: Rechtsbogen nach Süden, durchs Portal in den Palast
     [68, -124, 4],
     [93, -100, 4],
-    // 5–7: Spiegelsaal, nach Norden (bei 6.85 der Zeitspiegel)
+    // 5–7: Spiegelsaal, nach Süden (bei 6.85 der Zeitspiegel)
     [98, -64, 4],
     [98, -22, 4],
     [98, 10, 4],
-    // 8–10: erste Kehre (links)
+    // 8–10: erste Kehre (rechts)
     [94.49, 18.49, 4],
     [86, 22, 4],
     [77.51, 18.49, 4],
-    // 11–13: zurück nach Süden (bei 12.85 die Zwillingsspiegel)
+    // 11–13: zurück nach Norden (bei 12.85 die Zwillingsspiegel)
     [74, 10, 4],
     [74, -20, 4],
     [74, -50, 4],
-    // 14–16: zweite Kehre (rechts)
+    // 14–16: zweite Kehre (links)
     [70.49, -58.49, 4],
     [62, -62, 4],
     [53.51, -58.49, 4],
-    // 17–20: wieder nach Norden, die Rampe hinauf zur Galerie
+    // 17–20: wieder nach Süden, die Rampe hinauf zur Galerie
     [50, -50, 4],
     [50, -18, 4.6],
     [50, 16, 6.6],
     [43, 50, 8.6],
-    // 21–24: die Galerie, in weitem Bogen nach Westen (bei 22.0 der Randspiegel)
+    // 21–24: die Galerie, ein weiter Rechtsbogen um den Innenhof (bei 22.0 der Randspiegel, links außen)
     [20, 78, 9.2],
     [-18, 88, 9.2],
     [-56, 76, 9.2],
@@ -71,19 +73,19 @@ export const SPIEGEL: TrackDef = {
   landmarkAt: 9,
   surfaces: [[26.4, 4.4, 'cobble']],
   portals: [
-    // Zeitspiegel: vor der ersten Kehre, linke Hälfte; Ausgang hinter der Kehre
+    // Zeitspiegel: vor der ersten Kehre, linke Hälfte (außen); Ausgang hinter der Kehre
     { at: 6.85, to: 11.15, lat0: -6.0, lat1: -1.2, opens: 0, closes: 4, every: 10 },
     // Zwillingsspiegel vor der zweiten Kehre: links und rechts tauschen alle 6 s (dazwischen eine halbe Sekunde leer)
     { at: 12.85, to: 17.15, lat0: -6.2, lat1: -1.6, opens: 0, closes: 5.5, every: 12 },
     { at: 12.85, to: 11.9, lat0: -6.2, lat1: -1.6, opens: 6, closes: 11.5, every: 12 },
     { at: 12.85, to: 17.15, lat0: 1.6, lat1: 6.2, opens: 6, closes: 11.5, every: 12 },
     { at: 12.85, to: 11.9, lat0: 1.6, lat1: 6.2, opens: 0, closes: 5.5, every: 12 },
-    // Randspiegel auf der Galerie: immer offen, ganz außen
-    { at: 22.0, to: 22.75, lat0: 2.6, lat1: 6.0 },
+    // Randspiegel auf der Galerie: immer offen, ganz außen (links – die Galerie ist ein Rechtsbogen)
+    { at: 22.0, to: 22.75, lat0: -6.0, lat1: -2.6 },
   ],
   // Galerie: frei stehend; außen fehlt am Randspiegel das Geländer
   decks: [[20.4, 25.4]],
-  open: [[21.5, 22.3, 1]],
+  open: [[21.5, 22.3, -1]],
   // Sprung durchs Rosettenfenster
   ramps: [{ at: 25.3, length: 8, height: 1.0, gap: 9 }],
   pads: [
