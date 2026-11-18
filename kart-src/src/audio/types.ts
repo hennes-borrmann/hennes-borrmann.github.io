@@ -27,6 +27,11 @@ export type SfxName =
   | 'use-kite' // Abschleppdrache steigt auf (Flattern, Sirren der Schnur)
   | 'use-rocket' // das Kart verwandelt sich in eine Rakete: Servos surren, sieben Teile rasten metallisch ein, zum Schluss zischt die Düse an (~1,1 s)
   | 'use-wing' // Gleiter: Absprung – Luftstoß nach oben, ein steigender Pfiff, Stoff flattert kurz (~0,6 s)
+  | 'use-gold' // Get Gold: Korken ploppt, dann gluckert es fünfmal, immer tiefer, zum Schluss ein zufriedenes „Ah“ (~0,85 s)
+  | 'gold' // Get Gold: ausgetrunken – heller, glänzender Dur-Akkord, der aufwärts aufgeht, mit Glitzern (~1,1 s)
+  | 'gold-end' // Get Gold ist abgelaufen: der Akkord rutscht weich abwärts, ein Hauch Glitzern verweht (~0,5 s)
+  | 'gold-ram' // ein Gold-Kart haut ein anderes um: dumpfer, schwerer Stoß mit metallischem Nachklang (~0,4 s)
+  | 'gold-ping' // ein Item prallt an einem Gold-Kart ab: hohes, glockiges „Pling“ (~0,4 s)
   | 'rocket-launch' // die Rakete hebt ab: Zündknall, Fauchen, das nach oben zieht (~1,1 s)
   | 'rocket-incoming' // eine fremde Rakete stürzt auf dich herab: ein Pfeifen, das bis zum Einschlag (1 s) hinabfällt
   | 'rocket-hit' // die Rakete schlägt ein: großer, dumpfer Knall mit Krachen und nachprasselnden Trümmern (~1,2 s)

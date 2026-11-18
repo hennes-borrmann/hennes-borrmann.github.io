@@ -55,9 +55,13 @@ import {
   ITEM_ROCKET,
   ITEM_SPRING,
   ITEM_WING,
+  ITEM_GOLD,
   ITEM_TIRE,
   ITEM_TOP,
   CHARACTERS,
+  GOLD_SCALE,
+  GOLD_TICKS,
+  goldOn,
   KART_RADIUS,
   MAX_PLAYERS,
   NEUTRAL,
@@ -135,8 +139,12 @@ const SMOKE_RADIUS = 7.5;
 const SMOKE_LIFE_TICKS = 9 * 60;
 /** Erst ab diesem Rückstand (Meter auf das Kart davor) gibt es den Abschleppdrachen. */
 const KITE_MIN_GAP = 45;
-/** Rakete: Gewicht in der Auslosung des Letzten (bei rund 90 für alles andere: etwa jede zehnte Kiste). */
+/** Rakete: Gewicht in der Auslosung des Letzten (bei rund 100 für alles andere: etwa jede elfte Kiste). */
 const ROCKET_WEIGHT = 10;
+/** Get Gold: Gewicht in der Auslosung des Letzten (vorn 3, in der Mitte 7 – bei je rund 110 insgesamt: jede zehnte Kiste). */
+const GOLD_WEIGHT_LAST = 11;
+/** Get Gold: ein Gold-Kart wirft andere so kräftig zur Seite (m/s, zusätzlich zum Stoß). */
+const GOLD_SHOVE = 5;
 /** Rakete: so weit vor dem Ziel setzt sie auf (Meter) – man taucht knapp vor ihm aus dem Rauch auf. */
 const ROCKET_LAND_AHEAD = 4;
 /** Rakete: ohne Ziel landet sie so weit voraus (Meter). */
@@ -622,7 +630,10 @@ export class HostGame implements GameView {
     const before = k.state.seg;
     const progressBefore = k.progress;
     const flying = k.state.rocket > 0;
+    const drinking = k.state.gold > GOLD_TICKS;
     const ev = stepKart(k.state, cmd, this.env);
+    // Ausgetrunken: jetzt ist das Kart gold.
+    if (drinking && k.state.gold === GOLD_TICKS) this.fx(k, 'boost');
     k.ptick++;
     k.progress = addProgress(TRACK, k.progress, before, k.state.seg);
     if (flying && k.state.rocket === 0) this.rocketLanded(k, progressBefore, before);
@@ -664,20 +675,20 @@ export class HostGame implements GameView {
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete, Gleiter
-    // (Den Gleiter bekommt jeder; vorn etwas seltener.)
-    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22, 0, 0, 12];
-    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8, 0, 0, 7];
-    else if (place === count) table = [22, 14, 0, 24, 6, 14, 0, 10, 0, ROCKET_WEIGHT, 11];
-    else table = [18, 20, 10, 16, 10, 6, 10, 10, 0, 0, 12];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete, Gleiter, Get Gold
+    // (Den Gleiter bekommt jeder; vorn etwas seltener. Get Gold auch – vorn selten, hinten etwa jede zehnte Kiste.)
+    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5];
+    else if (place === 1) table = [14, 8, 25, 0, 23, 0, 19, 8, 0, 0, 7, 3];
+    else if (place === count) table = [18, 11, 0, 22, 6, 14, 0, 8, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST];
+    else table = [16, 18, 10, 15, 10, 6, 9, 9, 0, 0, 12, 7];
     // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
     // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
     if (count > 1 && behind > KITE_MIN_GAP) {
       if (place === count) table[8] = 22;
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
-    // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede zehnte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET, ITEM_WING];
+    // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede elfte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;
@@ -1024,6 +1035,46 @@ export class HostGame implements GameView {
     }
   }
 
+  /**
+   * Get Gold: Berührt das Gold-Kart ein anderes, wird das getroffen wie von einem Brummkreisel (ein Stoßfänger fängt es ab)
+   * und zur Seite geworfen. Das Gold-Kart selbst wird weder gebremst noch verschoben.
+   */
+  private goldRam(gold: HostKart, other: HostKart): void {
+    const g = gold.state;
+    const o = other.state;
+    // (Das große Kart reicht etwas höher – Brücke und Unterführung trennen trotzdem.)
+    if (Math.abs(o.y - g.y) > 2) return;
+    const dx = o.x - g.x;
+    const dz = o.z - g.z;
+    const d = Math.hypot(dx, dz);
+    const min = KART_RADIUS * (GOLD_SCALE + sizeScale(o.size));
+    if (d >= min) return;
+    // Genau übereinander (kaum je): seitlich zur Fahrtrichtung des Gold-Karts hinaus.
+    const nx = d > 1e-6 ? dx / d : -Math.cos(g.heading);
+    const nz = d > 1e-6 ? dz / d : Math.sin(g.heading);
+    o.x += nx * (min - d);
+    o.z += nz * (min - d);
+    const r = hitKart(o);
+    if (r === HIT_BLOCKED) this.fx(other, 'block');
+    else if (r !== HIT_NONE) this.fx(other, 'hit');
+    // Weggeworfen wird vor allem zur Seite (auf der es steht), etwas nach vorn: so fährt das Gold-Kart vorbei, statt das andere
+    // vor sich herzuschieben. Wer sich schon schnell genug entfernt, behält sein Tempo.
+    const fx = Math.sin(g.heading);
+    const fz = Math.cos(g.heading);
+    const side = dx * -fz + dz * fx >= 0 ? 1 : -1;
+    const ux = (-fz * side + fx * 0.4) / Math.hypot(1, 0.4);
+    const uz = (fx * side + fz * 0.4) / Math.hypot(1, 0.4);
+    const rel = (o.vx - g.vx) * ux + (o.vz - g.vz) * uz;
+    if (rel < GOLD_SHOVE) {
+      o.vx += (GOLD_SHOVE - rel) * ux;
+      o.vz += (GOLD_SHOVE - rel) * uz;
+    }
+    if (gold.bumpCooldown === 0) {
+      gold.bumpCooldown = 25;
+      this.fx(gold, 'bump');
+    }
+  }
+
   /** Rempler: Karts schieben sich auseinander und tauschen Tempo entlang der Stoßrichtung. */
   private collideKarts(): void {
     const list = [...this.karts.values()];
@@ -1034,9 +1085,17 @@ export class HostGame implements GameView {
         if (a.finished || b.finished || a.state.respawn > 0 || b.state.respawn > 0) continue;
         // Eine Rakete (beim Verwandeln wie im Flug) rempelt niemanden und wird nicht angerempelt.
         if (a.state.rocket > 0 || b.state.rocket > 0) continue;
-        // Wer am Drachen hängt, fegt die anderen beiseite und wird selbst nicht aufgehalten.
+        // Wer am Drachen hängt, fegt die anderen beiseite und wird selbst nicht aufgehalten (ein Gold-Kart auch nicht).
         if (a.state.tow > 0 || b.state.tow > 0) {
-          if (a.state.tow > 0 !== b.state.tow > 0) this.sweepAside(a.state.tow > 0 ? a : b, a.state.tow > 0 ? b : a);
+          const tower = a.state.tow > 0 ? a : b;
+          const other = tower === a ? b : a;
+          if (other.state.tow === 0 && !goldOn(other.state)) this.sweepAside(tower, other);
+          continue;
+        }
+        // Get Gold: das Gold-Kart fährt durch, das andere wird umgehauen (zwei Gold-Karts rempeln wie zwei Riesen).
+        const ga = goldOn(a.state);
+        if (ga !== goldOn(b.state)) {
+          this.goldRam(ga ? a : b, ga ? b : a);
           continue;
         }
         // Auf der Brücke und darunter begegnet man sich nicht.
@@ -1055,9 +1114,9 @@ export class HostGame implements GameView {
         const dz = b.state.z - a.state.z;
         const d = Math.hypot(dx, dz);
         // Riesenkinderzimmer: Ein riesiges Kart ist breiter und viel schwerer, ein winziges schmaler und leicht.
-        const sa = sizeClass(a.state.size);
-        const sb = sizeClass(b.state.size);
-        const min = sa === 0 && sb === 0 ? KART_RADIUS * 2 : KART_RADIUS * (sizeScale(a.state.size) + sizeScale(b.state.size));
+        const sa = ga ? 1 : sizeClass(a.state.size);
+        const sb = ga ? 1 : sizeClass(b.state.size);
+        const min = ga ? KART_RADIUS * GOLD_SCALE * 2 : sa === 0 && sb === 0 ? KART_RADIUS * 2 : KART_RADIUS * (sizeScale(a.state.size) + sizeScale(b.state.size));
         if (d >= min || d < 1e-6) continue;
         const nx = dx / d;
         const nz = dz / d;

@@ -20,6 +20,7 @@ import {
   FLAG_GLIDE,
   ITEM_BOOST,
   ITEM_EMP,
+  ITEM_GOLD,
   ITEM_GUARD,
   ITEM_KITE,
   ITEM_NONE,
@@ -32,6 +33,7 @@ import {
   ITEM_WING,
   bankGrip,
   forwardSpeed,
+  goldOn,
   type Cmd,
   type KartState,
   windPush,
@@ -95,6 +97,8 @@ export interface BotBrain {
   /** Größenring voraus, über den schon entschieden ist (Abschnitt; −1 = keiner) – und ob die KI hindurchwill. */
   sizerSeg: number;
   sizerTake: boolean;
+  /** Get Gold: auf welche Seite die KI einem Gold-Kart ausweicht (−1 links, 1 rechts, 0 = keins in der Nähe). */
+  goldSide: number;
   /** Ticks, die das Kart praktisch steht. */
   stuck: number;
   /** Verbleibende Ticks Rückwärtsfahrt zum Freikommen. */
@@ -155,6 +159,7 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     trainTake: false,
     sizerSeg: -1,
     sizerTake: false,
+    goldSide: 0,
     stuck: 0,
     reverse: 0,
     holding: 0,
@@ -352,7 +357,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           // wer sie hat, nimmt den Weg (dafür ist er ja durch den Ring gefahren).
           if (g.only !== 0) {
             if (t.branchOf[g.first] !== k) continue;
-            take = sizeClass(s.size) === g.only && Math.abs(s.size) > arrive - ctx.time + 45;
+            // (Wer Get Gold trinkt oder gold ist, kommt durch kein Größentor.)
+            take = s.gold === 0 && sizeClass(s.size) === g.only && Math.abs(s.size) > arrive - ctx.time + 45;
             continue;
           }
           if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 30)) {
@@ -385,7 +391,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const arrive = ctx.time + (d * t.step * 60) / Math.max(v, 12);
       if (g.only !== 0) {
         // Die Größe reicht nicht (mehr) bis zur Mündung: zurück auf die Hauptstrecke.
-        if (sizeClass(s.size) !== g.only || Math.abs(s.size) < arrive - ctx.time + 20) b.route &= ~(1 << k);
+        if (s.gold > 0 || sizeClass(s.size) !== g.only || Math.abs(s.size) < arrive - ctx.time + 20) b.route &= ~(1 << k);
       } else if (planActive(g.plan, arrive) && planActive(g.plan, arrive + 90)) b.route &= ~(1 << k);
     }
   }
@@ -404,7 +410,9 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const target = aheadSeg(look);
   const bend = curvatureAhead(0, 34);
   // Ohne Bande hält die KI Abstand zur Kante; vor einer Lücke fährt sie gerade auf die Mitte zu.
-  const maxLat = Math.max(0.5, t.rh[target] - (openAhead ? 3.2 : 2.2));
+  // Mit Get Gold bremst der Rand nicht: dann darf sie mit Bande daneben über den Seitenstreifen abkürzen.
+  const golden = goldOn(s);
+  const maxLat = golden && !openAhead && !gapAhead ? Math.max(0.5, t.wh[target] - 1.7) : Math.max(0.5, t.rh[target] - (openAhead ? 3.2 : 2.2));
   let lat = gapAhead ? 0 : (b.line * 0.6 * t.rh[target]) / 6.5 + bend * 110;
   // Flugstrecke voraus oder schon in der Luft: wer aufpasst, hält auf den nächsten Aufwind oder Ring zu.
   const flying = (s.flags & FLAG_GLIDE) !== 0;
@@ -461,6 +469,42 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     }
   }
   lat = Math.max(-maxLat, Math.min(maxLat, lat));
+
+  // --- Get Gold: einem Gold-Kart aus dem Weg gehen – oder, selbst gold, den nächsten Gegner voraus umfahren ---
+  if (others.length > 0 && !air) {
+    projectOnTrack(t, s.x, s.z, s.seg);
+    const myLat = proj.lat;
+    let ramLat = Number.NaN;
+    let ramD = 30;
+    let threat = false;
+    for (const o of others) {
+      if (o.respawn > 0 || o.rocket > 0 || Math.abs(o.y - s.y) > 2.5) continue;
+      const d = segDelta(t, s.seg, o.seg) * t.step;
+      if (golden) {
+        if (!goldOn(o) && o.spin === 0 && d > 3 && d < ramD) {
+          projectOnTrack(t, o.x, o.z, o.seg);
+          ramLat = proj.lat;
+          ramD = d;
+        }
+      } else if (goldOn(o) && d > -28 && d < 16) {
+        // Von hinten kommt es schneller heran, vorn fährt man ihm hinein: auf die Seite, auf der man schon ist (sonst die andere).
+        projectOnTrack(t, o.x, o.z, o.seg);
+        const gl = proj.lat;
+        if (Math.abs(gl - lat) < 4.4 || b.goldSide !== 0) {
+          threat = true;
+          // Die Seite wird einmal gewählt und gehalten, bis die Gefahr vorbei ist (sonst kippte sie von Schritt zu Schritt):
+          // die, auf der man schon ist – gleichauf die eigene Linie; ist dort kein Platz, die andere.
+          if (b.goldSide === 0) {
+            b.goldSide = myLat > gl + 0.3 ? 1 : myLat < gl - 0.3 ? -1 : b.line >= 0 ? 1 : -1;
+            if (Math.abs(gl + b.goldSide * 4.6) > maxLat + 1) b.goldSide = -b.goldSide;
+          }
+          lat = Math.max(-maxLat, Math.min(maxLat, gl + b.goldSide * 4.6));
+        }
+      }
+    }
+    if (ramLat === ramLat) lat = Math.max(-maxLat, Math.min(maxLat, ramLat));
+    if (!threat) b.goldSide = 0;
+  }
 
   // --- Verkehr, Geysire, Lavabomben: gesperrte Streifen voraus ---
   let jam = false;
@@ -905,6 +949,21 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         // Trifft alle anderen, egal wo – kein Grund zu warten.
         press = b.holding > 40;
         break;
+      case ITEM_GOLD: {
+        // Hinten sofort; sonst, wenn ein Gegner nah ist (umfahren), vor einer Kurve mit Bande (über den Rand abkürzen) oder
+        // wenn das Warten zu lang wird. Nicht mit einer Größe aus dem Ring (die bräuchte sie für die Abkürzung) und nicht
+        // in einer Größen-Abkürzung (dort ginge es ohnehin nicht).
+        const kb = s.seg < t.total ? t.branchOf[s.seg] : -1;
+        const back = ctx.place > 1 && ctx.place * 2 > others.length + 1;
+        const bend = maxCurvatureAhead(70) > 1 / 45 && (edgesAhead(70) & (EDGE_OPEN_L | EDGE_OPEN_R | EDGE_GAP)) === 0;
+        press =
+          s.gold === 0 &&
+          s.size === 0 &&
+          !(kb >= 0 && t.branchOnly[kb] !== 0) &&
+          b.holding > 30 &&
+          (back || inLine || (ahead > 2 && ahead < 22) || bend || late);
+        break;
+      }
       case ITEM_KITE:
         // Der Drache lenkt selbst – sofort nutzen.
         press = b.holding > 25 && !air;

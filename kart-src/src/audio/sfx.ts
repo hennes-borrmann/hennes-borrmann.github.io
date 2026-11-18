@@ -178,6 +178,12 @@ const LEVEL: Record<SfxName, number> = {
   'use-rocket': 3.2,
   'rocket-launch': 3.6,
   'use-wing': 3.4,
+  // Get Gold: Gluckern und Stoß so laut wie die anderen Items, die Akkorde (Notenfolgen) wie Runde und Ziel.
+  'use-gold': 3.4,
+  gold: 1.7,
+  'gold-end': 1.5,
+  'gold-ram': 3.8,
+  'gold-ping': 2.4,
   'rocket-incoming': 2.6,
   'rocket-hit': 3.4,
   warn: 2.2,
@@ -655,6 +661,56 @@ export class SfxPlayer {
           .tone('sine', 520, 1560, 0.42, 0.12, { attack: 0.03, vibHz: 9, vibDepth: 0.02 })
           .noise(2200, 1500, 0.06, 0.12, { q: 3, at: 0.42 })
           .noise(2400, 1600, 0.06, 0.1, { q: 3, at: 0.52 });
+        break;
+      case 'use-gold': {
+        // Austrinken (0,8 s wie im Spiel): der Korken ploppt, dann gluckert es – fünf runde Blasen, die nach oben
+        // schnalzen und dabei immer tiefer klingen (die Flasche wird leer) –, ein Schluck, und zum Schluss fliegt die
+        // Flasche mit einem Luftzug über die Schulter.
+        v.tone('sine', 520, 1350, 0.05, 0.3, { attack: 0.002 })
+          .noise(5000, 3000, 0.035, 0.14, { type: 'highpass' })
+          .tone('sine', 180, 120, 0.06, 0.16, { at: 0.01 });
+        const glugs = [0.2, 0.28, 0.36, 0.445, 0.53];
+        for (let i = 0; i < glugs.length; i++) {
+          const f = 330 - i * 26;
+          v.tone('sine', f * 0.62, f * 1.3, 0.075, 0.34, { at: glugs[i], attack: 0.008 })
+            .tone('triangle', f * 1.3, f * 1.9, 0.04, 0.06, { at: glugs[i] + 0.03, attack: 0.004 })
+            .noise(f * 2.4, f * 1.6, 0.05, 0.08, { q: 5, at: glugs[i] + 0.01 });
+        }
+        v.tone('sine', 140, 90, 0.08, 0.22, { at: 0.6 }).noise(700, 2600, 0.16, 0.12, { q: 0.9, attack: 0.04, at: 0.66 });
+        break;
+      }
+      case 'gold':
+        // Verwandlung: ein Gleitton saust hinauf, dann steht ein heller Dur-Akkord (C-Dur mit None, Glocke statt
+        // Notenfolge), über dem Glitzer perlt; darunter ein weiches, rundes Fundament.
+        v.tone('sine', 380, 1560, 0.16, 0.12, { attack: 0.06 })
+          .notes('triangle', [[72, 0.12, 0.95], [76, 0.15, 0.92], [79, 0.18, 0.9], [84, 0.21, 0.88]], 0.2, 0.004)
+          .notes('sine', [[86, 0.24, 0.8], [91, 0.27, 0.75]], 0.09, 0.006)
+          .notes('pulse12', [[96, 0.3, 0.08], [100, 0.36, 0.08], [103, 0.42, 0.08], [108, 0.48, 0.22]], 0.07)
+          .tone('sine', 131, 130, 0.7, 0.2, { at: 0.12, attack: 0.02 })
+          .noise(6000, 9000, 0.8, 0.07, { type: 'highpass', attack: 0.05, at: 0.15 });
+        break;
+      case 'gold-end':
+        // Das Gold vergeht: derselbe Akkord, abwärts gebrochen und leiser, ein Hauch Glitzern verweht.
+        v.notes('triangle', [[84, 0, 0.16], [79, 0.07, 0.16], [76, 0.14, 0.16], [72, 0.21, 0.3]], 0.2)
+          .tone('sine', 1400, 420, 0.4, 0.06, { attack: 0.02 })
+          .noise(7000, 3500, 0.35, 0.05, { type: 'highpass', attack: 0.03 });
+        break;
+      case 'gold-ram':
+        // Umgehauen: ein dumpfer, schwerer Stoß (tiefer Sinus, braunes Rauschen) und ein metallischer Nachklang –
+        // als rumpelte eine goldene Statue in jemanden hinein.
+        v.tone('sine', 115, 36, 0.32, 0.62)
+          .noise(650, 110, 0.26, 0.45, { type: 'lowpass', brown: true, attack: 0.003 })
+          .tone('triangle', 330, 170, 0.12, 0.16, { at: 0.005 })
+          .noise(2400, 900, 0.04, 0.16, { q: 1.2 })
+          .tone('triangle', 523, 519, 0.36, 0.06, { at: 0.02 })
+          .tone('sine', 784, 780, 0.3, 0.04, { at: 0.02 });
+        break;
+      case 'gold-ping':
+        // Abgeprallt: hohes, glockiges „Pling“ (E7 mit unharmonischem Teilton) und ein Funke Rauschen.
+        v.tone('sine', 2637, 2630, 0.38, 0.22, { attack: 0.002 })
+          .tone('sine', 6118, 6100, 0.16, 0.05, { attack: 0.002 })
+          .tone('triangle', 1319, 1316, 0.22, 0.06, { attack: 0.002 })
+          .noise(7000, 5000, 0.03, 0.1, { type: 'highpass' });
         break;
       case 'rocket-launch':
         // Zündung: kurzer Knall, dann ein Fauchen, das sich nach oben öffnet und mit der Rakete davonzieht;
