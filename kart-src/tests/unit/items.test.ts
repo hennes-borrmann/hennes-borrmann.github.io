@@ -21,6 +21,9 @@ import {
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
+  ITEM_WING,
+  FLAG_GLIDE,
+  WING_TICKS,
   NEUTRAL,
   ROCKET_FLY_TICKS,
   ROCKET_MORPH_TICKS,
@@ -648,5 +651,137 @@ describe('Neue Items', () => {
     for (let tick = 1; tick <= 120; tick++) ev |= stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 4, smoke: false }), ENV);
     expect(ev & EV_USE_ROCKET).toBeTruthy();
     expect(s.item).toBe(ITEM_NONE);
+  });
+});
+
+describe('Gleiter', () => {
+  beforeEach(() => {
+    setTrack(0);
+  });
+
+  /** Ein Abschnitt, hinter dem es len Meter fast geradeaus geht – mit Bande, ohne Lücke. */
+  function straightAt(len: number): number {
+    const t = TRACK;
+    const n = Math.round(len / t.step);
+    let best = -1;
+    let bestTurn = Infinity;
+    for (let i = 0; i + n < t.n; i += 5) {
+      let turn = 0;
+      let bad = false;
+      for (let k = 0; k <= n && !bad; k++) {
+        const j = i + k;
+        if (t.edge[j] & (EDGE_GAP | EDGE_OPEN_L)) bad = true;
+        turn = Math.max(turn, Math.abs(wrap(trackHeading(t, j) - trackHeading(t, i))));
+      }
+      if (!bad && turn < bestTurn) {
+        bestTurn = turn;
+        best = i;
+      }
+    }
+    return best;
+  }
+  const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+
+  it('springt gut 6 m hoch, gleitet mit Flügeln schneller als das Höchsttempo und landet nach gut 4 s', () => {
+    const t = TRACK;
+    const seg = straightAt(160);
+    const s = gridState(0);
+    placeAt(s, seg, 0, V_MAX);
+    s.item = ITEM_WING;
+    let ev = stepKart(s, PRESS, ENV);
+    expect(ev & EV_TAKEOFF).toBeTruthy();
+    expect(s.item).toBe(ITEM_NONE);
+    expect(s.wing).toBe(WING_TICKS);
+    let top = 0;
+    let glide = 0;
+    let fast = 0;
+    let air = 0;
+    for (let i = 0; i < 400; i++) {
+      ev |= stepKart(s, GAS, ENV);
+      top = Math.max(top, s.y - t.py[s.seg]);
+      if (s.flags & FLAG_GLIDE) glide++;
+      if (s.flags & FLAG_AIR) air++;
+      fast = Math.max(fast, forwardSpeed(s));
+      if (!(s.flags & FLAG_AIR) && i > 30) break;
+    }
+    expect(top).toBeGreaterThan(5);
+    expect(top).toBeLessThan(8);
+    expect(glide).toBeGreaterThan(150);
+    // In der Luft bis kurz nach Ablauf der Flügel (gut 4 s), nicht ewig.
+    expect(air).toBeGreaterThan(WING_TICKS - 40);
+    expect(air).toBeLessThan(WING_TICKS + 60);
+    expect(fast).toBeGreaterThan(V_MAX * 1.1);
+    expect(fast).toBeLessThan(V_MAX * 1.25);
+    expect(s.wing).toBe(0);
+    expect(ev & EV_FALL).toBe(0);
+  });
+
+  it('trägt über die Lücke der Möwenklippe – auch mit wenig Anlauf', () => {
+    setTrack(1);
+    const t = TRACK;
+    let gap = -1;
+    for (let i = 0; i < t.n; i++) if (t.edge[i] & EDGE_GAP && gap < 0) gap = i;
+    const s = gridState(0);
+    placeAt(s, gap - 30, 0, 12);
+    s.item = ITEM_WING;
+    let ev = stepKart(s, PRESS, ENV);
+    for (let i = 0; i < 500; i++) ev |= stepKart(s, GAS, ENV);
+    expect(ev & EV_FALL).toBe(0);
+    expect(s.seg).toBeGreaterThan(gap + 30);
+  });
+
+  it('bleibt zwischen den Banden – auch wer die ganze Zeit einlenkt', () => {
+    const t = TRACK;
+    const seg = straightAt(160);
+    for (const steer of [127, -127]) {
+      const s = gridState(0);
+      placeAt(s, seg, 0, V_MAX);
+      s.item = ITEM_WING;
+      stepKart(s, PRESS, ENV);
+      let worst = 0;
+      for (let i = 0; i < WING_TICKS + 30; i++) {
+        stepKart(s, { steer, buttons: 1 }, ENV);
+        projectOnTrack(t, s.x, s.z, s.seg);
+        worst = Math.max(worst, Math.abs(proj.lat) - t.wh[proj.seg]);
+      }
+      expect(worst).toBeLessThan(0.1);
+    }
+  });
+
+  it('ein Treffer klappt die Flügel zu', () => {
+    const s = gridState(0);
+    placeAt(s, straightAt(160), 0, V_MAX);
+    s.item = ITEM_WING;
+    stepKart(s, PRESS, ENV);
+    for (let i = 0; i < 60; i++) stepKart(s, GAS, ENV);
+    expect(s.wing).toBeGreaterThan(0);
+    hitKart(s);
+    expect(s.wing).toBe(0);
+    for (let i = 0; i < 10; i++) stepKart(s, GAS, ENV);
+    expect(s.flags & FLAG_GLIDE).toBe(0);
+  });
+
+  it('jeder kann ihn bekommen, wer vorn liegt etwas seltener', () => {
+    const host = runningHost([0, 1, 2, 3]);
+    const pick = (host as unknown as { pickItem(place: number, count: number, behind?: number): number }).pickItem.bind(host);
+    const share = (place: number, count: number): number => {
+      let n = 0;
+      for (let i = 0; i < 6000; i++) if (pick(place, count, 0) === ITEM_WING) n++;
+      return n / 6000;
+    };
+    for (const place of [1, 2, 3, 4]) expect(share(place, 4)).toBeGreaterThan(0.05);
+    expect(share(1, 4)).toBeLessThan(share(2, 4));
+    expect(share(1, 1)).toBeGreaterThan(0.05);
+  });
+
+  it('Flügelzeit steht im Snapshot', () => {
+    const host = runningHost([0, 1]);
+    host.giveItem(0, ITEM_WING);
+    host.step({ steer: 0, buttons: 1 | 8 });
+    for (let i = 0; i < 20; i++) host.step(GAS);
+    const snap = decodeSnapshot(new DataView(host.snapshot()))!;
+    const k = snap.karts.find((k) => k.slot === 0)!.state;
+    expect(k.wing).toBe(host.authoritative(0)!.wing);
+    expect(k.wing).toBeGreaterThan(0);
   });
 });

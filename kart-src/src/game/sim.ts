@@ -162,7 +162,9 @@ export const ITEM_SPRING = 8;
 export const ITEM_KITE = 9;
 /** "Rakete": das Kart verwandelt sich in eine Rakete und schlägt beim Fahrer vor ihm ein – selten, und nur für den Letzten. */
 export const ITEM_ROCKET = 10;
-export const ITEM_COUNT = 11;
+/** "Gleiter": ein Satz in die Luft, dann Flügel auf und ein paar Sekunden schneller gleiten – über Lücken, nicht über die Bande. */
+export const ITEM_WING = 11;
+export const ITEM_COUNT = 12;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -254,6 +256,8 @@ export interface KartState {
   aimSeg: number;
   /** Rakete: Platz des Karts, auf das sie zufliegt (−1 = keins, sie landet einfach voraus). */
   aimSlot: number;
+  /** Gleiter: verbleibende Ticks mit ausgebreiteten Flügeln (0 = keine). Endet früher, sobald das Kart wieder aufsetzt. */
+  wing: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -354,6 +358,14 @@ export const ROCKET_MORPH_TICKS = 66;
 export const ROCKET_FLY_TICKS = 150;
 export const ROCKET_TICKS = ROCKET_MORPH_TICKS + ROCKET_FLY_TICKS;
 export const ROCKET_HEIGHT = 55;
+/**
+ * Gleiter: Steiggeschwindigkeit beim Absprung (≈ 6 m hoch), Dauer der Flügel, Sinkrate im Gleiten (so verbraucht der
+ * Gleitflug die Höhe gerade in der Flügelzeit), Reisetempo (rund 15 % über dem Höchsttempo, unter dem Schub).
+ */
+export const WING_LAUNCH = 19;
+export const WING_TICKS = 250;
+const WING_SINK = 1.7;
+export const WING_SPEED = 30;
 /** Rakete: Tempo, mit dem das Kart aus dem Einschlag herausrollt, und wie lange es danach unverwundbar ist. */
 const ROCKET_LAND_SPEED = 20;
 const ROCKET_LAND_SHIELD = 60;
@@ -504,6 +516,7 @@ export function newState(): KartState {
     aimZ: 0,
     aimSeg: 0,
     aimSlot: -1,
+    wing: 0,
   };
 }
 
@@ -539,6 +552,7 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.aimZ = src.aimZ;
   dst.aimSeg = src.aimSeg;
   dst.aimSlot = src.aimSlot;
+  dst.wing = src.wing;
   return dst;
 }
 
@@ -587,6 +601,8 @@ export function hitKart(s: KartState): number {
   }
   s.spin = SPIN_TICKS;
   s.shield = SPIN_TICKS + SHIELD_TICKS;
+  // Getroffen klappen die Flügel zu.
+  s.wing = 0;
   s.driftDir = 0;
   s.driftCharge = 0;
   s.boost = 0;
@@ -1170,8 +1186,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // Magnettrommel: An Wand und Decke halten die Reifen schlechter (an der Decke DRUM_GRIP, am Boden voll).
   const drumGrip = (t.edge[seg0] & EDGE_DRUM) !== 0 ? 1 - ((1 - DRUM_GRIP) * (1 - Math.cos(t.roll[seg0]))) / 2 : 1;
   const hold = drumGrip * A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
-  // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts).
-  const gliding = wasAir && (t.edge[seg0] & EDGE_GLIDE) !== 0;
+  // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts) – und überall, solange der Gleiter die Flügel ausbreitet
+  // (nicht unter Wasser: dort trägt das Wasser).
+  const winged = wasAir && s.wing > 0 && !diving;
+  const gliding = wasAir && ((t.edge[seg0] & EDGE_GLIDE) !== 0 || winged);
   const yawMax = gliding ? GLIDE_YAW : (v < 0.3 ? 0 : Math.min(v / R_MIN, hold / v)) * (wasAir ? (diving ? DIVE_STEER : t.gravity < 1 ? LOWG_STEER : AIR_STEER) : 1);
   let yaw: number;
   if (s.driftDir !== 0) {
@@ -1269,7 +1287,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     const speed = Math.hypot(vf, vl);
     vl *= Math.exp(-GLIDE_GRIP * DT);
     vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
-    const cruise = (s.boost > 0 ? V_BOOST : GLIDE_SPEED * ch.vmax) * env.speedFactor * (s.stall > 0 ? STALL_FACTOR : 1);
+    const cruise = (s.boost > 0 ? V_BOOST : (winged ? WING_SPEED : GLIDE_SPEED) * ch.vmax) * env.speedFactor * (s.stall > 0 ? STALL_FACTOR : 1);
     if (env.canDrive && !spinning) vf += Math.max(-GLIDE_ACCEL * DT, Math.min(GLIDE_ACCEL * DT, cruise - vf));
   }
   s.vx = fx * vf + rx * vl;
@@ -1523,7 +1541,16 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       g = g0;
     }
   }
-  if (gliding && g === NO_GROUND) {
+  if (winged) {
+    // Gleiter: Die Zeit läuft; über einer Lücke halten die Flügel, bis wieder Boden darunter ist.
+    s.wing--;
+    if (s.wing === 0 && g === NO_GROUND) s.wing = 1;
+  }
+  if (winged && s.vy <= 0 && !(g === NO_GROUND && (t.edge[seg0] & EDGE_GLIDE) !== 0)) {
+    // Nach dem Scheitel des Absprungs: Flügel auf, das Kart sinkt nur noch langsam.
+    s.vy += (-WING_SINK - s.vy) * Math.min(1, GLIDE_RESPONSE * DT);
+    flags |= FLAG_GLIDE;
+  } else if (gliding && g === NO_GROUND) {
     // Statt zu fallen, sinkt das Kart langsam – und steigt in einem Aufwind.
     // (Über der Decke und neben dem Korridor trägt kein Aufwind: thermalLift gibt dort 0.)
     const up = thermalLift(t, s.seg, lat, s.x, s.y, s.z);
@@ -1549,6 +1576,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.y += s.vy * DT;
   if (s.y <= g) {
     if (wasAir && s.vy < -5) ev |= EV_LAND;
+    // Wieder Boden unter den Rädern: Flügel zu.
+    if (wasAir) s.wing = 0;
     s.y = g;
     // Am Boden ist die Steiggeschwindigkeit die des Hangs. Endet der Hang
     // (Kuppe, Schanze), nimmt das Kart sie mit und hebt ab.
@@ -1578,6 +1607,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.driftCharge = 0;
     s.spin = 0;
     s.stall = 0;
+    s.wing = 0;
     s.shield = RESPAWN_TICKS + 70;
     s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
     return ev | EV_FALL;
@@ -1689,7 +1719,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && drive && s.item !== ITEM_NONE) {
     const used = useItem(s, air);
     ev |= used;
-    if (used & EV_USE_SPRING) flags |= FLAG_AIR;
+    if (used & EV_TAKEOFF) flags |= FLAG_AIR;
   }
 
   s.flags = flags;
@@ -1724,6 +1754,7 @@ function stepRocket(s: KartState, itemBtn: boolean): number {
   s.tow = 0;
   s.draft = 0;
   s.flat = 0;
+  s.wing = 0;
   const held = itemBtn ? FLAG_ITEM_HELD : 0;
   const k = s.rocket - 1;
   if (k <= ROCKET_MORPH_TICKS) {
@@ -1823,6 +1854,18 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
         s.vy = SPRING_SPEED;
         s.y += AIR_EPS + 0.05;
         ev |= EV_USE_SPRING | EV_TAKEOFF;
+      }
+      break;
+    case ITEM_WING:
+      // Wie die Feder: auf den Schienen bleibt er aufgehoben. Aus der Luft heraus geht er – er fängt einen auf.
+      if (noSpring) used = false;
+      else {
+        s.vy = Math.max(s.vy, WING_LAUNCH);
+        s.y += AIR_EPS + 0.05;
+        s.wing = WING_TICKS;
+        s.driftDir = 0;
+        s.driftCharge = 0;
+        ev |= EV_TAKEOFF;
       }
       break;
     case ITEM_KITE:
