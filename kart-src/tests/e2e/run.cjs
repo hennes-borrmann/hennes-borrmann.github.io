@@ -80,6 +80,30 @@ const toLobby = async (page) => {
 const ctl = (page, expr) => page.evaluate(`window.__ctl.${expr}`);
 
 /**
+ * Die Lobby hat drei Schritte: 1 Figur, 2 Strecke, 3 Start. Wechselt über die Schrittleiste – direkt ausgelöst,
+ * damit es auch im winzigen Testfenster klappt, in dem die Leiste nicht zu sehen ist.
+ */
+const lobbyStep = async (page, n) => {
+  await page.evaluate((s) => document.querySelector(`#lobby-steps button[data-step="${s}"]`).click(), n);
+  await page.waitForSelector(`.view-lobby[data-step="${n}"]`, { timeout: 3000 });
+};
+/** Host: Strecke i im Schritt „Strecke“ antippen und warten, bis die Wahl gilt. */
+const pickTrack = async (page, i) => {
+  await lobbyStep(page, 2);
+  await page.locator('.track-card').nth(i).click();
+  await page.waitForFunction((k) => window.__kart.lobby().track === k, i, { timeout: 5000 });
+};
+/** „Ich bin bereit“ bzw. „Rennen starten“ stehen im Schritt „Start“. */
+const clickReady = async (page) => {
+  await lobbyStep(page, 3);
+  await page.click('#btn-ready');
+};
+const clickStart = async (page, options) => {
+  await lobbyStep(page, 3);
+  await page.click('#btn-start', options);
+};
+
+/**
  * Simuliertes Handy: lädt die Controller-Seite und speist Neigungswerte ein.
  * Die Werte kommen als künstliche deviceorientation-Ereignisse mit 60 Hz aus
  * der Seite selbst (die Sensor-Simulation von Chromium liefert ohne Bildschirm
@@ -282,14 +306,14 @@ async function main() {
   // === Start =================================================================
   section('Bereit melden und starten');
   check('Start gesperrt, solange Ben nicht bereit ist', await host.page.isDisabled('#btn-start'));
-  await client.page.click('#btn-ready');
+  await clickReady(client.page);
   await host.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 5000 });
   check('Start frei, sobald alle bereit sind', true);
   check('Mitspieler hat keinen Start-Knopf', await client.page.isHidden('#btn-start'));
   // Ohne Grafikkarte rendert Chromium sehr langsam; kleines Fenster hält die Bildrate brauchbar.
   await host.page.setViewportSize({ width: Number(process.env.VW || 240), height: Number(process.env.VH || 150) });
   await client.page.setViewportSize({ width: Number(process.env.VW || 240), height: Number(process.env.VH || 150) });
-  await host.page.click('#btn-start');
+  await clickStart(host.page);
   await host.page.waitForSelector('#app[data-view="game"]');
   await client.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
   check('Beide Bildschirme wechseln ins Rennen', true);
@@ -665,7 +689,7 @@ async function main() {
     // Während des Rennens kommt kein Neuer rein
     await client.page.waitForFunction(() => window.__kart.clientStatus() === 'joined');
     if (await client.page.evaluate(() => document.getElementById('btn-ready').textContent.includes('Ich bin'))) {
-      await client.page.click('#btn-ready');
+      await clickReady(client.page);
     }
     await host.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 5000 });
     // Großzügige Frist: Der Host wurde oben neu geladen und übersetzt hier alle Grafikprogramme zum ersten
@@ -673,7 +697,7 @@ async function main() {
     // einen Grafikprozess, und jede Rückfrage des Hosts wartet hinter einem Bild des Mitspielers – gemessen
     // rund 30 s für das erste Bild (mit DIAG=1 und CPU-Profil: alles in onFirstUse von three.js). Auf
     // getrennten Geräten gibt es diese Konkurrenz nicht.
-    await host.page.click('#btn-start', { timeout: 120000 });
+    await clickStart(host.page, { timeout: 120000 });
     await host.page.waitForSelector('#app[data-view="game"]');
     const late = await openScreen('spaet');
     await joinLobby(late, 'Gero', code);
@@ -758,10 +782,10 @@ async function main() {
     const c5 = await openScreen('client5', q);
     await joinLobby(c5, 'Ben', code5);
     await c5.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    await c5.page.click('#btn-ready');
+    await clickReady(c5.page);
     await h5.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h5, c5]) await s.page.setViewportSize({ width: 240, height: 150 });
-    await h5.page.click('#btn-start');
+    await clickStart(h5.page);
     await c5.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     const t0 = Date.now();
     await h5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 120000 });
@@ -803,18 +827,28 @@ async function main() {
     const c6 = await openScreen('client6');
     await joinLobby(c6, 'Ben', code6);
     await c6.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
+    // Die Lobby führt in drei Schritten: Figur, Strecke, Start. Gestartet wird erst im letzten.
+    const steps6 = await Promise.all([h6, c6].map((s) => s.page.getAttribute('.view-lobby', 'data-step')));
+    check('Die Lobby beginnt auf beiden Bildschirmen mit Schritt 1 (Figur)', steps6.every((x) => x === '1'), steps6.join(', '));
+    check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
+    await h6.page.click('#btn-step-next');
+    check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
     check('Neunzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 19);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 19);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
-    await h6.page.locator('.track-card').nth(1).click();
+    await pickTrack(h6.page, 1);
+    await lobbyStep(h6.page, 3);
     await h6.page.locator('#ai-level button[data-level="2"]').click();
     await c6.page.waitForFunction(() => window.__kart.lobby().track === 1 && window.__kart.lobby().aiLevel === 2, null, { timeout: 5000 });
     check('Wahl des Hosts kommt beim Mitspieler an', (await c6.page.locator('.track-card[data-on="true"] .track-name').textContent()) === 'Möwenklippe' && (await c6.page.locator('#ai-level button[aria-pressed="true"]').textContent()) === 'Schwer');
+    check('Mitspieler sieht die gewählte Strecke im Detail', (await c6.page.textContent('#td-name')) === 'Möwenklippe' && (await c6.page.textContent('#sum-track-name')) === 'Möwenklippe');
     // Rundenzahl: Vorgabe 3, nur der Host stellt um
     check('Rundenzahl steht anfangs auf 3', (await kart(c6.page, 'lobby()')).laps === 3 && (await c6.page.locator('#lap-count button[aria-pressed="true"]').textContent()) === '3');
     check('Mitspieler kann die Rundenzahl nicht ändern', (await c6.page.locator('#lap-count button').count()) === 4 && (await c6.page.locator('#lap-count button[data-laps="5"]').isDisabled()));
     await h6.page.locator('#lap-count button[data-laps="4"]').click();
     const lapsSynced = await c6.page.waitForFunction(() => window.__kart.lobby().laps === 4, null, { timeout: 5000 }).then(() => true, () => false);
     check('Host stellt 4 Runden ein – der Mitspieler sieht 4', lapsSynced && (await c6.page.locator('#lap-count button[aria-pressed="true"]').textContent()) === '4');
+    await lobbyStep(c6.page, 3);
     await c6.page.locator('#lap-count button[data-laps="2"]').click({ force: true });
     await sleep(300);
     check('Klick des Mitspielers ändert nichts', (await kart(h6.page, 'lobby()')).laps === 4 && (await kart(c6.page, 'lobby()')).laps === 4);
@@ -824,20 +858,43 @@ async function main() {
     check('Vier Figuren stehen zur Wahl, mit Bild und Fahrwerten', (await h6.page.locator('.char-card').count()) === 4 && drawn && (await h6.page.locator('.char-card .pips i.on').count()) > 8);
     const before6 = await kart(h6.page, 'lobby()');
     check('Ohne Wahl fährt jeder die Figur seines Platzes', before6.players.every((p) => p.character === p.slot), before6.players.map((p) => p.character).join(', '));
+    await lobbyStep(h6.page, 1);
+    await lobbyStep(c6.page, 1);
     await h6.page.locator('.char-card').nth(3).click();
     await c6.page.locator('.char-card').nth(3).click();
     await c6.page.waitForFunction(() => window.__kart.lobby().players.every((p) => p.character === 3), null, { timeout: 5000 });
     await h6.page.waitForFunction(() => window.__kart.lobby().players.every((p) => p.character === 3), null, { timeout: 5000 });
     check('Beide wählen dieselbe Figur – auf beiden Bildschirmen sichtbar', (await h6.page.locator('.char-card[data-on="true"] .char-name').textContent()) === 'Zünd-Zoe' && (await c6.page.locator('.player .player-fig').first().textContent()).includes('Zünd-Zoe'));
+    await h6.page.waitForFunction(() => /Ben/.test(document.querySelectorAll('.char-card')[3].querySelector('.char-who').textContent), null, { timeout: 5000 }).catch(() => undefined);
+    check('Auf der Figurenkarte steht, welcher Mitspieler sie fährt', /Ben/.test(await h6.page.locator('.char-card').nth(3).locator('.char-who').textContent()) && !/Anna/.test(await h6.page.locator('.char-card').nth(3).locator('.char-who').textContent()));
     await c6.page.locator('.char-card').nth(1).click();
     await h6.page.waitForFunction(() => window.__kart.lobby().players.find((p) => !p.isHost).character === 1, null, { timeout: 5000 });
     check('Ben wechselt zur Füchsin – der Host sieht es', true);
+    // Jeder Schritt passt auf den Bildschirm (iPad quer, 1180 × 820) – nichts scrollt als Ganzes.
+    const scrolls = [];
+    for (const s of [h6, c6]) {
+      for (const n of [1, 2, 3]) {
+        await lobbyStep(s.page, n);
+        const over = await s.page.evaluate(() => { const v = document.querySelector('.view-lobby'); return v.scrollHeight - v.clientHeight; });
+        if (over > 0) scrolls.push(`${s.name} Schritt ${n}: ${over} px`);
+      }
+    }
+    check('Kein Schritt der Lobby scrollt (1180 × 820)', scrolls.length === 0, scrolls.join(', '));
+    // Handy koppeln und Zahnrad: QR-Code im Fenster, Einstellungen und Diagnose in der Leiste.
+    await h6.page.click('#btn-pair-lobby');
+    await h6.page.waitForSelector('#modal:not([hidden])', { timeout: 3000 });
+    check('„Handy koppeln“ zeigt QR-Code, Stand und Anleitung', (await h6.page.textContent('#modal-title')) === 'Handy koppeln' && (await h6.page.locator('#modal .qr svg').count()) === 1 && /Kein Handy verbunden/.test(await h6.page.textContent('#pair-status')) && (await h6.page.locator('#modal .steps li').count()) === 3);
+    await h6.page.click('#modal-actions button');
+    await h6.page.click('#btn-tools');
+    check('Zahnrad öffnet Einstellungen und Diagnose', (await h6.page.isVisible('#lobby-tools')) && (await h6.page.locator('#tools-settings .seg button').count()) === 4 && (await h6.page.locator('#debug-slot #debug').count()) === 1);
+    await h6.page.click('#btn-tools-close');
+    check('… und schließt wieder', await h6.page.isHidden('#lobby-tools'));
     await shot(h6.page, 'lobby-phase3.png');
     await shot(c6.page, 'lobby-phase3-client.png');
-    await c6.page.click('#btn-ready');
+    await clickReady(c6.page);
     await h6.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 240, height: 150 });
-    await h6.page.click('#btn-start');
+    await clickStart(h6.page);
     await c6.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c6.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 20000 });
     const [trH, trC] = await Promise.all([kart(h6.page, 'track()'), kart(c6.page, 'track()')]);
@@ -1073,14 +1130,14 @@ async function main() {
       }, 50);
     });
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    const twist = await h7.page.locator('.track-card').nth(3).locator('.track-twist').textContent();
+    await pickTrack(h7.page, 3);
+    const twist = await h7.page.textContent('#td-twist');
     check('Streckenwahl nennt die Eigenheit der Nachtschicht', /Stadtverkehr/.test(twist || ''), twist || '');
-    await h7.page.locator('.track-card').nth(3).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 3, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h7, c7]) await s.page.setViewportSize({ width: 240, height: 150 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 25000 });
     await h7.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 5000 });
@@ -1148,11 +1205,11 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Glutkessel: Anna steht auf einem Geysir, bis er ausbricht.
-    await h7.page.locator('.track-card').nth(2).click();
+    await pickTrack(h7.page, 2);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 2, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 2, null, { timeout: 30000 });
     const vent = (await kart(h7.page, 'pulses()')).find((p) => p.kind === 0);
     await kart(h7.page, `place(0, ${vent.at}, ${vent.lat})`);
@@ -1172,13 +1229,13 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Werkshof: Ben (Mitspieler) steht unter einer Stampfpresse, bis sie zuschlägt.
-    const twist0 = await h7.page.locator('.track-card').nth(0).locator('.track-twist').textContent();
+    await pickTrack(h7.page, 0);
+    const twist0 = await h7.page.textContent('#td-twist');
     check('Streckenwahl nennt die Eigenheit des Werkshofs', /Förderbänder/.test(twist0 || '') && /Stampfpressen/.test(twist0 || ''), twist0 || '');
-    await h7.page.locator('.track-card').nth(0).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 0, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 0, null, { timeout: 30000 });
     const pressRow = (await kart(h7.page, 'pulses()')).filter((p) => p.kind === 2);
     check('Werkshof hat zwei Reihen Stampfpressen', pressRow.length === 6, `${pressRow.length} Pressen`);
@@ -1208,13 +1265,13 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Möwenklippe: dieselbe Gezeit auf beiden Bildschirmen; bei Flut bremst das Wasser in der Senke der Uferstraße.
-    const twist1 = await h7.page.locator('.track-card').nth(1).locator('.track-twist').textContent();
+    await pickTrack(h7.page, 1);
+    const twist1 = await h7.page.textContent('#td-twist');
     check('Streckenwahl nennt die Eigenheit der Möwenklippe', /Ebbe und Flut/.test(twist1 || ''), twist1 || '');
-    await h7.page.locator('.track-card').nth(1).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 1, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 1, null, { timeout: 30000 });
     // Ebbe: Anna fährt durch die Senke, so schnell sie kann (aus dem Stand, 2 s Gas).
     // Gemessen wird das Tempo nach 20 m Weg, nicht nach einer festen Zeit – ein Hänger der Testmaschine verfälscht das nicht.
@@ -1272,13 +1329,13 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Wolkenwerft: Ben (Mitspieler) fährt über die Absprungkante und gleitet – auf beiden Bildschirmen.
-    const twist4 = await h7.page.locator('.track-card').nth(4).locator('.track-twist').textContent();
+    await pickTrack(h7.page, 4);
+    const twist4 = await h7.page.textContent('#td-twist');
     check('Streckenwahl nennt die Eigenheit der Wolkenwerft', /Fliegen/.test(twist4 || ''), twist4 || '');
-    await h7.page.locator('.track-card').nth(4).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 4, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 4, null, { timeout: 30000 });
     const flight = await kart(h7.page, 'flight()');
     // (flight() nennt nur die Flugstrecken der Hauptstrecke; die dritte liegt auf der Abzweigung.)
@@ -1322,13 +1379,13 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Tiefseeriff: Ben (Mitspieler) springt vom Steg ins Wasser und taucht – auf beiden Bildschirmen.
-    const twist5 = await h7.page.locator('.track-card').nth(5).locator('.track-twist').textContent();
+    await pickTrack(h7.page, 5);
+    const twist5 = await h7.page.textContent('#td-twist');
     check('Streckenwahl nennt die Eigenheit des Tiefseeriffs', /Tauchen/.test(twist5 || ''), twist5 || '');
-    await h7.page.locator('.track-card').nth(5).click();
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 5, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 5, null, { timeout: 30000 });
     const reef = await kart(h7.page, 'dive()');
     check('Tiefseeriff hat Tauchstrecke, Strömungen und Blasenschlote', reef && reef.from > 50 && reef.currents >= 4 && reef.vents >= 3, JSON.stringify(reef));
@@ -1389,11 +1446,11 @@ async function main() {
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
     check('Mit dem Test-Schalter stehen neunzehn Strecken zur Wahl', cards === 19, `${cards} Karten`);
-    await h7.page.locator('.track-card').nth(6).click();
+    await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 6, null, { timeout: 30000 });
     const chute = (await kart(h7.page, 'pulses()')).find((p) => p.kind === 4);
     check('Eiszapfen-Pass hat Lawinen und Eiszapfen', !!chute && (await kart(h7.page, 'pulses()')).some((p) => p.kind === 5), chute ? `Lawine bei ${chute.at.toFixed(0)} m, alle ${chute.period} s` : 'keine');
@@ -1415,11 +1472,11 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Mondbasis: Ben (Mitspieler) fährt über die Sprungplatte des Massenbeschleunigers – weiter, hoher Sprung auf beiden Bildschirmen.
-    await h7.page.locator('.track-card').nth(7).click();
+    await pickTrack(h7.page, 7);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 7, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 7, null, { timeout: 30000 });
     const moon = await kart(h7.page, 'launchers()');
     const padM = moon.pads.find((p) => p.branch === -1);
@@ -1463,11 +1520,11 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 5000 });
 
     // Sturmhafen: Eine Böe schiebt Ben (Mitspieler) quer über die Bahn, Anna steht im Windschatten ruhig; ein Ponton hebt und senkt Ben.
-    await h7.page.locator('.track-card').nth(8).click();
+    await pickTrack(h7.page, 8);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 8, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 8, null, { timeout: 30000 });
     const harborH = await kart(h7.page, 'harbor()');
     const alleyIdx = harborH.winds.findIndex((w) => w.branch === -1 && w.lee.length > 0);
@@ -1546,11 +1603,11 @@ async function main() {
 
     // Vulkaninsel: Die Strecke verändert sich nach Plan – auf beiden Bildschirmen gleich. Ben (Mitspieler) steht auf
     // einer Platte, als sie wegbricht.
-    await h7.page.locator('.track-card').nth(9).click();
+    await pickTrack(h7.page, 9);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 9, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 9, null, { timeout: 30000 });
     // Stand beider Bildschirme zur selben Rennzeit: die Uhr des Mitspielers folgt dem Host nach einem Zeitsprung erst nach einem Moment.
     const changesAt = async (sec) => {
@@ -1626,11 +1683,11 @@ async function main() {
 
     // Zeitriss-Ruine: zwei Zeitalter im Wechsel – auf beiden Bildschirmen gleich. Ben steht auf einer Hallenplatte,
     // als die Zeit ins Jetzt springt.
-    await h7.page.locator('.track-card').nth(10).click();
+    await pickTrack(h7.page, 10);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 10, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 10, null, { timeout: 30000 });
     const eraState = (x) => `${x.era ? x.era.name : '–'} ${state(x)}`;
     const gateOf = (x, b) => x.gates.find((g) => g.branch === b);
@@ -1667,11 +1724,11 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
 
     // Gewitterkamm: Dunkelheit, Blitze nach Fahrplan, Blitzableiter mit Ladefeld – auf beiden Bildschirmen gleich.
-    await h7.page.locator('.track-card').nth(11).click();
+    await pickTrack(h7.page, 11);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 11, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 11, null, { timeout: 30000 });
     const stormPulses = await kart(h7.page, 'pulses()');
     const bolts = stormPulses.filter((p) => p.kind === 7);
@@ -1716,11 +1773,11 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
 
     // Dschungel-Fluss: Flöße treiben nach Fahrplan – auf beiden Bildschirmen gleich –, tragen und nehmen mit; dazwischen ist Wasser.
-    await h7.page.locator('.track-card').nth(12).click();
+    await pickTrack(h7.page, 12);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 12, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 12, null, { timeout: 30000 });
     const [rvH, rvC] = await Promise.all([kart(h7.page, 'river(20, 40)'), kart(c7.page, 'river(20, 40)')]);
     const lanesH = rvH.rivers.length === 1 ? rvH.rivers[0].lanes : [];
@@ -1781,11 +1838,11 @@ async function main() {
 
     // Spiegelkabinett: Spiegel stehen nach Fahrplan in den Rahmen – auf beiden Bildschirmen gleich. Wer durch einen fährt,
     // kommt im selben Augenblick woanders heraus (vorwärts oder zurück); ein leerer Rahmen ist nur ein Tor.
-    await h7.page.locator('.track-card').nth(13).click();
+    await pickTrack(h7.page, 13);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 13, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 13, null, { timeout: 30000 });
     const openAt = async (sec) => {
       const [a, b] = await Promise.all([kart(h7.page, `portals(${sec})`), kart(c7.page, `portals(${sec})`)]);
@@ -1842,11 +1899,11 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
 
     // Wüstenexpress: Vier Züge fahren nach Fahrplan – auf beiden Bildschirmen gleich; wer auf einem Dach steht, fährt mit.
-    await h7.page.locator('.track-card').nth(14).click();
+    await pickTrack(h7.page, 14);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 14, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 14, null, { timeout: 30000 });
     const [trH, trC] = await Promise.all([kart(h7.page, 'trains(30)'), kart(c7.page, 'trains(30)')]);
     let trainSkew = 0;
@@ -1902,11 +1959,11 @@ async function main() {
 
     // Riesenkinderzimmer: Ringe lassen schrumpfen und wachsen – die Größe kommt auf beiden Bildschirmen an –, und ins
     // Mauseloch kommt nur, wer winzig ist.
-    await h7.page.locator('.track-card').nth(15).click();
+    await pickTrack(h7.page, 15);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 15, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 15, null, { timeout: 30000 });
     const [szH, szC] = await Promise.all([kart(h7.page, 'sizers()'), kart(c7.page, 'sizers()')]);
     const shrinkRing = szH.rings.find((z) => !z.grow);
@@ -1966,11 +2023,11 @@ async function main() {
 
     // Achterbahn-Rummel: Auf den Schienen rollt das Kart wie ein Achterbahnwagen – die Kette zieht den Lifthügel hinauf,
     // Lenken wechselt die Schiene; die Schubmagnete ziehen nach Fahrplan, auf beiden Bildschirmen gleich.
-    await h7.page.locator('.track-card').nth(16).click();
+    await pickTrack(h7.page, 16);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 16, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 16, null, { timeout: 30000 });
     const kickState = (r) => r.kicks.map((k) => (k.on ? 1 : 0)).join('');
     const [rH0, rC0] = await Promise.all([kart(h7.page, 'rails(1)'), kart(c7.page, 'rails(1)')]);
@@ -2009,11 +2066,11 @@ async function main() {
 
     // Magnetwerk: In der Magnettrommel schraubt sich die Bahn über Wand und Decke; die Deckenplatten schalten nach Fahrplan
     // ab – auf beiden Bildschirmen gleich, links und rechts nie zugleich; an der Wand sackt ein Kart ab.
-    await h7.page.locator('.track-card').nth(17).click();
+    await pickTrack(h7.page, 17);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 17, null, { timeout: 5000 });
-    await c7.page.click('#btn-ready');
+    await clickReady(c7.page);
     await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
-    await h7.page.click('#btn-start');
+    await clickStart(h7.page);
     await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 17, null, { timeout: 30000 });
     const plateState = (d) => d.plates.map((p) => (p.off ? 1 : 0)).join('');
     const [dH0, dC0] = await Promise.all([kart(h7.page, 'drum(1, 580)'), kart(c7.page, 'drum(1, 580)')]);
@@ -2057,13 +2114,14 @@ async function main() {
     const cc = await openScreen('clientT', '&laps=1');
     await joinLobby(cc, 'Ben', codeT);
     await cc.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
+    await lobbyStep(hc.page, 3);
     await hc.page.click('#mode button[data-mode="cup"]');
     await hc.page.click('#cup-size button[data-races="3"]');
     await cc.page.waitForFunction(() => window.__kart.lobby().cupRaces === 3, null, { timeout: 5000 });
     check('Turnier über 3 Rennen kommt beim Mitspieler an', true);
     check('Im Turnier wird die Strecke nicht gewählt, sondern gelost', /Lostopf/.test(await cc.page.textContent('#track-head')) && (await hc.page.locator('.track-card').first().isDisabled()));
     check('Start-Knopf heißt „Turnier starten“', /Turnier starten/i.test(await hc.page.textContent('#btn-start')), await hc.page.textContent('#btn-start'));
-    await cc.page.click('#btn-ready');
+    await clickReady(cc.page);
     await hc.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [hc, cc]) await s.page.setViewportSize({ width: 480, height: 300 });
 
@@ -2072,7 +2130,8 @@ async function main() {
     // Drei Rennen: je Auslosung auf beiden Bildschirmen, dann Rennen, das der Test sofort beendet.
     const orders = [[1, 0], [0, 1], [1, 0]];
     for (let race = 0; race < 3; race++) {
-      await hc.page.click(race === 0 ? '#btn-start' : '#btn-next');
+      if (race === 0) await clickStart(hc.page);
+      else await hc.page.click('#btn-next');
       await hc.page.waitForSelector('#draw:not([hidden])', { timeout: 8000 });
       await cc.page.waitForSelector('#draw:not([hidden])', { timeout: 8000 });
       const [dh, dc] = await Promise.all([drawInfo(hc), drawInfo(cc)]);
@@ -2118,6 +2177,8 @@ async function main() {
     await hc.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
     const kept = (await kart(hc.page, 'lobby()')).cup;
     check('Der Turnierstand übersteht ein Neuladen des Hosts', !!kept && kept.done === 3 && kept.stars[1] === 8, JSON.stringify(kept && kept.stars));
+    check('Nach dem Neuladen steht der Host mit dem Turnierstand gleich im Schritt „Start“', (await hc.page.getAttribute('.view-lobby', 'data-step')) === '3');
+    await lobbyStep(hc.page, 3);
     await hc.page.click('#btn-cup-end');
     await hc.page.waitForFunction(() => window.__kart.lobby().cup === null, null, { timeout: 5000 });
     check('„Stand ausblenden“ räumt das beendete Turnier weg', !(await hc.page.isVisible('#cup-panel')));
@@ -2134,10 +2195,10 @@ async function main() {
     const c3 = await openScreen('client3', q);
     await joinLobby(c3, 'Ben', code3);
     await c3.page.waitForSelector('#app[data-view="lobby"]', { timeout: 20000 });
-    await c3.page.click('#btn-ready');
+    await clickReady(c3.page);
     await h3.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
     for (const s of [h3, c3]) await s.page.setViewportSize({ width: 240, height: 150 });
-    await h3.page.click('#btn-start');
+    await clickStart(h3.page);
     await c3.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     await c3.page.waitForFunction(() => window.__kart.entities().length === 4, null, { timeout: 8000 });
     await sleep(1500);
