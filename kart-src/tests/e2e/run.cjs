@@ -1101,6 +1101,81 @@ async function main() {
     })));
     check('Gleiter: Anna springt hoch und gleitet mit Flügeln – auf beiden Bildschirmen', winged.wing > 0 && [wingH, wingC].every((w) => w.glide > 120 && w.top > 4), `Host ${wingH.glide.toFixed(0)} Ticks / ${wingH.top.toFixed(1)} m, Ben ${wingC.glide.toFixed(0)} Ticks / ${wingC.top.toFixed(1)} m`);
 
+    // Get Gold: Anna trinkt die Flasche aus, wird gold und groß, haut Ben um und ist selbst unverwundbar – Ben sieht alles.
+    // Jede Seite schreibt selbst mit (Rennzeit in Ticks), auch wie das Kart gezeigt wird (Maßstab, Goldanteil).
+    const recordGold = () => {
+      window.__gold = { drink: false, gold: null, goldTo: null, scale: 0, look: 0, spin0: 0, spin1: 0, ramDist: -1 };
+      window.__goldTimer = setInterval(() => {
+        const k = window.__kart;
+        const now = k.race().time;
+        const list = k.entities();
+        const a = list.find((x) => x.slot === 0);
+        const b = list.find((x) => x.slot === 1);
+        const g = window.__gold;
+        if (a) {
+          if (a.gold > 420) g.drink = true;
+          if (a.gold > 0 && a.gold <= 420) {
+            if (g.gold === null) g.gold = now;
+            g.goldTo = now;
+          }
+          g.spin0 = Math.max(g.spin0, a.spin);
+        }
+        const look = k.look(0);
+        if (look) {
+          g.scale = Math.max(g.scale, look.scale);
+          g.look = Math.max(g.look, look.gold);
+        }
+        // Ben: beim Host die Rechnung, bei Ben die eigene Vorhersage (der Treffer kommt mit dem Stand des Hosts)
+        const bb = k.authoritative(1) || k.predicted() || b;
+        if (bb) {
+          if (bb.spin > 0 && g.spin1 === 0 && a) g.ramDist = Math.hypot(bb.x - a.x, bb.z - a.z);
+          g.spin1 = Math.max(g.spin1, bb.spin);
+        }
+      }, 16);
+    };
+    await sleep(1500);
+    // Die KI-Gegner bekommen solange keine Items (ein Treffer von ihnen sähe aus wie das Umfahren).
+    await h6.page.evaluate(() => {
+      window.__noItemsGold = setInterval(() => {
+        for (const slot of [2, 3]) window.__kart.giveItem(slot, 0);
+      }, 50);
+    });
+    await kart(h6.page, 'place(2, 60, -2)');
+    await kart(h6.page, 'place(3, 80, 2)');
+    await kart(h6.page, 'place(0, 440, 0)');
+    await kart(h6.page, 'place(1, 470, 0.4)');
+    await sleep(500);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordGold)));
+    const goldAt = await kart(h6.page, 'race().time');
+    await useItem(12);
+    const drinking = await kart(h6.page, 'authoritative(0)');
+    await h6.page.keyboard.down('ArrowUp');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 75, goldAt, { timeout: 60000 }).catch(() => {});
+    const beforeHit = await kart(h6.page, 'authoritative(0)');
+    await kart(h6.page, 'debugHit(0)');
+    const afterHit = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 230, goldAt, { timeout: 60000 }).catch(() => {});
+    await h6.page.keyboard.up('ArrowUp');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 560, goldAt, { timeout: 90000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 560, goldAt, { timeout: 90000 }).catch(() => {});
+    const [goldH, goldC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__goldTimer);
+      return window.__gold;
+    })));
+    await h6.page.evaluate(() => clearInterval(window.__noItemsGold));
+    const goldEnd = await kart(h6.page, 'authoritative(0)');
+    const lookEnd = await Promise.all([h6, c6].map((s) => kart(s.page, 'look(0)')));
+    const span = (g) => (g.gold === null ? 0 : g.goldTo - g.gold);
+    // (Ohne Grafikkarte sieht eine Seite unter Last nur alle paar Zehntelsekunden nach – Anfang und Ende des Golds können
+    // ihr dabei entgehen. Dass es genau 420 Ticks sind, prüfen die Unit-Tests.)
+    check('Get Gold: Anna trinkt erst (Item weg, noch nicht gold), dann 7 s gold – auf beiden Bildschirmen', drinking.item === 0 && drinking.gold > 420 && [goldH, goldC].every((g) => g.drink && span(g) > 330 && span(g) < 440), `Host ${span(goldH).toFixed(0)} Ticks, Ben ${span(goldC).toFixed(0)} Ticks gold gesehen`);
+    check('Get Gold: Annas Kart ist groß und gold zu sehen – auch bei Ben', [goldH, goldC].every((g) => g.scale > 1.3 && g.look > 0.99), `Maßstab ${goldH.scale.toFixed(2)} / ${goldC.scale.toFixed(2)}, gold ${goldH.look.toFixed(2)} / ${goldC.look.toFixed(2)}`);
+    // (Bens Vorhersage zieht von der Schleuderzeit die Eingaben ab, die der Host noch nicht kennt – unter Last viele.
+    // Der Abstand wird beim ersten Nachsehen nach dem Treffer gemessen; bis dahin sind beide schon ein Stück weiter.)
+    check('Get Gold: Anna haut Ben um (Treffer beim Host und in Bens Vorhersage), sie selbst schleudert nicht', goldH.spin1 > 40 && goldC.spin1 > 0 && goldH.ramDist > 0 && goldH.ramDist < 9 && goldH.spin0 === 0 && goldC.spin0 === 0, `Ben ${goldH.spin1} / ${goldC.spin1} Ticks, Abstand beim Nachsehen ${goldH.ramDist.toFixed(1)} m`);
+    check('Get Gold: Anna ist unverwundbar (ein Treffer prallt ab)', beforeHit.gold > 0 && beforeHit.gold <= 420 && afterHit.spin === 0 && afterHit.shield === beforeHit.shield, `Gold noch ${beforeHit.gold} Ticks`);
+    check('Get Gold: danach ist Anna wieder normal – auf beiden Bildschirmen', goldEnd.gold === 0 && lookEnd.every((l) => l && l.scale < 1.05 && l.gold === 0), JSON.stringify(lookEnd));
+
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
     await sleep(800);
     await shot(h6.page, 'race-phase3-host.png');

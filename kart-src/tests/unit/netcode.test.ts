@@ -82,6 +82,8 @@ describe('Protokoll', () => {
     s.flat = 130;
     // Größe (Riesenkinderzimmer): mit Vorzeichen – negativ = winzig
     s.size = -873;
+    // Get Gold: Restzeit samt Austrinken (bis 468 Ticks) – 16 Bit
+    s.gold = 461;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -116,6 +118,7 @@ describe('Protokoll', () => {
     expect(k.state.tow).toBe(201);
     expect([k.state.draft, k.state.flat]).toEqual([185, 130]);
     expect(k.state.size).toBe(-873);
+    expect(k.state.gold).toBe(461);
     expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([Math.fround(s.y), 4.5, 700, 99, 12]);
     expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 });
     expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 });
