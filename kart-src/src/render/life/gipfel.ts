@@ -604,6 +604,7 @@ export function buildGipfelLife(world: World): Life {
   /** Abschnitt, der die Schulter an einem Rasterpunkt trägt (−1: Gelände von world.ts). */
   const qV = sch.qV;
   const unterBahn = sch.unter;
+  (globalThis as any).__grid = { wY, hY, qV, gx0, gz0, CELL, GX, GZ };
   /** Sichtbarer Boden (Gelände bzw. Schulter, wie gezeichnet). */
   const grund = (x: number, z: number): number => {
     const fx = (x - gx0) / CELL;
