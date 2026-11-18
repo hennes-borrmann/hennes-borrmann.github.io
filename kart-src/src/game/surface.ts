@@ -3,7 +3,7 @@
 // und laden den Drift schnell, Stahl ist schnell und glatt, Fels und der
 // Stadtasphalt kleben. Die KI plant mit denselben Werten.
 
-export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble';
+export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble' | 'meadow';
 
 export interface Surface {
   id: SurfaceId;
@@ -56,6 +56,9 @@ export const SURFACES: Surface[] = [
   { id: 'panel', name: 'Bodenplatten', grip: 1.05, speed: 1.03, accel: 1.03, brake: 1.05, charge: 0 },
   // Tempelplatten: glatt geschliffener Sandstein – griffig und schnell.
   { id: 'marble', name: 'Tempelplatten', grip: 1.04, speed: 1.02, accel: 1.02, brake: 1.05, charge: 0 },
+  // Hohes Gras (Almwiese, Gipfelbahn): richtig langsam – eine Abkürzung darüber lohnt sich nur mit Schub (der hebt die
+  // Bremswirkung des Untergrunds auf, siehe sim.ts) oder im Gleitflug darüber hinweg.
+  { id: 'meadow', name: 'Hohes Gras', grip: 0.78, speed: 0.55, accel: 0.62, brake: 0.9, charge: 0.2 },
 ];
 
 export const SURFACE_INDEX = Object.fromEntries(SURFACES.map((s, i) => [s.id, i])) as Record<SurfaceId, number>;

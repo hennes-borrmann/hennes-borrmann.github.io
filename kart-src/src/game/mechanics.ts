@@ -782,8 +782,8 @@ export const LIFT_BOOST = 1.6;
 //
 // Gerechnet wird wie überall auf der flachen Fahrbahn. Die Verdrehung (Track.roll, Radiant: 0 = unten, π/2 = rechte
 // Wand, π = Decke) ist für die Physik nur eine Kraft und ein Haftwert – und für die Darstellung der Winkel, um den
-// sich die Trommel mit allem, was an ihr hängt, um die Fahrbahn dreht (drumPoint in track.ts): Das Bild zeigt die
-// Bahn aufrecht und die Halle verdreht – für den Fahrer dasselbe, wie an Wand und Decke zu fahren.
+// die Bahn an der Trommelwand liegt (drumWarp in track.ts): Das Bild zeigt eine gerade Röhre, die Bahn windet sich an
+// ihr hinauf, Karts und Kamera drehen sich mit.
 
 /** Trommelstück: Abschnitte first … first+count−1, Halbmesser der Trommel (Meter). */
 export interface Drum {

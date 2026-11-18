@@ -63,7 +63,7 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, NO_GROUND, TRACK, drumOf, drumRollAt, drumWarp, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -601,6 +601,16 @@ export class RaceScene {
   private shake = 0;
   private hitstop = 0;
   private orbit = 0;
+  /**
+   * Magnettrommel: Drehung um die Trommelachse, die einen flach gerechneten Punkt an seine echte Stelle an der
+   * Trommelwand bringt (drumTurn setzt sie), Punkt auf der Achse, Richtungssinn; Abschnitt für Effekte (−1 = keiner).
+   */
+  private readonly dq = new THREE.Quaternion();
+  private readonly dAxis = new THREE.Vector3();
+  private readonly dTan = new THREE.Vector3();
+  private readonly dP = { x: 0, y: 0, z: 0 };
+  private drumSign = 0;
+  private fxSeg = -1;
   /** Kamera der eigenen Rakete im Flug: Versatz zur Rakete (geglättet). */
   private rocketCam = false;
   private readonly rocketOff = new THREE.Vector3();
@@ -1252,11 +1262,82 @@ export class RaceScene {
     this.rocket = warn;
   }
 
-  private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
-    this.pops.show(word, e.x, e.y + 2.6, e.z, style, size);
+  /** Nächster Abschnitt einer Magnettrommel zu (x, z) – oder −1, wenn der Punkt nicht in einer Trommel liegt. */
+  private nearestDrumSeg(x: number, z: number): number {
+    const t = this.track;
+    let best = -1;
+    let bestD = Infinity;
+    for (const d of t.drums) {
+      for (let s = d.first; s < d.first + d.count; s += 2) {
+        const dd = (t.px[s] - x) ** 2 + (t.pz[s] - z) ** 2;
+        if (dd < bestD) {
+          bestD = dd;
+          best = s;
+        }
+      }
+      if (bestD > (d.radius + 12) ** 2) best = -1;
+    }
+    return best;
   }
 
-  private burst(x: number, y: number, z: number, count: number, speed: number, hex: number, glow: boolean, size = 0.5, life = 0.6, up = 3): void {
+  /**
+   * Magnettrommel: Gerechnet wird auf der flachen Fahrbahn, gezeigt an der Trommelwand (track.ts: drumWarp). Bestimmt die
+   * Drehung um die Trommelachse an der Stelle (x, z) – hint ist ein Abschnitt in der Nähe (−1: suchen). false außerhalb.
+   */
+  private drumTurn(x: number, z: number, hint: number): boolean {
+    const t = this.track;
+    if (t.drums.length === 0) return false;
+    let seg = hint >= 0 && hint < t.total ? hint : this.nearestDrumSeg(x, z);
+    if (seg < 0) return false;
+    projectOnTrack(t, x, z, seg);
+    seg = proj.seg;
+    const d = drumOf(t, seg);
+    if (!d) return false;
+    const r = drumRollAt(t, seg, Math.max(0, Math.min(1, proj.along / t.step)));
+    this.dAxis.set(t.px[seg] + t.tx[seg] * proj.along, t.py[seg] + d.radius, t.pz[seg] + t.tz[seg] * proj.along);
+    this.dTan.set(t.tx[seg], 0, t.tz[seg]).normalize();
+    // Richtungssinn einmal bestimmen: „oben“ soll zur rechten Wand kippen, wenn die Bahn die rechte Wand hinaufläuft.
+    if (this.drumSign === 0) this.drumSign = rightX(t, seg) * -t.tz[seg] + rightZ(t, seg) * t.tx[seg] > 0 ? -1 : 1;
+    this.dq.setFromAxisAngle(this.dTan, this.drumSign * r);
+    return true;
+  }
+
+  /** Wendet die zuletzt mit drumTurn bestimmte Drehung auf einen Punkt an. */
+  private drumApply(p: THREE.Vector3): THREE.Vector3 {
+    return p.sub(this.dAxis).applyQuaternion(this.dq).add(this.dAxis);
+  }
+
+  /** Effekte (Teilchen, Lautmalerei) eines Karts in der Trommel erscheinen an dessen echter Stelle. */
+  private fxAt(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    const p = this.dP;
+    p.x = x;
+    p.y = y;
+    p.z = z;
+    if (this.fxSeg < 0) return p;
+    const t = this.track;
+    // (proj gehört dem Aufrufer – hier nur ausleihen)
+    const ps = proj.seg;
+    const pl = proj.lat;
+    const pa = proj.along;
+    projectOnTrack(t, x, z, this.fxSeg);
+    const seg = proj.seg;
+    if ((t.edge[seg] & EDGE_DRUM) !== 0) drumWarp(t, seg, Math.max(0, Math.min(1, proj.along / t.step)), proj.lat, y - (t.py[seg] + proj.lat * t.bank[seg]), p);
+    proj.seg = ps;
+    proj.lat = pl;
+    proj.along = pa;
+    return p;
+  }
+
+  private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
+    const p = this.fxAt(e.x, e.y + 2.6, e.z);
+    this.pops.show(word, p.x, p.y, p.z, style, size);
+  }
+
+  private burst(x0: number, y0: number, z0: number, count: number, speed: number, hex: number, glow: boolean, size = 0.5, life = 0.6, up = 3): void {
+    const fp = this.fxAt(x0, y0, z0);
+    const x = fp.x;
+    const y = fp.y;
+    const z = fp.z;
     this.color.set(hex);
     const pool = glow ? this.sparks : this.puffs;
     for (let i = 0; i < count; i++) {
@@ -1847,7 +1928,9 @@ export class RaceScene {
       k.audio.distance = dist;
       k.audio.pan = dist > 0.5 ? Math.max(-1, Math.min(1, this.v1.dot(this.v2) / dist)) : 0;
 
+      this.fxSeg = e.respawn === 0 && e.rocket <= ROCKET_MORPH_TICKS && e.seg < t.total && (t.edge[e.seg] & EDGE_DRUM) !== 0 ? e.seg : -1;
       this.detect(k, e, local, dt);
+      this.fxSeg = -1;
 
       const root = k.visual.root;
       root.position.set(e.x, e.y, e.z);
@@ -1864,6 +1947,16 @@ export class RaceScene {
           root.position.addScaledVector(this.v1, -1.6);
         } else root.quaternion.copy(k.rocketQ);
       } else k.rocketQ.copy(root.quaternion);
+      // Magnettrommel: an die echte Stelle an der Trommelwand drehen. Wer durch eine abgeschaltete Platte fällt, fällt
+      // im Bild zum Hallenboden (in der Rechnung „unter die Fahrbahn“).
+      let drumK = false;
+      if (!flying && e.respawn === 0 && e.seg < t.total && (t.edge[e.seg] & EDGE_DRUM) !== 0 && this.drumTurn(e.x, e.z, e.seg)) {
+        const below = t.py[proj.seg] - root.position.y;
+        if (below > 0.3) root.position.y += 2 * below;
+        this.drumApply(root.position);
+        root.quaternion.premultiply(this.dq);
+        drumK = true;
+      }
       // Von der Presse geplättet: flach wie eine Flunder, dafür etwas breiter – und am Ende federt es zurück.
       k.flatK += ((e.flat > 6 ? 1 : 0) - k.flatK) * Math.min(1, dt * (e.flat > 6 ? 26 : 9));
       // Riesenkinderzimmer: winzig oder riesig – weich nachgeführt; kurz vor dem Ende pulsiert das Kart ruhig
@@ -1878,7 +1971,7 @@ export class RaceScene {
       root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
       k.visual.update(dt, pose);
 
-      if (ground !== NO_GROUND && e.respawn === 0 && !flying) {
+      if (ground !== NO_GROUND && e.respawn === 0 && !flying && !drumK) {
         this.e1.set(groundPitch, e.heading, groundRoll);
         this.q1.setFromEuler(this.e1);
         this.shadows.add(e.x, ground, e.z, this.q1, 2.5, e.y - ground);
@@ -1886,7 +1979,7 @@ export class RaceScene {
         if (this.track.dark && e.y - ground < 1.2) this.lights.add(e.x, ground, e.z, this.q1);
       }
 
-      this.trail(k, e, speed, air, pose.driftStage, dt);
+      this.trail(k, e, speed, air || drumK, pose.driftStage, dt);
 
       if (local) {
         me = e;
@@ -1902,6 +1995,7 @@ export class RaceScene {
         const ls = Math.max(0.5, Math.min(1.7, dist / 20));
         k.label.scale.set(3.6 * ls, 0.9 * ls, 1);
         k.label.position.set(e.x, e.y + 2.5 + ls * 0.4, e.z);
+        if (drumK && this.drumTurn(e.x, e.z, e.seg)) this.drumApply(k.label.position);
         k.label.visible = dist < 90 && dist > 8;
       }
     }
@@ -1922,6 +2016,16 @@ export class RaceScene {
     }
 
     // Dinge und Hindernisse
+    if (t.drums.length > 0 && !this.things.afterPlace) {
+      this.things.afterPlace = (o) => {
+        if (!this.drumTurn(o.position.x, o.position.z, -1)) return;
+        // (Drehung je Bild neu: die Dinge setzen nur ihre Gierung, Neigung von gestern weg)
+        o.rotation.x = 0;
+        o.rotation.z = 0;
+        this.drumApply(o.position);
+        o.quaternion.premultiply(this.dq);
+      };
+    } else if (t.drums.length === 0) this.things.afterPlace = null;
     this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
     for (const m of this.mechanics) {
@@ -1934,7 +2038,7 @@ export class RaceScene {
     this.flat.identity();
     for (const th of things) {
       if (th.kind === THING_TIRE || th.kind === THING_TOP) {
-        if (this.things.shown(th)) this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
+        if (this.things.shown(th) && (t.drums.length === 0 || this.nearestDrumSeg(th.x, th.z) < 0)) this.shadows.add(th.x, th.y - (th.kind === THING_TOP ? 0.6 : 0.8), th.z, this.flat, 1.6, 0);
         if (th.kind === THING_TOP && me && th.target === localSlot) {
           threat = Math.max(threat, 1 - Math.hypot(th.x - me.x, th.z - me.z) / 75);
         }
@@ -2334,7 +2438,23 @@ export class RaceScene {
     this.camLook.y += (me.y + 1.15 + rise * 0.4 - this.camLook.y) * Math.min(1, dt * 9);
 
     cam.position.copy(this.camPos);
-    cam.lookAt(this.camLook);
+    // Magnettrommel: Die Kamera dreht sich mit dem eigenen Kart an die Trommelwand – „oben“ zeigt zur Achse.
+    if (me.respawn === 0 && me.seg < t.total && (t.edge[me.seg] & EDGE_DRUM) !== 0 && this.drumTurn(me.x, me.z, me.seg)) {
+      this.v2.copy(this.camLook);
+      // Fällt das eigene Kart durch eine abgeschaltete Platte, fällt es im Bild zum Hallenboden – die Kamera mit.
+      const roadY = t.py[proj.seg];
+      if (me.y < roadY - 0.3) {
+        if (cam.position.y < roadY) cam.position.y = 2 * roadY - cam.position.y;
+        if (this.v2.y < roadY) this.v2.y = 2 * roadY - this.v2.y;
+      }
+      this.drumApply(cam.position);
+      this.drumApply(this.v2);
+      cam.up.set(0, 1, 0).applyQuaternion(this.dq);
+      cam.lookAt(this.v2);
+    } else {
+      cam.up.set(0, 1, 0);
+      cam.lookAt(this.camLook);
+    }
     // Leichte Schräglage in Kurven
     cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
     this.applyShake(dt);
