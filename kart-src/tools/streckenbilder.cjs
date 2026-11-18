@@ -285,6 +285,17 @@ const SHOTS = {
       [2, 530, 2.5],
     ],
   },
+  // Gipfelbahn: über den Serpentinen – unten die zweite Haarnadel mit Seilbahngondel und zwei Karts, oben der
+  // Eistunnel im Gletscher, ringsum die Gipfel.
+  gipfel: {
+    from: [700, -13, 16],
+    to: [610, 6, 2],
+    fov: 58,
+    karts: [
+      [1, 660, -2],
+      [2, 650, 3],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

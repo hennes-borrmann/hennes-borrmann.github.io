@@ -25,6 +25,7 @@ import { buildNachtLife } from './life/nacht';
 import { buildRiffLife } from './life/riff';
 import { buildWerkshofLife } from './life/werkshof';
 import { buildWolkenLife } from './life/wolken';
+import { buildGipfelLife } from './life/gipfel';
 import type { World } from './world';
 
 export interface Life {
@@ -77,6 +78,8 @@ export function buildLife(world: World): Life | null {
       return buildRummelLife(world);
     case 'magnet':
       return buildMagnetLife(world);
+    case 'gipfel':
+      return buildGipfelLife(world);
     default:
       return null;
   }

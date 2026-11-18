@@ -51,6 +51,8 @@ export interface Theme {
   farY: number;
   /** Buckel im Gelände abseits der Strecke (Meter). */
   rough: number;
+  /** Ab dieser Höhe wird flaches Gelände zu ground[3] (Schnee, Sand …); ohne Angabe 12 m. */
+  snowLine?: number;
   /**
    * Unterwasserwelt (Tauchstrecken): das Gelände wird auch unter dem Meeresspiegel
    * gezeichnet (Meeresboden), die Wasserfläche bekommt eine Unterseite, und sobald
@@ -106,6 +108,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     liquidGlow: false,
     farY: -60,
     rough: 9,
+    // Sommer: Schnee erst am Gletscher (die Gipfelstraße liegt bei 72–83 m)
+    snowLine: 68,
   },
   // Magnetwerk: Fabrikgelände am späten Abend – über dem Werk schon Nachtblau, am Horizont glüht der Abend nach;
   // flaches Licht aus Westen, Beton und Stahl. Die Signalfarben (Blau an, Gelb gleich aus, Dunkelrot aus) gehören

@@ -34,9 +34,28 @@ const lat = (s: KartState): number => {
 const speed = (s: KartState): number => Math.hypot(s.vx, s.vz);
 
 describe('Schienen', () => {
-  it('nur der Rummel hat Schienen: ein Stück mit zwei Schienen, Kettenlift und Bremsstrecke, ohne Lücke und ohne Looping', () => {
+  it('Schienen hat nur der Rummel (Achterbahn) und die Gipfelbahn (Sommerrodelbahn, ohne Schubmagnete): je ein Stück mit zwei Schienen, Kettenlift und Bremsstrecke, ohne Lücke und ohne Looping', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
+      if (t.def.id === 'gipfel') {
+        // Sommerrodelbahn: kurz und steil – die Kette zieht gut 30 m hinauf, danach Senke, Kuppe, Bremse.
+        expect(t.rails.length).toBe(1);
+        const r = t.rails[0];
+        expect(r.lanes).toEqual([-2, 2]);
+        expect(r.lifts.length).toBe(1);
+        expect(r.brakes.length).toBe(1);
+        expect(r.count * t.step).toBeGreaterThan(120);
+        expect(t.pulses.some((p) => p.kind === PULSE_KICK)).toBe(false);
+        let steep = 0;
+        for (let k = 0; k < r.count; k++) {
+          const seg = r.first + k;
+          expect(t.edge[seg] & EDGE_GAP).toBe(0);
+          expect(railOf(t, seg)).toBe(r);
+          steep = Math.max(steep, Math.abs(t.py[t.next[seg]] - t.py[seg]) / t.step);
+        }
+        expect(steep).toBeLessThan(0.75);
+        continue;
+      }
       if (i !== RUMMEL) {
         expect(t.rails.length).toBe(0);
         expect(t.pulses.some((p) => p.kind === PULSE_KICK)).toBe(false);

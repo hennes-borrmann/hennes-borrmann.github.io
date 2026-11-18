@@ -766,7 +766,9 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // --- Tempo: so schnell, wie die engste Stelle voraus es zulässt ---
   const brakeDist = (v * v) / 70 + 8;
   const tight = maxCurvatureAhead(brakeDist);
-  const mayDrift = !openAhead && !gapAhead && !close;
+  // (Im hohen Gras der Almwiese wird nicht gedriftet: der Untergrund bremst das Kart dabei bis zum Stehen.)
+  const slowGround = (SURFACES[t.surf[s.seg < t.total ? s.seg : 0]]?.speed ?? 1) < 0.8;
+  const mayDrift = !openAhead && !gapAhead && !close && !slowGround;
   // Wer driftet, kommt enger herum als mit normaler Lenkung und darf schneller hinein.
   const cornering = tight > b.driftFrom && mayDrift ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * (openAhead ? 0.8 : 0.92);
   const limit = tight > 1e-4 ? Math.sqrt(cornering / tight) : 99;

@@ -178,7 +178,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     const spots: Placement[] = [];
     // (Die Zeitriss-Ruine liegt im Dschungel: ihre Bäume pflanzt die eigene Kulisse.)
     // (Ruine, Dschungel-Fluss, Spiegelkabinett, Wüste, Kinderzimmer, Rummel und Magnetwerk bekommen ihre eigenen Pflanzen von der Kulisse – keine Kiefern.)
-    const cap = ['ruine', 'dschungel', 'spiegel', 'wueste', 'zimmer', 'rummel', 'magnet'].includes(t.def.theme) ? 0 : Math.round(170 * dense);
+    // (Die Gipfelbahn auch: Ihre Kulisse legt eigene Bergschultern über das Gelände und pflanzt Fichten am Hang und Laubbäume im Tal darauf.)
+    const cap = ['ruine', 'dschungel', 'spiegel', 'wueste', 'zimmer', 'rummel', 'magnet', 'gipfel'].includes(t.def.theme) ? 0 : Math.round(170 * dense);
     for (let i = 0; i < t.total && spots.length < cap; i++) {
       if (t.surf[i] !== dirt || t.edge[i] & (EDGE_DECK | EDGE_TUNNEL)) continue;
       // Dicht an den Weg heran, dahinter lichter – auf jeder Seite etwa ein Baum alle drei Meter.
