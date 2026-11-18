@@ -1031,6 +1031,21 @@ export class World {
   }
 
   /** Höhe des Geländes an einer beliebigen Stelle. */
+  /** Kantenlänge des Geländerasters in Metern. */
+  get terrainCell(): number {
+    return this.detail === 0 ? 11 : 7.5;
+  }
+
+  /**
+   * Wie tief das Gelände unter einer geneigten Fahrbahn liegen muss, damit die geraden Dreiecke des Rasters nicht
+   * durch die gewölbte Fahrbahn einer Steilkurve stechen; inside = Meter innerhalb der Fahrbahnkante.
+   * An der Kante 0 (dort schließt das Gelände an), ab 2,5 m innen voll.
+   */
+  roadSink(bank: number, inside: number): number {
+    if (bank === 0 || inside <= 0) return 0;
+    return Math.abs(bank) * this.terrainCell * 0.55 * smooth(inside / 2.5);
+  }
+
   heightAt(x: number, z: number): number {
     const t = this.track;
     const th = this.theme;
@@ -1100,6 +1115,9 @@ export class World {
     const k = smooth((d - whb - 1.2) / 24);
     const bumps = (noise(x * 0.045, z * 0.045) - 0.5) * 2 * th.rough + (noise(x * 0.13 + 9, z * 0.13) - 0.5) * th.rough * 0.5;
     let h = roadY + (base + bumps - roadY) * k;
+    // Unter einer geneigten Fahrbahn (Steilkurve) tiefer: Die Fahrbahn ist dort gewölbt, die Dreiecke des groben
+    // Geländerasters spannen gerade darüber und stachen in engen Kurven durch die Fahrbahn.
+    if (best >= 0 && d < whb) h -= this.roadSink(t.bank[best], whb - d);
     const cr = this.crater;
     if (cr) {
       // Vulkaninsel: rings um den Krater steigt das Gelände zum Rand an, innen fällt es zum Lavasee ab.
@@ -1151,7 +1169,7 @@ export class World {
     const t = this.track;
     const flat = t.def.theme === 'nacht' || t.def.theme === 'wolken';
     const margin = flat ? 0 : 150;
-    const cell = this.detail === 0 ? 11 : 7.5;
+    const cell = this.terrainCell;
     const x0 = minX - margin;
     const z0 = minZ - margin;
     const nx = Math.max(1, Math.ceil((maxX - minX + 2 * margin) / cell));
@@ -1172,6 +1190,7 @@ export class World {
       const rnd = seeded(77 + t.index);
       const P = (ix: number, iz: number): V3 => [x0 + ix * cell, h[iz * (nx + 1) + ix], z0 + iz * cell];
       const liquid = th.liquidY ?? -Infinity;
+      const snowLine = th.snowLine ?? 12;
       const tri = (a: V3, bb: V3, c: V3): void => {
         const top = Math.max(a[1], bb[1], c[1]);
         // Was tief unter Wasser liegt, sieht man nicht – außer in einer Unterwasserwelt: dort ist es der Meeresboden.
@@ -1190,7 +1209,7 @@ export class World {
         let col: RGB;
         if (up < 0.8) col = g[2];
         else if (th.liquidY !== null && mid < liquid + 1.6) col = g[0];
-        else if (mid > 12) col = mixRgb(g[1], g[3], smooth((mid - 12) / 6));
+        else if (mid > snowLine) col = mixRgb(g[1], g[3], smooth((mid - snowLine) / 6));
         else col = th.liquidY !== null ? g[1] : mixRgb(g[0], g[1], noise(a[0] * 0.03, a[2] * 0.03));
         b.tri(a, bb, c, shade(col, 0.94 + rnd() * 0.12));
       };

@@ -285,15 +285,15 @@ const SHOTS = {
       [2, 530, 2.5],
     ],
   },
-  // Gipfelbahn: von der Schanze am Gipfel über das Tal – vorn zwei Karts kurz vor dem Absprung, darunter Aufwinde,
-  // Schubringe und das Dorf, ringsum die Gipfel.
+  // Gipfelbahn: über den Serpentinen – unten die zweite Haarnadel mit Seilbahngondel und zwei Karts, oben der
+  // Eistunnel im Gletscher, ringsum die Gipfel.
   gipfel: {
-    from: [868, 0, 7.5],
-    to: [990, -4, -14],
-    fov: 62,
+    from: [700, -13, 16],
+    to: [610, 6, 2],
+    fov: 58,
     karts: [
-      [1, 892, -3],
-      [2, 900, 3.2],
+      [1, 660, -2],
+      [2, 650, 3],
     ],
   },
 };

@@ -912,6 +912,18 @@ export function buildGipfelLife(world: World): Life {
         peaks.push({ x: mx + tx * Hm * side + Math.cos(a) * Hm * back, z: mz + tz * Hm * side + Math.sin(a) * Hm * back, H: H2, R: H2 * (1 + rnd() * 0.35) });
       }
     }
+    // Die Flanken der nahen Massive dürfen nicht über die Strecke reichen: Jede Ecke liegt mindestens so weit von der
+    // Mitte, dass sie unter einer Linie bleibt, die vom Talboden am Rand der Strecke mit 60 % Steigung ansteigt.
+    let spur = 0;
+    for (let i = 0; i < T; i++) spur = Math.max(spur, Math.hypot(t.px[i] - cx, t.pz[i] - cz));
+    spur += 60;
+    const abstand = (P: V3): V3 => {
+      const dx = P[0] - cx;
+      const dz = P[2] - cz;
+      const d = Math.hypot(dx, dz) || 1;
+      const lim = spur + Math.max(0, P[1] - y0) / 0.6;
+      return d >= lim ? P : [cx + (dx / d) * lim, P[1], cz + (dz / d) * lim];
+    };
     const nSide = hi ? 8 : 7;
     const F = hi ? [0, 0.24, 0.48, 0.7, 0.88] : [0, 0.3, 0.6, 0.85];
     const RF = hi ? [1, 0.72, 0.46, 0.24, 0.08] : [1, 0.62, 0.3, 0.07];
@@ -925,11 +937,11 @@ export function buildGipfelLife(world: World): Life {
         for (let i = 0; i < nSide; i++) {
           const a = rot + (i / nSide) * TAU + (rnd() - 0.5) * 0.25;
           const rr = p.R * RF[j] * jit0[i] * (0.85 + 0.3 * rnd());
-          r.push([p.x + Math.cos(a) * rr, y0 + (p.H + 14) * F[j] * (0.92 + 0.16 * rnd()), p.z + Math.sin(a) * rr]);
+          r.push(abstand([p.x + Math.cos(a) * rr, y0 + (p.H + 14) * F[j] * (0.92 + 0.16 * rnd()), p.z + Math.sin(a) * rr]));
         }
         ring.push(r);
       }
-      const apex: V3 = [p.x + (rnd() - 0.5) * p.R * 0.1, y0 + p.H + 14, p.z + (rnd() - 0.5) * p.R * 0.1];
+      const apex: V3 = abstand([p.x + (rnd() - 0.5) * p.R * 0.1, y0 + p.H + 14, p.z + (rnd() - 0.5) * p.R * 0.1]);
       const snowY = 115 + rnd() * 70;
       const iceCol = Math.floor(rnd() * nSide);
       const ribs = Math.floor(rnd() * 3);
@@ -2928,7 +2940,7 @@ function schultern(
           } else {
             ey = surf - 0.25;
             // Neben einer Straße: an der Kante knapp darunter, innerhalb einer Zelle fast eben, dann Böschung
-            L = d < 0 ? surf - 0.35 : surf - 0.2 + (dd <= C1 ? 0.05 * dd : 0.05 * C1 + 1.15 * (dd - C1));
+            L = d < 0 ? surf - 0.35 - world.roadSink(qbank[j], -d) : surf - 0.2 + (dd <= C1 ? 0.05 * dd : 0.05 * C1 + 1.15 * (dd - C1));
           }
         }
         const c = ey - qa[j] * dd - qb[j] * dd * dd;
