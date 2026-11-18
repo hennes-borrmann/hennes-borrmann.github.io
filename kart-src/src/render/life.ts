@@ -26,6 +26,7 @@ import { buildRiffLife } from './life/riff';
 import { buildWerkshofLife } from './life/werkshof';
 import { buildWolkenLife } from './life/wolken';
 import { buildGipfelLife } from './life/gipfel';
+import { buildNeonLife } from './life/neon';
 import type { World } from './world';
 
 export interface Life {
@@ -80,6 +81,8 @@ export function buildLife(world: World): Life | null {
       return buildMagnetLife(world);
     case 'gipfel':
       return buildGipfelLife(world);
+    case 'neon':
+      return buildNeonLife(world);
     default:
       return null;
   }

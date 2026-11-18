@@ -297,15 +297,16 @@ const SHOTS = {
     ],
   },
   // Neonhochbahn: die Wandfahrt – das Schwebeband dreht sich senkrecht an die Fassade des Nachbarturms (≈ 400–470 m),
-  // drei Karts schweben daran entlang, die Magnetlinien leuchten. Von schräg unten aus der Häuserschlucht gesehen.
+  // drei Karts schweben daran entlang, die Magnetlinien leuchten. Von gegenüber aus der Häuserschlucht gesehen: rechts
+  // die Lichtsäule mit ihrer Wendel, dahinter die Stadt, tief unten die Lichtströme auf den Straßen.
   neon: {
-    from: { xyz: [44, 34, -66] },
-    to: { xyz: [28, 47, -88] },
-    fov: 55,
+    from: { xyz: [10, 48, -58] },
+    to: { xyz: [60, 46, -86] },
+    fov: 62,
     karts: [
-      [1, 434, 2],
-      [2, 441, -2.5],
-      [3, 449, 1.5],
+      [1, 420, 2],
+      [2, 428, -2.5],
+      [3, 437, 1.5],
     ],
   },
 };
