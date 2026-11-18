@@ -7,6 +7,7 @@ import { SURFACES } from '../game/surface';
 import {
   EDGE_BROKEN,
   EDGE_DECK,
+  EDGE_DRUM,
   EDGE_FLOAT,
   EDGE_FREE_L,
   EDGE_FREE_R,
@@ -21,6 +22,7 @@ import {
   rightZ,
   segDelta,
   type Track,
+  drumWarp,
 } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RGB, type V3 } from './build';
 import type { FxSink } from './fxApi';
@@ -28,6 +30,8 @@ import { buildLife, type Life } from './life';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
+
+const _dw = { x: 0, y: 0, z: 0 };
 
 const WALL_H = 0.95;
 const WALL_T = 0.5;
@@ -282,6 +286,8 @@ export class World {
   private P(i: number, f: number, lat: number, dy = 0): V3 {
     const t = this.track;
     const a = i;
+    // Magnettrommel: die Bahn liegt an der Innenwand, je Abschnitt um die Achse gedreht (track.ts: drumWarp).
+    if ((t.edge[a] & EDGE_DRUM) !== 0 && drumWarp(t, a, f, lat, dy, _dw)) return [_dw.x, _dw.y, _dw.z];
     const x = t.px[a] + rightX(t, a) * lat;
     const y = t.py[a] + lat * t.bank[a] + dy;
     const z = t.pz[a] + rightZ(t, a) * lat;
@@ -369,6 +375,9 @@ export class World {
           return { a: col(0xf3f7fc), b: col(0xe6eef7), c: col(0xc9d8e8), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdde8f3), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'ice':
           return { a: col(0xbfe6f5), b: col(0xa9dbef), c: col(0xf2fdff), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xd7edf8), detail: 'cracks', barrier: 'rock', wallA: col(0xd9eef8), wallB: col(0xa7cde4) };
+        case 'meadow':
+          // Hohes Gras: sattes, unruhiges Grün mit hellen Halmbüscheln, ohne Markierung, Holzzaun
+          return { a: col(0x6fae3e), b: col(0x5f9e34), c: col(0xb7d86a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0x7fb84a), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'marble':
           // Tempelplatten: heller Sandstein mit Fugen, Brüstung aus Quadern
           return { a: col(0xe6d6ac), b: col(0xd9c798), c: col(0xa9966a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xbcaa80), detail: 'plates', barrier: 'stone', wallA: col(0xdccb9e), wallB: col(0xc4b286) };
@@ -570,6 +579,9 @@ export class World {
       const whole = f0 === 0 && f1 === 1;
       for (const sgn of [-1, 1]) {
         if (sgn < 0 ? freeL : freeR) continue;
+        // In der Magnettrommel hat die Bahn keine Bande: Sie ist ein Streifen der Trommelwand, ihre Grenze zeigen die
+        // Magnetstreifen (mechanics/drum.ts).
+        if ((e & EDGE_DRUM) !== 0) continue;
         const open = sgn < 0 ? openL : openR;
         const inner = sgn * wh;
         const outer = sgn * (wh + WALL_T);
@@ -778,7 +790,7 @@ export class World {
     const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : rgb(0xd9c7a8);
     const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : rgb(0x6fd0e6);
     const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall

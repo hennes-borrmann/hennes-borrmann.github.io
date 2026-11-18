@@ -70,6 +70,43 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Gipfelbahn: klarer Sommertag in den Bergen – tiefblauer Himmel, sattgrüne Almen im Tal, oben Fels und Gletscher.
+  // Hoch stehende Sonne von Südwesten; weiter Blick (der Dunst beginnt spät), damit man vom Gipfel das Tal sieht.
+  gipfel: {
+    sky: [0x1f5fc4, 0x7fb8f2, 0xe6f1fb],
+    fog: 0xd8e8f6,
+    fogNear: 260,
+    fogFar: 980,
+    sunDir: [-0.45, 0.7, 0.4],
+    sunColor: 0xfff4e0,
+    sunIntensity: 2.6,
+    hemiSky: 0xcfe6ff,
+    hemiGround: 0x8fb070,
+    hemiIntensity: 1.3,
+    disc: 0xfff6dc,
+    discSize: 34,
+    clouds: 0xffffff,
+    cloudShade: 0xc9daee,
+    stars: false,
+    road: 0x5e6066,
+    roadAlt: 0x67696f,
+    line: 0xffffff,
+    kerbA: 0xd8382e,
+    kerbB: 0xffffff,
+    shoulder: 0x7c9a52,
+    wallA: 0xd8382e,
+    wallB: 0xffffff,
+    wallCap: 0x3a3f4a,
+    deck: 0xa9825a,
+    deckDark: 0x74573a,
+    pillar: 0x707480,
+    ground: [0x7fb04e, 0x5f9640, 0x8a8478, 0xf4f8fd],
+    liquidY: null,
+    liquid: [0x3f8fd0, 0x6fb6e6, 0xd6f0ff],
+    liquidGlow: false,
+    farY: -60,
+    rough: 9,
+  },
   // Magnetwerk: Fabrikgelände am späten Abend – über dem Werk schon Nachtblau, am Horizont glüht der Abend nach;
   // flaches Licht aus Westen, Beton und Stahl. Die Signalfarben (Blau an, Gelb gleich aus, Dunkelrot aus) gehören
   // den Magnetplatten: Bande und Randsteine bleiben deshalb grau und weiß.

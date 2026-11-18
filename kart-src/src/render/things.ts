@@ -461,6 +461,9 @@ export class ThingVisuals {
   }
 
   /** Gleicht die sichtbaren Dinge mit der Liste vom Spiel ab und bewegt sie. */
+  /** Wird nach dem Platzieren jedes sichtbaren Dings gerufen (Magnettrommel: an die Trommelwand drehen). */
+  afterPlace: ((o: THREE.Object3D) => void) | null = null;
+
   update(things: SnapshotThing[], dt: number, time: number, fx: FxSink): void {
     for (const v of this.live.values()) v.seen = false;
     for (const th of things) {
@@ -491,6 +494,7 @@ export class ThingVisuals {
       else if (th.kind === THING_OIL) this.oil(v, th, dt, time, fx);
       else if (th.kind === THING_TOP) this.top(v, th, dt, time, fx);
       else if (th.kind === THING_SMOKE) this.smoke(v, th, dt, time, fx);
+      this.afterPlace?.(v.obj);
     }
     this.primed = true;
     for (const [key, v] of this.live) {

@@ -64,7 +64,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -1705,6 +1705,37 @@ export function drumPoint(t: Track, seg: number, theta: number, dist: number, ra
   out.y = t.py[seg] + radius - down;
   out.z = t.pz[seg] + t.tz[seg] * along + rightZ(t, seg) * side;
   return out;
+}
+
+/**
+ * Magnettrommel, Darstellung: Gerechnet wird auf der flachen Fahrbahn; gezeigt wird die Bahn an der Innenwand der
+ * geraden Trommel, unter dem Hallenwinkel roll um die Achse gedreht. Wandelt einen Punkt in Bahnkoordinaten
+ * (Abschnitt seg, Anteil f zum nächsten, seitlich lat, h über der flachen Fahrbahn) in seine echte Stelle um.
+ * Gibt false zurück (und lässt out unberührt), wenn an seg keine Trommel ist.
+ */
+export function drumWarp(t: Track, seg: number, f: number, lat: number, h: number, out: { x: number; y: number; z: number }): boolean {
+  const d = drumOf(t, seg);
+  if (!d) return false;
+  const b = t.next[seg];
+  const r = drumRollAt(t, seg, f);
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  const y = h - d.radius;
+  const l = lat * c - y * s;
+  const hh = d.radius + lat * s + y * c;
+  const L = (p: number, q: number): number => p + (q - p) * f;
+  out.x = L(t.px[seg], t.px[b]) + L(rightX(t, seg), rightX(t, b)) * l;
+  out.y = L(t.py[seg], t.py[b]) + l * L(t.bank[seg], t.bank[b]) + hh;
+  out.z = L(t.pz[seg], t.pz[b]) + L(rightZ(t, seg), rightZ(t, b)) * l;
+  return true;
+}
+
+/** Hallenwinkel der Trommel am Abschnitt seg, Anteil f zum nächsten (0 außerhalb). */
+export function drumRollAt(t: Track, seg: number, f = 0): number {
+  if ((t.edge[seg] & EDGE_DRUM) === 0) return 0;
+  const b = t.next[seg];
+  const rb = (t.edge[b] & EDGE_DRUM) !== 0 ? t.roll[b] : t.roll[seg];
+  return t.roll[seg] + (rb - t.roll[seg]) * f;
 }
 
 /** Das Schienenstück, zu dem der Abschnitt gehört – oder null. */

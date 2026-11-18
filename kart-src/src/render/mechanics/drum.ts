@@ -2,10 +2,14 @@
 // ihr Innenleben (Hallenboden mit Maschinen, Hängelampen, Schweißfunken), die Magnetspulen entlang der Bahn, die
 // Deckenplatten, die im Takt abschalten, die beiden Portale und die Trommel von außen.
 //
-// Gezeichnet wird so, dass die Fahrbahn aufrecht bleibt und sich die Halle um sie dreht (track.ts: drumPoint): Alles,
-// was zur Halle gehört, steht in Hallenkoordinaten (X quer, Y von der Trommelachse aus nach oben, Hallenboden unten)
-// und wird je Abschnitt um roll gedreht. Was zur Bahn gehört (Magnetstreifen, Spulen, Platten, Portale), steht in
-// Bahnkoordinaten (seitlich, Höhe über der Fahrbahn) – es dreht sich nicht.
+// Gezeichnet wird, was man sieht: eine gerade Röhre, an deren Innenwand die Bahn sich als Schraube hinaufwindet – ohne
+// Bande, ihre Grenze zeigen die Magnetstreifen. (Bis Version 261118 blieb die Bahn aufrecht und die Halle drehte sich um
+// sie; so merkte man nicht, dass man an der Wand fährt.) Gebaut wird weiter in zwei Rahmen: Was zur Halle gehört, steht
+// in Hallenkoordinaten (X quer, Y von der Trommelachse aus nach oben, Hallenboden unten); was zur Bahn gehört
+// (Magnetstreifen, Spulen, Platten, Portale), in Bahnkoordinaten (seitlich, Höhe über der Fahrbahn). at() dreht
+// Bahnkoordinaten je Stelle um roll an die Wand (track.ts: drumWarp); hall() dreht Hallenkoordinaten um −roll in
+// Bahnkoordinaten – über at() landen sie so an ihrer festen Stelle. Die Außenhaut steht direkt im Weltrahmen (atFlat).
+// Karts, Kamera, Dinge und Effekte bringt raceScene.ts (drumTurn) ebenso an die Wand; gerechnet wird flach.
 //
 // „Unten“ zeigen: Der Hallenboden ist eine ebene, helle Laufgitterfläche mit gelb-schwarzen Kanten und Maschinen;
 // die Wände sind unten dunkel-grün gestrichen (Sockel), oben stahlblau, die Decke dunkel; Lampen hängen an Ketten
@@ -32,7 +36,7 @@
 
 import * as THREE from 'three';
 import { planActive, planUntil, type Drum, type Plan } from '../../game/mechanics';
-import { EDGE_DRUM, rightX, rightZ, type Track } from '../../game/track';
+import { EDGE_DRUM, drumOf, rightX, rightZ, type Track } from '../../game/track';
 import { MeshBuilder, seeded, smooth, type RGB, type V3 } from '../build';
 import type { MechanicView } from '../mechanics';
 import { addSmoothNormals, outlineMaterial, rgb } from '../toon';
@@ -270,8 +274,8 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
     const rollS = (i: number): number => t.roll[Math.max(first, Math.min(last, i))];
 
     // --- Rahmen der Bahn: Punkt an der Stelle u (gebrochener Abschnitt) -------------------
-    /** Punkt seitlich lat, h über der Fahrbahn, along voraus – an der gebrochenen Stelle u. */
-    const at = (u: number, lat: number, h: number, along = 0): V3 => {
+    /** Punkt seitlich lat, h über der flachen Rechen-Fahrbahn, along voraus – an der gebrochenen Stelle u (ohne Verdrehung). */
+    const atFlat = (u: number, lat: number, h: number, along = 0): V3 => {
       const i = Math.floor(u);
       const f = u - i;
       const a = seg(i);
@@ -287,6 +291,18 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
       const i = Math.floor(u);
       const f = u - i;
       return rollS(i) + (rollS(i + 1) - rollS(i)) * f;
+    };
+    /**
+     * Punkt in Bahnkoordinaten (seitlich lat, h über der Fahrbahn) an seiner echten Stelle: Die Bahn klebt unter dem
+     * Hallenwinkel rollU(u) an der Innenwand der geraden Röhre – Bahnkoordinaten werden dafür um die Achse gedreht.
+     * (Hallenpunkte, hall(), sind schon um −roll gedreht und landen so wieder an ihrer festen Stelle.)
+     */
+    const at = (u: number, lat: number, h: number, along = 0): V3 => {
+      const r = rollU(u);
+      const c = Math.cos(r);
+      const sn = Math.sin(r);
+      const y = h - R;
+      return atFlat(u, lat * c - y * sn, R + lat * sn + y * c, along);
     };
     /** Hallenpunkt: X quer (rechts +), Y von der Achse aus nach oben (Hallenboden bei −R). */
     const hall = (u: number, X: number, Y: number, along = 0): V3 => {
@@ -918,7 +934,8 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
       const lo = Math.min(...p.map((i) => t.holes[i].lat0));
       const hi = Math.max(...p.map((i) => t.holes[i].lat1));
       const ringsPit = 5;
-      const up: V3 = [0, 1, 0];
+      // (zeigt zur Achse: an der Decke ist „über der Bahn“ unten)
+      const up: V3 = sub(at((u0 + u1) / 2, 0, R), at((u0 + u1) / 2, 0, 0));
       for (let k = 0; k < ringsPit; k++) {
         const f0 = k / ringsPit;
         const f1 = (k + 1) / ringsPit;
@@ -1080,7 +1097,7 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
       const er: number[] = [];
       for (let u = first; u < last - ESTEP * 0.5; u += ESTEP) er.push(u);
       er.push(last);
-      const E = (u: number, a: number, r: number, along = 0): V3 => at(u, r * Math.sin(a), R - r * Math.cos(a), along);
+      const E = (u: number, a: number, r: number, along = 0): V3 => atFlat(u, r * Math.sin(a), R - r * Math.cos(a), along);
       const shadeOut = (u: number, a: number): number => {
         const sg = seg(Math.round(u));
         const n = new THREE.Vector3(rightX(t, sg) * Math.sin(a), -Math.cos(a), rightZ(t, sg) * Math.sin(a));
@@ -1094,16 +1111,16 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
           const a1 = AE + ((TAU - 2 * AE) * (k + 1)) / ME;
           const am = (a0 + a1) / 2;
           const p = E(u0, am, R_EXT);
-          flat.quad(E(u0, a0, R_EXT), E(u0, a1, R_EXT), E(u1, a1, R_EXT), E(u1, a0, R_EXT), sub(p, at(u0, 0, R)), mul(C_SHELL, shadeOut(u0, am) * ((r + k) % 2 === 0 ? 1 : 0.93)));
+          flat.quad(E(u0, a0, R_EXT), E(u0, a1, R_EXT), E(u1, a1, R_EXT), E(u1, a0, R_EXT), sub(p, atFlat(u0, 0, R)), mul(C_SHELL, shadeOut(u0, am) * ((r + k) % 2 === 0 ? 1 : 0.93)));
         }
         // Sockel: von der Unterkante der Haut ins Gelände
         for (const a of [AE, TAU - AE]) {
           const s = Math.sin(a) > 0 ? 1 : -1;
           const p0 = E(u0, a, R_EXT);
           const p1 = E(u1, a, R_EXT);
-          const q0 = at(u0, s * R_EXT * Math.sin(AE), -1.2);
-          const q1 = at(u1, s * R_EXT * Math.sin(AE), -1.2);
-          flat.quad(p0, p1, q1, q0, sub(at(u0, s, 0), at(u0, 0, 0)), mul(C_CONCRETE, 0.7));
+          const q0 = atFlat(u0, s * R_EXT * Math.sin(AE), -1.2);
+          const q1 = atFlat(u1, s * R_EXT * Math.sin(AE), -1.2);
+          flat.quad(p0, p1, q1, q0, sub(atFlat(u0, s, 0), atFlat(u0, 0, 0)), mul(C_CONCRETE, 0.7));
         }
       }
       // Außenrippen
@@ -1118,7 +1135,7 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
           const am = (a0 + a1) / 2;
           const col = mul(C_STEEL_D, 1.3 * shadeOut(u, am));
           const r1 = R_EXT + 0.9;
-          flat.quad(E(u, a0, r1, -0.6), E(u, a1, r1, -0.6), E(u, a1, r1, 0.6), E(u, a0, r1, 0.6), sub(E(u, am, r1), at(u, 0, R)), col);
+          flat.quad(E(u, a0, r1, -0.6), E(u, a1, r1, -0.6), E(u, a1, r1, 0.6), E(u, a0, r1, 0.6), sub(E(u, am, r1), atFlat(u, 0, R)), col);
           flat.quad(E(u, a0, R_EXT, -0.6), E(u, a1, R_EXT, -0.6), E(u, a1, r1, -0.6), E(u, a0, r1, -0.6), bwd, mul(col, 0.8));
         }
       }
@@ -1126,7 +1143,7 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
       const hs = (lat: number): number => R - Math.sqrt(R_EXT * R_EXT - lat * lat);
       for (let u = first + 24; u <= last - 20; u += detail ? 48 : 96) {
         for (const s of [-1, 1]) {
-          const T = (x: number, y: number, z: number): V3 => at(u + z, s * x, y);
+          const T = (x: number, y: number, z: number): V3 => atFlat(u + z, s * x, y);
           const xa = 15.5;
           const xb = 23;
           const ya = hs(xa) + 0.25;
@@ -1155,7 +1172,7 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
           const am = (a0 + a1) / 2;
           const r1 = k % 2 === 0 ? R_EXT + 1.6 : R_EXT + 1.1;
           const col = mul(C_STEEL_HI, 0.8 * shadeOut(ug, am));
-          flat.quad(E(ug, a0, r1, -0.7), E(ug, a1, r1, -0.7), E(ug, a1, r1, 0.7), E(ug, a0, r1, 0.7), sub(E(ug, am, r1), at(ug, 0, R)), col);
+          flat.quad(E(ug, a0, r1, -0.7), E(ug, a1, r1, -0.7), E(ug, a1, r1, 0.7), E(ug, a0, r1, 0.7), sub(E(ug, am, r1), atFlat(ug, 0, R)), col);
           flat.quad(E(ug, a0, R_EXT, -0.7), E(ug, a1, R_EXT, -0.7), E(ug, a1, r1, -0.7), E(ug, a0, r1, -0.7), bwd, mul(col, 0.75));
           flat.quad(E(ug, a0, R_EXT, 0.7), E(ug, a1, R_EXT, 0.7), E(ug, a1, r1, 0.7), E(ug, a0, r1, 0.7), fwd, mul(col, 0.85));
           if (k + 1 < NG) {
@@ -1173,7 +1190,7 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
         // Rahmen des Motors: x quer (radial nach außen), y = Achse des Motors (längs), z tangential
         const ex = Math.sin(phi);
         const ey = -Math.cos(phi);
-        const Tm = (x: number, y: number, z: number): V3 => at(ug + 3 + y, cl + ex * x - ey * z, ch + ey * x + ex * z);
+        const Tm = (x: number, y: number, z: number): V3 => atFlat(ug + 3 + y, cl + ex * x - ey * z, ch + ey * x + ex * z);
         cylL(body, Tm, 0, 0, 3.6, 2, 12, C_MOTOR, C_STEEL_D, 10);
         for (const yy of [3.5, 6, 8.5]) cylL(body, Tm, 0, 0, 3.95, yy, yy + 0.6, mul(C_MOTOR, 1.25), mul(C_MOTOR, 1.1), 10);
         cylL(body, Tm, 0, 0, 1.0, -4, 2, C_STEEL_HI, C_STEEL, 8); // Welle
@@ -1207,16 +1224,16 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
           const A = path[k];
           const B = path[k + 1];
           for (const dz of [-0.35, 0.35]) {
-            const a0 = at(uc + dz - 0.2, A[0], A[1]);
-            const a1 = at(uc + dz + 0.2, A[0], A[1]);
-            const b0 = at(uc + dz - 0.2, B[0], B[1]);
-            const b1 = at(uc + dz + 0.2, B[0], B[1]);
-            const outv = sub(at(uc, A[0] * 1.1, R + (A[1] - R) * 1.1), at(uc, A[0], A[1]));
+            const a0 = atFlat(uc + dz - 0.2, A[0], A[1]);
+            const a1 = atFlat(uc + dz + 0.2, A[0], A[1]);
+            const b0 = atFlat(uc + dz - 0.2, B[0], B[1]);
+            const b1 = atFlat(uc + dz + 0.2, B[0], B[1]);
+            const outv = sub(atFlat(uc, A[0] * 1.1, R + (A[1] - R) * 1.1), atFlat(uc, A[0], A[1]));
             flat.quad(a0, a1, b1, b0, outv, C_BLACK);
           }
         }
         const kb = path[path.length - 1];
-        boxL(body, (x, y, z) => at(uc + z, kb[0] + x, y), -1.6, 1.6, -0.5, 2.6, -1.2, 1.2, C_STEEL, C_YEL);
+        boxL(body, (x, y, z) => atFlat(uc + z, kb[0] + x, y), -1.6, 1.6, -0.5, 2.6, -1.2, 1.2, C_STEEL, C_YEL);
       }
     }
   }
@@ -1376,13 +1393,22 @@ export function buildDrum(track: Track, detail: boolean): MechanicView {
     }
   }
 
-  /** Punkt auf der Fahrbahn an der gebrochenen Stelle u (ohne Anlegen). */
-  function roadInto(u: number, lat: number, h: number, arr: Float32Array, o: number): void {
+  /** Punkt auf der Fahrbahn an der gebrochenen Stelle u (ohne Anlegen) – an seiner echten Stelle an der Trommelwand. */
+  function roadInto(u: number, lat0: number, h0: number, arr: Float32Array, o: number): void {
     const i = Math.floor(u);
     const f = u - i;
     const a = mod(i, t.total);
     const b = mod(i + 1, t.total);
     const L = (x: number, y: number): number => x + (y - x) * f;
+    const d = drumOf(t, a);
+    let lat = lat0;
+    let h = h0;
+    if (d) {
+      const r = L(t.roll[a], t.roll[(t.edge[b] & EDGE_DRUM) !== 0 ? b : a]);
+      const y = h0 - d.radius;
+      lat = lat0 * Math.cos(r) - y * Math.sin(r);
+      h = d.radius + lat0 * Math.sin(r) + y * Math.cos(r);
+    }
     arr[o] = L(t.px[a], t.px[b]) + L(rightX(t, a), rightX(t, b)) * lat;
     arr[o + 1] = L(t.py[a], t.py[b]) + lat * L(t.bank[a], t.bank[b]) + h;
     arr[o + 2] = L(t.pz[a], t.pz[b]) + L(rightZ(t, a), rightZ(t, b)) * lat;
