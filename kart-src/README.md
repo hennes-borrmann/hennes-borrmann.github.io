@@ -10,7 +10,9 @@ Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt ke
 
 **https://hennes-borrmann.github.io/kart/**
 
-Auf dem iPad oder Rechner öffnen, Lobby erstellen, QR-Code mit dem Handy scannen, Strecke wählen, Rennen starten.
+Auf dem iPad oder Rechner öffnen, Lobby erstellen, über „Handy koppeln“ den QR-Code mit dem Handy scannen, dann in drei Schritten: **1 Figur**, **2 Strecke**, **3 Start**.
+
+Die Lobby führt wie an der Konsole Schritt für Schritt, jeder Schritt passt auf einen Bildschirm (Schrittleiste oben, „Zurück“/„Weiter“ unten): Figurenwahl mit Fahrwerten, Strecken als Bilder-Raster mit Detail zur gewählten Strecke (im Turnier: der Lostopf), dann Modus, Runden, KI-Gegner und Fahrerfeld mit dem Start-Knopf. Raumcode und Einladungslink stehen in der Kopfzeile, daneben „Handy koppeln“ (Punkt grün = verbunden) und das Zahnrad für Einstellungen und Diagnose.
 
 ### Einzelrennen oder Turnier
 
@@ -140,7 +142,7 @@ Freie Plätze fahren KI-Gegner (in der Lobby abschaltbar), Stärke **Leicht**, *
 
 ### Einstellungen (je Bildschirm)
 
-Knopf „Einstellungen“ in der Lobby oder im Menü während des Rennens:
+Zahnrad in der Kopfzeile der Lobby oder „Einstellungen“ im Menü während des Rennens:
 
 - **Grafik:** Automatisch, Niedrig, Mittel, Hoch. „Automatisch“ senkt die Auflösung, sobald das Bild unter 50 Bilder pro Sekunde fällt, und geht notfalls eine Stufe herunter.
 - **Bildrate anzeigen:** blendet oben die gemessenen Bilder pro Sekunde ein – so lässt sich prüfen, ob ein Gerät 60 schafft.
@@ -171,12 +173,12 @@ Für echte Handys reicht `npm run dev` nicht: der Bewegungssensor braucht HTTPS.
 ## Was du prüfen solltest
 
 1. iPad/Rechner: Seite öffnen, Namen eintragen, **Lobby erstellen**.
-2. Handy: QR-Code unter „Dein Controller“ scannen → **Tippen zum Starten** → Sensor erlauben → Handy quer halten → **Kalibrieren**.
+2. Handy: In der Kopfzeile „Handy koppeln“ antippen, QR-Code scannen → **Tippen zum Starten** → Sensor erlauben → Handy quer halten → **Kalibrieren**.
 3. Zweiter Bildschirm: Einladungslink öffnen oder Raumcode eintippen, eigenes Handy koppeln, **Ich bin bereit**.
-4. Host: Strecke, KI-Stärke und Rundenzahl (2–5, Vorgabe 3) wählen, **Rennen starten**. Die Mitspieler sehen die Auswahl, ändern kann sie nur der Host.
+4. Host: Figur, Strecke, dann im Schritt „Start“ KI-Stärke und Rundenzahl (2–5, Vorgabe 3) wählen, **Rennen starten**. Die Mitspieler sehen die Auswahl, ändern kann sie nur der Host.
 5. Auf dem iPad in den Einstellungen **Bildrate anzeigen** einschalten und im Rennen ablesen.
 6. Nach dem Ziel: Ergebnisliste, dann **Nochmal** oder **Zur Lobby** (wählt der Host).
-7. Diagnose (im Menü oder Taste F2) bei Bedarf: Latenz, Raten, „direkt“ oder „über TURN“.
+7. Diagnose (Zahnrad in der Lobby, im Menü oder Taste F2) bei Bedarf: Latenz, Raten, „direkt“ oder „über TURN“.
 
 ## TURN – was ohne nicht geht
 
