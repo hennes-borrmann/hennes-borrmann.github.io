@@ -1629,6 +1629,8 @@ export class App {
         return t ? { time, phase: tidePhase(t, time), level: tideLevel(t, time), period: t.period, wall: performance.timeOrigin + performance.now() } : null;
       },
       scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
+      // Wie ein Kart auf diesem Bildschirm gezeigt wird: Maßstab, wie gold (0 … 1), sichtbar.
+      look: (slot: number) => this.scene?.kartLook(slot) ?? null,
       tree: () => this.scene?.debugTree() ?? [],
       buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),

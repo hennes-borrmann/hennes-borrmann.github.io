@@ -48,6 +48,11 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'use-kite',
   'use-rocket',
   'use-wing',
+  // Get Gold: man hört andere trinken, golden werden, umhauen und Items abprallen lassen
+  'use-gold',
+  'gold',
+  'gold-ram',
+  'gold-ping',
   'rocket-launch',
   'rocket-hit',
   // Was die Strecke selbst von sich gibt
