@@ -160,7 +160,9 @@ export const ITEM_SMOKE = 7;
 export const ITEM_SPRING = 8;
 /** "Abschleppdrache": zieht das Kart ein paar Sekunden von selbst die Strecke entlang – nur für die Hinteren. */
 export const ITEM_KITE = 9;
-export const ITEM_COUNT = 10;
+/** "Rakete": trifft alle anderen Fahrer und hält sie kurz an – selten, und nur für den Letzten. */
+export const ITEM_ROCKET = 10;
+export const ITEM_COUNT = 11;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -292,8 +294,19 @@ export const EV_WIND = 1 << 28;
 export const EV_CHARGE = 1 << 29;
 /** Durch ein Portal gefahren: das Kart steht jetzt an dessen Ausgang. */
 export const EV_PORTAL = 1 << 30;
+/** Rakete gezündet. (Das letzte Bit: der Wert ist negativ – nur mit & abfragen, nie mit > 0.) */
+export const EV_USE_ROCKET = 1 << 31;
 export const EV_USE_ANY =
-  EV_USE_BOOST | EV_USE_TIRE | EV_USE_OIL | EV_USE_TOP | EV_USE_GUARD | EV_USE_EMP | EV_USE_SMOKE | EV_USE_SPRING | EV_USE_KITE;
+  EV_USE_BOOST |
+  EV_USE_TIRE |
+  EV_USE_OIL |
+  EV_USE_TOP |
+  EV_USE_GUARD |
+  EV_USE_EMP |
+  EV_USE_SMOKE |
+  EV_USE_SPRING |
+  EV_USE_KITE |
+  EV_USE_ROCKET;
 
 // --- Abstimmung --------------------------------------------------------------
 // Diese Werte bestimmen das Fahrgefühl. Geschwindigkeiten in m/s.
@@ -324,6 +337,8 @@ const TURBO_TICKS = [30, 57, 90];
 export const PAD_TICKS = 60;
 const ITEM_BOOST_TICKS = 100;
 export const SPIN_TICKS = 75;
+/** Rakete: so lange steht ein getroffenes Kart (gut 2 s – länger als nach jedem anderen Treffer). */
+export const ROCKET_SPIN_TICKS = 125;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
@@ -565,6 +580,28 @@ export function flattenKart(s: KartState): number {
   s.boost = 0;
   s.vx *= 0.4;
   s.vz *= 0.4;
+  return HIT_SPIN;
+}
+
+/**
+ * Rakete: das Kart wird fast angehalten und schleudert länger als nach einem gewöhnlichen Treffer.
+ * Sie trifft auch, wer gerade schleudert oder nach einem Treffer noch blinkt; nur der Stoßfänger fängt sie ab.
+ * Wer gerade abgesetzt wird oder am Drachen hängt, ist außer Reichweite. Rückgabe wie hitKart.
+ */
+export function rocketKart(s: KartState): number {
+  if (s.respawn > 0 || s.tow > 0) return HIT_NONE;
+  if (s.guard > 0) {
+    s.guard = 0;
+    s.shield = 50;
+    return HIT_BLOCKED;
+  }
+  s.spin = ROCKET_SPIN_TICKS;
+  s.shield = ROCKET_SPIN_TICKS + SHIELD_TICKS;
+  s.driftDir = 0;
+  s.driftCharge = 0;
+  s.boost = 0;
+  s.vx *= 0.12;
+  s.vz *= 0.12;
   return HIT_SPIN;
 }
 
@@ -1676,6 +1713,9 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
       break;
     case ITEM_EMP:
       ev |= EV_USE_EMP;
+      break;
+    case ITEM_ROCKET:
+      ev |= EV_USE_ROCKET;
       break;
     case ITEM_SMOKE:
       ev |= EV_USE_SMOKE;

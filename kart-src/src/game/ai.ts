@@ -24,6 +24,7 @@ import {
   ITEM_KITE,
   ITEM_NONE,
   ITEM_OIL,
+  ITEM_ROCKET,
   ITEM_SMOKE,
   ITEM_SPRING,
   ITEM_TIRE,
@@ -864,6 +865,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         break;
       case ITEM_EMP:
         press = b.holding > 50 && (ctx.place > 1 || late);
+        break;
+      case ITEM_ROCKET:
+        // Trifft alle anderen, egal wo – kein Grund zu warten.
+        press = b.holding > 40;
         break;
       case ITEM_KITE:
         // Der Drache lenkt selbst – sofort nutzen.

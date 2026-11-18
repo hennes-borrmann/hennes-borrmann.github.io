@@ -2,7 +2,7 @@
 
 Kart-Racer für den Browser. Jeder Spieler hat einen eigenen Bildschirm (iPad oder Desktop) und lenkt mit dem Handy. Online über Lobbys mit Raumcode, kein Splitscreen.
 
-**Stand: Phase 3 mit Ausbau Schritt 19.** Achtzehn Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen – jede mit eigener Streckenmechanik (Förderbänder und Stampfpressen im Werkshof; Ebbe und Flut an der Möwenklippe; Geysire, Lavabomben und Lavaschwall im Glutkessel; Stadtverkehr auf der Nachtschicht; Fliegen auf der Wolkenwerft; Tauchen am Tiefseeriff; Rutschen, Lawinen und Eiszapfen am Eiszapfen-Pass; geringe Schwerkraft, Sprungplatten und Meteoriten auf der Mondbasis; Böen und schwankende Pontons im Sturmhafen; eine Strecke, die während des Rennens zerbricht, auf der Vulkaninsel; ein Tempel, der alle 18 Sekunden zwischen zwei Zeitaltern springt, in der Zeitriss-Ruine; Dunkelheit, Blitzeinschläge und Blitzableiter mit Ladefeld am Gewitterkamm; treibende Flöße als Fahrbahn am Dschungel-Fluss; Spiegel, durch die man woanders wieder herauskommt, im Spiegelkabinett; fahrende Züge, über deren Dächer man fährt, am Wüstenexpress; Schrumpfen und Wachsen im Riesenkinderzimmer; Schienen mit Kettenlift und Schubmagneten auf dem Achterbahn-Rummel; Fahren an Wand und Decke in der Magnettrommel des Magnetwerks) –, neun Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
+**Stand: Phase 3 mit Ausbau Schritt 19.** Achtzehn Strecken von je rund 1,5 km mit Abzweigungen, Höhlen, Steilkurven, Sprüngen und eigenen Untergründen – jede mit eigener Streckenmechanik (Förderbänder und Stampfpressen im Werkshof; Ebbe und Flut an der Möwenklippe; Geysire, Lavabomben und Lavaschwall im Glutkessel; Stadtverkehr auf der Nachtschicht; Fliegen auf der Wolkenwerft; Tauchen am Tiefseeriff; Rutschen, Lawinen und Eiszapfen am Eiszapfen-Pass; geringe Schwerkraft, Sprungplatten und Meteoriten auf der Mondbasis; Böen und schwankende Pontons im Sturmhafen; eine Strecke, die während des Rennens zerbricht, auf der Vulkaninsel; ein Tempel, der alle 18 Sekunden zwischen zwei Zeitaltern springt, in der Zeitriss-Ruine; Dunkelheit, Blitzeinschläge und Blitzableiter mit Ladefeld am Gewitterkamm; treibende Flöße als Fahrbahn am Dschungel-Fluss; Spiegel, durch die man woanders wieder herauskommt, im Spiegelkabinett; fahrende Züge, über deren Dächer man fährt, am Wüstenexpress; Schrumpfen und Wachsen im Riesenkinderzimmer; Schienen mit Kettenlift und Schubmagneten auf dem Achterbahn-Rummel; Fahren an Wand und Decke in der Magnettrommel des Magnetwerks) –, zehn Items, vier wählbare Figuren mit leicht verschiedenen Fahrwerten, KI-Gegner in drei Stärken, lebendige Kulissen, Grafik im Stil „Comic-Tusche“, Ton und Musik aus dem Synthesizer.
 
 Alles ist selbst entworfen: Figuren, Strecken, Items, Namen, Klänge. Es gibt keine fremden Modelle, Bilder, Schriften oder Tonaufnahmen im Spiel.
 
@@ -99,7 +99,7 @@ Wer von einer Kante oder in eine Lücke fällt, wird nach etwa einer Sekunde wie
 
 ### Items (aus den gelben Kisten)
 
-Neun Items:
+Zehn Items:
 
 | Item | Wirkung |
 | --- | --- |
@@ -112,8 +112,9 @@ Neun Items:
 | **Nebelkerze** | Rauchwolke hinter dir – wer hineinfährt, sieht kurz nichts |
 | **Sprungfeder** | Hüpfer aus der Fahrt: über Öl, Reifen und Hindernisse hinweg |
 | **Abschleppdrache** | zieht dich vier Sekunden lang von selbst mit rund 145 km/h die Strecke entlang, auch über Lücken; wer im Weg steht, wird beiseitegeschoben; Lenken verschiebt die Spur, die Bremse kappt die Schnur |
+| **Rakete** | steigt senkrecht auf und schlägt eine Sekunde später bei allen anderen Fahrern ein: Sie bleiben gut zwei Sekunden stehen und schleudern (ein gewöhnlicher Treffer dauert gut eine Sekunde). Trifft auch, wer gerade schleudert; nur ein aktiver Stoßfänger fängt sie ab, und wer am Drachen hängt oder gerade abgesetzt wird, ist außer Reichweite. Wer im Ziel ist, bleibt verschont. Die anderen sehen „Rakete im Anflug!“ und hören sie herunterpfeifen. |
 
-Wer vorn liegt, bekommt eher Abwehr (Öl, Nebel, Stoßfänger); wer hinten liegt, eher Schub, Brummkreisel und Kurzschluss. Den Abschleppdrachen gibt es nur auf dem letzten Platz (bei vier Fahrern selten auch auf dem vorletzten) und nur, wenn das Kart davor mehr als 45 m Vorsprung hat.
+Wer vorn liegt, bekommt eher Abwehr (Öl, Nebel, Stoßfänger); wer hinten liegt, eher Schub, Brummkreisel und Kurzschluss. Den Abschleppdrachen gibt es nur auf dem letzten Platz (bei vier Fahrern selten auch auf dem vorletzten) und nur, wenn das Kart davor mehr als 45 m Vorsprung hat. Die Rakete gibt es ebenfalls nur auf dem letzten Platz, unabhängig vom Abstand und selten: in gut 5 % der Kisten (wenn zugleich der Drache möglich ist, gut 4 %).
 
 Die Figur hält ihr Item sichtbar in der Hand und benutzt es mit einer eigenen Bewegung. Sucht ein Brummkreisel das eigene Kart, warnen ein Hinweis und ein Ton, der schneller wird, je näher er kommt.
 
