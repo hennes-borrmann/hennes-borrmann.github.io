@@ -57,6 +57,12 @@ export interface KartPose {
   rocket?: number;
   /** Rakete: Stärke des Düsenfeuers 0..1. */
   rocketFlame?: number;
+  /** Get Gold: Fortschritt des Austrinkens 0..1 (0 = es wird gerade nicht getrunken). */
+  drink?: number;
+  /** Get Gold: das Kart ist gold (Fahrer und Kart, mit Glanz). */
+  gold?: boolean;
+  /** Get Gold läuft gleich ab: die Goldfarbe blinkt. */
+  goldBlink?: boolean;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -3024,7 +3030,8 @@ const I_EMP = 6;
 const I_SPRING = 8;
 const I_KITE = 9;
 const I_ROCKET = 10;
-const I_COUNT = 12;
+const I_GOLD = 12;
+const I_COUNT = 13;
 
 // Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
 const I_RED = 0xff5a4e;
@@ -3369,6 +3376,65 @@ function buildRocket(b: Builder): void {
   b.put(cyl(0.05, 0.062, 0.05, 12), { bone: 0, color: 0x5a5566, pos: [0, -0.005, 0], outline: 0.6 });
 }
 
+/** Fünfzackiger Stern mit Radius 1 (für prism). */
+const STAR: readonly number[] = (() => {
+  const out: number[] = [];
+  for (let i = 0; i < 10; i++) {
+    const a = HALF_PI + (i * Math.PI) / 5;
+    const r = i % 2 === 0 ? 1 : 0.45;
+    out.push(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  return out;
+})();
+
+/** Get Gold: bauchige Goldflasche mit Korken, rotem Etikett mit Goldstern (vorn und hinten) und Glanzlicht. */
+function buildGoldBottle(b: Builder): void {
+  const GOLD = 0xffc62a;
+  const GOLD_D = 0xcf8a12;
+  const GOLD_L = 0xffeb9a;
+  b.put(
+    lathe(
+      [
+        [0, -0.07, GOLD_D],
+        [0.108, -0.07],
+        [0.146, -0.035],
+        [0.156, 0.01, GOLD, true],
+        [0.156, 0.04, I_RED, true],
+        [0.156, 0.15, GOLD, true],
+        [0.152, 0.18],
+        [0.13, 0.235],
+        [0.09, 0.28, GOLD_L, true],
+        [0.056, 0.315],
+        [0.05, 0.35, GOLD_D, true],
+        [0.062, 0.362],
+        [0.062, 0.385],
+        [0, 0.385],
+      ],
+      16,
+    ),
+    { bone: 0 },
+  );
+  // Korken
+  b.put(
+    lathe(
+      [
+        [0, 0.37, 0xa8683a],
+        [0.046, 0.37],
+        [0.055, 0.41],
+        [0.053, 0.445],
+        [0, 0.452],
+      ],
+      10,
+    ),
+    { bone: 0 },
+  );
+  for (const sd of [1, -1])
+    b.put(prism(STAR, 0.02), { bone: 0, color: GOLD_L, pos: [0, 0.095, sd * 0.158], rot: [0, sd > 0 ? 0 : Math.PI, 0], scale: [0.05, 0.05, 1], outline: 0.4 });
+  // Glanzlicht
+  b.put(box(0.026, 0.11, 0.01), { bone: 0, color: 0xfffbe6, pos: [0.07, 0.2, -0.13], rot: [-0.45, 0, -0.5], outline: 0 });
+  b.put(box(0.02, 0.05, 0.01), { bone: 0, color: 0xfffbe6, pos: [0.09, 0.005, -0.12], rot: [-0.3, 0, -0.5], outline: 0 });
+}
+
 // ───────────────────────────── Rakete (Verwandlung) ─────────────────────────────
 //
 // Das Kart klappt die Räder ein, stellt sich auf und wird Stück für Stück mit einer
@@ -3574,7 +3640,7 @@ let itemGeos: ItemGeo[] | null = null;
 /** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
 function getItemGeos(): ItemGeo[] {
   if (itemGeos) return itemGeos;
-  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket, buildGlider];
+  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket, buildGlider, buildGoldBottle];
   const out: ItemGeo[] = [];
   for (let i = 0; i < I_COUNT; i++) {
     const b = new Builder(ONE_BONE, 2, true);
@@ -3845,7 +3911,55 @@ const GESTURES: (Gesture | null)[] = [
     release: 0.42,
     fly: [0, 7, 0.5, 0, 0.25],
   },
+  // Get Gold: keine Geste – das Austrinken folgt dem Spielstand (pose.drink, siehe planItem und drinkHands).
+  null,
 ];
+
+// ───────────────────────────── Get Gold ─────────────────────────────
+//
+// Austrinken: Die Figur nimmt die Flasche in beide Hände, setzt sie an den Mund, kippt sie (Kopf in den Nacken), setzt ab
+// und wirft sie über die Schulter weg. Danach wird alles gold – vom Mund aus breitet sich die Farbe über Figur und Kart
+// aus; im Gold läuft ab und zu ein Glanzstreifen darüber. Kein eigener Shader: Die Eckenfarben des Netzes werden
+// umgeschrieben (Gold = Helligkeit der Originalfarbe auf einer Goldskala), dazu ein goldenes Glimmen (emissive).
+
+/** Mund im Raum des Kopfknochens, je Figur (dort sitzt beim Trinken der Flaschenhals). */
+const MOUTH: readonly V3[] = [
+  [0, 0.17, 0.37],
+  [0, 0.17, 0.42],
+  [0, 0.16, 0.36],
+  [0, 0.14, 0.3],
+];
+/** Flasche beim Trinken: Maßstab, Höhe des Griffs und des Halses über dem Boden der Flasche (Meter bei Maßstab 1). */
+const DRINK_SCALE = 1.3;
+const DRINK_GRIP = 0.16;
+const DRINK_NECK = 0.37;
+/** So weit darf sich ein Arm beim Trinken strecken (Vielfaches seiner Länge) – Gummiarme, aber nicht endlos. */
+const DRINK_STRETCH = 1.3;
+/** Anteile des Austrinkens: Flasche loslassen (Wurf über die Schulter). */
+const DRINK_THROW = 0.84;
+/** Goldskala: Schatten, Mitte, Licht, Glanz (Farben als lineares RGB). */
+const GOLD_RAMP = [rgb(0x4e2a02), rgb(0xc27a0c), rgb(0xffc93a), rgb(0xffeaa0)];
+/** Ausbreiten und Zurückweichen der Goldfarbe (Sekunden), Breite der Front (Anteil des Wegs). */
+const GOLD_IN = 0.5;
+const GOLD_OUT = 0.45;
+const GOLD_EDGE = 0.22;
+/** Glanzstreifen: alle so viele Sekunden, so lange, so breit (Meter). */
+const GLINT_EVERY = 1.7;
+const GLINT_DUR = 0.42;
+const GLINT_W = 0.26;
+
+/** Goldfarbe zu einer Eckenfarbe (lineares RGB): Helligkeit auf der Goldskala, dunkle Teile bleiben dunkles Gold. */
+function goldOf(r: number, g: number, b: number, out: Float32Array, o: number): void {
+  const v = Math.sqrt(Math.max(0, 0.2126 * r + 0.7152 * g + 0.0722 * b));
+  const x = clamp(0.06 + v * 1.12, 0, 1) * (GOLD_RAMP.length - 2);
+  const i = Math.min(GOLD_RAMP.length - 3, Math.floor(x));
+  const f = x - i;
+  const a = GOLD_RAMP[i];
+  const c = GOLD_RAMP[i + 1];
+  out[o] = a[0] + (c[0] - a[0]) * f;
+  out[o + 1] = a[1] + (c[1] - a[1]) * f;
+  out[o + 2] = a[2] + (c[2] - a[2]) * f;
+}
 
 function smooth01(x: number): number {
   const c = clamp(x, 0, 1);
@@ -3873,6 +3987,9 @@ const _iq = new THREE.Quaternion();
 const _ie = new THREE.Euler();
 const _ik = new Float32Array(KEY);
 const _dv = new THREE.Vector3();
+const _dg = new THREE.Vector3();
+const _dc = new THREE.Vector3();
+const _dx = new THREE.Vector3();
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -4040,6 +4157,28 @@ export class KartVisual {
   private flyG = 0;
   private flyDur = 0;
 
+  // Get Gold: Austrinken laut Spielstand (0..1, 0 = nicht), beidhändige Haltung (geglättet), Flasche (Mitte, Achse vom
+  // Boden zum Hals, Neigung, Hand am Mund), Ziel der linken Hand; die Flasche ist geworfen.
+  private fDrink = 0;
+  private drinkW = 0;
+  private drinkTilt = 0;
+  private drinkRaise = 0;
+  private drinkThrown = false;
+  private readonly gripP = new THREE.Vector3();
+  private readonly gripU = new THREE.Vector3(0, 1, 0);
+  private readonly handTL = new THREE.Vector3();
+  // Gold: Ziel, Anteil (0..1, linear in der Zeit), zuletzt gezeigter Stand der Farben, Farben (Original, Gold) und
+  // Abstand jeder Ecke vom Mund (0..1, für die Ausbreitung) sowie ihre Lage längs des Glanzstreifens.
+  private fGold = false;
+  private fGoldBlink = false;
+  private goldU = 0;
+  private goldShown = 0;
+  private goldGlint = -1;
+  private goldBase: Float32Array | null = null;
+  private goldCol: Float32Array | null = null;
+  private goldD: Float32Array | null = null;
+  private goldA: Float32Array | null = null;
+
   // Rakete: Hüllenteile, Düsenfeuer, Stand der Verwandlung
   private readonly rocketForm = new THREE.Group();
   private readonly rocketMeshes: THREE.Mesh[] = [];
@@ -4195,7 +4334,8 @@ export class KartVisual {
    * welcher Gegenstand fliegt, kommt deshalb von hier.
    */
   useItem(item: number): void {
-    if (!(item >= 1 && item < I_COUNT)) return;
+    // (Get Gold hat keine Geste: das Austrinken kommt aus dem Spielstand.)
+    if (!(item >= 1 && item < I_COUNT) || item === I_GOLD) return;
     this.gItem = Math.floor(item);
     this.gT = 0;
     this.gDone = false;
@@ -4204,6 +4344,11 @@ export class KartVisual {
       this.gFly = -1;
       this.propS = 0;
     }
+  }
+
+  /** Wie gold das Kart gerade gezeigt wird (0 … 1) – für Tests. */
+  get goldLook(): number {
+    return this.goldShown;
   }
 
   setDetail(detail: KartDetail): void {
@@ -4403,6 +4548,86 @@ export class KartVisual {
     const state = this.eyeState < 0 ? EYE.OPEN : this.eyeState;
     this.eyeState = -1;
     this.setEyes(state);
+    this.prepareGold();
+  }
+
+  /** Goldfarben zum neu gebauten Netz: Gold je Ecke, Abstand vom Mund, Lage längs des Glanzstreifens. */
+  private prepareGold(): void {
+    const geo = this.body.geometry;
+    const col = geo.getAttribute('color') as THREE.BufferAttribute;
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const n = col.count;
+    const base = new Float32Array(col.array as Float32Array);
+    const gold = new Float32Array(n * 3);
+    const dist = new Float32Array(n);
+    const along = new Float32Array(n);
+    const sp = this.spec;
+    const m = MOUTH[this.character];
+    const mx = 0;
+    const my = sp.hip[1] + sp.torsoLen + m[1];
+    const mz = sp.hip[2] + m[2];
+    let far = 1e-3;
+    for (let i = 0; i < n; i++) {
+      goldOf(base[i * 3], base[i * 3 + 1], base[i * 3 + 2], gold, i * 3);
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      // (Weiter unten zählt etwas mehr: die Farbe läuft am Fahrer herab und dann übers Kart.)
+      const d = Math.hypot(x - mx, (y - my) * 1.25, z - mz);
+      dist[i] = d;
+      if (d > far) far = d;
+      // Glanzstreifen: schräg von vorn unten nach hinten oben
+      along[i] = z * 0.62 - y * 0.78;
+    }
+    for (let i = 0; i < n; i++) dist[i] /= far;
+    this.goldBase = base;
+    this.goldCol = gold;
+    this.goldD = dist;
+    this.goldA = along;
+    // Neu gebaut, also in den Originalfarben: beim nächsten Bild wird der Stand wieder hergestellt.
+    this.goldShown = 0;
+    this.goldGlint = -1;
+  }
+
+  /**
+   * Färbt das Netz: k = 0 Original … 1 ganz gold (dazwischen breitet sich das Gold vom Mund aus); glint = Lage des
+   * Glanzstreifens (Meter, −99 = keiner).
+   */
+  private paintGold(k: number, glint: number): void {
+    const base = this.goldBase;
+    const gold = this.goldCol;
+    const dist = this.goldD;
+    const along = this.goldA;
+    if (!base || !gold || !dist || !along) return;
+    const attr = this.body.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const out = attr.array as Float32Array;
+    const n = dist.length;
+    const hi = GOLD_RAMP[3];
+    if (k <= 0) out.set(base);
+    else if (k >= 1 && glint < -50) out.set(gold);
+    else {
+      const front = k * (1 + GOLD_EDGE);
+      for (let i = 0; i < n; i++) {
+        let w = k >= 1 ? 1 : clamp((front - dist[i]) / GOLD_EDGE, 0, 1);
+        w = w * w * (3 - 2 * w);
+        const o = i * 3;
+        let r = base[o] + (gold[o] - base[o]) * w;
+        let g = base[o + 1] + (gold[o + 1] - base[o + 1]) * w;
+        let b = base[o + 2] + (gold[o + 2] - base[o + 2]) * w;
+        // Die Front selbst leuchtet hell auf.
+        let shine = k < 1 ? Math.max(0, 1 - Math.abs(front - GOLD_EDGE * 0.5 - dist[i]) / (GOLD_EDGE * 0.5)) * 0.5 : 0;
+        if (glint > -50) shine = Math.max(shine, Math.max(0, 1 - Math.abs(along[i] - glint) / GLINT_W) * w);
+        if (shine > 0) {
+          r += (hi[0] - r) * shine;
+          g += (hi[1] - g) * shine;
+          b += (hi[2] - b) * shine;
+        }
+        out[o] = r;
+        out[o + 1] = g;
+        out[o + 2] = b;
+      }
+    }
+    attr.needsUpdate = true;
   }
 
   private swapOutline(
@@ -4479,6 +4704,10 @@ export class KartVisual {
     this.fRocket = rocket === rocket ? clamp(rocket, 0, 1) : 0;
     const rf = pose.rocketFlame ?? 0;
     this.fRocketFlame = rf === rf ? clamp(rf, 0, 1) : 0;
+    const dk = pose.drink ?? 0;
+    this.fDrink = dk === dk ? clamp(dk, 0, 1) : 0;
+    this.fGold = pose.gold === true;
+    this.fGoldBlink = pose.goldBlink === true;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -4552,8 +4781,34 @@ export class KartVisual {
     this.moveSpace();
     this.moveItem();
     this.moveRocket();
+    this.moveGold();
     this.pickEyes(pose);
     this.placeAnchors();
+  }
+
+  /** Gold: ausbreiten, glänzen, blinken, zurückweichen – und ein goldenes Glimmen. */
+  private moveGold(): void {
+    const dt = this.fDt;
+    const t = this.time;
+    this.goldU = this.fGold ? Math.min(1, this.goldU + dt / GOLD_IN) : Math.max(0, this.goldU - dt / GOLD_OUT);
+    // Kurz vor dem Ende blinkt es (acht Wechsel je Sekunde), sonst zeigt es den Stand der Ausbreitung.
+    const k = this.fGold && this.fGoldBlink && Math.floor(t * 8) % 2 === 1 ? 0 : this.goldU;
+    let glint = -99;
+    if (k >= 1 && !this.fGoldBlink) {
+      const ph = (t % GLINT_EVERY) / GLINT_DUR;
+      if (ph < 1) glint = -2.4 + ph * 3.6;
+    }
+    if (k !== this.goldShown || glint !== this.goldGlint) {
+      this.paintGold(k, glint);
+      this.goldShown = k;
+      this.goldGlint = glint;
+    }
+    // Glimmen: lässt auch die Schattenseite golden wirken; pulsiert sacht.
+    const e = this.toon.emissive;
+    if (k > 0) {
+      const pulse = k * (0.8 + 0.2 * Math.sin(t * 5.3));
+      e.setRGB(0.1 * pulse, 0.05 * pulse, 0);
+    } else if (e.r !== 0 || e.g !== 0) e.setRGB(0, 0, 0);
   }
 
   /**
@@ -4782,9 +5037,63 @@ export class KartVisual {
     this.handT
       .set(-(sp.shoulder[0] + this.hOut), sp.shoulder[1] + this.hUp * reach, sp.shoulder[2] + this.hFwd * reach)
       .applyMatrix4(torso.matrix);
+    if (this.drinkW > 0.001 || this.fDrink > 0) this.drinkHands();
     this.solveArm(1);
     this.solveArm(-1);
     this.handP.copy(bn[B.handR].position);
+  }
+
+  /**
+   * Get Gold: Wo die Flasche gerade ist (Mitte gripP, Achse gripU vom Boden zum Hals) und wohin beide Hände greifen.
+   * Erst vor die Brust, dann an den Mund (der Hals sitzt dort, auch wenn der Kopf in den Nacken geht), kippen, absetzen.
+   */
+  private drinkHands(): void {
+    const sp = this.spec;
+    const bn = this.bones;
+    const torso = bn[B.torso];
+    const head = bn[B.head];
+    const p = this.fDrink;
+    const t = this.time;
+    const dt = this.fDt;
+    // Neigung (0 = aufrecht, π/2 = waagrecht, Hals zum Gesicht) und wie weit die Flasche schon am Mund ist.
+    let tilt = 0;
+    if (p < 0.22) tilt = 0.75 * smooth01((p - 0.06) / 0.16);
+    else if (p < 0.72) tilt = 0.75 + 1.6 * smooth01((p - 0.22) / 0.5);
+    else tilt = 2.35 - 1.45 * smooth01((p - 0.72) / 0.1);
+    const raise = p > 0 ? smooth01((p - 0.08) / 0.16) * (1 - smooth01((p - 0.74) / 0.1)) : 0;
+    this.drinkTilt = p > 0 ? damp(this.drinkTilt, tilt, 25, dt) : damp(this.drinkTilt, 0, 12, dt);
+    this.drinkRaise = p > 0 ? damp(this.drinkRaise, raise, 25, dt) : damp(this.drinkRaise, 0, 12, dt);
+    const s = DRINK_SCALE;
+    // Mund im Raum der Karosserie (der Kopf ist schon gedreht)
+    head.updateMatrix();
+    const m = MOUTH[this.character];
+    _dv.set(m[0], m[1], m[2]).applyMatrix4(head.matrix).applyMatrix4(torso.matrix);
+    // Achse der Flasche
+    const a = this.drinkTilt;
+    this.gripU.set(0, Math.cos(a), -Math.sin(a)).applyQuaternion(torso.quaternion);
+    // Griff, wenn der Hals am Mund liegt (beim Gluckern wackelt die Flasche ein wenig) …
+    const glug = p > 0.26 && p < 0.72 ? Math.sin(t * 34) * 0.012 : 0;
+    _dg.copy(_dv).addScaledVector(this.gripU, -(DRINK_NECK - DRINK_GRIP) * s);
+    _dg.y += glug;
+    // … und vor der Brust (Anfang und Ende)
+    const reach = (sp.upper + sp.fore) / 0.5;
+    _dc.set(0, sp.shoulder[1] + 0.02, sp.shoulder[2] + 0.36 * reach).applyMatrix4(torso.matrix);
+    this.gripP.lerpVectors(_dc, _dg, this.drinkRaise);
+    // Zu weit für die Arme: die Flasche kommt den Schultern entgegen (bis DRINK_STRETCH dürfen sie sich strecken).
+    _dx.set(1, 0, 0).applyQuaternion(torso.quaternion);
+    const gw = 0.15 * s + sp.hand * 0.55;
+    _sh.set(0, sp.shoulder[1], sp.shoulder[2]).applyMatrix4(torso.matrix);
+    const arm = (sp.upper + sp.fore) * DRINK_STRETCH;
+    const side = Math.max(0, sp.shoulder[0] - gw);
+    _dc.subVectors(this.gripP, _sh);
+    const fromMid = _dc.length();
+    const can = Math.sqrt(Math.max(0, arm * arm - side * side));
+    if (fromMid > can) this.gripP.copy(_sh).addScaledVector(_dc, can / fromMid);
+    // Beide Hände links und rechts an der Flasche.
+    const w = this.drinkW;
+    _dc.copy(this.gripP).addScaledVector(_dx, -gw);
+    this.handT.lerp(_dc, w);
+    this.handTL.copy(this.gripP).addScaledVector(_dx, gw);
   }
 
   /** Figur-eigenes Zubehör: Motor und Kiefer, Schal, Schnauzbart, Schwanz und Antennen. */
@@ -4801,7 +5110,8 @@ export class KartVisual {
         const shake = 0.35 + this.fIdle * 0.65 + this.boostS * 0.8;
         en.position.y = this.restPos[B.aux0 * 3 + 1] + Math.sin(t * 58) * 0.006 * shake + cough * 0.02;
         en.rotation.z = Math.sin(t * 58 + 1) * 0.022 * shake + cough * 0.06 * Math.sin(t * 80);
-        const open = Math.max(winS * (0.55 + 0.45 * Math.sin(t * 17)), stallS * 0.75, airS * 0.6, spinS * 0.7);
+        const sip = this.fDrink > 0.2 && this.fDrink < 0.74 ? 0.7 + 0.3 * Math.sin(t * 34) : 0;
+        const open = Math.max(winS * (0.55 + 0.45 * Math.sin(t * 17)), stallS * 0.75, airS * 0.6, spinS * 0.7, sip);
         bn[B.aux1].rotation.x = open * 0.42;
         break;
       }
@@ -4984,6 +5294,32 @@ export class KartVisual {
       rate = 30;
       want = 1;
     }
+    // Get Gold: Austrinken. Die Hände folgen der Flasche (drinkHands); hier nur Oberkörper, Kopf und Gewichte.
+    const dp = this.fDrink;
+    if (dp > 0) {
+      // Kopf in den Nacken, solange getrunken wird; leicht zurückgelehnt; nach dem Absetzen ein zufriedenes Nicken.
+      const sip = smooth01((dp - 0.22) / 0.12) * (1 - smooth01((dp - 0.72) / 0.1));
+      hx = -0.42 * sip + 0.12 * smooth01((dp - 0.82) / 0.08) * (1 - smooth01((dp - 0.92) / 0.08));
+      tx = -0.12 * sip;
+      ty = 0;
+      tz = 0;
+      // Wurf über die rechte Schulter: Hand nach hinten oben, dann zurück ans Lenkrad.
+      const fling = smooth01((dp - 0.76) / 0.08) * (1 - smooth01((dp - 0.93) / 0.07));
+      out = 0.32;
+      up = 0.34;
+      fwd = -0.28;
+      ty = -0.35 * fling;
+      want = dp < 0.95 ? 1 : 0;
+      rate = 30;
+      if (fling <= 0 && dp < DRINK_THROW) {
+        // (Solange getrunken wird, bestimmt drinkHands die rechte Hand ganz – diese Werte zählen dann nicht.)
+        out = HOLD[0];
+        up = HOLD[1];
+        fwd = HOLD[2];
+      }
+    }
+    this.drinkW = damp(this.drinkW, dp > 0 && dp < DRINK_THROW - 0.04 ? 1 : 0, dp > 0 ? 22 : 12, dt);
+    if (dp <= 0) this.drinkThrown = false;
     this.hOut = damp(this.hOut, out, rate, dt);
     this.hUp = damp(this.hUp, up, rate, dt);
     this.hFwd = damp(this.hFwd, fwd, rate, dt);
@@ -5044,9 +5380,23 @@ export class KartVisual {
         this.propV = 0;
       }
     }
+    // Get Gold: abgesetzt – die Flasche fliegt über die rechte Schulter nach hinten weg und trudelt.
+    const drinking = this.fDrink > 0 && !this.drinkThrown;
+    if (drinking && this.fDrink >= DRINK_THROW) {
+      this.drinkThrown = true;
+      if (this.propItem === I_GOLD && this.propS > 0.02) {
+        this.flyP.copy(prop.position);
+        this.flyV.set(-2.2, 4.2, -6.5);
+        this.flyG = 16;
+        this.flyDur = 0.55;
+        this.gFly = 0;
+      }
+    }
     if (this.gFly < 0) {
       let want = this.fTow || this.kiteT >= 0 ? 0 : this.fHeld;
       if (g && !this.gDone) want = this.gItem;
+      // Beim Austrinken hält die Figur die Goldflasche – auch wenn sie inzwischen schon ein neues Item hat.
+      if (this.fDrink > 0 && !this.drinkThrown) want = I_GOLD;
       if (want !== this.propItem) {
         if (this.propItem !== 0 && this.propS > 0.02) {
           // erst schnell verschwinden, dann tauschen
@@ -5106,9 +5456,22 @@ export class KartVisual {
         }
       }
     }
+    if (item === I_GOLD && this.gFly >= 0) rx -= this.drinkTilt;
     _iq.setFromEuler(_ie.set(rx, this.propSpin, rz, 'XZY'));
     prop.quaternion.multiplyQuaternions(bn[B.torso].quaternion, _iq);
-    const s = Math.max(this.propS, 0) * mul;
+    let s = Math.max(this.propS, 0) * mul;
+    if (item === I_GOLD && (this.drinkW > 0.001 || this.gFly >= 0)) {
+      // Beim Trinken: in beiden Händen, Hals zum Mund geneigt (Übergang aus der Hand weich, so schnell wie die Hände).
+      const w = this.gFly >= 0 ? 1 : this.drinkW;
+      s *= 1 + (DRINK_SCALE - 1) * w;
+      if (this.gFly < 0) {
+        _iv.copy(this.gripP).addScaledVector(this.gripU, -DRINK_GRIP * s);
+        prop.position.lerp(_iv, w);
+        _iq.setFromAxisAngle(_iw.set(1, 0, 0), -this.drinkTilt);
+        _iq.premultiply(bn[B.torso].quaternion);
+        prop.quaternion.slerp(_iq, w);
+      }
+    }
     prop.scale.set(s, s * sy, s);
     prop.visible = item > 0 && s > 0.01;
 
@@ -5357,7 +5720,11 @@ export class KartVisual {
   /** Augen: Kringel beim Schleudern, verdattert bei Kurzschluss, sonst je nach Lage – und ab und zu blinzeln. */
   private pickEyes(pose: KartPose): void {
     let eye: number = EYE.OPEN;
+    // Get Gold: beim Trinken genießerisch geschlossen, danach entschlossen.
+    const sipping = this.fDrink > 0.22 && this.fDrink < 0.8;
     if (this.fSpin > 0) eye = EYE.DIZZY;
+    else if (sipping) eye = EYE.HAPPY;
+    else if (this.fGold && pose.emote === 'none') eye = EYE.FIERCE;
     else if (pose.stall) eye = EYE.STUN;
     else if (pose.emote === 'win') eye = EYE.HAPPY;
     else if (pose.emote === 'lose') eye = EYE.SAD;
@@ -5414,7 +5781,9 @@ export class KartVisual {
       _hd.lerp(_t, sw);
     }
     // … oder (nur rechts) beim Item. Hochgerissene Arme haben Vorrang, außer während einer Geste.
-    if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 ? 1 : 1 - up));
+    if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 || this.fDrink > 0 ? 1 : 1 - up));
+    // … oder (links) mit an der Goldflasche.
+    if (side > 0 && this.drinkW > 0.001) _hd.lerp(this.handTL, this.drinkW);
     _u.subVectors(_hd, _sh);
     let d = _u.length();
     if (d < 1e-4) {

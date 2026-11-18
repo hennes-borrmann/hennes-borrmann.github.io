@@ -22,6 +22,12 @@ import {
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
+  GOLD_ALL,
+  GOLD_DRINK_TICKS,
+  GOLD_SCALE,
+  GOLD_TICKS,
+  GOLD_WARN,
+  goldOn,
   PAD_TICKS,
   SPIN_TICKS,
   ROCKET_FLY_TICKS,
@@ -112,6 +118,15 @@ export interface SceneEvent {
     | 'use-rocket'
     /** Gleiter: Absprung (die Flügel gehen dann mit 'wings' auf). */
     | 'use-wing'
+    /**
+     * Get Gold: Austrinken beginnt (Gluckern) / ausgetrunken, das Kart wird gold und groß / es ist abgelaufen / ein Gold-Kart
+     * haut ein anderes um (am Getroffenen gemeldet) / ein Item prallt an einem Gold-Kart ab.
+     */
+    | 'use-gold'
+    | 'gold'
+    | 'gold-end'
+    | 'gold-ram'
+    | 'gold-ping'
     | 'rocket-launch'
     | 'rocket-incoming'
     | 'rocket-hit'
@@ -309,6 +324,8 @@ interface KartView {
   sizeK: number;
   /** Riesenkinderzimmer: ist das Kart gerade auf dem eigenen Stück der Abkürzung durch die Bauklotz-Burg? */
   inCastle: boolean;
+  /** Get Gold: Restzeit im letzten Bild (Ticks, wie KartState.gold). */
+  gold: number;
   roulette: number;
   item: number;
   flags: number;
@@ -331,6 +348,8 @@ const LEVELS: { ratio: number; kart: KartDetail; world: number; particles: numbe
 ];
 
 const SPARK_COLORS = [0xcfd3e6, 0x3ff2e2, 0xffe04a, 0xff5ad2];
+/** Get Gold: Farben des Glitzerns. */
+const GOLD_SPARKS = [0xffd34a, 0xffe98a, 0xffb31f, 0xfff0b0];
 
 /** Farbe der Staubfahne je Untergrund (0 = fester Boden, kein Staub); Reihenfolge wie SURFACES. */
 const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gravel: 0xb5aea4, grass: 0x8cc463, snow: 0xffffff, regolith: 0xc9c6d2 } as Record<string, number>)[s.id] ?? 0);
@@ -577,6 +596,10 @@ export class RaceScene {
   private readonly bolts = new Bolts();
   /** In diesem Bild: wer einen Kurzschluss ausgelöst hat und wen er gerade erwischt. */
   private readonly empFrom: KartView[] = [];
+  /** Get Gold: die Karts, die in diesem Bild gold sind; welche Dinge im letzten Bild wo waren (abgeprallt?). */
+  private readonly goldList: RenderEntity[] = [];
+  private readonly thingsWere = new Map<number, { x: number; y: number; z: number }>();
+  private localSlot = -1;
   private readonly empHit: KartView[] = [];
   /** Teilchen für Bausteine, die das Teilchensystem nicht kennen (Items, Hindernisse). */
   private readonly fx: FxSink;
@@ -914,6 +937,7 @@ export class RaceScene {
       sizeWas: 0,
       sizeK: 1,
       inCastle: false,
+      gold: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1256,6 +1280,11 @@ export class RaceScene {
     this.pops.show(word, e.x, e.y + 2.6, e.z, style, size);
   }
 
+  /** Wie pop, aber dort, wo das Kart in gut einer halben Sekunde ist – große Wörter, die die Kamera sonst durchführe. */
+  private popAhead(word: string, e: RenderEntity, style: string, size: number): void {
+    this.pops.show(word, e.x + e.vx * 0.6, e.y + 2.6 + e.vy * 0.3, e.z + e.vz * 0.6, style, size);
+  }
+
   private burst(x: number, y: number, z: number, count: number, speed: number, hex: number, glow: boolean, size = 0.5, life = 0.6, up = 3): void {
     this.color.set(hex);
     const pool = glow ? this.sparks : this.puffs;
@@ -1263,6 +1292,61 @@ export class RaceScene {
       const a = Math.random() * Math.PI * 2;
       const s = speed * (0.4 + Math.random() * 0.6);
       pool.emit(x, y, z, Math.cos(a) * s, up * (0.3 + Math.random()), Math.sin(a) * s, life * (0.6 + Math.random() * 0.6), size * (0.7 + Math.random() * 0.6), this.color, glow ? -size : size * 1.2, glow ? 9 : 4, 1.5);
+    }
+  }
+
+  /**
+   * Get Gold: Ein Rollreifen, Ölfleck oder Kreisel, der direkt an einem Gold-Kart verschwindet, ist an ihm abgeprallt –
+   * „PLING!“, ein Funkenregen und ein heller Ton.
+   */
+  private goldDeflect(things: SnapshotThing[]): void {
+    const was = this.thingsWere;
+    if (this.goldList.length > 0) {
+      for (const [id, p] of was) {
+        if (things.some((th) => th.id === id)) continue;
+        for (const g of this.goldList) {
+          if (Math.abs(g.y - p.y) > 3 || Math.hypot(g.x - p.x, g.z - p.z) > 3.4) continue;
+          const k = this.karts.get(g.slot);
+          if (!k) break;
+          this.pop('PLING!', g, 'white', 3.4);
+          this.burst(p.x, p.y + 0.6, p.z, 14, 9, 0xfff3c2, true, 0.4, 0.45, 5);
+          this.emit('gold-ping', k, g.slot === this.localSlot);
+          break;
+        }
+      }
+    }
+    was.clear();
+    for (const th of things) if (th.kind !== THING_SMOKE) was.set(th.id, { x: th.x, y: th.y, z: th.z });
+  }
+
+  /** Get Gold: das nächste Gold-Kart (ein anderes) höchstens reach Meter von e entfernt, sonst null. */
+  private goldNear(e: RenderEntity, reach: number): RenderEntity | null {
+    let best: RenderEntity | null = null;
+    let bestD = reach;
+    for (const g of this.goldList) {
+      if (g.slot === e.slot || Math.abs(g.y - e.y) > 3) continue;
+      const d = Math.hypot(g.x - e.x, g.z - e.z);
+      if (d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  /** Get Gold: goldene Funken an zufälligen Stellen von Kart und Fahrer, etwa 36 je Sekunde. */
+  private goldSparkle(e: RenderEntity, k: KartView, dt: number): void {
+    const n = Math.floor(dt * 36 + Math.random());
+    const sz = k.sizeK;
+    const cs = Math.cos(e.heading);
+    const sn = Math.sin(e.heading);
+    for (let i = 0; i < n; i++) {
+      const lx = (Math.random() - 0.5) * 1.7 * sz;
+      const lz = (Math.random() - 0.5) * 2.3 * sz;
+      const ly = (0.25 + Math.random() * 1.5) * sz;
+      const c = GOLD_SPARKS[(Math.random() * GOLD_SPARKS.length) | 0];
+      this.color.set(c);
+      this.sparks.emit(e.x + lx * cs + lz * sn, e.y + ly, e.z - lx * sn + lz * cs, e.vx * 0.35 + (Math.random() - 0.5) * 1.2, 0.6 + Math.random() * 1.4, e.vz * 0.35 + (Math.random() - 0.5) * 1.2, 0.35 + Math.random() * 0.35, 0.12 + Math.random() * 0.13, this.color, -0.2, -0.6, 1);
     }
   }
 
@@ -1504,6 +1588,25 @@ export class RaceScene {
         this.pop('AUFWIND!', e, 'white', 3);
         this.emit('lift', k, local);
       }
+      // Get Gold: Austrinken beginnt, ausgetrunken (gold und groß), abgelaufen.
+      // (Die Wörter stehen ein Stück voraus: ein fahrendes Kart holt sie ein, die Kamera dahinter nicht, solange sie stehen.)
+      if (e.gold > GOLD_TICKS && k.gold <= GOLD_TICKS) {
+        this.popAhead('GLUCK GLUCK!', e, 'warm', 3);
+        this.emit('use-gold', k, local);
+      }
+      if (goldOn(e) && !(k.gold > 0 && k.gold <= GOLD_TICKS)) {
+        this.popAhead('GOLD!', e, 'warm', 4.6);
+        this.burst(e.x, e.y + 1.4, e.z, 22, 9, 0xffd34a, true, 0.38, 0.75, 6);
+        this.burst(e.x, e.y + 0.9, e.z, 14, 6, 0xffe98a, true, 0.3, 0.55, 3);
+        k.visual.squash(-1);
+        this.emit('gold', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.25);
+      }
+      if (e.gold === 0 && k.gold > 0 && k.gold <= GOLD_TICKS && e.rocket === 0) {
+        this.burst(e.x, e.y + 0.9, e.z, 16, 4, 0xffd34a, true, 0.45, 0.7, 1);
+        k.visual.squash(0.6);
+        this.emit('gold-end', k, local);
+      }
       // Rakete: Verwandlung, Abheben, Landung
       if (e.rocket > 0 && k.rocket === 0) {
         this.pop('VERWANDLUNG!', e, 'cool', 3.6);
@@ -1535,10 +1638,13 @@ export class RaceScene {
         }
       }
       if (e.spin > 0 && k.spin === 0) {
-        this.pop('KRACH!', e, 'hot', 4.2);
+        // Von einem Gold-Kart umgehauen? (Es steht direkt daneben.)
+        const rammer = this.goldNear(e, 4.2);
+        this.pop(rammer ? 'WAMM!' : 'KRACH!', e, 'hot', rammer ? 4.6 : 4.2);
         this.burst(e.x, e.y + 1, e.z, 16, 9, 0xffd23f, true, 0.7, 0.7, 6);
         this.burst(e.x, e.y + 0.6, e.z, 8, 5, 0xe9e6f2, false, 0.9, 0.7);
         k.visual.squash(1);
+        if (rammer) this.emit('gold-ram', k, local || rammer.slot === this.localSlot);
         this.emit('hit', k, local);
         if (local) {
           this.hitstop = 0.085;
@@ -1675,6 +1781,8 @@ export class RaceScene {
         this.emit('finish', k, local);
       }
     }
+    // Get Gold: Glitzern rund ums Kart – die Funken bleiben als goldene Spur zurück.
+    if (goldOn(e) && e.respawn === 0) this.goldSparkle(e, k, dt);
     // Fahrtwind im Gleitflug: nur das eigene Kart, als dichte Folge kurzer Böen.
     if (glide && local) {
       k.windWait -= dt;
@@ -1693,6 +1801,7 @@ export class RaceScene {
     else if (e.spin > k.spin) k.spinFull = Math.max(SPIN_TICKS, e.spin);
     k.spin = e.spin;
     k.rocket = e.rocket;
+    k.gold = e.gold;
     k.boost = e.boost;
     k.stall = e.stall;
     k.guard = e.guard;
@@ -1735,6 +1844,10 @@ export class RaceScene {
     }
 
     for (const k of this.karts.values()) k.seen = false;
+    // Get Gold: wer gerade gold ist (für „umgehauen“ und „abgeprallt“).
+    this.goldList.length = 0;
+    for (const e of entities) if (goldOn(e) && e.respawn === 0) this.goldList.push(e);
+    this.localSlot = localSlot;
     this.empFrom.length = 0;
     this.empHit.length = 0;
     this.shadows.begin();
@@ -1830,6 +1943,10 @@ export class RaceScene {
         pose.held = 0;
       }
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
+      // Get Gold: Austrinken (Fortschritt), gold, kurz vor dem Ende blinkend.
+      pose.drink = e.gold > GOLD_TICKS ? (GOLD_ALL - e.gold + 1) / (GOLD_DRINK_TICKS + 1) : 0;
+      pose.gold = goldOn(e);
+      pose.goldBlink = goldOn(e) && e.gold < GOLD_WARN;
 
       // Hören: Entfernung und Richtung zur Kamera
       this.v1.set(e.x, e.y, e.z).sub(this.camera.position);
@@ -1870,6 +1987,8 @@ export class RaceScene {
       // zwischen seiner Größe und der normalen (drei Mal je Sekunde, kein Flackern).
       let wantK = sizeScale(e.size);
       if (e.size !== 0 && Math.abs(e.size) < SIZE_WARN) wantK = 1 + (wantK - 1) * (0.7 + 0.3 * Math.cos(this.time * 19));
+      // Get Gold: groß – in der letzten Sekunde pulsiert es wie eine ablaufende Größe.
+      if (goldOn(e)) wantK = e.gold < GOLD_WARN ? 1 + (GOLD_SCALE - 1) * (0.7 + 0.3 * Math.cos(this.time * 19)) : GOLD_SCALE;
       if (k.fresh) k.sizeK = wantK;
       k.sizeK += (wantK - k.sizeK) * Math.min(1, dt * 9);
       root.scale.set((1 + 0.22 * k.flatK) * k.sizeK, (1 - 0.7 * k.flatK) * k.sizeK, (1 + 0.12 * k.flatK) * k.sizeK);
@@ -1923,6 +2042,7 @@ export class RaceScene {
 
     // Dinge und Hindernisse
     this.things.update(things, dt, this.time, this.fx);
+    this.goldDeflect(things);
     this.things.updateHazards(race.hostTick, this.time);
     for (const m of this.mechanics) {
       m.update(race.time, this.time, dt, this.camera.position, this.fx);
@@ -2217,6 +2337,8 @@ export class RaceScene {
         const a = entities[i];
         const b = entities[j];
         if (Math.abs(a.y - b.y) > 1.6 || a.respawn > 0 || b.respawn > 0) continue;
+        // (Ein Gold-Kart rempelt nicht, es haut um – das meldet der Treffer.)
+        if (goldOn(a) !== goldOn(b)) continue;
         const dx = b.x - a.x;
         const dz = b.z - a.z;
         const d = Math.hypot(dx, dz);
@@ -2480,6 +2602,13 @@ export class RaceScene {
       if (o !== this.world?.group) out.push({ name: label(o, i), triangles: count(o) });
     });
     return out.filter((x) => x.triangles > 0);
+  }
+
+  /** Für Tests: wie ein Kart gerade gezeigt wird – Maßstab und wie gold (0 … 1). */
+  kartLook(slot: number): { scale: number; gold: number; visible: boolean } | null {
+    const k = this.karts.get(slot);
+    if (!k) return null;
+    return { scale: k.visual.root.scale.y, gold: k.visual.goldLook, visible: k.visual.root.visible };
   }
 
   kartAudio(out: KartAudio[]): KartAudio[] {

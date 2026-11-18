@@ -164,7 +164,12 @@ export const ITEM_KITE = 9;
 export const ITEM_ROCKET = 10;
 /** "Gleiter": ein Satz in die Luft, dann Flügel auf und ein paar Sekunden schneller gleiten – über Lücken, nicht über die Bande. */
 export const ITEM_WING = 11;
-export const ITEM_COUNT = 12;
+/**
+ * "Get Gold": eine goldene Flasche austrinken – danach ist das Kart sieben Sekunden lang gold, größer und etwas
+ * schneller, unverwundbar, ohne Bremse neben der Fahrbahn, und wen es berührt, den haut es um. Hinten häufiger.
+ */
+export const ITEM_GOLD = 12;
+export const ITEM_COUNT = 13;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -258,6 +263,11 @@ export interface KartState {
   aimSlot: number;
   /** Gleiter: verbleibende Ticks mit ausgebreiteten Flügeln (0 = keine). Endet früher, sobald das Kart wieder aufsetzt. */
   wing: number;
+  /**
+   * Get Gold: verbleibende Ticks (0 = keins). Über GOLD_TICKS wird noch getrunken (die ersten GOLD_DRINK_TICKS),
+   * von GOLD_TICKS bis 1 ist das Kart gold. Unverwundbar ist es vom ersten Schluck an.
+   */
+  gold: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -369,6 +379,19 @@ export const WING_SPEED = 30;
 /** Rakete: Tempo, mit dem das Kart aus dem Einschlag herausrollt, und wie lange es danach unverwundbar ist. */
 const ROCKET_LAND_SPEED = 20;
 const ROCKET_LAND_SHIELD = 60;
+/**
+ * Get Gold: so lange wird getrunken (0,8 s – das Kart fährt dabei weiter), danach so lange ist das Kart gold (7 s);
+ * so lange vor dem Ende blinkt es (Darstellung). Gold: Faktor auf Höchsttempo und Antritt, Maßstab (Darstellung und
+ * Rempeln), Kurvenhalt.
+ */
+export const GOLD_DRINK_TICKS = 48;
+export const GOLD_TICKS = 420;
+export const GOLD_ALL = GOLD_DRINK_TICKS + GOLD_TICKS;
+export const GOLD_WARN = 60;
+export const GOLD_VMAX = 1.11;
+const GOLD_ACCEL = 1.15;
+export const GOLD_SCALE = 1.4;
+const GOLD_GRIP = 1;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
@@ -517,6 +540,7 @@ export function newState(): KartState {
     aimSeg: 0,
     aimSlot: -1,
     wing: 0,
+    gold: 0,
   };
 }
 
@@ -553,6 +577,7 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.aimSeg = src.aimSeg;
   dst.aimSlot = src.aimSlot;
   dst.wing = src.wing;
+  dst.gold = src.gold;
   return dst;
 }
 
@@ -578,6 +603,11 @@ export function turboStage(charge: number, char = 0): number {
   return 0;
 }
 
+/** Wirkt Get Gold gerade (ausgetrunken und noch nicht abgelaufen)? */
+export function goldOn(s: KartState): boolean {
+  return s.gold > 0 && s.gold <= GOLD_TICKS;
+}
+
 /** Vorwärtsgeschwindigkeit (negativ = rückwärts). */
 export function forwardSpeed(s: KartState): number {
   return s.vx * Math.sin(s.heading) + s.vz * Math.cos(s.heading);
@@ -592,8 +622,8 @@ export const HIT_BLOCKED = 2;
  * HIT_NONE = gerade unverwundbar, HIT_BLOCKED = der Stoßfänger hat ihn abgefangen.
  */
 export function hitKart(s: KartState): number {
-  // Am Drachen hängend fliegt das Kart über alles hinweg; als Rakete ist es außer Reichweite.
-  if (s.shield > 0 || s.spin > 0 || s.respawn > 0 || s.tow > 0 || s.rocket > 0) return HIT_NONE;
+  // Am Drachen hängend fliegt das Kart über alles hinweg; als Rakete ist es außer Reichweite; mit Get Gold prallt alles ab.
+  if (s.shield > 0 || s.spin > 0 || s.respawn > 0 || s.tow > 0 || s.rocket > 0 || s.gold > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -613,7 +643,7 @@ export function hitKart(s: KartState): number {
 
 /** Stampfpresse: das Kart wird geplättet und fährt eine Weile flach und langsam. Rückgabe wie hitKart. */
 export function flattenKart(s: KartState): number {
-  if (s.shield > 0 || s.flat > 0 || s.respawn > 0 || s.tow > 0 || s.rocket > 0) return HIT_NONE;
+  if (s.shield > 0 || s.flat > 0 || s.respawn > 0 || s.tow > 0 || s.rocket > 0 || s.gold > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -631,7 +661,7 @@ export function flattenKart(s: KartState): number {
 
 /** Kurzschluss: der Motor läuft kurz nur gedrosselt. Rückgabe wie hitKart. */
 export function stallKart(s: KartState): number {
-  if (s.respawn > 0 || s.stall > 0 || s.tow > 0 || s.rocket > 0) return HIT_NONE;
+  if (s.respawn > 0 || s.stall > 0 || s.tow > 0 || s.rocket > 0 || s.gold > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -955,6 +985,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.guard > 0) s.guard--;
   if (s.stall > 0) s.stall--;
   if (s.flat > 0) s.flat--;
+  // Get Gold: ausgetrunken – eine Größe aus dem Ring endet hier (Gold hat Vorrang; solange es läuft, wirkt kein Ring).
+  if (s.gold > 0) {
+    s.gold--;
+    if (s.gold === GOLD_TICKS) s.size = 0;
+  }
   // Größe läuft ab – außer in der Abkürzung, die nur diese Größe einlässt (im Mauseloch bleibt man winzig).
   if (s.size !== 0) {
     const k = s.seg < t.total ? t.branchOf[s.seg] : -1;
@@ -1130,6 +1165,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const driftBtn = drive && (cmd.buttons & BTN_DRIFT) !== 0;
   const wasOffroad = (s.flags & FLAG_OFFROAD) !== 0;
   const ch = CHARACTERS[s.char] ?? CHARACTERS[0];
+  // Get Gold: etwas schneller, kein Bremsen neben der Fahrbahn und auf langsamem Grund (Sand, Schnee, hohes Gras).
+  const golden = goldOn(s);
+  const big = !golden && s.size > 0;
+  const small = !golden && s.size < 0;
 
   // Boden an der alten Stelle: Bezug für Steigung und für Stufen.
   const x0 = s.x;
@@ -1191,7 +1230,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // Die Steilkurve gibt nur beim normalen Lenken mehr Halt (man kommt schneller herum). Im Drift dreht das Kart immer
   // im Verhältnis zum Halt – mit dem Zuschlag drehte es dort fast doppelt so eng und fuhr in die Innenbande.
   const banked = wasAir || turnDir === 0 || s.driftDir !== 0 ? 1 : bankGrip(t, seg0, turnDir);
-  const hold = drumGrip * A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * banked;
+  const hold = drumGrip * A_LAT * ch.grip * (golden ? GOLD_GRIP : big ? BIG_GRIP : small ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * banked;
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts) – und überall, solange der Gleiter die Flügel ausbreitet
   // (nicht unter Wasser: dort trägt das Wasser).
   const winged = wasAir && s.wing > 0 && !diving;
@@ -1233,9 +1272,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
     // --- Beschleunigen und Bremsen ---
     const boosting = s.boost > 0;
-    let vmax = V_MAX * env.speedFactor * ch.vmax * ground.speed * (s.size > 0 ? BIG_VMAX : s.size < 0 ? SMALL_VMAX : 1);
+    let vmax = V_MAX * env.speedFactor * ch.vmax * (golden ? Math.max(1, ground.speed) : ground.speed) * (golden ? GOLD_VMAX : big ? BIG_VMAX : small ? SMALL_VMAX : 1);
+    // Neben der Fahrbahn bremst es – außer mit Get Gold.
+    const rough = wasOffroad && !golden;
     if (boosting) vmax = V_BOOST * env.speedFactor;
-    else if (wasOffroad) vmax *= ch.offroad;
+    else if (rough) vmax *= ch.offroad;
     if (s.stall > 0) vmax *= STALL_FACTOR;
     if (s.flat > 0) vmax *= FLAT_FACTOR;
     if (diving) vmax *= DIVE_SPEED;
@@ -1276,14 +1317,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (vf < vmax) vf = Math.min(vmax, vf + BOOST_ACCEL * DT);
       else vf = Math.max(vmax, vf - 10 * DT);
     } else if (gas && !brake) {
-      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * (s.size > 0 ? BIG_ACCEL : s.size < 0 ? SMALL_ACCEL : 1) * ground.accel * (diving ? DIVE_ACCEL : 1) * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
-      else vf = Math.max(vmax, vf - (wasOffroad ? 34 : 10) * DT);
+      if (vf < vmax) vf = Math.min(vmax, vf + ACCEL * ch.accel * (golden ? GOLD_ACCEL : big ? BIG_ACCEL : small ? SMALL_ACCEL : 1) * (golden ? Math.max(1, ground.accel) : ground.accel) * (diving ? DIVE_ACCEL : 1) * (1 - (0.75 * Math.max(0, vf)) / vmax) * DT);
+      else vf = Math.max(vmax, vf - (rough ? 34 : 10) * DT);
     } else if (brake) {
       if (vf > 0.4) vf = Math.max(0, vf - BRAKE * ground.brake * DT);
       else vf = Math.max(-V_REVERSE, vf - 16 * DT);
     } else {
       // Auf glattem Grund (Eis) rollt das Kart länger aus.
-      const d = ((wasOffroad ? COAST + 12 : COAST) * Math.min(1, ground.brake * 2) + (diving ? DIVE_COAST : 0)) * DT;
+      const d = ((rough ? COAST + 12 : COAST) * Math.min(1, ground.brake * 2) + (diving ? DIVE_COAST : 0)) * DT;
       vf = vf > d ? vf - d : vf < -d ? vf + d : 0;
     }
   }
@@ -1413,7 +1454,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Tor: eine gesperrte Abzweigung ---
   // An der Mündung liegen Abzweigung und Hauptstrecke noch ineinander: dort läuft, solange das Tor zu ist, die
   // Bande der Hauptstrecke einfach durch. (Wer tiefer drin ist, wenn es schließt, kommt noch hinaus.)
-  if (t.gates.length > 0 && gateShut(t, s.seg, env.time, s.size)) {
+  // (Wer Get Gold trinkt oder gold ist, zählt für die Größentore als normal groß – er kommt in keine Größen-Abkürzung.)
+  const gateSize = s.gold > 0 ? 0 : s.size;
+  if (t.gates.length > 0 && gateShut(t, s.seg, env.time, gateSize)) {
     const tw = t.twin[s.seg];
     if (tw >= 0) {
       const nx = rightX(t, tw);
@@ -1443,7 +1486,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         lat = proj.lat;
         along = proj.along;
       }
-    } else if (!gateShut(t, seg0, env.time, s.size)) {
+    } else if (!gateShut(t, seg0, env.time, gateSize)) {
       s.x = x0;
       s.z = z0;
       s.seg = seg0;
@@ -1461,8 +1504,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (k0 >= 0 && t.branchOnly[k0] !== 0 && t.branchOf[s.seg] !== k0 && Math.abs(s.size) > SIZE_WARN) s.size = s.size > 0 ? SIZE_WARN : -SIZE_WARN;
   }
 
-  // --- Größenring: wer hindurchfährt, schrumpft bzw. wächst ---
-  if (t.sizers.length > 0 && s.respawn === 0 && seg0 !== s.seg) {
+  // --- Größenring: wer hindurchfährt, schrumpft bzw. wächst (mit Get Gold nicht) ---
+  if (t.sizers.length > 0 && s.respawn === 0 && s.gold === 0 && seg0 !== s.seg) {
     for (const z of t.sizers) {
       if (!samePath(t, z.seg, seg0) || !samePath(t, z.seg, s.seg)) continue;
       const before = segDelta(t, seg0, z.seg);
@@ -1848,6 +1891,8 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
       s.tow = 0;
       s.boost = 0;
       s.stall = 0;
+      // Als Rakete ist das Kart kein Gold mehr.
+      s.gold = 0;
       ev |= EV_USE_ROCKET;
       break;
     case ITEM_SMOKE:
@@ -1874,6 +1919,17 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
         ev |= EV_TAKEOFF;
       }
       break;
+    case ITEM_GOLD: {
+      // Austrinken beginnt. Ein zweites Gold, solange eines läuft, bleibt aufgehoben – ebenso in einer Abkürzung, die nur eine
+      // Größe einlässt (im Mauseloch wäre ein großes Gold-Kart zu groß).
+      const k = s.seg < TRACK.total ? TRACK.branchOf[s.seg] : -1;
+      if (s.gold > 0 || (k >= 0 && TRACK.branchOnly[k] !== 0)) used = false;
+      else {
+        s.gold = GOLD_ALL;
+        s.stall = 0;
+      }
+      break;
+    }
     case ITEM_KITE:
       s.tow = TOW_TICKS;
       s.boost = 0;
