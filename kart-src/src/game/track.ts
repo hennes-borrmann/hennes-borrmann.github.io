@@ -210,6 +210,12 @@ export interface PathFeatures {
 export interface BranchDef extends PathFeatures {
   from: number;
   to: number;
+  /**
+   * Echte Abkürzung (ab der Gipfelbahn): Sie spart deutlich (1,5–3 s), hat aber einen Preis.
+   * 'item' = lohnt sich nur mit Schub oder Gleiter (ohne: kaum schneller, eher langsamer);
+   * 'risk' = wer sie verpatzt (zu langsam, getroffen), stürzt ab. Ohne Angabe sind beide Wege gleichwertig.
+   */
+  shortcut?: 'item' | 'risk';
   /** Eigene Stützpunkte [x, z, höhe] zwischen Gabelung und Einmündung (mit scale wie die Hauptstrecke). */
   points: number[][];
   roadHalf?: number;

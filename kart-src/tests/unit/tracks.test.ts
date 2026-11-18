@@ -155,6 +155,18 @@ describe('Alle Strecken', () => {
             expect(best[0] - best[1 << k]).toBeLessThan(2.6);
           }
           expect(Math.max(...best) - Math.min(...best)).toBeLessThan(4.5);
+        } else if (t.def.branches?.some((b) => b.shortcut)) {
+          // Echte Abkürzungen (ab der Gipfelbahn): Eine mit Risiko spart deutlich (die KI fährt sie ohne Patzer), eine,
+          // die sich nur mit Schub lohnt, ist ohne Schub höchstens knapp schneller. Zusammen höchstens fünf Sekunden.
+          t.def.branches.forEach((b, k) => {
+            const gain = best[0] - best[1 << k];
+            if (b.shortcut === 'risk') {
+              expect(gain).toBeGreaterThan(1.5);
+              expect(gain).toBeLessThan(4);
+            } else if (b.shortcut === 'item') expect(gain).toBeLessThan(1);
+            else expect(Math.abs(gain)).toBeLessThan(2);
+          });
+          expect(Math.max(...best) - Math.min(...best)).toBeLessThan(5);
         } else {
           // Beide Wege sollen sich lohnen: höchstens zwei Sekunden Unterschied.
           expect(Math.max(...best) - Math.min(...best)).toBeLessThan(2);

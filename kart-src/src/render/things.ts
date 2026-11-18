@@ -373,6 +373,30 @@ export class ThingVisuals {
       b.box(0, 2.12, 0, 2.7, 0.16, 2.4, rgb(0xffd23f));
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.box(sx * 1.15, 10.6, sz * 1.0, 0.07, 17, 0.07, rgb(0x2a2733));
       b.box(0, 2.35, 0, 0.5, 0.3, 0.5, rgb(0x2a2733));
+    } else if (this.theme === 'gipfel') {
+      // Seilbahngondel: rote Kabine mit großen Fenstern und weißem Band, Dach, Gehänge hinauf zum Laufwerk am Seil.
+      // Sie pendelt knapp über der Straße quer über die Fahrbahn (das Seil selbst steht fest, siehe buildCableway).
+      const RED = rgb(0xd8382e);
+      const RED_D = rgb(0xa8261f);
+      const GLASS = rgb(0x9fd8f0);
+      b.box(0, 1.2, 0, 2.3, 1.9, 2.0, RED, 0, RED_D);
+      // Fensterband rundum (etwas vor der Wand)
+      b.box(0, 1.45, 1.01, 1.9, 0.8, 0.04, GLASS);
+      b.box(0, 1.45, -1.01, 1.9, 0.8, 0.04, GLASS);
+      b.box(1.16, 1.45, 0, 0.04, 0.8, 1.6, GLASS);
+      b.box(-1.16, 1.45, 0, 0.04, 0.8, 1.6, GLASS);
+      // weißes Zierband und Boden
+      b.box(0, 0.78, 0, 2.34, 0.14, 2.04, rgb(0xfdf9f0));
+      b.box(0, 0.25, 0, 2.1, 0.12, 1.8, rgb(0x2a2733));
+      // Dach mit Rand
+      b.box(0, 2.23, 0, 2.5, 0.16, 2.2, rgb(0x3a3f4a));
+      b.box(0, 2.38, 0, 1.6, 0.14, 1.4, rgb(0x3a3f4a));
+      // Gehänge: Bügel hinauf zum Laufwerk am Seil (Seil 9,5 m über der Straße)
+      b.box(0.9, 2.5, 0, 0.12, 0.3, 0.12, rgb(0x5a5f6a));
+      b.box(0.45, 2.7, 0, 1.0, 0.12, 0.12, rgb(0x5a5f6a));
+      b.box(0, 6.0, 0, 0.14, 6.6, 0.14, rgb(0x5a5f6a));
+      b.box(0, 9.35, 0, 0.9, 0.35, 0.5, rgb(0x2a2733));
+      for (const sz of [-0.32, 0.32]) put(b, new THREE.CylinderGeometry(0.2, 0.2, 0.1, 8), 0x9aa0ae, 0, 9.5, sz, 1, 1, 1, Math.PI / 2);
     } else {
       // Kehrroboter mit Warnlicht
       b.box(0, 0.75, 0, 2.3, 1.0, 1.9, rgb(0x1fd6c8), 0, rgb(0x16a79c));
@@ -388,6 +412,54 @@ export class ThingVisuals {
       this.hazards.push(obj);
       this.group.add(obj);
     }
+    if (this.theme === 'gipfel') this.buildCableway(track);
+  }
+
+  /**
+   * Gipfelbahn: das feste Seil quer über die Straße an jeder Gondel, mit je einer Gitterstütze links und rechts außerhalb
+   * der Bande. Die Gondel pendelt darunter hin und her (updateHazards).
+   */
+  private buildCableway(track: Track): void {
+    const b = new MeshBuilder();
+    const STEEL = rgb(0x8a909c);
+    const STEEL_D = rgb(0x5a5f6a);
+    for (const h of track.hazards) {
+      const seg = h.seg;
+      const out = Math.max(track.wh[seg] + 3, h.amp + 6);
+      const rx = rightX(track, seg);
+      const rz = rightZ(track, seg);
+      const y0 = track.py[seg];
+      const yaw = Math.atan2(rx, rz);
+      for (const side of [-1, 1]) {
+        const x = track.px[seg] + rx * out * side;
+        const z = track.pz[seg] + rz * out * side;
+        // Stütze: vier Eckpfosten, Querstreben, oben ein Ausleger mit Seilrolle
+        for (const [dx, dz] of [
+          [-0.6, -0.6],
+          [0.6, -0.6],
+          [-0.6, 0.6],
+          [0.6, 0.6],
+        ])
+          b.box(x + dx, y0 + 5, z + dz, 0.18, 10.5, 0.18, STEEL);
+        for (let k = 1; k < 5; k++) b.box(x, y0 + k * 2.1, z, 1.4, 0.12, 1.4, STEEL_D, yaw);
+        b.box(x, y0 + 10.3, z, 1.8, 0.4, 2.6, STEEL_D, yaw);
+      }
+      // das Seil: quer über die Straße, leicht durchhängend (drei Stücke)
+      const P = (f: number): [number, number, number] => [track.px[seg] + rx * out * f, y0 + 9.6 - (1 - f * f) * 0.5, track.pz[seg] + rz * out * f];
+      for (const [f0, f1] of [
+        [-1, -0.33],
+        [-0.33, 0.33],
+        [0.33, 1],
+      ]) {
+        const a = P(f0);
+        const c = P(f1);
+        const len = Math.hypot(c[0] - a[0], c[2] - a[2]);
+        b.box((a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2, 0.08, 0.08, len, rgb(0x2a2733), yaw);
+      }
+    }
+    const mesh = new THREE.Mesh(this.keep(b.build()), this.toon);
+    mesh.name = 'Seilbahn';
+    this.group.add(mesh);
   }
 
   private keep(g: THREE.BufferGeometry): THREE.BufferGeometry {
@@ -747,6 +819,10 @@ export class ThingVisuals {
         inner.position.y = -0.25 + 0.08 * Math.sin(time * 2.1 + i * 1.3);
         inner.rotation.z = -lat * 0.35;
         inner.rotation.y = Math.sin(time * 0.6 + i) * 0.12;
+      } else if (this.theme === 'gipfel') {
+        // Die Gondel schaukelt am Gehänge: am Umkehrpunkt schräg, dazu ein leichtes Wiegen.
+        inner.position.y = 0.15;
+        inner.rotation.z = -(lat / Math.max(1, h.amp)) * 0.08 + Math.sin(time * 1.6 + i) * 0.02;
       } else if (this.theme === 'hafen') {
         // Die Last hängt: am Umkehrpunkt steht sie schräg, in der Mitte gerade; dazu dreht sie leicht am Seil.
         inner.position.y = 0.12 + 0.05 * Math.sin(time * 1.3 + i);

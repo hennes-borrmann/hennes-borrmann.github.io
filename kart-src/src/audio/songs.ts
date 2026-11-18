@@ -444,6 +444,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   rummel: RUMMEL_STUECK,
   // Magnetwerk: eigenes Stück (stuecke/magnet.ts)
   magnet: MAGNET_STUECK,
+  // Gipfelbahn: vorerst das Stück der Wolkenwerft (eigenes folgt)
+  gipfel: NEUE_STUECKE.wolken,
   results: RESULTS,
 };
 

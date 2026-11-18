@@ -39,9 +39,10 @@ const C_RIGHT = rgb(0x1fc8c0); // rechte Schiene: Türkis
 const C_TIE = rgb(0x5b3a24);
 const C_TIE_SIDE = rgb(0x3b2618);
 const C_WALK = rgb(0x8c7a66);
-const C_WOOD = rgb(0xf2efe6); // weiß gestrichenes Holz
-const C_WOOD_2 = rgb(0xe2dccd);
-const C_WOOD_3 = rgb(0xcfc7b4);
+// Gerüst: auf dem Rummel weiß gestrichenes Holz, auf der Gipfelbahn (Sommerrodelbahn) verzinkter Stahl – gesetzt in buildRails.
+let C_WOOD = rgb(0xf2efe6);
+let C_WOOD_2 = rgb(0xe2dccd);
+let C_WOOD_3 = rgb(0xcfc7b4);
 const C_PLATE = rgb(0x24212b);
 const C_PLATE_SIDE = rgb(0x17151c);
 const C_TROUGH = rgb(0x2b2a31);
@@ -240,6 +241,10 @@ const CHEV_SPACING = PLATE_LEN / CHEV_N;
 // --- Aufbau -------------------------------------------------------------------------
 
 export function buildRails(track: Track, detail: boolean): MechanicView {
+  const alpine = track.def.theme === 'gipfel';
+  C_WOOD = rgb(alpine ? 0xa9b0bc : 0xf2efe6);
+  C_WOOD_2 = rgb(alpine ? 0x8c939f : 0xe2dccd);
+  C_WOOD_3 = rgb(alpine ? 0x737a86 : 0xcfc7b4);
   const t = track;
   const at = makeAt(t);
   const group = new THREE.Group();

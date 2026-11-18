@@ -285,6 +285,17 @@ const SHOTS = {
       [2, 530, 2.5],
     ],
   },
+  // Gipfelbahn: von der Schanze am Gipfel über das Tal – vorn zwei Karts kurz vor dem Absprung, darunter Aufwinde,
+  // Schubringe und das Dorf, ringsum die Gipfel.
+  gipfel: {
+    from: [868, 0, 7.5],
+    to: [990, -4, -14],
+    fov: 62,
+    karts: [
+      [1, 892, -3],
+      [2, 900, 3.2],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

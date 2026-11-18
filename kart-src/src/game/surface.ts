@@ -58,7 +58,7 @@ export const SURFACES: Surface[] = [
   { id: 'marble', name: 'Tempelplatten', grip: 1.04, speed: 1.02, accel: 1.02, brake: 1.05, charge: 0 },
   // Hohes Gras (Almwiese, Gipfelbahn): richtig langsam – eine Abkürzung darüber lohnt sich nur mit Schub (der hebt die
   // Bremswirkung des Untergrunds auf, siehe sim.ts) oder im Gleitflug darüber hinweg.
-  { id: 'meadow', name: 'Hohes Gras', grip: 0.78, speed: 0.55, accel: 0.62, brake: 0.9, charge: 0.2 },
+  { id: 'meadow', name: 'Hohes Gras', grip: 0.8, speed: 0.56, accel: 0.66, brake: 0.9, charge: 0.2 },
 ];
 
 export const SURFACE_INDEX = Object.fromEntries(SURFACES.map((s, i) => [s.id, i])) as Record<SurfaceId, number>;
