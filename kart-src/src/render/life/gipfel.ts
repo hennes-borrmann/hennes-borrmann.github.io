@@ -430,17 +430,9 @@ const WALD = 3;
 const LUFTRAUM = 4;
 
 export function buildGipfelLife(world: World): Life {
-  const ZEIT: [string, number][] = [];
-  (globalThis as any).__gz = ZEIT;
-  let bodenZahl = (): number => 0;
-  const mark = (n: string) => ZEIT.push([n + ' ' + bodenZahl(), performance.now()]);
-  mark('start');
-  const GP: Record<string, number[]> = {};
-  (globalThis as any).__gp = GP;
   const t = world.track;
   const th = world.theme;
   const group = new THREE.Group();
-  if (typeof location !== 'undefined' && location.search.includes('ohnekulisse')) return { group, update() {}, dispose() {} };
   const disposables: { dispose(): void }[] = [];
   const detail = world.detail;
   const hi = detail > 0;
@@ -454,7 +446,6 @@ export function buildGipfelLife(world: World): Life {
 
   const bauB = new MeshBuilder(); // Bauten (mit Kontur)
   const bodenB = new MeshBuilder(); // Boden, Pflanzen, Kleinkram (ohne Kontur)
-  bodenZahl = () => bodenB.triangles;
   const mattB = new MeshBuilder(); // Wasser, Schlund der Klamm (unbeleuchtet)
   const fern = new Fern();
   const bau = new Kit(bauB);
@@ -463,7 +454,6 @@ export function buildGipfelLife(world: World): Life {
   const mov = new Moving(); // Kühe, Gleitschirme (mit Kontur)
   const small = new Moving(); // Fahnen, Windsack, Vögel (ohne Kontur)
 
-  mark('Strecke: Stützpunkte, Gebiete,');
   // =====================================================================================
   // Strecke: Stützpunkte, Gebiete, freier Platz
   // =====================================================================================
@@ -576,7 +566,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Gelände: Bergschultern über de');
   // =====================================================================================
   // Gelände: Bergschultern über dem Raster von world.ts
   // =====================================================================================
@@ -604,7 +593,6 @@ export function buildGipfelLife(world: World): Life {
   /** Abschnitt, der die Schulter an einem Rasterpunkt trägt (−1: Gelände von world.ts). */
   const qV = sch.qV;
   const unterBahn = sch.unter;
-  (globalThis as any).__grid = { wY, hY, qV, gx0, gz0, CELL, GX, GZ };
   /** Sichtbarer Boden (Gelände bzw. Schulter, wie gezeichnet). */
   const grund = (x: number, z: number): number => {
     const fx = (x - gx0) / CELL;
@@ -801,7 +789,6 @@ export function buildGipfelLife(world: World): Life {
     b.add(g, c, m4.compose(v4.set(x, y, z), q4, s4.set(sx, sy, sz)));
   };
 
-  mark('Boden: die Schultern als Netz');
   // =====================================================================================
   // Boden: die Schultern als Netz
   // =====================================================================================
@@ -883,7 +870,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Bergpanorama rundum und Talbod');
   // =====================================================================================
   // Bergpanorama rundum und Talboden
   // =====================================================================================
@@ -1123,7 +1109,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Bäume: Fichten am Hang, Laubbä');
   // =====================================================================================
   // Bäume: Fichten am Hang, Laubbäume im Tal
   // =====================================================================================
@@ -1150,7 +1135,6 @@ export function buildGipfelLife(world: World): Life {
     if (hi && H > 9.5) geo(bodenB, G.ico, shade(c, 0.9), x + (rnd() - 0.5) * r, y + H * 0.82, z + (rnd() - 0.5) * r, rnd(), rnd() * 3, 0, r * 0.7, r * 0.6, r * 0.7);
   };
 
-  mark('Dorf um Start und Ziel');
   // =====================================================================================
   // Dorf um Start und Ziel
   // =====================================================================================
@@ -1332,7 +1316,6 @@ export function buildGipfelLife(world: World): Life {
     const yaw = yawAt(i);
     const W = 9.5;
     const Lg = 17;
-    GP.kirche = [x, grund(x, z), z];
     let gMax = -Infinity;
     let gMin = Infinity;
     for (const [a, b] of [
@@ -1478,7 +1461,6 @@ export function buildGipfelLife(world: World): Life {
     const mx = LX(i - 9, lat - 2);
     const mz = LZ(i - 9, lat - 2);
     const my = grund(mx, mz);
-    GP.brunnen = [x, y, z];
     bau.at(mx, my, mz, yaw);
     deko.like(bau);
     const MH = 27;
@@ -1503,7 +1485,7 @@ export function buildGipfelLife(world: World): Life {
 
   // Chalets beidseits der Dorfstraße
   {
-    const want = hi ? 16 : 10;
+    const want = hi ? 14 : 10;
     let got = 0;
     const kandidaten: [number, number][] = [];
     for (let j = 0; j < dorfSegs.length; j += 13) {
@@ -1615,7 +1597,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Sommerrodelbahn: Talstation un');
   // =====================================================================================
   // Sommerrodelbahn: Talstation und Bergstation
   // =====================================================================================
@@ -1649,7 +1630,6 @@ export function buildGipfelLife(world: World): Life {
         }
       }
       const y = grund(x, z);
-      GP.talstation = [x, y, z];
       let gMin = y;
       for (const [a, b] of [
         [-W / 2, -L / 2],
@@ -1701,7 +1681,6 @@ export function buildGipfelLife(world: World): Life {
       }
       const latP = whMax + RAND + 0.4;
       const roofY = yMax + LUFT + 0.3;
-      GP.bergstation = [LX(e1 - 10, 0), roofY - 10, LZ(e1 - 10, 0)];
       for (let s = e0; s <= e1; s += 6) {
         const si = Math.round(s);
         for (const sg of [-1, 1]) {
@@ -1748,7 +1727,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Almen: Kühe, Heustadel, Schräg');
   // =====================================================================================
   // Almen: Kühe, Heustadel, Schrägzäune, Blumen, Felsbrocken, hohes Gras
   // =====================================================================================
@@ -1878,7 +1856,6 @@ export function buildGipfelLife(world: World): Life {
       const fleck = rnd() < 0.55;
       const yaw = rnd() * TAU;
       kuehe.push(mov.add(kuhRumpf(fleck)), mov.add(kuhKopf(fleck)), x, y - 0.05, z, yaw, rnd() * 50);
-      GP['kuh' + (kuehe.length / 7)] = [x, y, z];
       belege(x, z, 1.8);
     }
   }
@@ -1895,7 +1872,6 @@ export function buildGipfelLife(world: World): Life {
       if (grund(x, z) > 64) continue;
       if (!platz(x, z, 4, 6, 0.86)) continue;
       stadel(x, z, faceRoad(i, x, z) + (rnd() - 0.5) * 0.6);
-      GP['stadel' + got] = [x, grund(x, z), z];
       got++;
     }
   }
@@ -1977,7 +1953,7 @@ export function buildGipfelLife(world: World): Life {
   }
   // Blumen: einzelne Blüten dicht an den Wegen der Almen und im Dorf
   {
-    const want = hi ? 850 : 360;
+    const want = hi ? 720 : 360;
     let got = 0;
     for (let k = 0; k < want * 4 && got < want; k++) {
       const i = Math.floor(rnd() * T);
@@ -2006,7 +1982,7 @@ export function buildGipfelLife(world: World): Life {
   }
   // Hohes Gras neben der Almwiese (Abzweigung a)
   if (brA) {
-    const want = hi ? 320 : 140;
+    const want = hi ? 420 : 170;
     let got = 0;
     for (let k = 0; k < want * 4 && got < want; k++) {
       const i = brA.first + Math.floor(rnd() * brA.count);
@@ -2016,23 +1992,25 @@ export function buildGipfelLife(world: World): Life {
       const z = LZ(i, lat, (rnd() - 0.5) * 2);
       const y = grund(x, z);
       if (kante(x, z) < 0.8) continue;
-      if (!frei(x, z, 0.2, y, 1.2, 0.8)) continue;
-      const H = 0.7 + rnd() * 0.6;
+      if (!frei(x, z, 0.2, y, 1.6, 0.8)) continue;
+      // dicht an der Fahrbahn am höchsten
+      const H = 0.9 + rnd() * 0.7 - Math.max(0, kante(x, z) - 3) * 0.05;
       const nb = 3;
       for (let b = 0; b < nb; b++) {
         const a = rnd() * TAU;
         const lean = 0.15 + rnd() * 0.3;
-        const c = pick(GRAS);
-        const bx = Math.cos(a) * 0.09;
-        const bz = Math.sin(a) * 0.09;
+        const c = b === 2 && rnd() < 0.4 ? rgb(0xcdb862) : shade(pick(GRAS), 0.82);
+        const bx = Math.cos(a) * 0.12;
+        const bz = Math.sin(a) * 0.12;
         const tip: V3 = [x + Math.sin(a) * lean, y + H * (0.8 + rnd() * 0.3), z + Math.cos(a) * lean];
         bodenB.tri([x - bx, y - 0.1, z - bz], [x + bx, y - 0.1, z + bz], tip, c);
         bodenB.tri([x - bx, y - 0.1, z - bz], tip, [x + bx, y - 0.1, z + bz], shade(c, 0.85));
       }
-      if (rnd() < 0.3) {
-        const col = pick(BLUMEN);
-        deko.at(x + 0.2, y + H * 0.7, z, 0);
-        deko.octa(0, 0, 0, 0.1, 0.08, 0.1, col);
+      if (rnd() < 0.35) {
+        // Margerite, Glockenblume oder Arnika über dem Gras
+        const col = pick([C_WEISS, rgb(0x8f6ad8), C_GELB, rgb(0xf29a2e)]);
+        deko.at(x + 0.15, y + H * 0.85, z, 0);
+        deko.octa(0, 0, 0, 0.13, 0.08, 0.13, col, rgb(0xe8c840));
       }
       got++;
     }
@@ -2062,12 +2040,11 @@ export function buildGipfelLife(world: World): Life {
         got++;
       }
     };
-    plant(hi ? 250 : 130, (i) => gebiet[i] === WALD && !(t.edge[i] & EDGE_DECK), RAND + 1.6, 70, farY + 8, 66);
+    plant(hi ? 215 : 130, (i) => gebiet[i] === WALD && !(t.edge[i] & EDGE_DECK), RAND + 1.6, 70, farY + 8, 66);
     plant(hi ? 26 : 12, (i) => gebiet[i] === ALM && !(t.edge[i] & EDGE_DECK), 12, 60, farY + 8, 64);
     plant(hi ? 40 : 20, (i) => (t.edge[i] & EDGE_RAIL) !== 0 || inU(i, 2.6, 4.2) || inU(i, 29.6, 31.2), RAND + 4, 60, farY + 8, 60);
   }
 
-  mark('Gletscher und Gipfel');
   // =====================================================================================
   // Gletscher und Gipfel
   // =====================================================================================
@@ -2127,7 +2104,6 @@ export function buildGipfelLife(world: World): Life {
     }
     geo(bodenB, G.kegel4, C_SCHNEE, x + 1.2, y + 0.4, z - 0.8, 0, rnd() * 3, 0, 2.2, 0.9, 1.8);
     const yc = top + 0.4;
-    GP.kreuz = [x, yc, z];
     bau.at(x, yc, z, faceRoad(L0, x, z));
     bau.box(0, 3.6, 0, 0.36, 7.2, 0.36, C_HOLZ_D);
     bau.box(0, 5.4, 0, 3.4, 0.34, 0.36, C_HOLZ_D);
@@ -2177,7 +2153,6 @@ export function buildGipfelLife(world: World): Life {
       const hz = LZ(i, hLat);
       const yaw = faceRoad(i, hx, hz);
       const hy = grund(hx, hz);
-      GP.huette = [hx, hy, hz];
       let gMin = hy;
       for (const [a, b] of [
         [-3, -3.5],
@@ -2377,7 +2352,6 @@ export function buildGipfelLife(world: World): Life {
         }
         k.beam([0, 0.45, 0], [0, -0.45, 0], 0.06, C_STAHL);
         windsack = small.add(mb);
-        GP.windsack = [x, y, z];
         windsackAt[0] = x;
         windsackAt[1] = y + 8.0;
         windsackAt[2] = z;
@@ -2385,7 +2359,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Bergwald und Abfahrt: Almhütte');
   // =====================================================================================
   // Bergwald und Abfahrt: Almhütte, Skisprungschanze, Klamm
   // =====================================================================================
@@ -2400,7 +2373,6 @@ export function buildGipfelLife(world: World): Life {
       const z = LZ(i, lat);
       if (!platz(x, z, 5.5, 8, 0.7)) continue;
       const yaw = faceRoad(i, x, z);
-      GP.almhuette = [x, grund(x, z), z];
       chalet(x, z, yaw, 7.2, 7.8, C_LADEN[1]);
       // Bank, Tisch, Brunnentrog, Holzstoß
       deko.at(x, grund(x, z), z, yaw);
@@ -2434,7 +2406,6 @@ export function buildGipfelLife(world: World): Life {
       const z = LZ(i, lat);
       const y = grund(x, z);
       if (!frei(x, z, 3, y - 1, 16)) continue;
-      GP.richter = [x, y, z];
       bau.at(x, y, z, faceRoad(ramp, x, z));
       deko.like(bau);
       bau.box(0, 4, 0, 2.6, 8.6, 2.6, C_SOCKEL);
@@ -2458,7 +2429,6 @@ export function buildGipfelLife(world: World): Life {
         const z = LZ(i, lat);
         const y = grund(x, z);
         if (!frei(x, z, 3, y - 1, 15)) continue;
-        GP.anlauf = [x, y, z];
         bau.at(x, y, z, yawAt(i));
         deko.like(bau);
         for (const [a, b] of [
@@ -2506,7 +2476,6 @@ export function buildGipfelLife(world: World): Life {
   // Klamm: Wasser im Grund, Gischt an den Stufen, Felsblöcke; unter der Schanze ein dunkler Schlund
   if (klamm) {
     const kl = klamm;
-    GP.klamm = [kl.x, kl.y + 15, kl.z, kl.rx, kl.rz, kl.ax, kl.az];
     const ref: V3 = [kl.x, -1e4, kl.z];
     const W = 2.4;
     const n = hi ? 34 : 20;
@@ -2571,7 +2540,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Über dem Tal: Gleitschirmflieg');
   // =====================================================================================
   // Über dem Tal: Gleitschirmflieger und Greifvögel
   // =====================================================================================
@@ -2642,7 +2610,6 @@ export function buildGipfelLife(world: World): Life {
       const cy = gy - 5 + rnd() * 45;
       if (!bahnFrei(cx, cy, cz, R, 3, 6)) continue;
       const [cA, cB] = SCHIRME[(schirme.length / 7) % SCHIRME.length];
-      GP['schirm' + schirme.length / 7] = [cx, cy, cz, R];
       schirme.push(mov.add(schirm(cA, cB)), cx, cy, cz, R, (rnd() < 0.5 ? -1 : 1) * (0.1 + rnd() * 0.05), rnd() * TAU);
     }
   }
@@ -2674,7 +2641,6 @@ export function buildGipfelLife(world: World): Life {
     }
   }
 
-  mark('Netze');
   // =====================================================================================
   // Netze
   // =====================================================================================
@@ -2729,7 +2695,6 @@ export function buildGipfelLife(world: World): Life {
   group.add(smallMesh);
   disposables.push(smallGeo);
 
-  mark('Bewegung');
   // =====================================================================================
   // Bewegung
   // =====================================================================================
@@ -2799,8 +2764,6 @@ export function buildGipfelLife(world: World): Life {
     }
   };
 
-  mark('ende');
-  (globalThis as any).__gt = { bau: bauB.triangles, boden: bodenB.triangles, matt: mattB.triangles, fern: fern.triangles, mov: mov.geometry.getAttribute('position').count / 3, small: small.geometry.getAttribute('position').count / 3 };
   update(0);
   mov.update(0);
   small.update(0);
