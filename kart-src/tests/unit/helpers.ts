@@ -5,9 +5,9 @@ import { TRACK } from '../../src/game/track';
 /**
  * Führt fn auf der aktiven Strecke ohne Streckenmechanik aus (kein Verkehr,
  * keine Geysire, keine Lava, keine Bänder, keine Flut, kein Wind, kein Seegang, keine Bruchstellen, keine Tore, keine Portale) – für Messungen, die nur Verlauf und Fahrwerk
- * vergleichen sollen und sonst vom Zufall des Verkehrs abhingen.
+ * vergleichen sollen und sonst vom Zufall des Verkehrs abhingen. except: was trotzdem bleibt.
  */
-export function withoutMechanics<T>(fn: () => T): T {
+export function withoutMechanics<T>(fn: () => T, except: ('vehicles' | 'gates')[] = []): T {
   const t = TRACK;
   const keep = { vehicles: t.vehicles, pulses: t.pulses, floods: t.floods, belts: t.belts, tide: t.tide, winds: t.winds, pontoons: t.pontoons, holes: t.holes, gates: t.gates, rivers: t.rivers, portals: t.portals };
   t.vehicles = [];
@@ -21,6 +21,9 @@ export function withoutMechanics<T>(fn: () => T): T {
   t.gates = [];
   t.rivers = [];
   t.portals = [];
+  // (Die Abkürzung über das Zugdach der Neonhochbahn gibt es nur mit Zug – und mit dem Tor, das ihn abwartet.)
+  if (except.includes('vehicles')) t.vehicles = keep.vehicles;
+  if (except.includes('gates')) t.gates = keep.gates;
   try {
     return fn();
   } finally {

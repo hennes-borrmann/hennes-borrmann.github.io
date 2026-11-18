@@ -23,12 +23,13 @@ import { RUMMEL } from './tracks/rummel';
 import { ZIMMER } from './tracks/zimmer';
 import { WOLKEN } from './tracks/wolken';
 import { GIPFEL } from './tracks/gipfel';
+import { NEON } from './tracks/neon';
 
-export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS, MOND, HAFEN, VULKAN, RUINE, KAMM, FLUSS, SPIEGEL, WUESTE, ZIMMER, RUMMEL, MAGNET, GIPFEL];
+export const TRACK_DEFS: TrackDef[] = [WERKSHOF, KLIPPE, GLUT, NACHT, WOLKEN, RIFF, EIS, MOND, HAFEN, VULKAN, RUINE, KAMM, FLUSS, SPIEGEL, WUESTE, ZIMMER, RUMMEL, MAGNET, GIPFEL, NEON];
 
 /**
  * So viele Strecken (von vorn gezählt) stehen in der Lobby zur Wahl. Was dahinter
  * stünde, wäre noch in Arbeit – zu erreichen nur mit dem Test-Schalter ?alle=1.
  * Zurzeit sind die ersten zwölf freigegeben.
  */
-export const RELEASED_TRACKS = 19;
+export const RELEASED_TRACKS = 20;

@@ -38,9 +38,12 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt, bandLineLat } from './mechanics';
 import { SURFACES } from './surface';
 import {
+  EDGE_BAND,
+  bandMeters,
+  bandOf,
   EDGE_GAP,
   EDGE_GLIDE,
   EDGE_RAIL,
@@ -324,6 +327,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const d = segDelta(t, s.seg, t.branches[k].from);
       if (d > DECIDE_AT && d <= DECIDE_AT + 2) {
         let take = random(b) < 0.5;
+        // Abkürzung über ein Zugdach (Neonhochbahn): nur, wenn das Tor bei der Ankunft offen ist (dann hält ein Zug) –
+        // ohne Zug wäre dort ein Graben. Ob sie es wagt, hängt an der Stärke (wie beim Aufspringen auf den Wüstenexpress).
+        const train = t.def.branches?.[k]?.shortcut === 'train';
+        if (train) take = false;
         // Liegt auf der Abzweigung ein Stück, durch das im Takt Lava läuft? Wer aufpasst,
         // nimmt sie genau dann, wenn sie bei der Durchfahrt frei ist (die Ampel zeigt es an).
         if (b.level > 0) {
@@ -356,7 +363,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           }
           if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 30)) {
             // Offen – und das ist es nicht immer: Wer aufpasst, nimmt den Weg meistens, solange es ihn gibt.
-            if (t.branchOf[g.first] === k && b.level > 0 && !take) take = random(b) < 0.6;
+            if (train && t.branchOf[g.first] === k) take = random(b) < TRAIN_DARE[b.level];
+            else if (t.branchOf[g.first] === k && b.level > 0 && !take) take = random(b) < 0.6;
             continue;
           }
           if (t.branchOf[g.first] === k) take = false;
@@ -420,6 +428,19 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           }
         }
       }
+    }
+  }
+  // Schwebeband: Wer aufpasst, fährt auf einer Magnetlinie – auf der, die bei der Ankunft am Zielpunkt näher liegt.
+  // (Nicht in engen Kurven: dort zählt die Innenseite mehr als der Zug der Linie.)
+  if (b.level > 0 && !air && (t.edge[target] & EDGE_BAND) !== 0 && Math.abs(bend) < 1 / 70) {
+    const band = bandOf(t, target);
+    if (band) {
+      const m = bandMeters(t, band, target, 0);
+      const when = ctx.time + (look / Math.max(v, 8)) * 60;
+      const a = bandLineLat(t.rh[target], m, when, 0);
+      const c = bandLineLat(t.rh[target], m, when, 1);
+      projectOnTrack(t, s.x, s.z, s.seg);
+      lat = Math.abs(a - proj.lat) <= Math.abs(c - proj.lat) ? a : c;
     }
   }
   for (const h of t.hazards) {
@@ -502,8 +523,9 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const range = Math.min((PATH.length - 2) * t.step, 16 + v * 1.7);
     /** Bei Flut: die höhere, flachere Seite der Fahrbahn (−1 links, 1 rechts, 0 = keine Flut hier). */
     let shallow = 0;
-    // Im Verkehr nutzt die KI die Fahrbahn bis an den Rand.
-    const room = t.vehicles.length > 0 && !openAhead ? Math.max(maxLat, t.rh[target] - 0.9) : maxLat;
+    // Im Verkehr nutzt die KI die Fahrbahn bis an den Rand. (Die U-Bahn fährt nicht auf der Fahrbahn: kein Verkehr.)
+    const traffic = t.vehicles.length > (t.metro ? t.metro.plan.trains : 0);
+    const room = traffic && !openAhead ? Math.max(maxLat, t.rh[target] - 0.9) : maxLat;
     // Zug: die Spur, auf die ich will, um aufs Dach zu kommen oder oben zu bleiben (NaN = keine Vorliebe)
     let trainWant = Number.NaN;
     let trainNear = false;
@@ -511,6 +533,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const lap = t.n * t.step;
       const mine = t.prog[s.seg] * t.step + proj.along;
       for (const veh of t.vehicles) {
+        // (Die U-Bahn hält im Graben: Sie ist kein Hindernis, sondern die Brücke – siehe die Tore.)
+        if (veh.plan) continue;
         // Abstand zur Fahrzeugmitte des vordersten Wagens, entlang der Hauptstrecke
         let d = vehicleAt(veh, ctx.time, lap) - mine;
         if (d > lap / 2) d -= lap;
@@ -720,8 +744,12 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     for (const g of t.gates) {
       // (Ein Größentor geht nicht von selbst auf: Davor wird umgeplant, nicht gewartet.)
       if (g.only !== 0) continue;
-      for (let k = 1; k < PATH.length && k * t.step <= range; k++) {
-        if (PATH[k] !== g.first) continue;
+      // (Wer schon auf dem gesperrten Stück ist, kommt hinaus. Wer noch auf der Hauptstrecke daneben fährt – an der
+      // Mündung liegen beide ineinander –, für den beginnt das Tor schon dort, wo sein Weg das gesperrte Stück erreicht.)
+      if (s.seg >= g.first && s.seg < g.first + g.count) continue;
+      for (let k = 0; k < PATH.length && k * t.step <= range; k++) {
+        if (PATH[k] < g.first || PATH[k] >= g.first + g.count) continue;
+        if (PATH[k] !== g.first && k > 0 && t.twin[PATH[k]] < 0) break;
         if (planActive(g.plan, ctx.time + ((k * t.step) / Math.max(v, 8)) * 60)) {
           jam = true;
           haltSpeed = Math.min(haltSpeed, Math.sqrt(Math.max(0, 20 * (k * t.step - 6))));
@@ -758,7 +786,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       const free = freeLat(lat, here, room);
       // Alles dicht? Im Verkehr heißt das bremsen; steht nur überall Wasser, dann dort durch, wo es am flachsten ist.
       if (!Number.isNaN(free)) lat = free;
-      else if (t.vehicles.length > 0) jam = true;
+      else if (traffic) jam = true;
       else if (shallow !== 0) lat = shallow * room;
     }
     // Fluss: Ausweichen hält sonst möglichst die Spur – die schnelle Bahn aber ist ein Ziel, kein Hindernis.

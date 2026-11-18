@@ -833,8 +833,8 @@ async function main() {
     check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
     await h6.page.click('#btn-step-next');
     check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
-    check('Neunzehn Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 19);
-    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 19);
+    check('Zwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 20);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 20);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
@@ -1520,7 +1520,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen neunzehn Strecken zur Wahl', cards === 19, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen zwanzig Strecken zur Wahl', cards === 20, `${cards} Karten`);
     await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2175,9 +2175,67 @@ async function main() {
       check('An der rechten Wand sackt Anna ohne Lenken nach links ab', sag1.side < -1.5, `${sag1.side.toFixed(1)} m quer nach ${((sag1.time - sag0.time) / 60).toFixed(1)} s`);
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Neonhochbahn: Auf dem Schwebeband schweben die Karts; es dreht sich senkrecht an eine Fassade, zwei Magnetlinien wandern
+    // darüber – nach der Rennzeit, auf beiden Bildschirmen gleich. Berühren sich zwei schwebende Karts, stoßen sie sich ab,
+    // und beide bekommen Schub. Die U-Bahn hält nach Fahrplan im Bahnhof; das Tor zur Abkürzung über ihr Dach folgt ihm.
+    await pickTrack(h7.page, 19);
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 19, null, { timeout: 5000 });
+    await clickReady(c7.page);
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await clickStart(h7.page);
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 19, null, { timeout: 30000 });
+    const lineState = (b) => b.lines.map((x) => x.toFixed(3)).join('/');
+    const [nH0, nC0] = await Promise.all([kart(h7.page, 'band(2, 200)'), kart(c7.page, 'band(2, 200)')]);
+    const [nH1, nC1] = await Promise.all([kart(h7.page, 'band(3.5, 200)'), kart(c7.page, 'band(3.5, 200)')]);
+    const [nH2, nC2] = await Promise.all([kart(h7.page, 'band(5, 440)'), kart(c7.page, 'band(5, 440)')]);
+    check(
+      'Neonhochbahn hat ein Schwebeband, das sich senkrecht an die Fassade dreht, und zwei wandernde Magnetlinien – auf beiden Bildschirmen gleich',
+      nH0.bands.length === 1 && nH0.hover && Math.abs(nH0.roll) < 1 && nH2.roll > 85 && nH0.lines.length === 2 && lineState(nH0) === lineState(nC0) && lineState(nH1) === lineState(nC1) && lineState(nH0) !== lineState(nH1) && nH2.roll === nC2.roll && nH0.bumpers >= 2,
+      `Band ${nH0.bands.map((b) => `${b.at.toFixed(0)}–${(b.at + b.length).toFixed(0)} m`).join(', ')} · Verdrehung bei 440 m ${nH2.roll.toFixed(0)}° · Linien bei 2 s ${lineState(nH0)} / ${lineState(nC0)}, bei 3,5 s ${lineState(nH1)} / ${lineState(nC1)}`,
+    );
+    // Abstoßen: Anna (Host) und Ben (Mitspieler) nebeneinander auf dem Band, eine Handbreit Überlappung – beide bekommen Schub.
+    const repel = await h7.page.evaluate(async () => {
+      const k = window.__kart;
+      k.place(0, 180, -0.7);
+      k.place(1, 180, 0.7);
+      for (let n = 0; n < 40; n++) {
+        await new Promise((r) => setTimeout(r, 16));
+        const a = k.authoritative(0);
+        const b = k.authoritative(1);
+        if (a.boost > 0 && b.boost > 0) return { a: a.boost, b: b.boost, apart: Math.hypot(a.x - b.x, a.z - b.z) };
+      }
+      const a = k.authoritative(0);
+      const b = k.authoritative(1);
+      return { a: a.boost, b: b.boost, apart: Math.hypot(a.x - b.x, a.z - b.z) };
+    });
+    // (Ben sieht seinen Schub auch selbst: Die Vorhersage seines Bildschirms übernimmt den Stand des Hosts.)
+    let benBoost = 0;
+    for (const until = Date.now() + 1500; Date.now() < until && benBoost === 0; ) {
+      const p = await kart(c7.page, 'predicted()');
+      benBoost = p ? p.boost : 0;
+      if (benBoost === 0) await sleep(30);
+    }
+    check('Schwebeband: Anna und Ben stoßen sich ab, und beide bekommen Schub – auch auf Bens Bildschirm', repel.a > 0 && repel.b > 0 && repel.apart >= 1.9 && benBoost > 0, `Schub ${repel.a} / ${repel.b} Ticks, ${repel.apart.toFixed(2)} m auseinander, bei Ben ${benBoost}`);
+    // U-Bahn: Solange das Tor offen ist, steht ein Zug im Bahnhof oder rollt gerade die letzten Meter heran (das Tor geht
+    // so viel früher auf, wie man von der Einfahrt bis zum Graben braucht) – auf beiden Bildschirmen gleich.
+    let gateOk = true;
+    let same = true;
+    let opened = 0;
+    for (let sec = 1; sec < 40; sec += 0.5) {
+      const [a, b] = await Promise.all([kart(h7.page, `band(${sec})`), kart(c7.page, `band(${sec})`)]);
+      if (a.gate !== b.gate || a.trains.map((f) => f.toFixed(3)).join() !== b.trains.map((f) => f.toFixed(3)).join()) same = false;
+      if (!a.gate) {
+        opened++;
+        if (!a.trains.some((f) => f > a.stop - 10 && f < a.stop + 0.5)) gateOk = false;
+      }
+    }
+    check('U-Bahn und Tor zum Zugdach: nach Fahrplan, auf beiden Bildschirmen gleich – offen nur, solange ein Zug hält', same && gateOk && opened > 4, `${opened} von 78 Stichproben offen${same ? '' : ', Bildschirme verschieden'}${gateOk ? '' : ', offen ohne haltenden Zug'}`);
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die neunzehn großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die zwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

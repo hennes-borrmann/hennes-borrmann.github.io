@@ -16,6 +16,9 @@ import {
   EDGE_RAMP,
   EDGE_RIVER,
   EDGE_TUNNEL,
+  EDGE_BAND,
+  EDGE_TWIST,
+  twistWarp,
   heaveAt,
   rightX,
   rightZ,
@@ -28,6 +31,8 @@ import { buildLife, type Life } from './life';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
+
+const _tw = { x: 0, y: 0, z: 0 };
 
 const WALL_H = 0.95;
 const WALL_T = 0.5;
@@ -282,6 +287,8 @@ export class World {
   private P(i: number, f: number, lat: number, dy = 0): V3 {
     const t = this.track;
     const a = i;
+    // Schwebeband an der Fassade: die Fahrbahn ist je Abschnitt um eine Achse über ihr gedreht (track.ts: twistWarp).
+    if ((t.edge[a] & EDGE_TWIST) !== 0 && twistWarp(t, a, f, lat, dy, _tw)) return [_tw.x, _tw.y, _tw.z];
     const x = t.px[a] + rightX(t, a) * lat;
     const y = t.py[a] + lat * t.bank[a] + dy;
     const z = t.pz[a] + rightZ(t, a) * lat;
@@ -364,6 +371,9 @@ export class World {
         case 'regolith':
           return { a: col(0xb9b6c2), b: col(0xaaa7b4), c: col(0x8a8796), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0x9d9aa8), detail: 'ruts', barrier: 'rock', wallA: col(0x8f8c9c), wallB: col(0x6f6c7c) };
         case 'panel':
+          // (Neonhochbahn: Steg durch das Atrium und Bahnsteig – dunkles Glas mit leuchtenden Kanten statt heller Platten;
+          // so hebt sich auch das helle Dach der U-Bahn davon ab.)
+          if (t.def.theme === 'neon') return { a: rgb(0x1d2347), b: rgb(0x232a55), c: rgb(0x5ff3ff), band: 3, plain: false, lines: true, line: rgb(0x5ff3ff), kerbs: false, shoulder: rgb(0x14172e), detail: 'plates', barrier: 'rail', wallA: rgb(0x1f2240), wallB: rgb(0xff3fae) };
           return { a: col(0xe6e9f2), b: col(0xd6dae6), c: col(0x8f96ab), band: 3, plain: false, lines: true, line: col(0xff8a2a), kerbs: false, shoulder: col(0xb9bfd0), detail: 'plates', barrier: 'rail', wallA: col(0x4b5268), wallB: col(0xff8a2a) };
         case 'snow':
           return { a: col(0xf3f7fc), b: col(0xe6eef7), c: col(0xc9d8e8), band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0xdde8f3), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
@@ -372,6 +382,9 @@ export class World {
         case 'meadow':
           // Hohes Gras: sattes, unruhiges Grün mit hellen Halmbüscheln, ohne Markierung, Holzzaun
           return { a: col(0x6fae3e), b: col(0x5f9e34), c: col(0xb7d86a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0x7fb84a), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
+        case 'band':
+          // Schwebeband: dunkles, glattes Magnetband mit leuchtenden Rändern (die Magnetlinien zeichnet mechanics/band.ts)
+          return { a: rgb(0x1b2150), b: rgb(0x20275c), c: rgb(0x5ff3ff), band: 2, plain: false, lines: true, line: rgb(0x5ff3ff), kerbs: false, shoulder: rgb(0x2a7fd6), detail: 'none', barrier: 'rail', wallA: rgb(0x1f2240), wallB: rgb(0x5ff3ff) };
         case 'marble':
           // Tempelplatten: heller Sandstein mit Fugen, Brüstung aus Quadern
           return { a: col(0xe6d6ac), b: col(0xd9c798), c: col(0xa9966a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xbcaa80), detail: 'plates', barrier: 'stone', wallA: col(0xdccb9e), wallB: col(0xc4b286) };
@@ -573,6 +586,12 @@ export class World {
       const whole = f0 === 0 && f1 === 1;
       for (const sgn of [-1, 1]) {
         if (sgn < 0 ? freeL : freeR) continue;
+        // Auf dem Schwebeband steht keine Bande: Die Grenze zeigen die leuchtenden Magnetkanten (mechanics/band.ts). Hier
+        // nur die Stirnseite des Bands.
+        if ((e & EDGE_BAND) !== 0) {
+          side(i, f0, f1, sgn * wh, -DECK_D, 0, sgn > 0, cDeckDark);
+          continue;
+        }
         const open = sgn < 0 ? openL : openR;
         const inner = sgn * wh;
         const outer = sgn * (wh + WALL_T);
@@ -705,7 +724,8 @@ export class World {
       if (gapI) cross(i, 0.5, -wh, wh, -DECK_D - 0.6, 0, false, cDeckDark);
 
       // Stützen: links und rechts außerhalb der Bande, mit Querträger
-      if (deck && !gapI && !gapJ && i % 14 === 7 && (e & EDGE_RAMP) === 0) {
+      // (Unter dem Band an der Fassade trägt die Fassade – die Halter zeichnet mechanics/band.ts.)
+      if (deck && !gapI && !gapJ && i % 14 === 7 && (e & (EDGE_RAMP | EDGE_TWIST)) === 0) {
         const lat = wh + WALL_T + 0.5;
         let free = true;
         const posts: V3[] = [];
@@ -715,6 +735,14 @@ export class World {
           for (let k = 0; k < t.total; k += 2) {
             if (Math.abs(segDelta(t, i, k)) < 24 && t.branchOf[i] === t.branchOf[k]) continue;
             if (t.py[k] < p[1] - 2 && Math.hypot(t.px[k] - p[0], t.pz[k] - p[2]) < t.wh[k] + 1) free = false;
+          }
+          // Neonhochbahn: keine Stütze in der Trasse der U-Bahn (der Zug fuhr sonst durch sie hindurch).
+          const m = t.metro;
+          if (m) {
+            const dx = p[0] - m.x[0];
+            const dz = p[2] - m.z[0];
+            const u = dx * m.tx + dz * m.tz;
+            if (u > -6 && u < m.n + 6 && Math.abs(-dx * m.tz + dz * m.tx) < 3.4) free = false;
           }
         }
         if (free) {
@@ -774,15 +802,15 @@ export class World {
     const id = t.def.theme;
     // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
     // Wänden, die Naturstrecken eine Höhle im Fels.
-    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen';
+    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen' || id === 'neon';
     const H = TUNNEL_H;
     const R = hall ? 0.9 : TUNNEL_ROCK;
     const cRock = rgb(th.ground[2]);
     // (Gipfelbahn: Tunnel im Gletschereis – hellblaues Eis, dunkleres Blau im Scheitel.)
-    const cWall = id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : rgb(0xd9c7a8);
-    const cBand = id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : rgb(0x6fd0e6);
-    const cRoof = id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff }[id] ?? 0x7ef0ff);
+    const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : rgb(0xd9c7a8);
+    const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : rgb(0x6fd0e6);
+    const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : rgb(0xb5543c);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -1040,7 +1068,8 @@ export class World {
   heightAt(x: number, z: number): number {
     const t = this.track;
     const th = this.theme;
-    if (th.rough === 0 && th.liquidY === null && t.def.theme === 'nacht') return th.farY;
+    // Stadt: ebener Boden (in der Neonhochbahn weit unter der Bahn, die ganz auf Stützen steht).
+    if (th.rough === 0 && th.liquidY === null && (t.def.theme === 'nacht' || t.def.theme === 'neon')) return th.farY;
     // Über den Wolken gibt es kein Gelände: alles steht auf Pfeilern, die im Wolkenmeer verschwinden.
     if (t.def.theme === 'wolken') return th.farY;
 
@@ -1159,7 +1188,7 @@ export class World {
   private buildTerrain(minX: number, maxX: number, minZ: number, maxZ: number): void {
     const th = this.theme;
     const t = this.track;
-    const flat = t.def.theme === 'nacht' || t.def.theme === 'wolken';
+    const flat = t.def.theme === 'nacht' || t.def.theme === 'wolken' || t.def.theme === 'neon';
     const margin = flat ? 0 : 150;
     const cell = this.terrainCell;
     const x0 = minX - margin;

@@ -3,7 +3,7 @@
 // und laden den Drift schnell, Stahl ist schnell und glatt, Fels und der
 // Stadtasphalt kleben. Die KI plant mit denselben Werten.
 
-export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble' | 'meadow';
+export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble' | 'meadow' | 'band';
 
 export interface Surface {
   id: SurfaceId;
@@ -59,6 +59,9 @@ export const SURFACES: Surface[] = [
   // Hohes Gras (Almwiese, Gipfelbahn): richtig langsam – eine Abkürzung darüber lohnt sich nur mit Schub (der hebt die
   // Bremswirkung des Untergrunds auf, siehe sim.ts) oder im Gleitflug darüber hinweg.
   { id: 'meadow', name: 'Hohes Gras', grip: 0.8, speed: 0.56, accel: 0.66, brake: 0.9, charge: 0.2 },
+  // Schwebeband (Neonhochbahn): Das Kart schwebt über dem Magnetband – Halt wie auf Asphalt (die Magnete halten auch an
+  // der Wand), ein Hauch schneller, weil nichts rollt; gebremst wird magnetisch, etwas weicher.
+  { id: 'band', name: 'Schwebeband', grip: 1, speed: 1.02, accel: 1, brake: 0.9, charge: 0 },
 ];
 
 export const SURFACE_INDEX = Object.fromEntries(SURFACES.map((s, i) => [s.id, i])) as Record<SurfaceId, number>;

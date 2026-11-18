@@ -97,8 +97,19 @@ import {
   RAIL_VMIN,
   DRUM_GRIP,
   DRUM_SAG,
+  BAND_LINE_HALF,
+  BAND_LINE_PULL,
+  BUMPER_RADIUS,
+  BUMPER_TICKS,
+  REPEL_PUSH,
+  REPEL_TICKS,
+  bandLineLat,
+  metroFront,
 } from './mechanics';
 import {
+  EDGE_BAND,
+  bandMeters,
+  bandOf,
   EDGE_DRUM,
   EDGE_FLOAT,
   EDGE_RAIL,
@@ -726,12 +737,17 @@ function roofUnder(t: Track, x: number, y: number, z: number, seg: number, time:
   const mine = t.prog[seg] * t.step;
   for (const v of t.vehicles) {
     if (!v.roofs) continue;
-    let d = mine - vehicleAt(v, time, lap);
-    if (d > lap / 2) d -= lap;
-    else if (d < -lap / 2) d += lap;
-    if (d > v.half + 8 || d < -((v.cars - 1) * v.pitch + v.half + 8)) continue;
+    if (v.plan) {
+      if (!metroNear(t, v, x, z, time)) continue;
+    } else {
+      let d = mine - vehicleAt(v, time, lap);
+      if (d > lap / 2) d -= lap;
+      else if (d < -lap / 2) d += lap;
+      if (d > v.half + 8 || d < -((v.cars - 1) * v.pitch + v.half + 8)) continue;
+    }
     for (let car = 0; car < v.cars; car++) {
       const p = vehiclePose(t, v, car, time, RPOSE);
+      if (p.seg < 0) continue;
       const hx = Math.sin(p.heading);
       const hz = Math.cos(p.heading);
       const dx = x - p.x;
@@ -762,6 +778,20 @@ function roofUnder(t: Track, x: number, y: number, z: number, seg: number, time:
 }
 
 /**
+ * U-Bahn: Kann dieser Zug an der Stelle (x, z) überhaupt jemanden berühren? Nur in der Nähe des Bahnhofs, und nur
+ * während er unterwegs ist (sonst steht er im Tunnel).
+ */
+function metroNear(t: Track, v: Vehicle, x: number, z: number, time: number): boolean {
+  const m = t.metro;
+  if (!m) return false;
+  const dx = x - m.cx;
+  const dz = z - m.cz;
+  if (dx * dx + dz * dz > m.reach * m.reach) return false;
+  const f = metroFront(v.plan!, v.train ?? 0, time);
+  return f > 0 && f - (v.cars - 1) * v.pitch - 2 * v.half < m.n;
+}
+
+/**
  * Verkehr: Zusammenstöße und Windschatten. Fahrzeuge sind fahrende Wände –
  * seitlich streift man an ihnen entlang wie an einer Bande; wer mit viel
  * Überschuss auffährt (oder überrollt wird), schleudert.
@@ -772,14 +802,19 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
   const mine = t.prog[s.seg] * t.step;
   let inWake = false;
   for (const v of t.vehicles) {
-    // Grob: nur Fahrzeuge in der Nähe (gemessen am Fortschritt auf der Hauptstrecke).
-    let d = mine - vehicleAt(v, time, lap);
-    if (d > lap / 2) d -= lap;
-    else if (d < -lap / 2) d += lap;
-    const train = (v.cars - 1) * v.pitch;
-    if (d > v.half + 8 || d < -(train + v.half + WAKE_LENGTH + 8)) continue;
+    // Grob: nur Fahrzeuge in der Nähe (gemessen am Fortschritt auf der Hauptstrecke; die U-Bahn nach der Entfernung).
+    if (v.plan) {
+      if (!metroNear(t, v, s.x, s.z, time)) continue;
+    } else {
+      let d = mine - vehicleAt(v, time, lap);
+      if (d > lap / 2) d -= lap;
+      else if (d < -lap / 2) d += lap;
+      const train = (v.cars - 1) * v.pitch;
+      if (d > v.half + 8 || d < -(train + v.half + WAKE_LENGTH + 8)) continue;
+    }
     for (let car = 0; car < v.cars; car++) {
       const p = vehiclePose(t, v, car, time, VPOSE);
+      if (p.seg < 0) continue;
       const hx = Math.sin(p.heading);
       const hz = Math.cos(p.heading);
       const dx = s.x - p.x;
@@ -891,12 +926,17 @@ export function trafficBlocks(t: Track, x: number, y: number, z: number, radius:
   const lap = t.n * t.step;
   const mine = t.prog[seg] * t.step;
   for (const v of t.vehicles) {
-    let d = mine - vehicleAt(v, time, lap);
-    if (d > lap / 2) d -= lap;
-    else if (d < -lap / 2) d += lap;
-    if (d > v.half + 8 || d < -((v.cars - 1) * v.pitch + v.half + 8)) continue;
+    if (v.plan) {
+      if (!metroNear(t, v, x, z, time)) continue;
+    } else {
+      let d = mine - vehicleAt(v, time, lap);
+      if (d > lap / 2) d -= lap;
+      else if (d < -lap / 2) d += lap;
+      if (d > v.half + 8 || d < -((v.cars - 1) * v.pitch + v.half + 8)) continue;
+    }
     for (let car = 0; car < v.cars; car++) {
       const p = vehiclePose(t, v, car, time, VPOSE);
+      if (p.seg < 0) continue;
       const hx = Math.sin(p.heading);
       const hz = Math.cos(p.heading);
       const du = (x - p.x) * hx + (z - p.z) * hz;
@@ -973,6 +1013,52 @@ export function windPush(t: Track, seg: number, along: number, lat: number, time
     blow += w.push * k * Math.min(1, ends) * open;
   }
   return blow;
+}
+
+/**
+ * Schwebeband: Fährt ein Kart an dieser Stelle (Abschnitt seg, along, seitlich lat) zur Rennzeit time auf einer der
+ * beiden Magnetlinien? Dieselbe Frage stellen Rechnung, KI und Anzeige.
+ */
+export function onBandLine(t: Track, seg: number, along: number, lat: number, time: number): boolean {
+  const b = bandOf(t, seg);
+  if (!b) return false;
+  const m = bandMeters(t, b, seg, along);
+  const rh = t.rh[seg];
+  return Math.abs(lat - bandLineLat(rh, m, time, 0)) < BAND_LINE_HALF || Math.abs(lat - bandLineLat(rh, m, time, 1)) < BAND_LINE_HALF;
+}
+
+/** Schwebt das Kart gerade über einem Schwebeband (am Boden, nicht in der Luft, nicht beim Neuaufsetzen)? */
+export function hovering(t: Track, s: KartState): boolean {
+  return s.respawn === 0 && s.rocket === 0 && (s.flags & FLAG_AIR) === 0 && s.seg < t.total && (t.edge[s.seg] & EDGE_BAND) !== 0;
+}
+
+/**
+ * Abstoßen auf dem Schwebeband (der Host ruft es für jedes Paar sich berührender Karts auf): Schweben beide, stoßen sie
+ * sich ab – auseinandergeschoben, jedes mit REPEL_PUSH/2 von der Berührstelle weg – und beide bekommen kurz Schub.
+ * Gibt true zurück, wenn es so war (dann gilt kein gewöhnlicher Rempler).
+ */
+export function bandRepel(t: Track, a: KartState, b: KartState): boolean {
+  if (!hovering(t, a) || !hovering(t, b)) return false;
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const d = Math.hypot(dx, dz);
+  if (d >= KART_RADIUS * 2 || d < 1e-6) return false;
+  const nx = dx / d;
+  const nz = dz / d;
+  const push = (KART_RADIUS * 2 - d) / 2;
+  a.x -= nx * push;
+  a.z -= nz * push;
+  b.x += nx * push;
+  b.z += nz * push;
+  const rel = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
+  const k = (rel < 0 ? -rel / 2 : 0) + REPEL_PUSH / 2;
+  a.vx -= nx * k;
+  a.vz -= nz * k;
+  b.vx += nx * k;
+  b.vz += nz * k;
+  if (a.boost < REPEL_TICKS) a.boost = REPEL_TICKS;
+  if (b.boost < REPEL_TICKS) b.boost = REPEL_TICKS;
+  return true;
 }
 
 export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
@@ -1291,6 +1377,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
     // Aus dem Windschatten ausgeschert: kurz mehr Tempo – aber nur auf dem Gas, die Bremse bleibt die Bremse.
     if (s.draft >= DRAFT_PULL_FROM && !boosting) vmax *= DRAFT_PULL;
+    // Schwebeband: Wer auf einer Magnetlinie fährt, wird mitgezogen.
+    if (!boosting && t.bands.length > 0 && (t.edge[seg0] & EDGE_BAND) !== 0 && onBandLine(t, seg0, along0, lat0, env.time)) vmax *= BAND_LINE_PULL;
     // Lava auf der Fahrbahn: zäh wie Teer.
     if (t.floods.length > 0) {
       const lava = lavaAt(t, seg0, env.time);
@@ -1448,6 +1536,36 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         const turn = wrapAngle(trackHeading(t, s.seg) - s.heading);
         if (Math.abs(turn) < Math.PI / 2) s.heading = wrapAngle(s.heading + turn * 0.08);
       }
+    }
+  }
+
+  // --- Prallpoller am Rand des Schwebebands: abprallen und Schub ---
+  if (t.bumpers.length > 0 && !sunk && (t.edge[s.seg] & EDGE_BAND) !== 0) {
+    for (const b of t.bumpers) {
+      if (Math.abs(b.seg - s.seg) > 4) continue;
+      const dx = s.x - b.x;
+      const dz = s.z - b.z;
+      const reach = BUMPER_RADIUS + KART_RADIUS;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= reach * reach || Math.abs(y0 - b.y) > 2) continue;
+      const d = Math.sqrt(d2) || 1e-6;
+      const nx = dx / d;
+      const nz = dz / d;
+      s.x += nx * (reach - d);
+      s.z += nz * (reach - d);
+      const vn = s.vx * nx + s.vz * nz;
+      // Weg vom Poller: was auf ihn zulief, wird umgekehrt, und es gibt einen Stoß dazu – nie ein Abbremsen.
+      const out = Math.max(0, -vn) * 2 + REPEL_PUSH * 0.6;
+      s.vx += nx * out;
+      s.vz += nz * out;
+      if (s.boost < BUMPER_TICKS - 8) {
+        s.boost = BUMPER_TICKS;
+        ev |= EV_PAD;
+      }
+      projectOnTrack(t, s.x, s.z, s.seg);
+      s.seg = proj.seg;
+      lat = proj.lat;
+      along = proj.along;
     }
   }
 

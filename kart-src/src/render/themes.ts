@@ -72,6 +72,45 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Neonhochbahn: Zukunftsstadt bei Nacht. Tiefer, fast schwarzer Himmel mit violettem Dunst am Horizont (der Widerschein
+  // der Stadt), kühles Mondlicht von oben, magentafarbene Rückstrahlung von unten – wie in der Nachtschicht entsteht die
+  // Nacht ganz ohne eigene Shader und ohne zusätzliche Lichtquellen: über Dunst, Himmelslicht und gedämpfte Farben.
+  // Die Bahn liegt hoch über den Straßen: Der Boden ist weit unten (farY) und verschwindet im Dunst.
+  neon: {
+    sky: [0x04050f, 0x120f38, 0x3a1d5c],
+    fog: 0x150f33,
+    fogNear: 90,
+    fogFar: 420,
+    sunDir: [0.3, 0.8, -0.45],
+    sunColor: 0xa9b8ff,
+    sunIntensity: 1.25,
+    hemiSky: 0x6f7cff,
+    hemiGround: 0xff4fb0,
+    hemiIntensity: 1.45,
+    disc: 0xe8ecff,
+    discSize: 18,
+    clouds: 0x221a52,
+    cloudShade: 0x110d2c,
+    stars: true,
+    road: 0x262a48,
+    roadAlt: 0x2c3052,
+    line: 0x5ff3ff,
+    kerbA: 0xff3fae,
+    kerbB: 0x16f0d8,
+    shoulder: 0x1b1e36,
+    wallA: 0x1f2240,
+    wallB: 0x16f0d8,
+    wallCap: 0x0e1024,
+    deck: 0x3b3f66,
+    deckDark: 0x1d2040,
+    pillar: 0x2a2d50,
+    ground: [0x0d0f22, 0x121530, 0x0b0c1c, 0x181b38],
+    liquidY: null,
+    liquid: [0, 0, 0],
+    liquidGlow: false,
+    farY: -28,
+    rough: 0,
+  },
   // Gipfelbahn: klarer Sommertag in den Bergen – tiefblauer Himmel, sattgrüne Almen im Tal, oben Fels und Gletscher.
   // Hoch stehende Sonne von Südwesten; weiter Blick (der Dunst beginnt spät), damit man vom Gipfel das Tal sieht.
   gipfel: {

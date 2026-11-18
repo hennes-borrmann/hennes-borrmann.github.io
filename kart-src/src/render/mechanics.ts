@@ -19,6 +19,9 @@ import { buildMoon } from './mechanics/moon';
 import { buildRift } from './mechanics/rift';
 import { buildRiver } from './mechanics/river';
 import { buildDrum } from './mechanics/drum';
+import { buildBand } from './mechanics/band';
+import { buildMetro } from './mechanics/metro';
+import { buildAtrium } from './mechanics/atrium';
 import { buildRails } from './mechanics/rails';
 import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
@@ -54,7 +57,15 @@ export interface MechanicView {
 export function buildMechanics(track: Track, detail: boolean, world: World): MechanicView[] {
   const out: MechanicView[] = [];
   if (track.vehicles.some((v) => !v.roofs)) out.push(buildTraffic(track, detail));
-  if (track.roofed) out.push(buildTrain(track, detail));
+  // (Die U-Bahn der Neonhochbahn zeichnet mechanics/metro.ts.)
+  if (track.roofed && track.vehicles.some((v) => v.roofs && !v.plan)) out.push(buildTrain(track, detail));
+  if (track.bands.length > 0) out.push(buildBand(track, detail));
+  if (track.metro) out.push(buildMetro(track, detail));
+  // Neonhochbahn: der Atriumturm um die Abkürzung mit Risiko
+  if (track.def.theme === 'neon') {
+    const k = track.def.branches?.findIndex((b) => b.shortcut === 'risk') ?? -1;
+    if (k >= 0) out.push(buildAtrium(track, k));
+  }
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
   // (Im Dschungel ist ein „Band“ die Querströmung der Furt: die zeichnet mechanics/river.ts.)
@@ -73,6 +84,7 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.drums.length > 0) out.push(buildDrum(track, detail));
   if (track.era) out.push(buildRift(track, detail));
   // (Im Magnetwerk zeichnet die Trommel ihre Magnetplatten selbst.)
-  else if (track.drums.length === 0 && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
+  // (Das Tor der U-Bahn zeigt mechanics/metro.ts.)
+  else if (track.drums.length === 0 && !track.metro && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
   return out;
 }

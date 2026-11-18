@@ -296,6 +296,19 @@ const SHOTS = {
       [2, 650, 3],
     ],
   },
+  // Neonhochbahn: die Wandfahrt – das Schwebeband dreht sich senkrecht an die Fassade des Nachbarturms (≈ 400–470 m),
+  // drei Karts schweben daran entlang, die Magnetlinien leuchten. Von gegenüber aus der Häuserschlucht gesehen: rechts
+  // die Lichtsäule mit ihrer Wendel, dahinter die Stadt, tief unten die Lichtströme auf den Straßen.
+  neon: {
+    from: { xyz: [10, 48, -58] },
+    to: { xyz: [60, 46, -86] },
+    fov: 62,
+    karts: [
+      [1, 420, 2],
+      [2, 428, -2.5],
+      [3, 437, 1.5],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
@@ -370,6 +383,8 @@ async function openRace(browser, opt, index) {
   await page.fill('#in-name', 'Foto');
   await page.click('#btn-create');
   await page.waitForSelector('#app[data-view="lobby"]', { timeout: 60000 });
+  // (Die Lobby führt in drei Schritten – „Rennen starten“ steht im letzten.)
+  await page.evaluate(() => document.querySelector('#lobby-steps button[data-step="3"]')?.click());
   await page.click('#btn-start');
   await page.waitForSelector('#app[data-view="game"]', { timeout: 60000 });
   await page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1, null, { timeout: 120000, polling: 250 });

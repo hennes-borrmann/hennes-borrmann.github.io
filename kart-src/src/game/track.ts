@@ -60,11 +60,16 @@ import {
   type Rail,
   type River,
   raftAt,
+  type Band,
+  type MetroPlan,
+  VEH_METRO,
+  metroArrive,
+  metroFront,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -173,6 +178,16 @@ export interface PathFeatures {
    * wie ein Achterbahnwagen (mechanics.ts, Rail). lifts = Kettenlifte, brakes = Bremsstrecken: je [von, bis, Tempo in m/s].
    */
   rails?: { from: number; to: number; lanes: number[]; lifts?: [number, number, number][]; brakes?: [number, number, number][] }[];
+  /**
+   * Schwebeband (Neonhochbahn, mechanics.ts: Band): Von from bis to schwebt das Kart über einem Magnetband (EDGE_BAND) –
+   * Räder eingeklappt, Magnetlinien laufen darüber, wer sich berührt, stößt sich ab. twists = Verdrehung an Stützstellen
+   * [Stelle, Winkel in Grad] (positiv: an die rechte Wand gedreht, 90 = senkrecht an der Fassade), dazwischen weich; vor
+   * der ersten und nach der letzten 0. radius = Abstand der Drehachse über der Fahrbahn (ohne Angabe 10 m). Gerechnet wird
+   * flach, gezeigt wird die gedrehte Lage (twistWarp). Nur auf der Hauptstrecke.
+   */
+  bands?: { from: number; to: number; radius?: number; twists?: [number, number][] }[];
+  /** Prallpoller am Rand eines Schwebebands (lat in Metern): Wer sie streift, prallt ab und bekommt Schub (sim.ts). */
+  bumpers?: { at: number; lat: number }[];
   /** Schubmagnete auf einer Schiene (lat = Lage dieser Schiene): ziehen im Takt an (mechanics.ts, PULSE_KICK). */
   kicks?: { at: number; lat: number; period: number; phase: number }[];
   /**
@@ -213,9 +228,16 @@ export interface BranchDef extends PathFeatures {
   /**
    * Echte Abkürzung (ab der Gipfelbahn): Sie spart deutlich (1,5–3 s), hat aber einen Preis.
    * 'item' = lohnt sich nur mit Schub oder Gleiter (ohne: kaum schneller, eher langsamer);
-   * 'risk' = wer sie verpatzt (zu langsam, getroffen), stürzt ab. Ohne Angabe sind beide Wege gleichwertig.
+   * 'risk' = wer sie verpatzt (zu langsam, getroffen), stürzt ab.
+   * 'train' = Zeitfenster (Neonhochbahn): Über den Gleisgraben (trench) trägt nur das Dach eines Zugs, der im Bahnhof
+   * hält – ein Tor an der Mündung ist nur offen, solange er steht. Ohne Angabe sind beide Wege gleichwertig.
    */
-  shortcut?: 'item' | 'risk';
+  shortcut?: 'item' | 'risk' | 'train';
+  /**
+   * Gleisgraben (mit shortcut 'train'): [von, bis] hat keine Fahrbahn – nur das Dach des haltenden Zugs der U-Bahn
+   * (TrackDef.metro) liegt dort auf Höhe der Fahrbahn. Muss gerade sein. Wer hineinfällt, wird vor der Gabelung aufgesetzt.
+   */
+  trench?: [number, number];
   /** Eigene Stützpunkte [x, z, höhe] zwischen Gabelung und Einmündung (mit scale wie die Hauptstrecke). */
   points: number[][];
   roadHalf?: number;
@@ -273,6 +295,12 @@ export interface TrackDef extends PathFeatures {
    * flashes = fernes Wetterleuchten ohne Einschlag: Takt und Versatz in Sekunden, Helligkeit 0…1.
    */
   dark?: { flashes: { period: number; phase: number; power: number }[] };
+  /**
+   * U-Bahn (Neonhochbahn): Die Linie folgt dem Gleisgraben der Abzweigung branch (BranchDef.trench) und läuft an beiden
+   * Enden in einen Tunnel. Fahrplan wie MetroPlan (mechanics.ts): speed in m/s, accel in m/s², dwell und period in
+   * Sekunden, phase in Sekunden. Gehalten wird so, dass der Zug den Graben genau überdeckt.
+   */
+  metro?: { branch: number; speed: number; accel: number; dwell: number; period: number; phase: number };
 }
 
 export interface BoostPad {
@@ -332,6 +360,13 @@ export const EDGE_RIVER = 2048;
 export const EDGE_RAIL = 4096;
 /** Magnettrommel: Die Fahrbahn läuft an der Innenwand einer Trommel (Track.drums, Track.roll). */
 export const EDGE_DRUM = 8192;
+/** Schwebeband (Neonhochbahn): Das Kart schwebt über einem Magnetband (Track.bands). */
+export const EDGE_BAND = 16384;
+/**
+ * Verdreht: Gerechnet wird hier flach, gezeigt wird die Fahrbahn um eine Achse über ihr gedreht (Track.roll, Track.twist,
+ * twistWarp) – auf dem Schwebeband an einer Fassade. (Die Magnettrommel zeigt die Bahn aufrecht und dreht die Halle.)
+ */
+export const EDGE_TWIST = 32768;
 /**
  * An Gabelung und Einmündung liegen zwei Fahrbahnen nebeneinander: auf der
  * Seite zur anderen hin steht keine Bande, und der Boden geht einfach weiter.
@@ -452,6 +487,13 @@ export interface Track {
   /** Magnettrommeln (mechanics.ts) und die Verdrehung je Abschnitt (Radiant; außerhalb 0). */
   drums: Drum[];
   roll: Float32Array;
+  /** Abstand der Drehachse über der Fahrbahn, wo das Bild verdreht ist (EDGE_TWIST; sonst 0). */
+  twist: Float32Array;
+  /** Schwebebänder und ihre Prallpoller (mechanics.ts). */
+  bands: Band[];
+  bumpers: Bumper[];
+  /** U-Bahn: Linie und Züge (null = keine). Die Züge stehen mit in vehicles. */
+  metro: MetroLine | null;
   /** Portale (mechanics.ts). */
   portals: Portal[];
   /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
@@ -475,6 +517,39 @@ export interface Track {
   /** Zeitalter der Strecke (mechanics.ts) – null: sie hat keine. */
   era: Era | null;
   laps: number;
+}
+
+/** Prallpoller am Rand eines Schwebebands. */
+export interface Bumper {
+  seg: number;
+  lat: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Linie der U-Bahn: im Meterabstand abgetastet (Lage und Höhe der Schienenoberkante, Fahrtrichtung). Sie liegt gerade im
+ * Gleisgraben ihrer Abzweigung und taucht an beiden Enden unter die Fahrbahn ab.
+ */
+export interface MetroLine {
+  n: number;
+  x: Float64Array;
+  y: Float64Array;
+  z: Float64Array;
+  tx: number;
+  tz: number;
+  /** Graben: erster und letzter Abschnitt der Abzweigung, Meter ab Linienanfang. */
+  first: number;
+  last: number;
+  s0: number;
+  s1: number;
+  /** Mitte und Reichweite: Wer weiter weg ist, kann keinen Zug berühren (zum schnellen Aussieben). */
+  cx: number;
+  cz: number;
+  reach: number;
+  plan: MetroPlan;
+  branch: number;
 }
 
 export const PAD_LENGTH = 7;
@@ -1080,6 +1155,10 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     rails: [],
     drums: [],
     roll: new Float32Array(total),
+    twist: new Float32Array(total),
+    bands: [],
+    bumpers: [],
+    metro: null,
     portals: [],
     roofed: false,
     sizers: [],
@@ -1230,6 +1309,62 @@ export function buildTrack(def: TrackDef, index = 0): Track {
         track.roll[seg] = angle;
       }
     }
+    for (const bd of p.f.bands ?? []) {
+      // Schwebeband: nur auf der Hauptstrecke (die Verdrehung gilt je Abschnitt der Hauptstrecke).
+      if (!p.closed) continue;
+      const first = segAt(p, bd.from);
+      const last = segAt(p, bd.to);
+      const count = Math.max(1, ((last - first + n) % n) + 1);
+      track.bands.push({ first, count });
+      const twists = (bd.twists ?? []).map(([at, deg]) => [(segAt(p, at) - first + n) % n, (deg * Math.PI) / 180]).sort((a, b) => a[0] - b[0]);
+      const radius = bd.radius ?? 10;
+      for (let k = 0; k < count; k++) {
+        const seg = (first + k) % n;
+        edge[seg] |= EDGE_BAND;
+        if (twists.length === 0) continue;
+        let angle = 0;
+        if (k >= twists[twists.length - 1][0]) angle = twists[twists.length - 1][1];
+        else if (k > twists[0][0]) {
+          for (let i = 0; i + 1 < twists.length; i++) {
+            if (k < twists[i][0] || k >= twists[i + 1][0]) continue;
+            const u = (k - twists[i][0]) / Math.max(1, twists[i + 1][0] - twists[i][0]);
+            angle = twists[i][1] + (twists[i + 1][1] - twists[i][1]) * u * u * (3 - 2 * u);
+          }
+        } else angle = twists[0][1];
+        track.roll[seg] = angle;
+      }
+      // Verdreht gezeichnet wird, wo der Winkel nicht 0 ist – und je ein Abschnitt davor und dahinter (die Fahrbahn
+      // wird zwischen zwei Abschnitten gemittelt).
+      for (let k = 0; k < count; k++) {
+        const seg = (first + k) % n;
+        if (track.roll[seg] === 0 && track.roll[next[seg]] === 0 && track.roll[prev[seg]] === 0) continue;
+        edge[seg] |= EDGE_TWIST;
+        track.twist[seg] = radius;
+      }
+    }
+    for (const b of p.f.bumpers ?? []) {
+      const seg = segAt(p, b.at);
+      track.bumpers.push({ seg, lat: b.lat, x: px[seg] + rightX(track, seg) * b.lat, y: py[seg] + b.lat * bank[seg], z: pz[seg] + rightZ(track, seg) * b.lat });
+    }
+    const tr = (p.f as BranchDef).trench;
+    if (tr && !p.closed) {
+      // Gleisgraben: keine Fahrbahn, keine Bande; wer hineinfällt, kommt vor der Gabelung wieder auf die Strecke.
+      const k = branchOf[p.off];
+      let back = branches[k].from;
+      for (let j = 0; j < 14; j++) back = prev[back];
+      const a = segAt(p, tr[0]);
+      const b = segAt(p, tr[1]);
+      for (let g = a; g <= b; g++) {
+        edge[g] |= EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
+        respawn[g] = back;
+      }
+      // (Auch kurz davor und dahinter steht keine Bande quer im Weg – und wer dort seitlich fällt, fällt in den Graben.)
+      for (const g of [a - 1, a - 2, b + 1, b + 2]) {
+        if (g < p.off || g >= p.off + p.count) continue;
+        edge[g] |= EDGE_OPEN_L | EDGE_OPEN_R | EDGE_DECK;
+        respawn[g] = back;
+      }
+    }
     for (const r of p.f.rails ?? []) {
       const first = segAt(p, r.from);
       const last = segAt(p, r.to);
@@ -1370,7 +1505,110 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       if (VEHICLE_SPECS[kind].roofs) track.roofed = true;
     }
   }
+  if (def.metro) buildMetro(track, def.metro);
   return track;
+}
+
+/** Wie tief die Linie hinter dem Graben je Meter abtaucht, und wie weit sie vor und hinter ihm reicht (Meter). */
+const METRO_DIVE = 0.22;
+const METRO_LEAD = 170;
+const METRO_TAIL = 150;
+
+/**
+ * U-Bahn anlegen: Linie entlang des Gleisgrabens der Abzweigung, Züge nach Fahrplan, und das Tor an der Mündung der
+ * Abzweigung, das nur offen ist, solange ein Zug im Bahnhof steht (mit Vorlauf für den Weg bis zum Graben).
+ */
+function buildMetro(t: Track, m: NonNullable<TrackDef['metro']>): void {
+  const bd = t.def.branches?.[m.branch];
+  const b = t.branches[m.branch];
+  if (!bd?.trench || !b) return;
+  let first = -1;
+  let last = -1;
+  for (let g = b.first; g < b.first + b.count; g++) {
+    if ((t.edge[g] & EDGE_GAP) === 0) continue;
+    if (first < 0) first = g;
+    last = g;
+  }
+  if (first < 0) return;
+  const dx = t.px[last] - t.px[first];
+  const dz = t.pz[last] - t.pz[first];
+  const len = Math.hypot(dx, dz);
+  const tx = dx / len;
+  const tz = dz / len;
+  const spec = VEHICLE_SPECS[VEH_METRO];
+  const roof = spec.roofs![0][0];
+  // Graben von der Mitte des letzten Abschnitts davor bis zur Mitte des ersten dahinter (dort endet die Fahrbahn).
+  const s0 = METRO_LEAD - t.step / 2;
+  const s1 = METRO_LEAD + len + t.step / 2;
+  const n = Math.ceil(METRO_LEAD + len + METRO_TAIL);
+  const x = new Float64Array(n + 1);
+  const y = new Float64Array(n + 1);
+  const z = new Float64Array(n + 1);
+  const y0 = t.py[first] - roof;
+  const y1 = t.py[last] - roof;
+  // Vor und hinter dem Graben taucht die Linie weich ab (erst gekrümmt, dann gerade) – unter der Fahrbahn hindurch.
+  const dive = (d: number): number => (d <= 0 ? 0 : d < 6 ? (METRO_DIVE * d * d) / 12 : METRO_DIVE * (d - 3));
+  for (let i = 0; i <= n; i++) {
+    const u = i - METRO_LEAD;
+    x[i] = t.px[first] + tx * u;
+    z[i] = t.pz[first] + tz * u;
+    const k = Math.max(0, Math.min(1, u / len));
+    y[i] = y0 + (y1 - y0) * k - dive(s0 - i) - dive(i - s1);
+  }
+  // Der Zug steht mittig im Graben.
+  const train = 2 * spec.half + (spec.cars - 1) * spec.pitch;
+  const stop = (s0 + s1) / 2 + train / 2;
+  const plan: MetroPlan = {
+    period: Math.round(m.period * 60),
+    phase: Math.round(m.phase * 60),
+    stop,
+    speed: m.speed,
+    accel: m.accel,
+    dwell: Math.round(m.dwell * 60),
+    trains: 1,
+  };
+  // So viele Züge, dass immer einer kommt: einer lebt vom Auftauchen bis das Heck im Tunnel am Ende verschwunden ist.
+  const leave = n - stop + train;
+  const tv = m.speed / m.accel;
+  const life = metroArrive(plan) + plan.dwell + (leave <= 0.5 * m.speed * tv ? Math.sqrt((2 * leave) / m.accel) : tv + (leave - 0.5 * m.speed * tv) / m.speed) * 60;
+  plan.trains = Math.max(1, Math.ceil(life / plan.period));
+  t.metro = {
+    n,
+    x,
+    y,
+    z,
+    tx,
+    tz,
+    first,
+    last,
+    s0,
+    s1,
+    cx: (t.px[first] + t.px[last]) / 2,
+    cz: (t.pz[first] + t.pz[last]) / 2,
+    reach: len / 2 + train + 40,
+    plan,
+    branch: m.branch,
+  };
+  let id = t.vehicles.length;
+  for (let k = 0; k < plan.trains; k++) {
+    t.vehicles.push({ ...spec, id: id++, kind: VEH_METRO, lat: 0, speed: m.speed, offset: 0, plan, train: k });
+  }
+  t.roofed = true;
+  // Tor an der Mündung: offen ab kurz vor dem Halt (bis man am Graben ist, steht der Zug) bis so lange vor der Abfahrt,
+  // dass auch ein langsames Kart (22 m/s) von der Mündung bis hinter den Graben kommt.
+  let mouth = 0;
+  while (mouth < b.count - 6 && t.twin[b.first + mouth] >= 0) mouth++;
+  const toTrench = (first - b.first) * t.step;
+  const across = toTrench + len;
+  const arrive = metroArrive(plan) + plan.phase;
+  const open0 = arrive - (toTrench / 26) * 60 + 12;
+  const open1 = arrive + plan.dwell - (across / 22) * 60 - 24;
+  const P = plan.period;
+  const a = ((open0 % P) + P) % P;
+  const c = ((open1 % P) + P) % P;
+  // zu: [c, a) innerhalb jeder Periode
+  const spans = c <= a ? [c, a] : [0, a, c, P];
+  t.gates.push({ first: b.first, count: mouth + 5, plan: { period: P, spans }, warn: GATE_WARN, noteOpen: '', noteShut: '', only: 0 });
 }
 
 /**
@@ -1431,6 +1669,7 @@ export function newVehiclePose(): VehiclePose {
  * (Ticks seit "Los", auch gebrochen oder negativ).
  */
 export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
+  if (v.plan) return metroPose(t, v, car, time, out);
   const lap = t.n * t.step;
   let s = vehicleAt(v, time, lap);
   if (car > 0 && v.roofs) {
@@ -1469,6 +1708,34 @@ export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out
   out.bank = bank;
   out.seg = i;
   out.lat = lat;
+  return out;
+}
+
+/**
+ * Lage eines Wagens der U-Bahn auf ihrer Linie (Track.metro). Ist der Wagen gerade nicht unterwegs (der Zug ist noch nicht
+ * aufgetaucht oder schon im Tunnel verschwunden), ist out.seg −1 – er ist dann für niemanden da.
+ */
+function metroPose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
+  const m = t.metro!;
+  const s = metroFront(v.plan!, v.train ?? 0, time) - v.half - car * v.pitch;
+  out.heading = Math.atan2(m.tx, m.tz);
+  out.bank = 0;
+  out.lat = 0;
+  if (!(s >= 0 && s < m.n)) {
+    out.seg = -1;
+    out.x = m.x[0];
+    out.y = m.y[0] - 50;
+    out.z = m.z[0];
+    out.slope = 0;
+    return out;
+  }
+  const i = Math.floor(s);
+  const f = s - i;
+  out.x = m.x[i] + m.tx * f;
+  out.z = m.z[i] + m.tz * f;
+  out.y = m.y[i] + (m.y[i + 1] - m.y[i]) * f;
+  out.slope = m.y[i + 1] - m.y[i];
+  out.seg = m.first;
   return out;
 }
 
@@ -1742,6 +2009,59 @@ export function drumRollAt(t: Track, seg: number, f = 0): number {
   const b = t.next[seg];
   const rb = (t.edge[b] & EDGE_DRUM) !== 0 ? t.roll[b] : t.roll[seg];
   return t.roll[seg] + (rb - t.roll[seg]) * f;
+}
+
+/**
+ * Verdrehte Fahrbahn (Schwebeband an der Fassade), für die Darstellung: Gerechnet wird auf der flachen
+ * Fahrbahn; gezeigt wird sie um eine Achse gedreht, die twist[seg] Meter über der Fahrbahnmitte längs der Strecke läuft –
+ * um den Winkel roll (positiv: die rechte Seite hebt sich, bei 90° steht die Fahrbahn senkrecht an einer Wand rechts).
+ * Wandelt einen Punkt in Bahnkoordinaten (Abschnitt seg, Anteil f zum nächsten, seitlich lat, h über der flachen
+ * Fahrbahn) in seine gezeigte Stelle um. false (out unberührt), wo nichts verdreht ist.
+ */
+export function twistWarp(t: Track, seg: number, f: number, lat: number, h: number, out: { x: number; y: number; z: number }): boolean {
+  if ((t.edge[seg] & EDGE_TWIST) === 0) return false;
+  const b = t.next[seg];
+  const tb = (t.edge[b] & EDGE_TWIST) !== 0;
+  const R = tb ? t.twist[seg] + (t.twist[b] - t.twist[seg]) * f : t.twist[seg];
+  const r = t.roll[seg] + ((tb ? t.roll[b] : t.roll[seg]) - t.roll[seg]) * f;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  const y = h - R;
+  const l = lat * c - y * s;
+  const hh = R + lat * s + y * c;
+  const L = (p: number, q: number): number => p + (q - p) * f;
+  out.x = L(t.px[seg], t.px[b]) + L(rightX(t, seg), rightX(t, b)) * l;
+  out.y = L(t.py[seg], t.py[b]) + l * L(t.bank[seg], t.bank[b]) + hh;
+  out.z = L(t.pz[seg], t.pz[b]) + L(rightZ(t, seg), rightZ(t, b)) * l;
+  return true;
+}
+
+/** Verdrehung (Radiant) und Achsabstand am Abschnitt seg, Anteil f zum nächsten – 0, wo nichts verdreht ist. */
+export function twistRollAt(t: Track, seg: number, f = 0): number {
+  if ((t.edge[seg] & EDGE_TWIST) === 0) return 0;
+  const b = t.next[seg];
+  const rb = (t.edge[b] & EDGE_TWIST) !== 0 ? t.roll[b] : t.roll[seg];
+  return t.roll[seg] + (rb - t.roll[seg]) * f;
+}
+export function twistRadiusAt(t: Track, seg: number, f = 0): number {
+  if ((t.edge[seg] & EDGE_TWIST) === 0) return 0;
+  const b = t.next[seg];
+  return (t.edge[b] & EDGE_TWIST) !== 0 ? t.twist[seg] + (t.twist[b] - t.twist[seg]) * f : t.twist[seg];
+}
+
+/** Das Schwebeband, zu dem der Abschnitt gehört – oder null. */
+export function bandOf(t: Track, seg: number): Band | null {
+  if ((t.edge[seg] & EDGE_BAND) === 0) return null;
+  for (const b of t.bands) {
+    const k = seg - b.first;
+    if ((k >= 0 && k < b.count) || (k < 0 && k + t.n < b.count)) return b;
+  }
+  return null;
+}
+
+/** Meter vom Anfang des Schwebebands bis zu dieser Stelle (Abschnitt seg, along Meter weiter). */
+export function bandMeters(t: Track, b: Band, seg: number, along: number): number {
+  return (((seg - b.first) % t.n) + t.n) % t.n * t.step + along;
 }
 
 /** Das Schienenstück, zu dem der Abschnitt gehört – oder null. */

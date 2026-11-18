@@ -20,6 +20,7 @@ import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import { MAGNET_STUECK } from './stuecke/magnet';
 import { GIPFEL_STUECK } from './stuecke/gipfel';
+import { NEON_STUECK } from './stuecke/neon';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
@@ -447,6 +448,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   magnet: MAGNET_STUECK,
   // Gipfelbahn: eigenes Stück (stuecke/gipfel.ts)
   gipfel: GIPFEL_STUECK,
+  // Neonhochbahn: eigenes Stück (stuecke/neon.ts)
+  neon: NEON_STUECK,
   results: RESULTS,
 };
 
