@@ -9,9 +9,9 @@
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { TRACK_DEFS } from '../../src/game/tracks';
-import { EDGE_GAP, EDGE_GLIDE, EDGE_RAIL, EDGE_TUNNEL, TRACK, addProgress, getTrack, progDelta, rightX, rightZ, setTrack, trackHeading } from '../../src/game/track';
+import { EDGE_GAP, EDGE_GLIDE, EDGE_RAIL, EDGE_TUNNEL, TRACK, addProgress, centerHeight, getTrack, progDelta, proj, projectOnTrack, rightX, rightZ, setTrack, trackHeading } from '../../src/game/track';
 import { AI_HARD, botCmd, newBrain } from '../../src/game/ai';
-import { BTN_ITEM, EV_FALL, ITEM_BOOST, gridState, stepKart, type Cmd, type KartState } from '../../src/game/sim';
+import { BTN_DRIFT, BTN_ITEM, EV_FALL, ITEM_BOOST, TOW_TICKS, gridState, stepKart, type Cmd, type KartState } from '../../src/game/sim';
 
 const GIPFEL = TRACK_DEFS.findIndex((d) => d.id === 'gipfel');
 const GAS: Cmd = { steer: 0, buttons: 1 };
@@ -128,5 +128,41 @@ describe('Gipfelbahn', () => {
     };
     expect(jump(30, 26, true)).toBe(false);
     expect(jump(4, 7, false)).toBe(true);
+  });
+  it('Steilkurve: im Drift dreht das Kart wie in einer flachen Kurve', () => {
+    setTrack(GIPFEL);
+    // stärkste Neigung der ersten Haarnadel
+    let seg = 0;
+    for (let i = 0; i < TRACK.n; i++) if (Math.abs(TRACK.bank[i]) > Math.abs(TRACK.bank[seg])) seg = i;
+    const dir = TRACK.bank[seg] > 0 ? -1 : 1; // Kurve zur tiefen Seite
+    const turn = (bank: number): number => {
+      const keep = TRACK.bank[seg];
+      TRACK.bank[seg] = bank;
+      const s = gridState(0);
+      placeAt(s, seg, 0, 20);
+      s.y = TRACK.py[seg];
+      s.driftDir = dir;
+      const h0 = s.heading;
+      stepKart(s, { steer: dir * 127, buttons: 1 | BTN_DRIFT }, { ...ENV, time: 1 });
+      TRACK.bank[seg] = keep;
+      return Math.abs(s.heading - h0);
+    };
+    expect(turn(TRACK.bank[seg])).toBeCloseTo(turn(0), 6);
+  });
+
+  it('Abschleppdrache: trägt über die steilen Schienen der Rodelbahn, nicht durch sie', () => {
+    setTrack(GIPFEL);
+    let rail = -1;
+    for (let i = 0; i < TRACK.n && rail < 0; i++) if (TRACK.edge[i] & EDGE_RAIL) rail = i;
+    const s = gridState(0);
+    placeAt(s, Math.max(0, rail - 20), 0, 20);
+    s.tow = TOW_TICKS;
+    let worst = Infinity;
+    for (let tick = 0; tick < TOW_TICKS - 10; tick++) {
+      stepKart(s, GAS, { ...ENV, time: tick });
+      projectOnTrack(TRACK, s.x, s.z, s.seg);
+      worst = Math.min(worst, s.y - (centerHeight(TRACK, proj.seg, proj.along) + proj.lat * TRACK.bank[proj.seg]));
+    }
+    expect(worst).toBeGreaterThan(0.5);
   });
 });

@@ -7,7 +7,6 @@ import { SURFACES } from '../game/surface';
 import {
   EDGE_BROKEN,
   EDGE_DECK,
-  EDGE_DRUM,
   EDGE_FLOAT,
   EDGE_FREE_L,
   EDGE_FREE_R,
@@ -22,7 +21,6 @@ import {
   rightZ,
   segDelta,
   type Track,
-  drumWarp,
 } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RGB, type V3 } from './build';
 import type { FxSink } from './fxApi';
@@ -30,8 +28,6 @@ import { buildLife, type Life } from './life';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
-
-const _dw = { x: 0, y: 0, z: 0 };
 
 const WALL_H = 0.95;
 const WALL_T = 0.5;
@@ -286,8 +282,6 @@ export class World {
   private P(i: number, f: number, lat: number, dy = 0): V3 {
     const t = this.track;
     const a = i;
-    // Magnettrommel: die Bahn liegt an der Innenwand, je Abschnitt um die Achse gedreht (track.ts: drumWarp).
-    if ((t.edge[a] & EDGE_DRUM) !== 0 && drumWarp(t, a, f, lat, dy, _dw)) return [_dw.x, _dw.y, _dw.z];
     const x = t.px[a] + rightX(t, a) * lat;
     const y = t.py[a] + lat * t.bank[a] + dy;
     const z = t.pz[a] + rightZ(t, a) * lat;
@@ -579,9 +573,6 @@ export class World {
       const whole = f0 === 0 && f1 === 1;
       for (const sgn of [-1, 1]) {
         if (sgn < 0 ? freeL : freeR) continue;
-        // In der Magnettrommel hat die Bahn keine Bande: Sie ist ein Streifen der Trommelwand, ihre Grenze zeigen die
-        // Magnetstreifen (mechanics/drum.ts).
-        if ((e & EDGE_DRUM) !== 0) continue;
         const open = sgn < 0 ? openL : openR;
         const inner = sgn * wh;
         const outer = sgn * (wh + WALL_T);

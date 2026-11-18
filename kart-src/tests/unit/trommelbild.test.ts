@@ -1,9 +1,7 @@
 // Bild der Magnettrommel im Magnetwerk (render/mechanics/drum.ts).
 //
-// Die Trommel wird als gerade Röhre gezeichnet, an deren Innenwand die Bahn sich als Schraube hinaufwindet (track.ts:
-// drumWarp – gerechnet wird weiter auf der flachen Fahrbahn). Für die Prüfungen wird das Bild Abschnitt für Abschnitt
-// um die Achse zurückgedreht (unwarp), bis die Bahn wieder aufrecht liegt und sich die Halle um sie dreht (track.ts:
-// drumPoint) – in diesem Rahmen sind die Maße einfach. Geprüft wird, was ein Fehler dabei sichtbar machen würde:
+// Die Trommel wird so gezeichnet, dass die Fahrbahn aufrecht bleibt und sich die Halle um sie dreht
+// (track.ts: drumPoint). Geprüft wird, was ein Fehler dabei sichtbar machen würde:
 //   (a) Die Röhrenwand liegt überall auf Halbmesser ± 2 m um die Trommelachse und schließt sich rundum
 //       (kein Durchblick aufs Gelände); zwischen Bahn und Achse ist auf ±8,4 m nichts von ihr, und über der
 //       Bahn ragt bis 10 m Höhe überhaupt nichts auf (die Kamera fährt dort). Die Lampen bleiben 10 m weg.
@@ -63,35 +61,6 @@ function local(t: Track, first: number, last: number, x: number, y: number, z: n
   return { seg: best, lat, along, h: y - t.py[best] - lat * t.bank[best] };
 }
 
-/**
- * Zurückdrehen: Punkt des Bilds (Bahn an der Trommelwand) in den Rahmen, in dem die Bahn aufrecht liegt – um die
- * Trommelachse um −roll an seiner Stelle (Gegenstück zu at() in drum.ts und drumWarp in track.ts).
- */
-function unwarp(t: Track, first: number, last: number, R: number, x: number, y: number, z: number): [number, number, number] {
-  const l = local(t, first, last, x, y, z, 3);
-  if (l.seg < first || l.seg > last) return [x, y, z];
-  const u = l.seg + l.along / t.step;
-  const rk = (k: number): number => t.roll[Math.max(first, Math.min(last, k))];
-  const i = Math.floor(u);
-  const r = rk(i) + (rk(i + 1) - rk(i)) * (u - i);
-  const c = Math.cos(r);
-  const sn = Math.sin(r);
-  const yt = l.h - R;
-  const lat = l.lat * c + yt * sn;
-  const yy = -l.lat * sn + yt * c;
-  const s = l.seg;
-  return [t.px[s] + t.tx[s] * l.along + rightX(t, s) * lat, t.py[s] + lat * t.bank[s] + R + yy, t.pz[s] + t.tz[s] * l.along + rightZ(t, s) * lat];
-}
-
-/** Alle Ecken einer Fläche zurückdrehen (siehe unwarp). */
-function unwarpMesh(t: Track, first: number, last: number, R: number, mesh: THREE.Mesh): void {
-  const p = mesh.geometry.getAttribute('position');
-  for (let i = 0; i < p.count; i++) {
-    const [x, y, z] = unwarp(t, first, last, R, p.getX(i), p.getY(i), p.getZ(i));
-    p.setXYZ(i, x, y, z);
-  }
-}
-
 function inRanges(i: number, ranges: [number, number][]): boolean {
   for (const [a, b] of ranges) if (i >= a && i < b) return true;
   return false;
@@ -107,7 +76,6 @@ describe('Magnetwerk: Bild der Magnettrommel', () => {
   it('(a) die Röhre ist geschlossen, liegt auf ihrem Halbmesser und lässt die Bahn frei', () => {
     const view = buildDrum(t, true);
     const { fixed, signal, data } = parts(view);
-    unwarpMesh(t, first, last, R, fixed);
     const pos = fixed.geometry.getAttribute('position');
     const P = { x: 0, y: 0, z: 0 };
     let wallCount = 0;
@@ -182,7 +150,6 @@ describe('Magnetwerk: Bild der Magnettrommel', () => {
     };
     check(fixed, data.hang);
     view.update(100, 0, 1 / 60, cam, fx);
-    unwarpMesh(t, first, last, R, signal);
     check(signal, []);
     // Lampen, Kabel und Tragseil: mindestens 10 m von der Fahrbahn
     for (const [a, b] of data.hang) {
@@ -205,7 +172,6 @@ describe('Magnetwerk: Bild der Magnettrommel', () => {
     const seen = new Set<string>();
     for (const time of [0, 40, 100, 150, 200, 300]) {
       view.update(time, time / 60, 1 / 60, cam, fx);
-      unwarpMesh(t, first, last, R, signal);
       for (const p of data.plates) {
         // Soll: der gefährlichste Zustand seiner Platten
         let want = 0;
@@ -272,14 +238,13 @@ describe('Magnetwerk: Bild der Magnettrommel', () => {
   it('(c) die Lampen hängen zum Hallenboden – unten, an der Wand und an der Decke', () => {
     const view = buildDrum(t, true);
     const { fixed, data } = parts(view);
-    unwarpMesh(t, first, last, R, fixed);
     const pos = fixed.geometry.getAttribute('position');
     const P = { x: 0, y: 0, z: 0 };
     for (const want of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
       // die Lampe, deren Verdrehung dem Ziel am nächsten liegt
       const lamp = data.lamps.reduce((a, b) => (Math.abs(t.roll[b.seg] - want) < Math.abs(t.roll[a.seg] - want) ? b : a));
       expect(Math.abs(t.roll[lamp.seg] - want), `Lampe für ${want.toFixed(2)}`).toBeLessThan(0.35);
-      const top = new THREE.Vector3(...unwarp(t, first, last, R, ...lamp.top));
+      const top = new THREE.Vector3(...lamp.top);
       // Aufhängung auf der Achse
       drumPoint(t, lamp.seg, 0, 0, R, P);
       expect(top.distanceTo(new THREE.Vector3(P.x, P.y, P.z))).toBeLessThan(0.6);
