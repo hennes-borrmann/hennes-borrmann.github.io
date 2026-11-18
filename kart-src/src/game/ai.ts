@@ -755,7 +755,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     b.reverse--;
     return { steer: Math.round(Math.max(-1, Math.min(1, err * 2)) * 127), buttons: BTN_BRAKE };
   }
-  if (v < 1.5 && s.spin === 0 && !air) {
+  if (v < 1.5 && s.spin === 0 && s.rocket === 0 && !air) {
     if (++b.stuck > 80) {
       b.stuck = 0;
       b.reverse = 45;

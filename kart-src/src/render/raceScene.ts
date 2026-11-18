@@ -23,6 +23,9 @@ import {
   ITEM_TOP,
   PAD_TICKS,
   SPIN_TICKS,
+  ROCKET_FLY_TICKS,
+  ROCKET_MORPH_TICKS,
+  ROCKET_TICKS,
   V_MAX,
   ringAt,
   thermalLift,
@@ -104,8 +107,9 @@ export interface SceneEvent {
     | 'use-smoke'
     | 'use-spring'
     | 'use-kite'
-    /** Rakete: gezündet; eine fremde ist zum eigenen Kart unterwegs (nur eigenes Kart); eingeschlagen. */
+    /** Rakete: Verwandlung beginnt; sie hebt ab; eine fremde stürzt auf das eigene Kart herab (nur eigenes Kart); Einschlag. */
     | 'use-rocket'
+    | 'rocket-launch'
     | 'rocket-incoming'
     | 'rocket-hit'
     | 'finish'
@@ -248,8 +252,13 @@ interface KartView {
   airTime: number;
   // letzter Zustand, um Ereignisse zu erkennen
   spin: number;
-  /** Dauer des laufenden Schleuderns in Ticks (nach der Rakete länger als nach anderen Treffern) – für die Drehung im Bild. */
+  /** Dauer des laufenden Schleuderns in Ticks – für die Drehung im Bild. */
   spinFull: number;
+  /** Rakete: Ticks seit dem Zünden im letzten Bild (0 = keine); Pause bis zum nächsten Klacken der Verwandlung. */
+  rocket: number;
+  /** Rakete: Ausrichtung im Flug (geglättet) und ob das Herabpfeifen für das eigene Kart schon kam. */
+  rocketQ: THREE.Quaternion;
+  incoming: boolean;
   boost: number;
   stall: number;
   guard: number;
@@ -483,6 +492,9 @@ function labelSprite(name: string, color: string): THREE.Sprite {
   return sprite;
 }
 
+const Y_UP = new THREE.Vector3(0, 1, 0);
+const ROCKET_Q = new THREE.Quaternion();
+
 /** So viel weiter als in der Rechnung gilt ein Schubring für die Anzeige als durchflogen (das Bild läuft dem Treffer leicht nach). */
 const RING_SEEN = 2.5;
 
@@ -494,14 +506,8 @@ export class RaceScene {
   smoke = 0;
   /** Wie nah ein Brummkreisel ist, der das eigene Kart sucht (0 = keiner, 1 = gleich da). */
   threat = 0;
-  /** Eine fremde Rakete ist zum eigenen Kart unterwegs: 0 = keine, sonst wie weit ihr Flug ist (bis 1 = Einschlag). */
+  /** Eine fremde Rakete hat das eigene Kart als Ziel: 0 = keine, sonst wie weit sie ist (bis 1 = Einschlag). */
   rocket = 0;
-  /** Sekunden, seit ein anderer eine Rakete gezündet hat (−1 = keine unterwegs). */
-  private rocketAge = -1;
-  /** In diesem Bild hat ein anderes Kart als das eigene eine Rakete gezündet. */
-  private rocketSeen = false;
-  /** Aufsteigende Raketen (nur Bild): Startpunkt und Alter in Sekunden. */
-  private readonly rocketsUp: { x: number; y: number; z: number; age: number }[] = [];
   onEvent: ((e: SceneEvent) => void) | null = null;
   /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
   readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
@@ -592,6 +598,9 @@ export class RaceScene {
   private shake = 0;
   private hitstop = 0;
   private orbit = 0;
+  /** Kamera der eigenen Rakete im Flug: Versatz zur Rakete (geglättet). */
+  private rocketCam = false;
+  private readonly rocketOff = new THREE.Vector3();
   private raceId = -1;
   /** Neue Welt oder neue Karts: vor dem nächsten Bild alle Shader übersetzen. */
   private needsCompile = true;
@@ -754,8 +763,6 @@ export class RaceScene {
     this.hitstop = 0;
     this.smoke = 0;
     this.rocket = 0;
-    this.rocketAge = -1;
-    this.rocketsUp.length = 0;
     this.skids.clear();
     this.puffs.clear();
     this.sparks.clear();
@@ -874,6 +881,9 @@ export class RaceScene {
       flat: 0,
       flatK: 0,
       spinFull: 0,
+      rocket: 0,
+      rocketQ: new THREE.Quaternion(),
+      incoming: false,
       glide: false,
       lift: false,
       windWait: 0,
@@ -1185,47 +1195,58 @@ export class RaceScene {
     return false;
   }
 
-  /** Einschlag einer Rakete bei einem Kart: Feuerschweif von oben, Feuerball, Rauch und Funken. */
+  /** Rakete schlägt ein: Feuerball, Funken, eine dichte Rauchwolke, aus der das Kart herausrollt. */
   private rocketImpact(e: RenderEntity): void {
-    this.pop('KAWUMM!', e, 'hot', 5.2);
-    // Der Schweif der herabstürzenden Rakete – eine Säule, die von oben nach unten verlischt.
-    this.color.set(0xffb347);
-    for (let i = 0; i < 14; i++) {
-      const h = 1.5 + i * 1.6;
-      this.sparks.emit(e.x, e.y + h, e.z, 0, -6, 0, 0.14 + i * 0.025, 1.1 - i * 0.04, this.color, -1, 0, 0);
+    this.pop('KAWUMM!', e, 'hot', 5.4);
+    this.burst(e.x, e.y + 0.8, e.z, 28, 13, 0xff8a1c, true, 1.2, 0.6, 8);
+    this.burst(e.x, e.y + 1.2, e.z, 18, 9, 0xffe04a, true, 0.9, 0.5, 10);
+    // Rauchwolke: dicht und langsam, sie bleibt gut eine Sekunde stehen.
+    this.color.set(0xcfc9da);
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.6 + Math.random() * 2;
+      this.puffs.emit(e.x + Math.cos(a) * r, e.y + 0.3 + Math.random() * 1.4, e.z + Math.sin(a) * r, Math.cos(a) * 2.6, 0.5 + Math.random(), Math.sin(a) * 2.6, 0.9 + Math.random() * 0.5, 0.9 + Math.random() * 0.6, this.color, 1, 0, 2.2);
     }
-    this.burst(e.x, e.y + 0.8, e.z, 26, 12, 0xff8a1c, true, 1.1, 0.6, 7);
-    this.burst(e.x, e.y + 1.2, e.z, 16, 8, 0xffe04a, true, 0.8, 0.5, 9);
-    // Rauch: hell und flach, damit die Sicht des Getroffenen nicht ganz zugeht
-    this.burst(e.x, e.y + 0.3, e.z, 12, 9, 0xd9d4e2, false, 0.8, 0.7, 1);
   }
 
   /**
-   * Aufsteigende Raketen zeichnen (Feuer und Rauch, immer steiler nach oben) und die Warnung für das eigene Kart führen,
-   * wenn ein anderer eine gezündet hat. Die Rakete schlägt 1 s nach dem Zünden ein (ROCKET_FLIGHT_TICKS in hostGame.ts).
+   * Raketen: im Flug Feuer und Rauch aus der Düse; und die Warnung, wenn eine fremde Rakete das eigene Kart als Ziel hat
+   * (Banner während des ganzen Flugs, das Herabpfeifen in der letzten Sekunde).
    */
-  private updateRockets(me: RenderEntity | null, dt: number): void {
-    for (let i = this.rocketsUp.length - 1; i >= 0; i--) {
-      const r = this.rocketsUp[i];
-      r.age += dt;
-      if (r.age > 0.9) {
-        this.rocketsUp.splice(i, 1);
-        continue;
-      }
-      const y = r.y + 6 * r.age + 40 * r.age * r.age;
+  private updateRockets(entities: RenderEntity[], me: RenderEntity | null): void {
+    let warn = 0;
+    for (const e of entities) {
+      if (e.rocket <= ROCKET_MORPH_TICKS) continue;
+      const k = this.karts.get(e.slot);
+      if (!k) continue;
+      // Düse am Heck: entgegen der Flugrichtung, ein Stück unter der Mitte.
+      const v = Math.hypot(e.vx, e.vy, e.vz) || 1;
+      const dx = e.vx / v;
+      const dy = e.vy / v;
+      const dz = e.vz / v;
+      const nx = e.x - dx * 1.7;
+      const ny = e.y - dy * 1.7;
+      const nz = e.z - dz * 1.7;
       this.color.set(0xffd23f);
-      this.sparks.emit(r.x, y, r.z, 0, -4, 0, 0.12, 1.2, this.color, -1.2, 0, 0);
+      this.sparks.emit(nx, ny, nz, -dx * 14, -dy * 14, -dz * 14, 0.14, 1.3, this.color, -2, 0, 1);
       this.color.set(0xff6a2a);
-      this.sparks.emit(r.x, y - 0.6, r.z, (Math.random() - 0.5) * 2, -10, (Math.random() - 0.5) * 2, 0.25, 0.8, this.color, -0.8, 0, 1.5);
-      this.color.set(0xd9d4e2);
-      if (r.age > 0.08) this.puffs.emit(r.x, y - 1, r.z, (Math.random() - 0.5) * 1.5, -1, (Math.random() - 0.5) * 1.5, 0.9, 0.5, this.color, 1.2, 0, 1.5);
+      this.sparks.emit(nx, ny, nz, -dx * 22 + (Math.random() - 0.5) * 4, -dy * 22 + (Math.random() - 0.5) * 4, -dz * 22 + (Math.random() - 0.5) * 4, 0.22, 1, this.color, -1.5, 0, 2);
+      this.color.set(0xe4e0ec);
+      this.puffs.emit(nx - dx * 1.5, ny - dy * 1.5, nz - dz * 1.5, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, 1.6, 1.1, this.color, 1.6, 0, 1.5);
+      if (me && !me.finished && e.slot !== me.slot && e.aimSlot === me.slot) {
+        const fly = (e.rocket - ROCKET_MORPH_TICKS) / ROCKET_FLY_TICKS;
+        warn = Math.max(warn, Math.max(0.01, fly));
+        if (!k.incoming && e.rocket >= ROCKET_TICKS - 62) {
+          k.incoming = true;
+          this.onEvent?.({ kind: 'rocket-incoming', slot: me.slot, local: true, pan: 0, gain: 1 });
+        }
+      }
     }
-    if (this.rocketSeen && me && !me.finished) {
-      this.rocketAge = 0;
-      this.onEvent?.({ kind: 'rocket-incoming', slot: me.slot, local: true, pan: 0, gain: 1 });
-    } else if (this.rocketAge >= 0) this.rocketAge += dt;
-    if (this.rocketAge > 1.25 || !me || me.finished) this.rocketAge = -1;
-    this.rocket = this.rocketAge >= 0 ? Math.max(0.01, Math.min(1, this.rocketAge)) : 0;
+    // Schon während der Verwandlung warnen, wenn sie auf das eigene Kart zielt.
+    if (me && !me.finished && warn === 0) {
+      for (const e of entities) if (e.rocket > 0 && e.slot !== me.slot && e.aimSlot === me.slot) warn = 0.01;
+    }
+    this.rocket = warn;
   }
 
   private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
@@ -1480,18 +1501,37 @@ export class RaceScene {
         this.pop('AUFWIND!', e, 'white', 3);
         this.emit('lift', k, local);
       }
-      if (e.spin > SPIN_TICKS + 8 && e.spin > k.spin + 12) {
-        // Von der Rakete getroffen: Sie fällt senkrecht aus dem Himmel, dann der große Knall.
+      // Rakete: Verwandlung, Abheben, Landung
+      if (e.rocket > 0 && k.rocket === 0) {
+        this.pop('VERWANDLUNG!', e, 'cool', 3.6);
+        this.burst(e.x, e.y + 0.8, e.z, 12, 5, 0xdfe6f2, true, 0.4, 0.4, 4);
+        this.emit('use-rocket', k, local);
+        k.incoming = false;
+      }
+      if (e.rocket > 0 && e.rocket <= ROCKET_MORPH_TICKS) {
+        // Klacken, wenn Teile einrasten (Zeitpunkte wie die Zeitfenster in kartModel.ts)
+        for (const at of [0.4, 0.5, 0.58, 0.63, 0.72, 0.76, 0.86]) {
+          const tick = Math.round(at * ROCKET_MORPH_TICKS);
+          if (k.rocket < tick && e.rocket >= tick) this.burst(e.x, e.y + 0.6 + at * 2.6, e.z, 5, 4, 0xffe9a8, true, 0.3, 0.25, 2);
+        }
+      }
+      if (e.rocket > ROCKET_MORPH_TICKS && k.rocket <= ROCKET_MORPH_TICKS && k.rocket > 0) {
+        this.pop('WUSCH!', e, 'hot', 4.2);
+        this.burst(e.x, e.y + 0.2, e.z, 26, 11, 0xe9e6f2, false, 1.1, 1.1, 1);
+        this.burst(e.x, e.y + 0.3, e.z, 16, 8, 0xff8a1c, true, 0.8, 0.4, 3);
+        this.emit('rocket-launch', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.5);
+      }
+      if (e.rocket === 0 && k.rocket > ROCKET_MORPH_TICKS) {
         this.rocketImpact(e);
-        k.visual.squash(1);
+        k.visual.squash(-1);
         this.emit('rocket-hit', k, local);
         if (local) {
-          this.hitstop = 0.11;
-          this.shake = Math.max(this.shake, 1);
-          this.rocketAge = -1;
-          this.rocket = 0;
+          this.hitstop = 0.07;
+          this.shake = Math.max(this.shake, 0.8);
         }
-      } else if (e.spin > 0 && k.spin === 0) {
+      }
+      if (e.spin > 0 && k.spin === 0) {
         this.pop('KRACH!', e, 'hot', 4.2);
         this.burst(e.x, e.y + 1, e.z, 16, 9, 0xffd23f, true, 0.7, 0.7, 6);
         this.burst(e.x, e.y + 0.6, e.z, 8, 5, 0xe9e6f2, false, 0.9, 0.7);
@@ -1576,13 +1616,7 @@ export class RaceScene {
         k.visual.useItem(k.item);
         if (k.item === ITEM_EMP) this.empFrom.push(k);
         if (k.item === ITEM_ROCKET) {
-          this.pop('WUSCH!', e, 'hot', 3.6);
-          this.burst(e.x, e.y + 0.4, e.z, 10, 6, 0xe9e6f2, false, 0.6, 0.7, 1.5);
-          this.burst(e.x, e.y + 1.2, e.z, 10, 5, 0xff8a1c, true, 0.6, 0.4, 6);
-          this.rocketsUp.push({ x: e.x, y: e.y + 1.8, z: e.z, age: 0 });
-          this.emit('use-rocket', k, local);
-          if (local) this.shake = Math.max(this.shake, 0.25);
-          else this.rocketSeen = true;
+          // Wirkung und Ton kommen mit dem Beginn der Verwandlung (siehe oben).
         } else if (k.item === ITEM_KITE) {
           // Wirkung und Ton kommen mit dem Start des Zugs (siehe oben).
         } else if (k.item === ITEM_TIRE) {
@@ -1648,6 +1682,7 @@ export class RaceScene {
     if (e.spin === 0) k.spinFull = 0;
     else if (e.spin > k.spin) k.spinFull = Math.max(SPIN_TICKS, e.spin);
     k.spin = e.spin;
+    k.rocket = e.rocket;
     k.boost = e.boost;
     k.stall = e.stall;
     k.guard = e.guard;
@@ -1692,7 +1727,6 @@ export class RaceScene {
     for (const k of this.karts.values()) k.seen = false;
     this.empFrom.length = 0;
     this.empHit.length = 0;
-    this.rocketSeen = false;
     this.shadows.begin();
     this.lights.begin();
     let me: RenderEntity | null = null;
@@ -1705,7 +1739,7 @@ export class RaceScene {
       // Spiegelkabinett: Wer durch ein Portal fährt, steht im selben Augenblick woanders. Das ist kein Fahren, sondern
       // ein Schnitt – nichts wird dorthin geglättet, keine Bremsspur quer durch die Halle, die eigene Kamera springt mit.
       if (t.portals.length > 0) {
-        if (!k.fresh && e.respawn === 0 && k.respawn === 0 && Math.abs(e.x - k.lastX) + Math.abs(e.z - k.lastZ) > 10) {
+        if (!k.fresh && e.respawn === 0 && k.respawn === 0 && e.rocket === 0 && k.rocket === 0 && Math.abs(e.x - k.lastX) + Math.abs(e.z - k.lastZ) > 10) {
           const forward = progDelta(t, k.lastSeg, e.seg) > 0;
           const hex = forward ? 0x9fe8ff : 0xff7ad1;
           this.burst(k.lastX, k.lastY + 0.8, k.lastZ, 10, 6, hex, true, 0.5, 0.45, 2);
@@ -1777,6 +1811,14 @@ export class RaceScene {
       pose.glide = (e.flags & FLAG_GLIDE) !== 0 && e.respawn === 0;
       pose.dive = (e.flags & FLAG_DIVE) !== 0 && e.respawn === 0;
       pose.space = this.track.gravity < 1;
+      const flying = e.rocket > ROCKET_MORPH_TICKS;
+      pose.rocket = e.rocket > 0 ? Math.min(1, e.rocket / ROCKET_MORPH_TICKS) : 0;
+      pose.rocketFlame = flying ? 1 : e.rocket > ROCKET_MORPH_TICKS * 0.9 ? 0.45 : 0;
+      if (e.rocket > 0) {
+        pose.speed = 0;
+        pose.air = flying;
+        pose.held = 0;
+      }
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
 
       // Hören: Entfernung und Richtung zur Kamera
@@ -1784,9 +1826,9 @@ export class RaceScene {
       const dist = this.v1.length();
       this.v2.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
       k.audio.local = local;
-      k.audio.speed = Math.abs(vf) / V_MAX;
-      k.audio.throttle = !e.finished && race.phase !== RACE_COUNTDOWN && e.spin === 0;
-      k.audio.boost = e.boost > 0 || e.tow > 0;
+      k.audio.speed = e.rocket > 0 ? 0 : Math.abs(vf) / V_MAX;
+      k.audio.throttle = !e.finished && race.phase !== RACE_COUNTDOWN && e.spin === 0 && e.rocket === 0;
+      k.audio.boost = e.boost > 0 || e.tow > 0 || flying;
       k.audio.drift = e.driftDir !== 0 ? Math.max(0.5, pose.driftStage) : 0;
       // Loser Untergrund klingt wie der Grünstreifen: es prasselt unter den Rädern.
       k.audio.offroad = pose.offroad || DUST[this.track.surf[e.seg < this.track.total ? e.seg : 0]] !== 0;
@@ -1800,6 +1842,18 @@ export class RaceScene {
       const root = k.visual.root;
       root.position.set(e.x, e.y, e.z);
       root.rotation.set(k.pitch, e.heading, k.roll);
+      if (flying) {
+        // Im Flug zeigt die Achse der Rakete (+y von root) in Flugrichtung; die Mitte der Rakete sitzt auf der Bahn.
+        const v = Math.hypot(e.vx, e.vy, e.vz);
+        if (v > 0.5) {
+          this.v1.set(e.vx / v, e.vy / v, e.vz / v);
+          this.q1.setFromAxisAngle(Y_UP, e.heading);
+          ROCKET_Q.setFromUnitVectors(Y_UP, this.v1).multiply(this.q1);
+          k.rocketQ.slerp(ROCKET_Q, Math.min(1, dt * 12));
+          root.quaternion.copy(k.rocketQ);
+          root.position.addScaledVector(this.v1, -1.6);
+        } else root.quaternion.copy(k.rocketQ);
+      } else k.rocketQ.copy(root.quaternion);
       // Von der Presse geplättet: flach wie eine Flunder, dafür etwas breiter – und am Ende federt es zurück.
       k.flatK += ((e.flat > 6 ? 1 : 0) - k.flatK) * Math.min(1, dt * (e.flat > 6 ? 26 : 9));
       // Riesenkinderzimmer: winzig oder riesig – weich nachgeführt; kurz vor dem Ende pulsiert das Kart ruhig
@@ -1814,7 +1868,7 @@ export class RaceScene {
       root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
       k.visual.update(dt, pose);
 
-      if (ground !== NO_GROUND && e.respawn === 0) {
+      if (ground !== NO_GROUND && e.respawn === 0 && !flying) {
         this.e1.set(groundPitch, e.heading, groundRoll);
         this.q1.setFromEuler(this.e1);
         this.shadows.add(e.x, ground, e.z, this.q1, 2.5, e.y - ground);
@@ -1884,7 +1938,7 @@ export class RaceScene {
     this.lights.end();
     this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
     this.threat = Math.max(0, threat);
-    this.updateRockets(me, dt);
+    this.updateRockets(entities, me);
     this.bolts.update(dt);
 
     this.puffs.update(dt);
@@ -2198,6 +2252,11 @@ export class RaceScene {
       this.camReady = false;
       return;
     }
+    if (me.rocket > 0 && !me.finished && race.phase !== RACE_RESULTS) {
+      this.rocketCamera(me, dt);
+      return;
+    }
+    this.rocketCam = false;
     const speed = Math.hypot(me.vx, me.vz);
     const frac = Math.min(1.4, speed / V_MAX);
 
@@ -2272,6 +2331,66 @@ export class RaceScene {
 
     const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : 0) + this.camGlide * 5;
     this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 5);
+    if (Math.abs(cam.fov - this.camFov) > 0.05) {
+      cam.fov = this.camFov;
+      cam.updateProjectionMatrix();
+    }
+  }
+
+  /**
+   * Kamera der eigenen Rakete. Beim Verwandeln schwenkt sie von hinten zur Seite und hebt sich – man soll zusehen können.
+   * Im Flug hängt sie in festem Abstand hinter und über der Rakete (der Versatz wird geglättet, nicht die Lage: bei
+   * mehreren hundert Stundenkilometern verlöre eine nachlaufende Kamera die Rakete aus dem Blick).
+   */
+  private rocketCamera(me: RenderEntity, dt: number): void {
+    const cam = this.camera;
+    const flying = me.rocket > ROCKET_MORPH_TICKS;
+    if (!flying) {
+      const u = Math.min(1, me.rocket / ROCKET_MORPH_TICKS);
+      const sm = u * u * (3 - 2 * u);
+      if (!this.camReady) this.camYaw = me.heading;
+      const yaw = this.camYaw + Math.PI - 1.0 * sm;
+      const d = 6.4 + sm * 1.6;
+      const px = me.x + Math.sin(yaw) * d;
+      const pz = me.z + Math.cos(yaw) * d;
+      const py = me.y + 2.2 + sm * 1.6;
+      if (!this.camReady) {
+        this.camPos.set(px, py, pz);
+        this.camLook.set(me.x, me.y + 1.2, me.z);
+        this.camReady = true;
+      }
+      const f = Math.min(1, dt * 5);
+      this.camPos.x += (px - this.camPos.x) * f;
+      this.camPos.y += (py - this.camPos.y) * f;
+      this.camPos.z += (pz - this.camPos.z) * f;
+      this.camLook.x += (me.x - this.camLook.x) * Math.min(1, dt * 8);
+      this.camLook.y += (me.y + 1.3 + sm * 0.9 - this.camLook.y) * Math.min(1, dt * 8);
+      this.camLook.z += (me.z - this.camLook.z) * Math.min(1, dt * 8);
+      this.rocketCam = false;
+    } else {
+      const vh = Math.hypot(me.vx, me.vz);
+      if (vh > 3) this.camYaw += wrapAngle(Math.atan2(me.vx, me.vz) - this.camYaw) * Math.min(1, dt * 3);
+      const wantX = -Math.sin(this.camYaw) * 12;
+      const wantZ = -Math.cos(this.camYaw) * 12;
+      // Beim Steigen knapp über der Rakete, beim Sturz höher – dann sieht man das Ziel unten kommen.
+      const wantY = me.vy > 0 ? 3.5 : 8;
+      if (!this.rocketCam) {
+        this.rocketOff.set(this.camPos.x - me.x, this.camPos.y - me.y, this.camPos.z - me.z);
+        this.rocketCam = true;
+      }
+      const f = Math.min(1, dt * 2.5);
+      this.rocketOff.x += (wantX - this.rocketOff.x) * f;
+      this.rocketOff.y += (wantY - this.rocketOff.y) * f;
+      this.rocketOff.z += (wantZ - this.rocketOff.z) * f;
+      this.camPos.set(me.x + this.rocketOff.x, me.y + this.rocketOff.y, me.z + this.rocketOff.z);
+      const v = Math.hypot(me.vx, me.vy, me.vz) || 1;
+      this.camLook.set(me.x + (me.vx / v) * 3, me.y + (me.vy / v) * 3, me.z + (me.vz / v) * 3);
+    }
+    cam.position.copy(this.camPos);
+    cam.lookAt(this.camLook);
+    this.applyShake(dt);
+    const wantFov = flying ? 74 : 58;
+    this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 4);
     if (Math.abs(cam.fov - this.camFov) > 0.05) {
       cam.fov = this.camFov;
       cam.updateProjectionMatrix();

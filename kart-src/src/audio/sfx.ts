@@ -175,7 +175,8 @@ const LEVEL: Record<SfxName, number> = {
   'use-smoke': 2.2,
   'use-spring': 3.8,
   'use-kite': 4.5,
-  'use-rocket': 3.6,
+  'use-rocket': 3.2,
+  'rocket-launch': 3.6,
   'rocket-incoming': 2.6,
   'rocket-hit': 3.4,
   warn: 2.2,
@@ -630,7 +631,22 @@ export class SfxPlayer {
           .noise(1800, 1200, 0.07, 0.14, { q: 4, at: 0.22 })
           .tone('sine', 110, 70, 0.2, 0.3);
         break;
-      case 'use-rocket':
+      case 'use-rocket': {
+        // Verwandlung: zwei Servos surren hoch (Räder einklappen, aufstellen), dann rasten sieben Teile ein –
+        // jedes ein kurzes, metallisches Klacken (Rauschband + tiefer Schlag); zuletzt zischt die Düse an.
+        v.tone('sawtooth', 220, 520, 0.24, 0.07, { attack: 0.02 })
+          .tone('sawtooth', 300, 640, 0.3, 0.06, { attack: 0.02, at: 0.12 })
+          .tone('triangle', 440, 1040, 0.3, 0.05, { attack: 0.02, at: 0.12 });
+        const clacks = [0.4, 0.5, 0.58, 0.63, 0.72, 0.76, 0.86];
+        for (let i = 0; i < clacks.length; i++) {
+          const at = clacks[i] * 1.1;
+          const f = 2600 + (i % 3) * 500;
+          v.noise(f, f * 0.7, 0.05, 0.22, { q: 3, at, attack: 0.002 }).tone('square', 150 + i * 12, 90, 0.06, 0.1, { at });
+        }
+        v.noise(5000, 2500, 0.25, 0.08, { type: 'highpass', attack: 0.05, at: 0.95 });
+        break;
+      }
+      case 'rocket-launch':
         // Zündung: kurzer Knall, dann ein Fauchen, das sich nach oben öffnet und mit der Rakete davonzieht;
         // darunter ein tiefes Grollen, das schnell leiser wird.
         v.noise(2400, 900, 0.08, 0.3, { q: 1.2 })

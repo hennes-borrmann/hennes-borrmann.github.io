@@ -25,9 +25,10 @@ export type SfxName =
   | 'use-smoke' // Nebelkerze (Zischen, Puff)
   | 'use-spring' // Sprungfeder (Boing, aber eigenständig)
   | 'use-kite' // Abschleppdrache steigt auf (Flattern, Sirren der Schnur)
-  | 'use-rocket' // Rakete zündet und steigt steil auf: Zündknall, Fauchen, das nach oben zieht (~1,1 s)
-  | 'rocket-incoming' // eine fremde Rakete ist unterwegs zu dir: fernes Aufsteigen, dann ein Pfeifen, das bis zum Einschlag (1 s) hinabfällt
-  | 'rocket-hit' // von der Rakete getroffen: großer, dumpfer Knall mit Krachen und nachprasselnden Trümmern (~1,2 s)
+  | 'use-rocket' // das Kart verwandelt sich in eine Rakete: Servos surren, sieben Teile rasten metallisch ein, zum Schluss zischt die Düse an (~1,1 s)
+  | 'rocket-launch' // die Rakete hebt ab: Zündknall, Fauchen, das nach oben zieht (~1,1 s)
+  | 'rocket-incoming' // eine fremde Rakete stürzt auf dich herab: ein Pfeifen, das bis zum Einschlag (1 s) hinabfällt
+  | 'rocket-hit' // die Rakete schlägt ein: großer, dumpfer Knall mit Krachen und nachprasselnden Trümmern (~1,2 s)
   | 'warn' // ein Brummkreisel hat dich im Visier (kurzer Warnton, wiederholt)
   | 'hit' // eigenes Kart getroffen, schleudert
   | 'guard-block' // Treffer vom Stoßfänger abgefangen (metallisches Klonk)

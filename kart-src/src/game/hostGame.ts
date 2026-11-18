@@ -66,7 +66,6 @@ import {
   flattenKart,
   hitKart,
   newState,
-  rocketKart,
   stallKart,
   stepKart,
   trafficBlocks,
@@ -76,6 +75,7 @@ import {
   BTN_ITEM,
 } from './sim';
 import {
+  EDGE_GAP,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
   NO_GROUND,
@@ -133,10 +133,14 @@ const SMOKE_RADIUS = 7.5;
 const SMOKE_LIFE_TICKS = 9 * 60;
 /** Erst ab diesem Rückstand (Meter auf das Kart davor) gibt es den Abschleppdrachen. */
 const KITE_MIN_GAP = 45;
-/** Rakete: Gewicht in der Auslosung des Letzten (bei rund 90 für alles andere: etwa jede zwanzigste Kiste). */
-const ROCKET_WEIGHT = 5;
-/** Rakete: so lange fliegt sie nach dem Zünden, bevor sie bei allen anderen einschlägt (Zeit für die Warnung). */
-export const ROCKET_FLIGHT_TICKS = 60;
+/** Rakete: Gewicht in der Auslosung des Letzten (bei rund 90 für alles andere: etwa jede zehnte Kiste). */
+const ROCKET_WEIGHT = 10;
+/** Rakete: so weit vor dem Ziel setzt sie auf (Meter) – man taucht knapp vor ihm aus dem Rauch auf. */
+const ROCKET_LAND_AHEAD = 4;
+/** Rakete: ohne Ziel landet sie so weit voraus (Meter). */
+const ROCKET_NO_TARGET = 150;
+/** Rakete: Trifft nur, wenn das Ziel bei der Landung so nah am Landepunkt ist (Meter). */
+const ROCKET_HIT_RANGE = 14;
 export const HAZARD_RADIUS = 1.5;
 /** Höchstzahl gleichzeitiger Dinge je Art – hält die Snapshots klein. */
 const MAX_PER_KIND = 6;
@@ -204,8 +208,6 @@ export class HostGame implements GameView {
   private readonly env: StepEnv = { canDrive: false, speedFactor: 1, time: 0 };
   private readonly boxTimers: Uint16Array;
   private thingList: Thing[] = [];
-  /** Gezündete Raketen, die noch fliegen: wer sie gezündet hat und in welchem Tick sie einschlagen. */
-  private rockets: { from: number; at: number }[] = [];
   /** Gewählte Figur je Platz; fehlt ein Eintrag (KI), gilt die Standardfigur des Platzes. */
   private chars: number[] = [];
   private readonly botCtx: BotContext = { tick: 0, time: 0, place: 1, smoke: false };
@@ -262,7 +264,6 @@ export class HostGame implements GameView {
     this.firstFinishTick = -1;
     this.resultsAtTick = -1;
     this.thingList = [];
-    this.rockets = [];
     this.boxTimers.fill(0);
     for (const k of this.karts.values()) {
       copyState(k.state, gridState(k.slot, this.charOf(k.slot, k.bot)));
@@ -403,7 +404,7 @@ export class HostGame implements GameView {
     }
 
     this.stepItems();
-    this.stepRockets();
+    this.aimRockets();
     this.collideKarts();
     this.rank();
     this.checkRaceEnd();
@@ -617,16 +618,19 @@ export class HostGame implements GameView {
   /** Einen Schritt für ein Kart rechnen und dessen Folgen behandeln. */
   private advance(k: HostKart, cmd: Cmd): void {
     const before = k.state.seg;
+    const progressBefore = k.progress;
+    const flying = k.state.rocket > 0;
     const ev = stepKart(k.state, cmd, this.env);
     k.ptick++;
     k.progress = addProgress(TRACK, k.progress, before, k.state.seg);
+    if (flying && k.state.rocket === 0) this.rocketLanded(k, progressBefore, before);
 
     if (ev & EV_USE_TIRE) this.spawnTire(k);
     if (ev & EV_USE_OIL) this.spawnDrop(k, THING_OIL);
     if (ev & EV_USE_SMOKE) this.spawnDrop(k, THING_SMOKE);
     if (ev & EV_USE_TOP) this.spawnTop(k);
     if (ev & EV_USE_EMP) this.shortCircuit(k);
-    if (ev & EV_USE_ROCKET) this.rockets.push({ from: k.slot, at: this.tick + ROCKET_FLIGHT_TICKS });
+    if (ev & EV_USE_ROCKET) this.aimRocket(k, true);
     if (ev & EV_USE_KITE) this.fx(k, 'boost');
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.fx(k, 'boost');
     // Treffer durch die Strecke selbst (Verkehr, Geysir, Lavabombe) sagt der Bildschirm eines
@@ -669,7 +673,7 @@ export class HostGame implements GameView {
       if (place === count) table[8] = 22;
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
-    // Die Rakete gibt es nur auf dem letzten Platz, und selten – unabhängig vom Drachen, der dort auch drin bleibt.
+    // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede zehnte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
     const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET];
     let total = 0;
     for (const w of table) total += w;
@@ -769,21 +773,67 @@ export class HostGame implements GameView {
     }
   }
 
-  /** Rakete: schlägt nach ihrer Flugzeit bei allen ein, die noch fahren – außer bei dem, der sie gezündet hat. */
-  private stepRockets(): void {
-    if (this.rockets.length === 0) return;
-    for (let i = this.rockets.length - 1; i >= 0; i--) {
-      const r = this.rockets[i];
-      if (this.tick < r.at) continue;
-      this.rockets.splice(i, 1);
-      if (this.phase !== RACE_RUNNING) continue;
-      for (const o of this.karts.values()) {
-        if (o.slot === r.from || o.finished) continue;
-        const res = rocketKart(o.state);
-        if (res === HIT_BLOCKED) this.fx(o, 'block');
-        else if (res !== HIT_NONE) this.fx(o, 'hit');
+  /** Raketen im Flug: den Landepunkt jeden Tick dem Ziel nachführen. */
+  private aimRockets(): void {
+    for (const k of this.karts.values()) if (k.state.rocket > 0) this.aimRocket(k, false);
+  }
+
+  /**
+   * Landepunkt einer Rakete setzen. Beim Zünden wird das Ziel gewählt: der Fahrer einen Platz weiter vorn (wer schon im Ziel
+   * ist, zählt nicht; ersatzweise der nächste, der noch fährt). Gelandet wird ein paar Meter vor ihm, auf seiner Spur – aber
+   * nie über einer Lücke oder an einer Stelle, an der man nicht abgesetzt werden darf (dann ein Stück weiter vorn).
+   */
+  private aimRocket(k: HostKart, choose: boolean): void {
+    const t = TRACK;
+    const s = k.state;
+    if (choose) {
+      let target: HostKart | null = null;
+      for (const o of this.karts.values()) if (o !== k && !o.finished && o.place === k.place - 1) target = o;
+      if (!target) {
+        for (const o of this.karts.values()) {
+          if (o === k || o.finished || o.progress <= k.progress) continue;
+          if (!target || o.progress < target.progress) target = o;
+        }
       }
+      s.aimSlot = target ? target.slot : -1;
     }
+    const target = s.aimSlot >= 0 ? this.karts.get(s.aimSlot) : undefined;
+    let seg: number;
+    let lat = 0;
+    if (target) {
+      projectOnTrack(t, target.state.x, target.state.z, target.state.seg);
+      seg = walk(t, proj.seg, Math.round(ROCKET_LAND_AHEAD / t.step));
+      lat = proj.lat;
+    } else {
+      // Ohne Ziel (alle anderen im Ziel): ein Stück voraus, gerechnet vom Startpunkt – nur einmal festlegen.
+      if (!choose) return;
+      seg = walk(t, s.seg, Math.round(ROCKET_NO_TARGET / t.step));
+    }
+    for (let i = 0; i < 400 && (t.respawn[seg] !== seg || (t.edge[seg] & EDGE_GAP) !== 0); i++) seg = t.next[seg];
+    const room = Math.max(0, t.rh[seg] - 1.5);
+    lat = Math.max(-room, Math.min(room, lat));
+    s.aimSeg = seg;
+    s.aimX = t.px[seg] + rightX(t, seg) * lat;
+    s.aimZ = t.pz[seg] + rightZ(t, seg) * lat;
+    s.aimY = centerHeight(t, seg, 0) + lat * t.bank[seg] + 0.6;
+  }
+
+  /**
+   * Die Rakete ist gelandet: Rennfortschritt um die überflogene Strecke weiterschreiben (der Sprung ist zu weit für
+   * addProgress) und das Ziel treffen – genau wie ein Brummkreisel, wenn es noch in der Nähe des Landepunkts ist.
+   */
+  private rocketLanded(k: HostKart, progressBefore: number, fromSeg: number): void {
+    const t = TRACK;
+    const s = k.state;
+    let gain = (t.prog[s.seg] - t.prog[fromSeg]) % t.n;
+    if (gain < 0) gain += t.n;
+    k.progress = Math.round((progressBefore + gain - t.prog[s.seg]) / t.n) * t.n + t.prog[s.seg];
+    this.fx(k, 'boost');
+    const target = s.aimSlot >= 0 ? this.karts.get(s.aimSlot) : undefined;
+    s.aimSlot = -1;
+    if (!target || target.finished) return;
+    const o = target.state;
+    if (Math.hypot(o.x - s.x, o.z - s.z) <= ROCKET_HIT_RANGE && Math.abs(o.y - s.y) < 5) this.applyHit(target);
   }
 
   private applyHit(k: HostKart): void {
@@ -821,7 +871,7 @@ export class HostGame implements GameView {
       const count = this.karts.size;
       for (const k of this.karts.values()) {
         const s = k.state;
-        if (k.finished || s.item !== ITEM_NONE || s.roulette > 0 || s.respawn > 0) continue;
+        if (k.finished || s.item !== ITEM_NONE || s.roulette > 0 || s.respawn > 0 || s.rocket > 0) continue;
         for (let i = 0; i < t.boxes.length; i++) {
           if (this.boxTimers[i] > 0) continue;
           const b = t.boxes[i];
@@ -979,6 +1029,8 @@ export class HostGame implements GameView {
         const a = list[i];
         const b = list[j];
         if (a.finished || b.finished || a.state.respawn > 0 || b.state.respawn > 0) continue;
+        // Eine Rakete (beim Verwandeln wie im Flug) rempelt niemanden und wird nicht angerempelt.
+        if (a.state.rocket > 0 || b.state.rocket > 0) continue;
         // Wer am Drachen hängt, fegt die anderen beiseite und wird selbst nicht aufgehalten.
         if (a.state.tow > 0 || b.state.tow > 0) {
           if (a.state.tow > 0 !== b.state.tow > 0) this.sweepAside(a.state.tow > 0 ? a : b, a.state.tow > 0 ? b : a);

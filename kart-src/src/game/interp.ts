@@ -29,8 +29,9 @@ export function lerpAngle(a: number, b: number, k: number): number {
 export function lerpState(out: KartState, a: KartState, b: KartState, k: number): KartState {
   // Alles, was keine Position oder Geschwindigkeit ist, kommt vom näheren Stand.
   copyState(out, k < 0.5 ? a : b);
-  // Ein Sprung über viele Meter ist kein Fahren, sondern ein Versetzen (Zurücksetzen nach Absturz).
-  if (Math.abs(b.x - a.x) + Math.abs(b.z - a.z) > 8) return copyState(out, b);
+  // Ein Sprung über viele Meter ist kein Fahren, sondern ein Versetzen (Zurücksetzen nach Absturz) –
+  // außer im Flug der Rakete, die so schnell ist.
+  if (Math.abs(b.x - a.x) + Math.abs(b.z - a.z) > 8 && !(a.rocket > 0 && b.rocket > 0)) return copyState(out, b);
   out.x = a.x + (b.x - a.x) * k;
   out.y = a.y + (b.y - a.y) * k;
   out.z = a.z + (b.z - a.z) * k;

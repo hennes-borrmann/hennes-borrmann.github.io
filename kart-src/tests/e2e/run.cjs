@@ -973,31 +973,43 @@ async function main() {
     }
     check('Sprungfeder: das Kart hüpft', hop >= 2, `${hop} Messungen in der Luft`);
 
-    // Rakete: Anna zündet; 1 s später hält es alle anderen an – auch Ben auf seinem eigenen Bildschirm, der vorher gewarnt wird.
-    // Ohne Grafikkarte dauert jede Abfrage von außen lange; deshalb schreibt jede Seite selbst mit (Warnung, längstes Schleudern).
+    // Rakete: Anna (Letzte) verwandelt sich, fliegt in hohem Bogen über die Karte und schlägt bei Ben (einen Platz weiter
+    // vorn) ein. Ben schleudert so lange wie nach einem Kreisel, Anna taucht vor ihm auf; Ben wird vorher gewarnt.
+    // Ohne Grafikkarte dauert jede Abfrage von außen lange; deshalb schreibt jede Seite selbst mit.
     const recordRocket = () => {
-      window.__rocket = { banner: false, spin: {} };
+      window.__rocket = { banner: false, spin: {}, rocket: 0, y0: null, top: 0 };
       const el = document.getElementById('race-banner');
       window.__rocketTimer = setInterval(() => {
         if (!el.hidden && el.textContent.includes('Rakete')) window.__rocket.banner = true;
-        for (const e of window.__kart.entities()) window.__rocket.spin[e.slot] = Math.max(window.__rocket.spin[e.slot] || 0, e.spin);
+        for (const e of window.__kart.entities()) {
+          window.__rocket.spin[e.slot] = Math.max(window.__rocket.spin[e.slot] || 0, e.spin);
+          if (e.slot !== 0) continue;
+          if (window.__rocket.y0 === null) window.__rocket.y0 = e.y;
+          window.__rocket.rocket = Math.max(window.__rocket.rocket, e.rocket);
+          window.__rocket.top = Math.max(window.__rocket.top, e.y - window.__rocket.y0);
+        }
       }, 16);
     };
     await kart(h6.page, 'place(0, 40, 0)');
-    await kart(h6.page, 'place(1, 90, 0)');
-    await kart(h6.page, 'place(2, 120, -2)');
-    await kart(h6.page, 'place(3, 150, 2)');
+    await kart(h6.page, 'place(1, 140, 0)');
+    await kart(h6.page, 'place(2, 260, -2)');
+    await kart(h6.page, 'place(3, 290, 2)');
     await sleep(300);
     await Promise.all([h6, c6].map((s) => s.page.evaluate(recordRocket)));
     const rocketAt = await kart(h6.page, 'race().time');
     await useItem(10);
-    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 150, rocketAt, { timeout: 30000 }).catch(() => {});
-    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 150, rocketAt, { timeout: 30000 }).catch(() => {});
+    const aimed = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 250, rocketAt, { timeout: 60000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 250, rocketAt, { timeout: 60000 }).catch(() => {});
     const [rocketH, rocketC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
       clearInterval(window.__rocketTimer);
       return window.__rocket;
     })));
-    check('Rakete: alle außer Anna schleudern länger als nach einem Treffer, auf beiden Bildschirmen', rocketH.spin[0] === 0 && rocketC.spin[0] === 0 && [1, 2, 3].every((s) => rocketH.spin[s] > 80 && rocketC.spin[s] > 80), `Host ${JSON.stringify(rocketH.spin)}, Ben ${JSON.stringify(rocketC.spin)}`);
+    const [landedA, landedB] = await Promise.all([kart(h6.page, 'authoritative(0)'), kart(h6.page, 'authoritative(1)')]);
+    check('Rakete: zielt auf Ben (einen Platz vor Anna)', aimed.rocket > 0 && aimed.aimSlot === 1, `Ziel ${aimed.aimSlot}`);
+    check('Rakete: Anna verwandelt sich und fliegt hoch über die Karte – auf beiden Bildschirmen', [rocketH, rocketC].every((r) => r.rocket > 150 && r.top > 30), `Host ${rocketH.rocket} Ticks / ${rocketH.top.toFixed(0)} m, Ben ${rocketC.rocket} Ticks / ${rocketC.top.toFixed(0)} m`);
+    check('Rakete: Ben schleudert wie nach einem Kreisel, Anna nicht – auf beiden Bildschirmen', [rocketH, rocketC].every((r) => r.spin[0] === 0 && r.spin[1] > 40 && r.spin[1] <= 75), `Host ${JSON.stringify(rocketH.spin)}, Ben ${JSON.stringify(rocketC.spin)}`);
+    check('Rakete: Anna ist gelandet und liegt danach vor Ben', landedA.rocket === 0 && landedA.respawn === 0 && (await kart(h6.page, 'standings()')).findIndex((x) => x.slot === 0) < (await kart(h6.page, 'standings()')).findIndex((x) => x.slot === 1), `Anna Abschnitt ${landedA.seg}, Ben ${landedB.seg}`);
     check('Rakete: Ben wird gewarnt, Anna nicht', rocketC.banner && !rocketH.banner);
 
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
