@@ -1130,7 +1130,8 @@ export class World {
     // gleich daneben eine höhere Fahrbahn am Boden verläuft. Unter Stegen, deren Platten
     // wegbrechen können, liegt ein tiefer Graben: dort glüht die Lava.
     // Sturmhafen: die Lücke hinter der Schanze ist eine Ladeluke – das Gelände darunter liegt tief (über dem Meeresspiegel).
-    const gapPit = t.def.theme === 'hafen' ? 3.4 : 0;
+    // Gipfelbahn: unter der Skisprungschanze liegt die Klamm.
+    const gapPit = t.def.theme === 'hafen' ? 3.4 : t.def.theme === 'gipfel' ? 16 : 0;
     for (const i of this.deckSegs) {
       const cap = t.py[i] - (this.pitAt(i) ? PIT_D : (t.edge[i] & EDGE_RIVER) !== 0 ? RIVER_D : gapPit > 0 && (t.edge[i] & EDGE_GAP) !== 0 ? gapPit : DECK_D + 0.8);
       if (h <= cap) continue;
