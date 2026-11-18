@@ -6,6 +6,7 @@ import {
   ITEM_GUARD,
   ITEM_KITE,
   ITEM_OIL,
+  ITEM_ROCKET,
   ITEM_SMOKE,
   ITEM_SPRING,
   ITEM_TIRE,
@@ -62,6 +63,11 @@ export const ITEMS: Record<number, ItemInfo> = {
     name: 'Abschleppdrache',
     hint: 'Zieht dich nach vorn · Bremse kappt',
     icon: `<path d="M12 1.500 20 9.500 12 17 4 9.500z" fill="currentColor"/><path d="M12 17c-.500 2 1.500 2.500 1 4.500M9.500 19.500l2.300.800M11.800 22.300l2.400-.900" ${STROKE}/>`,
+  },
+  [ITEM_ROCKET]: {
+    name: 'Rakete',
+    hint: 'Trifft alle anderen',
+    icon: '<path d="M12 1.500c3 2.300 4.300 6 4.300 9.800v5.200H7.700v-5.200C7.700 7.500 9 3.800 12 1.500z" fill="currentColor"/><path d="M7.700 11.500 4.500 15.500v3l3.200-1.600zM16.300 11.500l3.200 4v3l-3.200-1.600z" fill="currentColor"/><path d="M10 18.500c.300 1.600 1 2.800 2 4 1-1.200 1.700-2.400 2-4z" fill="currentColor"/>',
   },
   [ITEM_SPRING]: {
     name: 'Sprungfeder',

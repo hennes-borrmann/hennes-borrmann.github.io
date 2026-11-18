@@ -46,6 +46,8 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'use-smoke',
   'use-spring',
   'use-kite',
+  'use-rocket',
+  'rocket-hit',
   // Was die Strecke selbst von sich gibt
   'geyser',
   'bomb',

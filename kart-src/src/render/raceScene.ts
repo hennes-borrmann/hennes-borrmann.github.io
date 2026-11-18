@@ -16,6 +16,7 @@ import {
   ITEM_KITE,
   ITEM_NONE,
   ITEM_OIL,
+  ITEM_ROCKET,
   ITEM_SMOKE,
   ITEM_SPRING,
   ITEM_TIRE,
@@ -103,6 +104,10 @@ export interface SceneEvent {
     | 'use-smoke'
     | 'use-spring'
     | 'use-kite'
+    /** Rakete: gezündet; eine fremde ist zum eigenen Kart unterwegs (nur eigenes Kart); eingeschlagen. */
+    | 'use-rocket'
+    | 'rocket-incoming'
+    | 'rocket-hit'
     | 'finish'
     /** Aus dem Windschatten ausgeschert: es zieht. */
     | 'draft'
@@ -243,6 +248,8 @@ interface KartView {
   airTime: number;
   // letzter Zustand, um Ereignisse zu erkennen
   spin: number;
+  /** Dauer des laufenden Schleuderns in Ticks (nach der Rakete länger als nach anderen Treffern) – für die Drehung im Bild. */
+  spinFull: number;
   boost: number;
   stall: number;
   guard: number;
@@ -487,6 +494,14 @@ export class RaceScene {
   smoke = 0;
   /** Wie nah ein Brummkreisel ist, der das eigene Kart sucht (0 = keiner, 1 = gleich da). */
   threat = 0;
+  /** Eine fremde Rakete ist zum eigenen Kart unterwegs: 0 = keine, sonst wie weit ihr Flug ist (bis 1 = Einschlag). */
+  rocket = 0;
+  /** Sekunden, seit ein anderer eine Rakete gezündet hat (−1 = keine unterwegs). */
+  private rocketAge = -1;
+  /** In diesem Bild hat ein anderes Kart als das eigene eine Rakete gezündet. */
+  private rocketSeen = false;
+  /** Aufsteigende Raketen (nur Bild): Startpunkt und Alter in Sekunden. */
+  private readonly rocketsUp: { x: number; y: number; z: number; age: number }[] = [];
   onEvent: ((e: SceneEvent) => void) | null = null;
   /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
   readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
@@ -738,6 +753,9 @@ export class RaceScene {
     this.shake = 0;
     this.hitstop = 0;
     this.smoke = 0;
+    this.rocket = 0;
+    this.rocketAge = -1;
+    this.rocketsUp.length = 0;
     this.skids.clear();
     this.puffs.clear();
     this.sparks.clear();
@@ -855,6 +873,7 @@ export class RaceScene {
       draft: 0,
       flat: 0,
       flatK: 0,
+      spinFull: 0,
       glide: false,
       lift: false,
       windWait: 0,
@@ -1166,6 +1185,49 @@ export class RaceScene {
     return false;
   }
 
+  /** Einschlag einer Rakete bei einem Kart: Feuerschweif von oben, Feuerball, Rauch und Funken. */
+  private rocketImpact(e: RenderEntity): void {
+    this.pop('KAWUMM!', e, 'hot', 5.2);
+    // Der Schweif der herabstürzenden Rakete – eine Säule, die von oben nach unten verlischt.
+    this.color.set(0xffb347);
+    for (let i = 0; i < 14; i++) {
+      const h = 1.5 + i * 1.6;
+      this.sparks.emit(e.x, e.y + h, e.z, 0, -6, 0, 0.14 + i * 0.025, 1.1 - i * 0.04, this.color, -1, 0, 0);
+    }
+    this.burst(e.x, e.y + 0.8, e.z, 26, 12, 0xff8a1c, true, 1.1, 0.6, 7);
+    this.burst(e.x, e.y + 1.2, e.z, 16, 8, 0xffe04a, true, 0.8, 0.5, 9);
+    // Rauch: hell und flach, damit die Sicht des Getroffenen nicht ganz zugeht
+    this.burst(e.x, e.y + 0.3, e.z, 12, 9, 0xd9d4e2, false, 0.8, 0.7, 1);
+  }
+
+  /**
+   * Aufsteigende Raketen zeichnen (Feuer und Rauch, immer steiler nach oben) und die Warnung für das eigene Kart führen,
+   * wenn ein anderer eine gezündet hat. Die Rakete schlägt 1 s nach dem Zünden ein (ROCKET_FLIGHT_TICKS in hostGame.ts).
+   */
+  private updateRockets(me: RenderEntity | null, dt: number): void {
+    for (let i = this.rocketsUp.length - 1; i >= 0; i--) {
+      const r = this.rocketsUp[i];
+      r.age += dt;
+      if (r.age > 0.9) {
+        this.rocketsUp.splice(i, 1);
+        continue;
+      }
+      const y = r.y + 6 * r.age + 40 * r.age * r.age;
+      this.color.set(0xffd23f);
+      this.sparks.emit(r.x, y, r.z, 0, -4, 0, 0.12, 1.2, this.color, -1.2, 0, 0);
+      this.color.set(0xff6a2a);
+      this.sparks.emit(r.x, y - 0.6, r.z, (Math.random() - 0.5) * 2, -10, (Math.random() - 0.5) * 2, 0.25, 0.8, this.color, -0.8, 0, 1.5);
+      this.color.set(0xd9d4e2);
+      if (r.age > 0.08) this.puffs.emit(r.x, y - 1, r.z, (Math.random() - 0.5) * 1.5, -1, (Math.random() - 0.5) * 1.5, 0.9, 0.5, this.color, 1.2, 0, 1.5);
+    }
+    if (this.rocketSeen && me && !me.finished) {
+      this.rocketAge = 0;
+      this.onEvent?.({ kind: 'rocket-incoming', slot: me.slot, local: true, pan: 0, gain: 1 });
+    } else if (this.rocketAge >= 0) this.rocketAge += dt;
+    if (this.rocketAge > 1.25 || !me || me.finished) this.rocketAge = -1;
+    this.rocket = this.rocketAge >= 0 ? Math.max(0.01, Math.min(1, this.rocketAge)) : 0;
+  }
+
   private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
     this.pops.show(word, e.x, e.y + 2.6, e.z, style, size);
   }
@@ -1418,7 +1480,18 @@ export class RaceScene {
         this.pop('AUFWIND!', e, 'white', 3);
         this.emit('lift', k, local);
       }
-      if (e.spin > 0 && k.spin === 0) {
+      if (e.spin > SPIN_TICKS + 8 && e.spin > k.spin + 12) {
+        // Von der Rakete getroffen: Sie fällt senkrecht aus dem Himmel, dann der große Knall.
+        this.rocketImpact(e);
+        k.visual.squash(1);
+        this.emit('rocket-hit', k, local);
+        if (local) {
+          this.hitstop = 0.11;
+          this.shake = Math.max(this.shake, 1);
+          this.rocketAge = -1;
+          this.rocket = 0;
+        }
+      } else if (e.spin > 0 && k.spin === 0) {
         this.pop('KRACH!', e, 'hot', 4.2);
         this.burst(e.x, e.y + 1, e.z, 16, 9, 0xffd23f, true, 0.7, 0.7, 6);
         this.burst(e.x, e.y + 0.6, e.z, 8, 5, 0xe9e6f2, false, 0.9, 0.7);
@@ -1502,7 +1575,15 @@ export class RaceScene {
         // Die Figur macht die passende Bewegung: werfen, kippen, hochreißen …
         k.visual.useItem(k.item);
         if (k.item === ITEM_EMP) this.empFrom.push(k);
-        if (k.item === ITEM_KITE) {
+        if (k.item === ITEM_ROCKET) {
+          this.pop('WUSCH!', e, 'hot', 3.6);
+          this.burst(e.x, e.y + 0.4, e.z, 10, 6, 0xe9e6f2, false, 0.6, 0.7, 1.5);
+          this.burst(e.x, e.y + 1.2, e.z, 10, 5, 0xff8a1c, true, 0.6, 0.4, 6);
+          this.rocketsUp.push({ x: e.x, y: e.y + 1.8, z: e.z, age: 0 });
+          this.emit('use-rocket', k, local);
+          if (local) this.shake = Math.max(this.shake, 0.25);
+          else this.rocketSeen = true;
+        } else if (k.item === ITEM_KITE) {
           // Wirkung und Ton kommen mit dem Start des Zugs (siehe oben).
         } else if (k.item === ITEM_TIRE) {
           this.pop('HUI!', e, 'white', 2.6);
@@ -1563,6 +1644,9 @@ export class RaceScene {
     k.dive = dive;
     k.blown = blown;
     k.airTime = air ? k.airTime + dt : 0;
+    // Länge des Schleuderns für die Drehung im Bild: so lang, wie es war, als es anfing (mindestens ein gewöhnlicher Treffer).
+    if (e.spin === 0) k.spinFull = 0;
+    else if (e.spin > k.spin) k.spinFull = Math.max(SPIN_TICKS, e.spin);
     k.spin = e.spin;
     k.boost = e.boost;
     k.stall = e.stall;
@@ -1608,6 +1692,7 @@ export class RaceScene {
     for (const k of this.karts.values()) k.seen = false;
     this.empFrom.length = 0;
     this.empHit.length = 0;
+    this.rocketSeen = false;
     this.shadows.begin();
     this.lights.begin();
     let me: RenderEntity | null = null;
@@ -1681,7 +1766,7 @@ export class RaceScene {
       pose.driftStage = e.driftDir !== 0 ? turboStage(e.driftCharge, e.char) : 0;
       pose.boost = e.boost > 0;
       pose.air = air;
-      pose.spin = e.spin > 0 ? 1 - e.spin / SPIN_TICKS : 0;
+      pose.spin = e.spin > 0 ? 1 - e.spin / Math.max(k.spinFull, e.spin, SPIN_TICKS) : 0;
       // Kurz bevor der Stoßfänger abläuft, blinkt er.
       pose.guard = e.guard > 0 && (e.guard > 90 || Math.floor(this.time * 10) % 2 === 0);
       pose.stall = e.stall > 0;
@@ -1799,6 +1884,7 @@ export class RaceScene {
     this.lights.end();
     this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
     this.threat = Math.max(0, threat);
+    this.updateRockets(me, dt);
     this.bolts.update(dt);
 
     this.puffs.update(dt);

@@ -37,6 +37,7 @@ import {
   EV_USE_BOOST,
   EV_USE_EMP,
   EV_USE_KITE,
+  EV_USE_ROCKET,
   EV_USE_OIL,
   EV_USE_SMOKE,
   EV_USE_TIRE,
@@ -51,6 +52,7 @@ import {
   ITEM_OIL,
   ITEM_SMOKE,
   ITEM_KITE,
+  ITEM_ROCKET,
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
@@ -64,6 +66,7 @@ import {
   flattenKart,
   hitKart,
   newState,
+  rocketKart,
   stallKart,
   stepKart,
   trafficBlocks,
@@ -130,6 +133,10 @@ const SMOKE_RADIUS = 7.5;
 const SMOKE_LIFE_TICKS = 9 * 60;
 /** Erst ab diesem Rückstand (Meter auf das Kart davor) gibt es den Abschleppdrachen. */
 const KITE_MIN_GAP = 45;
+/** Rakete: Gewicht in der Auslosung des Letzten (bei rund 90 für alles andere: etwa jede zwanzigste Kiste). */
+const ROCKET_WEIGHT = 5;
+/** Rakete: so lange fliegt sie nach dem Zünden, bevor sie bei allen anderen einschlägt (Zeit für die Warnung). */
+export const ROCKET_FLIGHT_TICKS = 60;
 export const HAZARD_RADIUS = 1.5;
 /** Höchstzahl gleichzeitiger Dinge je Art – hält die Snapshots klein. */
 const MAX_PER_KIND = 6;
@@ -197,6 +204,8 @@ export class HostGame implements GameView {
   private readonly env: StepEnv = { canDrive: false, speedFactor: 1, time: 0 };
   private readonly boxTimers: Uint16Array;
   private thingList: Thing[] = [];
+  /** Gezündete Raketen, die noch fliegen: wer sie gezündet hat und in welchem Tick sie einschlagen. */
+  private rockets: { from: number; at: number }[] = [];
   /** Gewählte Figur je Platz; fehlt ein Eintrag (KI), gilt die Standardfigur des Platzes. */
   private chars: number[] = [];
   private readonly botCtx: BotContext = { tick: 0, time: 0, place: 1, smoke: false };
@@ -253,6 +262,7 @@ export class HostGame implements GameView {
     this.firstFinishTick = -1;
     this.resultsAtTick = -1;
     this.thingList = [];
+    this.rockets = [];
     this.boxTimers.fill(0);
     for (const k of this.karts.values()) {
       copyState(k.state, gridState(k.slot, this.charOf(k.slot, k.bot)));
@@ -393,6 +403,7 @@ export class HostGame implements GameView {
     }
 
     this.stepItems();
+    this.stepRockets();
     this.collideKarts();
     this.rank();
     this.checkRaceEnd();
@@ -615,6 +626,7 @@ export class HostGame implements GameView {
     if (ev & EV_USE_SMOKE) this.spawnDrop(k, THING_SMOKE);
     if (ev & EV_USE_TOP) this.spawnTop(k);
     if (ev & EV_USE_EMP) this.shortCircuit(k);
+    if (ev & EV_USE_ROCKET) this.rockets.push({ from: k.slot, at: this.tick + ROCKET_FLIGHT_TICKS });
     if (ev & EV_USE_KITE) this.fx(k, 'boost');
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.fx(k, 'boost');
     // Treffer durch die Strecke selbst (Verkehr, Geysir, Lavabombe) sagt der Bildschirm eines
@@ -646,18 +658,19 @@ export class HostGame implements GameView {
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache
-    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22, 0];
-    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8, 0];
-    else if (place === count) table = [22, 14, 0, 24, 6, 14, 0, 10, 0];
-    else table = [18, 20, 10, 16, 10, 6, 10, 10, 0];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete
+    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22, 0, 0];
+    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8, 0, 0];
+    else if (place === count) table = [22, 14, 0, 24, 6, 14, 0, 10, 0, ROCKET_WEIGHT];
+    else table = [18, 20, 10, 16, 10, 6, 10, 10, 0, 0];
     // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
     // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
     if (count > 1 && behind > KITE_MIN_GAP) {
       if (place === count) table[8] = 22;
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE];
+    // Die Rakete gibt es nur auf dem letzten Platz, und selten – unabhängig vom Drachen, der dort auch drin bleibt.
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;
@@ -753,6 +766,23 @@ export class HostGame implements GameView {
       const r = stallKart(o.state);
       if (r === HIT_BLOCKED) this.fx(o, 'block');
       else if (r !== HIT_NONE) this.fx(o, 'stall');
+    }
+  }
+
+  /** Rakete: schlägt nach ihrer Flugzeit bei allen ein, die noch fahren – außer bei dem, der sie gezündet hat. */
+  private stepRockets(): void {
+    if (this.rockets.length === 0) return;
+    for (let i = this.rockets.length - 1; i >= 0; i--) {
+      const r = this.rockets[i];
+      if (this.tick < r.at) continue;
+      this.rockets.splice(i, 1);
+      if (this.phase !== RACE_RUNNING) continue;
+      for (const o of this.karts.values()) {
+        if (o.slot === r.from || o.finished) continue;
+        const res = rocketKart(o.state);
+        if (res === HIT_BLOCKED) this.fx(o, 'block');
+        else if (res !== HIT_NONE) this.fx(o, 'hit');
+      }
     }
   }
 

@@ -175,6 +175,9 @@ const LEVEL: Record<SfxName, number> = {
   'use-smoke': 2.2,
   'use-spring': 3.8,
   'use-kite': 4.5,
+  'use-rocket': 3.6,
+  'rocket-incoming': 2.6,
+  'rocket-hit': 3.4,
   warn: 2.2,
   hit: 3.8,
   'guard-block': 4.4,
@@ -626,6 +629,33 @@ export class SfxPlayer {
           .noise(1800, 1200, 0.07, 0.16, { q: 4, at: 0.1 })
           .noise(1800, 1200, 0.07, 0.14, { q: 4, at: 0.22 })
           .tone('sine', 110, 70, 0.2, 0.3);
+        break;
+      case 'use-rocket':
+        // Zündung: kurzer Knall, dann ein Fauchen, das sich nach oben öffnet und mit der Rakete davonzieht;
+        // darunter ein tiefes Grollen, das schnell leiser wird.
+        v.noise(2400, 900, 0.08, 0.3, { q: 1.2 })
+          .tone('sine', 140, 48, 0.25, 0.4)
+          .noise(500, 4200, 1.0, 0.3, { q: 0.8, attack: 0.06, at: 0.04 })
+          .noise(260, 120, 0.9, 0.32, { type: 'lowpass', brown: true, attack: 0.03, at: 0.03 })
+          .tone('triangle', 300, 1400, 0.9, 0.07, { attack: 0.1, at: 0.08, vibHz: 23, vibDepth: 0.02 });
+        break;
+      case 'rocket-incoming':
+        // Die Rakete kommt herunter: ein Pfeifen, das von hoch nach tief fällt und genau beim Einschlag
+        // (1 s nach dem Zünden) endet; ein Hauch Fauchen fährt mit.
+        v.tone('sine', 2300, 520, 0.72, 0.14, { attack: 0.12, sustain: 0.8, at: 0.26, vibHz: 9, vibDepth: 0.012 })
+          .noise(4600, 1100, 0.72, 0.05, { q: 3, attack: 0.15, at: 0.26 });
+        break;
+      case 'rocket-hit':
+        // Einschlag: harter Knall im Mittenband, tiefer Stoß, langes braunes Grollen, das ausrollt,
+        // dazu ein paar späte, trockene Trümmer.
+        v.noise(3200, 400, 0.12, 0.5, { q: 0.8 })
+          .tone('sine', 120, 28, 0.7, 0.62)
+          .tone('square', 70, 36, 0.22, 0.16)
+          .noise(900, 80, 1.1, 0.55, { type: 'lowpass', brown: true, attack: 0.005 })
+          .noise(6000, 2500, 0.3, 0.08, { type: 'highpass', at: 0.02 })
+          .noise(1800, 1200, 0.05, 0.14, { q: 1.5, at: 0.38, attack: 0.003 })
+          .noise(1400, 900, 0.05, 0.11, { q: 1.5, at: 0.55, attack: 0.003 })
+          .noise(2100, 1300, 0.04, 0.08, { q: 1.5, at: 0.74, attack: 0.003 });
         break;
       case 'warn':
         v.tone('pulse25', 1320, 1318, 0.07, 0.2).tone('pulse25', 1760, 1756, 0.09, 0.2, { at: 0.09 });

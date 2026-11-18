@@ -973,6 +973,33 @@ async function main() {
     }
     check('Sprungfeder: das Kart hüpft', hop >= 2, `${hop} Messungen in der Luft`);
 
+    // Rakete: Anna zündet; 1 s später hält es alle anderen an – auch Ben auf seinem eigenen Bildschirm, der vorher gewarnt wird.
+    // Ohne Grafikkarte dauert jede Abfrage von außen lange; deshalb schreibt jede Seite selbst mit (Warnung, längstes Schleudern).
+    const recordRocket = () => {
+      window.__rocket = { banner: false, spin: {} };
+      const el = document.getElementById('race-banner');
+      window.__rocketTimer = setInterval(() => {
+        if (!el.hidden && el.textContent.includes('Rakete')) window.__rocket.banner = true;
+        for (const e of window.__kart.entities()) window.__rocket.spin[e.slot] = Math.max(window.__rocket.spin[e.slot] || 0, e.spin);
+      }, 16);
+    };
+    await kart(h6.page, 'place(0, 40, 0)');
+    await kart(h6.page, 'place(1, 90, 0)');
+    await kart(h6.page, 'place(2, 120, -2)');
+    await kart(h6.page, 'place(3, 150, 2)');
+    await sleep(300);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordRocket)));
+    const rocketAt = await kart(h6.page, 'race().time');
+    await useItem(10);
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 150, rocketAt, { timeout: 30000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 150, rocketAt, { timeout: 30000 }).catch(() => {});
+    const [rocketH, rocketC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__rocketTimer);
+      return window.__rocket;
+    })));
+    check('Rakete: alle außer Anna schleudern länger als nach einem Treffer, auf beiden Bildschirmen', rocketH.spin[0] === 0 && rocketC.spin[0] === 0 && [1, 2, 3].every((s) => rocketH.spin[s] > 80 && rocketC.spin[s] > 80), `Host ${JSON.stringify(rocketH.spin)}, Ben ${JSON.stringify(rocketC.spin)}`);
+    check('Rakete: Ben wird gewarnt, Anna nicht', rocketC.banner && !rocketH.banner);
+
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
     await sleep(800);
     await shot(h6.page, 'race-phase3-host.png');

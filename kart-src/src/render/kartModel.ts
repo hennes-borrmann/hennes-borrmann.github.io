@@ -3019,7 +3019,8 @@ const I_GUARD = 5;
 const I_EMP = 6;
 const I_SPRING = 8;
 const I_KITE = 9;
-const I_COUNT = 10;
+const I_ROCKET = 10;
+const I_COUNT = 11;
 
 // Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
 const I_RED = 0xff5a4e;
@@ -3320,18 +3321,58 @@ function buildKiteFolded(b: Builder): void {
   b.put(prism([0, 0, -0.06, 0.035, -0.06, -0.035], 0.02), { bone: 0, color: I_YEL, pos: [-0.07, -0.11, 0], mirror: 0, outline: 0.5 });
 }
 
+/** Rakete: weißer Rumpf mit roter Spitze und rotem Band, Bullauge, vier Flossen, dunkle Düse. */
+function buildRocket(b: Builder): void {
+  b.put(
+    lathe(
+      [
+        [0, 0.0, I_INK],
+        [0.062, 0.0],
+        [0.07, 0.03, WHITE, true],
+        [0.082, 0.09],
+        [0.084, 0.15, I_RED, true],
+        [0.084, 0.2, WHITE, true],
+        [0.082, 0.32],
+        [0.074, 0.36, I_RED, true],
+        [0.05, 0.43],
+        [0.022, 0.475],
+        [0, 0.49],
+      ],
+      14,
+    ),
+    { bone: 0, pos: [0, 0.02, 0] },
+  );
+  // Bullauge vorn: Chromring, Glas
+  b.put(cyl(0.036, 0.036, 0.02, 12), { bone: 0, color: CHROME, pos: [0, 0.29, 0.078], rot: [HALF_PI, 0, 0], outline: 0.5 });
+  b.put(sphere(0.026, 0.026, 0.012, 8, 5), { bone: 0, color: I_TURQ, pos: [0, 0.29, 0.088], outline: 0 });
+  // Vier Flossen am Heck
+  const FIN = [0.06, 0.2, 0.15, 0.06, 0.155, -0.02, 0.06, 0.04];
+  for (let i = 0; i < 4; i++)
+    b.put(prism(FIN, 0.02), { bone: 0, color: I_RED, pos: [0, 0.0, 0], rot: [0, (i * Math.PI) / 2 + Math.PI / 4, 0], outline: 0.5 });
+  // Düse
+  b.put(cyl(0.05, 0.062, 0.05, 12), { bone: 0, color: 0x5a5566, pos: [0, -0.005, 0], outline: 0.6 });
+}
+
 let itemGeos: ItemGeo[] | null = null;
 
 /** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
 function getItemGeos(): ItemGeo[] {
   if (itemGeos) return itemGeos;
-  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded];
+  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket];
   const out: ItemGeo[] = [];
   for (let i = 0; i < I_COUNT; i++) {
     const b = new Builder(ONE_BONE, 2, true);
     if (i > 0) fns[i - 1](b);
     else b.put(box(0.001, 0.001, 0.001), { bone: 0, outline: 0 });
-    out.push(finishItem(b));
+    const g = finishItem(b);
+    // Die Rakete ist schlank – etwas größer, damit man sie in der Hand erkennt.
+    if (i === I_ROCKET) {
+      g.main.scale(1.35, 1.35, 1.35);
+      g.line?.scale(1.35, 1.35, 1.35);
+      g.main.computeBoundingSphere();
+      g.line?.computeBoundingSphere();
+    }
+    out.push(g);
   }
   itemGeos = out;
   return out;
@@ -3560,6 +3601,20 @@ const GESTURES: (Gesture | null)[] = [
     ],
     release: 0.3,
     fly: [-0.5, 5, 6, 0, 0.15],
+  },
+  // Rakete: hoch über den Kopf recken, kurz halten, dann zündet sie und schießt immer schneller senkrecht davon
+  {
+    dur: 0.6,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.2, 0.16, 0.6, 0.08, -0.18, 0, -0.06, -0.34,
+      0.45, 0.16, 0.62, 0.08, -0.2, 0, -0.06, -0.36,
+      0.62, 0.18, 0.5, 0.08, -0.1, 0, 0, -0.2,
+      1, 0.16, 0.1, 0.1, 0, 0, 0, 0,
+    ],
+    release: 0.45,
+    fly: [0, 4, 0.5, -60, 0.45],
   },
 ];
 
@@ -4698,7 +4753,7 @@ export class KartVisual {
       mul = u < 0.6 ? 1 : 1 - smooth01((u - 0.6) / 0.4);
       if (item === I_GUARD) mul *= 1 + u * 0.7;
       if (item === I_TIRE) rx += tf * 30;
-      else if (item !== I_TOP) rx += this.flyV.z < 0 ? -tf * 16 : tf * 10;
+      else if (item !== I_TOP && item !== I_ROCKET) rx += this.flyV.z < 0 ? -tf * 16 : tf * 10;
     } else {
       // Griff knapp über der Faust (die Hand sitzt am Ende des Unterarms)
       _iv.set(0, 1, 0).applyQuaternion(bn[B.handR].quaternion);

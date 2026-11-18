@@ -6,6 +6,7 @@ import {
   EV_LAND,
   EV_TOW_END,
   EV_USE_KITE,
+  EV_USE_ROCKET,
   EV_RESPAWNED,
   EV_TAKEOFF,
   FLAG_AIR,
@@ -14,11 +15,15 @@ import {
   ITEM_GUARD,
   ITEM_KITE,
   ITEM_NONE,
+  ITEM_COUNT,
+  ITEM_ROCKET,
   ITEM_SMOKE,
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
   NEUTRAL,
+  ROCKET_SPIN_TICKS,
+  SPIN_TICKS,
   STALL_TICKS,
   TOW_TICKS,
   V_MAX,
@@ -454,7 +459,7 @@ describe('Neue Items', () => {
     const host = runningHost([0, 1, 2, 3]);
     const pick = (host as unknown as { pickItem(place: number, count: number): number }).pickItem.bind(host);
     const count = (place: number): number[] => {
-      const n = new Array<number>(9).fill(0);
+      const n = new Array<number>(ITEM_COUNT).fill(0);
       for (let i = 0; i < 4000; i++) n[pick(place, 4)]++;
       return n;
     };
@@ -467,5 +472,119 @@ describe('Neue Items', () => {
     expect(last[ITEM_SMOKE]).toBe(0);
     expect(last[ITEM_TOP]).toBeGreaterThan(600);
     for (let item = 1; item <= 8; item++) expect(first[item] + last[item] + count(2)[item]).toBeGreaterThan(0);
+  });
+
+  it('Rakete gibt es nur auf dem letzten Platz, und selten – der Drache bleibt daneben', () => {
+    const host = runningHost([0, 1, 2, 3]);
+    const pick = (host as unknown as { pickItem(place: number, count: number, behind?: number): number }).pickItem.bind(host);
+    const share = (place: number, count: number, behind: number, item: number): number => {
+      let n = 0;
+      for (let i = 0; i < 6000; i++) if (pick(place, count, behind) === item) n++;
+      return n / 6000;
+    };
+    for (const place of [1, 2, 3]) expect(share(place, 4, 200, ITEM_ROCKET)).toBe(0);
+    expect(share(1, 1, 0, ITEM_ROCKET)).toBe(0);
+    expect(share(1, 2, 0, ITEM_ROCKET)).toBe(0);
+    // Letzter: etwa jede zwanzigste Kiste, mit dem Drachen daneben etwas seltener.
+    expect(share(4, 4, 20, ITEM_ROCKET)).toBeGreaterThan(0.03);
+    expect(share(4, 4, 20, ITEM_ROCKET)).toBeLessThan(0.08);
+    expect(share(4, 4, 200, ITEM_ROCKET)).toBeGreaterThan(0.02);
+    expect(share(4, 4, 200, ITEM_ROCKET)).toBeLessThan(0.07);
+    expect(share(4, 4, 200, ITEM_KITE)).toBeGreaterThan(0.12);
+    expect(share(2, 2, 10, ITEM_ROCKET)).toBeGreaterThan(0.02);
+  });
+
+  it('Rakete: schlägt nach einer Sekunde bei allen anderen ein und hält sie länger an als ein Treffer', () => {
+    const host = runningHost([0, 1, 2, 3]);
+    const fx: string[] = [];
+    host.onFx = (slot, kind) => fx.push(`${slot}:${kind}`);
+    host.debugPlace(1, 160);
+    host.debugPlace(2, 120);
+    host.debugPlace(3, 80);
+    host.debugPlace(0, 30);
+    for (const slot of [1, 2, 3]) {
+      const s = host.authoritative(slot)!;
+      s.vx = Math.sin(s.heading) * 24;
+      s.vz = Math.cos(s.heading) * 24;
+    }
+    host.step(NEUTRAL);
+    host.giveItem(0, ITEM_ROCKET);
+    host.step({ steer: 0, buttons: 8 });
+    expect(host.authoritative(0)!.item).toBe(ITEM_NONE);
+    // Noch im Flug: niemand ist getroffen.
+    for (let i = 0; i < 50; i++) host.step(NEUTRAL);
+    for (const slot of [1, 2, 3]) expect(host.authoritative(slot)!.spin).toBe(0);
+    for (let i = 0; i < 12; i++) host.step(NEUTRAL);
+    for (const slot of [1, 2, 3]) {
+      const s = host.authoritative(slot)!;
+      expect(s.spin).toBeGreaterThan(SPIN_TICKS);
+      expect(Math.hypot(s.vx, s.vz)).toBeLessThan(4);
+      expect(fx).toContain(`${slot}:hit`);
+    }
+    // Wer sie gezündet hat, bleibt verschont.
+    expect(host.authoritative(0)!.spin).toBe(0);
+    // Länger als ein gewöhnlicher Treffer: nach dessen Dauer schleudern sie noch.
+    for (let i = 0; i < SPIN_TICKS; i++) host.step(NEUTRAL);
+    for (const slot of [1, 2, 3]) expect(host.authoritative(slot)!.spin).toBeGreaterThan(0);
+    for (let i = 0; i < ROCKET_SPIN_TICKS; i++) host.step(NEUTRAL);
+    for (const slot of [1, 2, 3]) expect(host.authoritative(slot)!.spin).toBe(0);
+  });
+
+  it('Rakete: trifft auch, wer gerade schleudert; der Stoßfänger fängt sie ab, am Drachen ist man außer Reichweite', () => {
+    const host = runningHost([0, 1, 2, 3]);
+    const fx: string[] = [];
+    host.onFx = (slot, kind) => fx.push(`${slot}:${kind}`);
+    host.debugPlace(1, 160);
+    host.debugPlace(2, 120);
+    host.debugPlace(3, 80);
+    host.debugPlace(0, 30);
+    host.step(NEUTRAL);
+    host.debugHit(1);
+    host.authoritative(2)!.guard = GUARD_TICKS;
+    host.giveItem(3, ITEM_KITE);
+    host.giveItem(0, ITEM_ROCKET);
+    // Kart 3 zündet seinen Drachen über die Eingabe der KI nicht – hier von Hand: es hängt am Drachen.
+    host.authoritative(3)!.tow = 200;
+    host.step({ steer: 0, buttons: 8 });
+    for (let i = 0; i < 62; i++) host.step(NEUTRAL);
+    expect(host.authoritative(1)!.spin).toBeGreaterThan(SPIN_TICKS);
+    expect(host.authoritative(2)!.spin).toBe(0);
+    expect(host.authoritative(2)!.guard).toBe(0);
+    expect(fx).toContain('2:block');
+    expect(host.authoritative(3)!.spin).toBe(0);
+  });
+
+  it('Rakete: ein neues Rennen löscht eine, die noch fliegt', () => {
+    const host = runningHost([0, 1]);
+    host.giveItem(0, ITEM_ROCKET);
+    host.step({ steer: 0, buttons: 8 });
+    host.newRace();
+    while (host.phase !== RACE_RUNNING) host.step(NEUTRAL);
+    for (let i = 0; i < 80; i++) host.step(NEUTRAL);
+    expect(host.authoritative(1)!.spin).toBe(0);
+  });
+
+  it('Rakete im Snapshot: Item und lange Schleuderzeit kommen beim Mitspieler an', () => {
+    const host = runningHost([0, 1]);
+    host.giveItem(1, ITEM_ROCKET);
+    let snap = decodeSnapshot(new DataView(host.snapshot()))!;
+    expect(snap.karts.find((k) => k.slot === 1)!.state.item).toBe(ITEM_ROCKET);
+    host.debugPlace(1, 120);
+    host.giveItem(0, ITEM_ROCKET);
+    host.step({ steer: 0, buttons: 8 });
+    for (let i = 0; i < 61; i++) host.step(NEUTRAL);
+    snap = decodeSnapshot(new DataView(host.snapshot()))!;
+    expect(snap.karts.find((k) => k.slot === 1)!.state.spin).toBeGreaterThan(SPIN_TICKS);
+  });
+
+  it('KI zündet die Rakete bald nach dem Aufnehmen', () => {
+    const s = gridState(1);
+    placeAt(s, 40, 0, 22);
+    const brain = newBrain(1, 1);
+    s.item = ITEM_ROCKET;
+    let ev = 0;
+    for (let tick = 1; tick <= 120; tick++) ev |= stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 4, smoke: false }), ENV);
+    expect(ev & EV_USE_ROCKET).toBeTruthy();
+    expect(s.item).toBe(ITEM_NONE);
   });
 });
