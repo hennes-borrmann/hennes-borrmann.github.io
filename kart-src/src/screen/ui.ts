@@ -16,6 +16,9 @@ import { qrSvg } from '../util/qr';
 
 export type ViewName = 'boot' | 'home' | 'lobby' | 'game';
 
+/** Die drei Schritte der Lobby: Figur, Strecke (im Turnier: Lostopf), Start. */
+export type LobbyStep = 1 | 2 | 3;
+
 /** So lange läuft der Streifen der Auslosung, und so lange bleibt die ausgeloste Strecke danach stehen (ms). */
 export const DRAW_SPIN_MS = 6500;
 export const DRAW_HOLD_MS = 2400;
@@ -196,7 +199,6 @@ export class ScreenUi {
   private readonly btnBack = $<HTMLButtonElement>('btn-back');
   private readonly banner = $('banner');
   private readonly modal = $('modal');
-  private lastQrUrl = '';
   private lastPlayersJson = '';
   private localReady = false;
   private readonly hudCache: Record<string, string> = {};
@@ -204,8 +206,19 @@ export class ScreenUi {
   private shownTime = 0;
   private lastSetupJson = '';
   private lastCharJson = '';
+  /** Lobby: aktueller Schritt (1 Figur, 2 Strecke, 3 Start). */
+  private step: LobbyStep = 1;
+  /** Beim nächsten Stand der Lobby den passenden Schritt wählen: frisch hinein oder zurück aus dem Rennen. */
+  private stepInit: 'enter' | 'race' | null = null;
+  private lastLobby: LobbyModel | null = null;
+  /** Zustand der Kopplung (auch für den offenen Kopplungsdialog). */
+  private pairText = 'Kein Handy verbunden';
+  private pairOk = false;
+  /** Platz, für dessen Farbe die Figurenkarten gebaut sind. */
+  private charSlot = -2;
+  private tracksBuilt = false;
   private readonly portraits = new Map<string, string>();
-  private portraitJobs: { key: string; character: number; slot: number; targets: HTMLImageElement[] }[] = [];
+  private portraitJobs: { key: string; character: number; slot: number; px: number; targets: HTMLImageElement[] }[] = [];
   private portraitTimer = 0;
   private lastOrderJson = '';
   private lastCupJson = '';
@@ -280,10 +293,38 @@ export class ScreenUi {
       });
     }
     const chkBots = $<HTMLInputElement>('chk-bots');
-    chkBots.addEventListener('change', () => on.setBots(chkBots.checked));
+    chkBots.addEventListener('change', () => {
+      on.click('click');
+      on.setBots(chkBots.checked);
+    });
     $('btn-debug-lobby').addEventListener('click', () => on.toggleDebug());
     $('btn-copy').addEventListener('click', () => void this.copyInvite());
-    $('btn-settings').addEventListener('click', () => this.showSettings());
+
+    // Lobby: Schritte, Kopplung, Zahnrad
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#lobby-steps button')) {
+      btn.addEventListener('click', () => this.goStep(Number(btn.dataset.step) as LobbyStep));
+    }
+    $('btn-step-back').addEventListener('click', () => this.goStep((this.step - 1) as LobbyStep));
+    $('btn-step-next').addEventListener('click', () => this.goStep((this.step + 1) as LobbyStep));
+    $('sum-track').addEventListener('click', () => this.goStep(2));
+    $('sum-char').addEventListener('click', () => this.goStep(1));
+    const pair = (): void => {
+      on.click('click');
+      on.showPairing();
+    };
+    $('btn-pair-lobby').addEventListener('click', pair);
+    $('btn-pair-hint').addEventListener('click', pair);
+    $('btn-tools').addEventListener('click', () => {
+      on.click('click');
+      this.openTools();
+    });
+    $('btn-tools-close').addEventListener('click', () => this.closeTools());
+    $('lobby-tools').addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).dataset.close === 'true') this.closeTools();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' && !$('lobby-tools').hidden) this.closeTools();
+    });
 
     // Menü im Rennen: jede Auswahl schließt es wieder.
     const menu = $('menu');
@@ -333,8 +374,16 @@ export class ScreenUi {
   }
 
   show(view: ViewName): void {
+    const prev = this.app.dataset.view;
     this.app.dataset.view = view;
     if (view !== 'game') $('menu').hidden = true;
+    if (view !== 'lobby') $('lobby-tools').hidden = true;
+    if (view === 'home') this.lastLobby = null;
+    // Neu in der Lobby: vorn anfangen; zurück aus dem Rennen: dort, wo es weitergeht.
+    if (view === 'lobby' && prev !== 'lobby') {
+      this.stepInit = prev === 'game' ? 'race' : 'enter';
+      if (this.lastLobby) this.applyStepInit(this.lastLobby);
+    }
     // Die Diagnose hängt in der Lobby fest im Layout (verdeckt nichts) und
     // schwebt nur über dem Rennen.
     const debug = $('debug');
@@ -375,12 +424,7 @@ export class ScreenUi {
     const link = $<HTMLInputElement>('lobby-link');
     if (link.value !== m.inviteUrl) link.value = m.inviteUrl;
 
-    if (m.pairUrl !== this.lastQrUrl) {
-      this.lastQrUrl = m.pairUrl;
-      $('lobby-qr').replaceChildren(qrSvg(m.pairUrl));
-      $('pair-url').textContent = m.pairUrl.replace(/^https?:\/\//, '');
-    }
-    const status = $('pair-status');
+    this.lastLobby = m;
     let text = 'Kein Handy verbunden';
     if (m.controllerConnected) {
       if (m.controllerState === 'active') text = `Handy verbunden · Ping ${ms(m.controllerRtt)}`;
@@ -388,8 +432,24 @@ export class ScreenUi {
       else text = 'Handy verbunden, sendet aber gerade nichts';
       if (m.controllerMismatch) text = 'Handy hat eine ältere Fassung der Seite – dort bitte neu laden';
     }
-    status.textContent = text;
-    status.dataset.on = String(m.controllerConnected && m.controllerState === 'active' && !m.controllerMismatch);
+    const ok = m.controllerConnected && m.controllerState === 'active' && !m.controllerMismatch;
+    this.pairText = text;
+    this.pairOk = ok;
+    // Punkt am Knopf „Handy koppeln“: grün = verbunden und aktiv, gelb = (noch) nicht.
+    const dot = $('pair-dot');
+    if (dot.dataset.on !== String(ok)) dot.dataset.on = String(ok);
+    const pairBtn = $('btn-pair-lobby');
+    if (pairBtn.title !== text) {
+      pairBtn.title = text;
+      pairBtn.setAttribute('aria-label', `Handy koppeln – ${text}`);
+    }
+    $('pair-hint').hidden = m.controllerConnected;
+    // Ist der Kopplungsdialog offen, zeigt er den Stand mit.
+    const status = document.getElementById('pair-status');
+    if (status && status.textContent !== text) {
+      status.textContent = text;
+      status.dataset.on = String(ok);
+    }
 
     // Liste nur neu aufbauen, wenn sich etwas Sichtbares geändert hat.
     const json = JSON.stringify([m.players, m.localSlot, m.bots]);
@@ -399,10 +459,9 @@ export class ScreenUi {
     }
 
     this.localReady = m.localReady;
-    this.btnReady.hidden = m.isHost;
     this.btnReady.textContent = m.localReady ? 'Doch nicht bereit' : 'Ich bin bereit';
     this.btnReady.classList.toggle('btn-on', m.localReady);
-    this.btnStart.hidden = !m.isHost;
+    this.btnReady.classList.toggle('btn-primary', !m.localReady);
     this.btnStart.disabled = !m.canStart;
     const cupRunning = m.cup !== null && !m.cup.over;
     this.btnStart.textContent = cupRunning ? (m.cup!.done > 0 ? 'Nächstes Rennen auslosen' : 'Strecke auslosen') : m.cupRaces > 0 ? 'Turnier starten' : 'Rennen starten';
@@ -412,13 +471,15 @@ export class ScreenUi {
     const chkBots = $<HTMLInputElement>('chk-bots');
     chkBots.checked = m.bots;
     chkBots.disabled = !m.isHost;
-    $('bots-note').textContent = m.isHost ? '' : 'Modus, Strecke, Runden und Gegner legt der Host fest.';
-    const charJson = JSON.stringify([m.character, m.localSlot]);
+    $('bots-note').textContent = m.isHost
+      ? 'Stell das Rennen ein und starte, sobald alle bereit sind.'
+      : 'Modus, Strecke, Runden und Gegner legt der Host fest.';
+    const charJson = JSON.stringify([m.character, m.localSlot, m.players.map((p) => [p.slot, p.name, p.character])]);
     if (charJson !== this.lastCharJson) {
       this.lastCharJson = charJson;
       this.renderCharacters(m);
     }
-    const setupJson = JSON.stringify([m.track, m.aiLevel, m.laps, m.bots, m.isHost, m.cupRaces, cupRunning]);
+    const setupJson = JSON.stringify([m.track, m.aiLevel, m.laps, m.bots, m.isHost, m.cupRaces, cupRunning, m.cup !== null]);
     if (setupJson !== this.lastSetupJson) {
       this.lastSetupJson = setupJson;
       this.renderSetup(m);
@@ -439,9 +500,78 @@ export class ScreenUi {
     }
     $('lobby-hint').textContent = hint;
 
+    if (this.stepInit) this.applyStepInit(m);
+    else this.syncStep();
+
     $('hud-note').textContent = m.controllerConnected
       ? ''
       : 'Kein Handy verbunden – den QR-Code gibt es im Menü unter „Controller koppeln“. Am Rechner: Pfeiltasten/WASD, Shift = Drift, Leertaste = Item.';
+  }
+
+  // --- Lobby: Schritte ------------------------------------------------------
+
+  /** Wechselt in einen Schritt der Lobby (Schrittleiste, Weiter/Zurück, Zusammenfassung). */
+  goStep(step: LobbyStep): void {
+    const next = Math.max(1, Math.min(3, step)) as LobbyStep;
+    if (next === this.step) return;
+    this.on.click(next < this.step ? 'back' : 'click');
+    this.step = next;
+    this.syncStep();
+    // Im Strecken-Raster die gewählte Strecke ins Bild holen.
+    if (next === 2) {
+      const on = document.querySelector<HTMLElement>('#track-list .track-card[data-on="true"]');
+      const list = $('track-list');
+      if (on && list.scrollHeight > list.clientHeight) list.scrollTop = Math.max(0, on.offsetTop - list.offsetTop - 8);
+    }
+    const stage = document.querySelector<HTMLElement>('.view-lobby');
+    if (stage) stage.scrollTop = 0;
+  }
+
+  /** Erster Schritt nach dem Betreten der Lobby. */
+  private applyStepInit(m: LobbyModel): void {
+    const from = this.stepInit;
+    this.stepInit = null;
+    // Zurück aus dem Rennen: Der Host eines Einzelrennens sucht meist die nächste Strecke aus, alle anderen
+    // (Mitspieler melden sich neu bereit, Turnier mit Stand) stehen gleich am Start.
+    if (from === 'race') this.step = m.isHost && m.cupRaces === 0 && m.cup === null ? 2 : 3;
+    else this.step = m.cup ? 3 : 1;
+    this.syncStep();
+  }
+
+  /** Schrittleiste und Knöpfe unten an den aktuellen Schritt anpassen. */
+  private syncStep(): void {
+    const view = document.querySelector<HTMLElement>('.view-lobby');
+    if (!view) return;
+    const step = String(this.step);
+    if (view.dataset.step !== step) view.dataset.step = step;
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#lobby-steps button')) {
+      const n = Number(btn.dataset.step);
+      if (n === this.step) btn.setAttribute('aria-current', 'step');
+      else btn.removeAttribute('aria-current');
+      btn.dataset.done = String(n < this.step);
+    }
+    const m = this.lastLobby;
+    const isHost = m?.isHost ?? true;
+    const last = this.step === 3;
+    $('btn-step-back').hidden = this.step === 1;
+    const next = $('btn-step-next');
+    next.hidden = last;
+    next.textContent = this.step === 1 ? (m && m.cupRaces > 0 ? 'Zum Lostopf' : 'Zur Strecke') : 'Zum Start';
+    this.btnReady.hidden = !last || isHost;
+    this.btnStart.hidden = !last || !isHost;
+  }
+
+  /** Zahnrad: Grafik, Ton und Diagnose in einer Leiste am Rand. */
+  openTools(): void {
+    $('tools-settings').replaceChildren(this.settingsBody());
+    $('lobby-tools').hidden = false;
+    $('btn-tools-close').focus();
+  }
+
+  private closeTools(): void {
+    if ($('lobby-tools').hidden) return;
+    this.on.click('back');
+    $('lobby-tools').hidden = true;
   }
 
   setBanner(text: string | null, tone: 'warn' | 'bad' = 'warn'): void {
@@ -450,8 +580,10 @@ export class ScreenUi {
     this.banner.dataset.tone = tone;
   }
 
-  showModal(title: string, body: (string | Node)[], actions: ModalAction[]): void {
+  showModal(title: string, body: (string | Node)[], actions: ModalAction[], variant = ''): void {
     $('modal-title').textContent = title;
+    const card = this.modal.querySelector<HTMLElement>('.modal-card');
+    if (card) card.dataset.variant = variant;
     $('modal-body').replaceChildren(...body.map((b) => (typeof b === 'string' ? h('p', { text: b }) : b)));
     const row = $('modal-actions');
     row.replaceChildren();
@@ -699,7 +831,7 @@ export class ScreenUi {
       { class: `cup-line${r.me ? ' cup-line-me' : ''}` },
       h('span', { class: 'cup-rank', text: `${r.rank}.` }),
       this.face(r.character, r.slot, faceClass, render),
-      h('span', { class: 'cup-name' }, r.name, r.bot ? h('span', { class: 'tag', text: 'KI' }) : null, r.me ? h('span', { class: 'you', text: 'du' }) : null),
+      h('span', { class: 'cup-name' }, h('span', { class: 'cup-n', text: r.name }), r.bot ? h('span', { class: 'tag', text: 'KI' }) : null, r.me ? h('span', { class: 'you', text: 'du' }) : null),
       h('span', { class: 'cup-gain', text: r.gain > 0 ? `+${r.gain}` : '' }),
       h('span', { class: 'cup-stars' }, h('span', { class: 'cup-star', text: '★' }), String(r.stars)),
     );
@@ -852,22 +984,36 @@ export class ScreenUi {
     $('results').hidden = true;
   }
 
-  /** QR-Code zum (Neu-)Koppeln während des Rennens. */
+  /** Handy koppeln (Lobby und Menü im Rennen): QR-Code, Stand der Verbindung, drei Schritte, Adresse. */
   showPairingModal(pairUrl: string, connected: boolean): void {
     const qr = h('div', { class: 'qr qr-large' });
     qr.append(qrSvg(pairUrl));
-    this.showModal(
-      'Controller koppeln',
-      [
-        qr,
-        connected
-          ? 'Es ist bereits ein Handy verbunden. Scannt ein anderes den Code, übernimmt es die Steuerung.'
-          : 'QR-Code mit der Handy-Kamera scannen.',
-      ],
-      [{ label: 'Schließen', run: () => undefined }],
+    const status = h('p', { id: 'pair-status', class: 'pair-status', text: this.pairText });
+    status.dataset.on = String(this.pairOk);
+    const steps = h(
+      'ol',
+      { class: 'steps' },
+      h('li', { text: 'QR-Code mit der Handy-Kamera scannen.' }),
+      h('li', { text: 'Auf dem Handy „Tippen zum Starten“ und Bewegungssensor erlauben.' }),
+      h('li', { text: 'Handy quer halten und kalibrieren.' }),
     );
+    const body = h(
+      'div',
+      { class: 'pairing' },
+      qr,
+      h(
+        'div',
+        { class: 'pairing-text' },
+        status,
+        steps,
+        connected ? h('p', { class: 'pairing-note', text: 'Scannt ein anderes Handy den Code, übernimmt es die Steuerung.' }) : null,
+        h('p', { class: 'pairing-url', text: pairUrl.replace(/^https?:\/\//, '') }),
+      ),
+    );
+    this.showModal('Handy koppeln', [body], [{ label: 'Fertig', primary: true, run: () => undefined }], 'pairing');
   }
 
+  /** Fahrerfeld im Start-Schritt: vier Plätze mit Figur, Bereitschaft und Handy. */
   private renderPlayers(m: LobbyModel): void {
     const list = $('lobby-players');
     list.replaceChildren();
@@ -877,65 +1023,53 @@ export class ScreenUi {
       const chip = h('span', { class: 'chip', text: String(slot + 1) });
       chip.style.setProperty('--c', playerColor(slot));
       if (!p) {
-        list.append(
+        const li = h(
+          'li',
+          { class: `player player-empty${m.bots ? ' player-bot' : ''}` },
+          chip,
+          m.bots ? this.face(slot, slot, 'player-face') : h('span', { class: 'player-face player-face-empty' }),
           h(
-            'li',
-            { class: `player player-empty${m.bots ? ' player-bot' : ''}` },
-            chip,
-            h(
-              'span',
-              { class: 'player-name' },
-              m.bots ? this.face(slot, slot, 'player-face') : null,
-              h('span', { class: 'player-id' }, h('span', { class: 'player-id-name', text: m.bots ? BOT_NAMES[slot] : 'frei' })),
-            ),
-            m.bots ? h('span', { class: 'player-tags' }, h('span', { class: 'tag', text: 'KI' })) : null,
+            'span',
+            { class: 'player-id' },
+            h('span', { class: 'player-id-name', text: m.bots ? BOT_NAMES[slot] : 'Platz frei' }),
+            h('span', { class: 'player-sub', text: m.bots ? `KI · fährt ${CHARACTERS[slot]?.name ?? ''}` : 'per Raumcode beitreten' }),
           ),
+          m.bots ? h('span', { class: 'player-state' }, h('span', { class: 'pill pill-bot', text: 'KI' })) : null,
         );
+        list.append(li);
         continue;
       }
       const me = slot === m.localSlot;
-      const name = h(
+      const id = h(
         'span',
-        { class: 'player-name' },
-        this.face(p.character, slot, 'player-face'),
+        { class: 'player-id' },
         h(
           'span',
-          { class: 'player-id' },
-          h('span', { class: 'player-id-name' }, p.name, me ? h('span', { class: 'you', text: 'du' }) : null),
-          h('span', { class: 'player-fig', text: `fährt ${CHARACTERS[p.character]?.name ?? ''}` }),
+          { class: 'player-id-name' },
+          h('span', { class: 'player-n', text: p.name }),
+          me ? h('span', { class: 'you', text: 'du' }) : null,
+          p.isHost ? h('span', { class: 'tag tag-host', text: 'Host' }) : null,
+          p.online ? null : h('span', { class: 'tag tag-bad', text: 'getrennt' }),
         ),
+        h('span', { class: 'player-fig', text: `fährt ${CHARACTERS[p.character]?.name ?? ''}` }),
       );
-      const tags = h('span', { class: 'player-tags' });
-      if (p.isHost) tags.append(h('span', { class: 'tag tag-host', text: 'Host' }));
-      if (!p.online) tags.append(h('span', { class: 'tag tag-bad', text: 'getrennt' }));
-
+      const readyOk = p.isHost || p.ready;
+      const ready = h('span', { class: `pill stat-ready ${readyOk ? 'stat-ok' : 'stat-off'}`, text: p.isHost ? 'startet' : p.ready ? 'bereit' : 'nicht bereit' });
+      const net = p.isHost ? '' : ` · Netz ${p.online ? ms(p.ping) : '–'}`;
       const controller = h(
         'span',
-        { class: `stat stat-controller ${p.controller ? 'stat-ok' : 'stat-off'}` },
-        h('span', { class: 'stat-label', text: 'Controller' }),
-        p.controller ? `verbunden · ${ms(p.ctrlRtt)}` : 'nicht verbunden',
+        { class: `stat-controller ${p.controller ? 'stat-ok' : 'stat-off'}` },
+        h('i', { class: 'pair-dot' }),
+        p.controller ? `Handy ${ms(p.ctrlRtt)}${net}` : `kein Handy${net}`,
       );
-      const ready = h(
-        'span',
-        { class: `stat stat-ready ${p.isHost || p.ready ? 'stat-ok' : 'stat-off'}` },
-        h('span', { class: 'stat-label', text: 'Status' }),
-        p.isHost ? 'startet' : p.ready ? 'bereit' : 'nicht bereit',
-      );
-      const ping = h(
-        'span',
-        { class: 'stat stat-num' },
-        h('span', { class: 'stat-label', text: 'Ping' }),
-        p.isHost ? 'Host' : p.online ? ms(p.ping) : '–',
-      );
+      (controller.firstChild as HTMLElement).dataset.on = String(p.controller);
       const row = h(
         'li',
         { class: `player${me ? ' player-me' : ''}${p.online ? '' : ' player-off'}` },
         chip,
-        name,
-        tags,
-        controller,
-        ready,
-        ping,
+        this.face(p.character, slot, 'player-face'),
+        id,
+        h('span', { class: 'player-state' }, ready, controller),
       );
       row.title = `Platz ${slot + 1} · ${PLAYER_COLOR_NAMES[slot]}`;
       list.append(row);
@@ -947,18 +1081,19 @@ export class ScreenUi {
    * 3D-Modellen – eins nach dem anderen im Hintergrund, damit die Lobby dabei
    * bedienbar bleibt. Bis ein Bild fertig ist, steht dort ein farbiger Kreis.
    * @param render false = nur bereits fertige Bilder verwenden (im Rennen wird nichts nachgerendert)
+   * @param px Kantenlänge des gerenderten Bildes
    */
-  private face(character: number, slot: number, cls: string, render = true): HTMLImageElement {
+  private face(character: number, slot: number, cls: string, render = true, px = 192): HTMLImageElement {
     const img = h('img', { class: cls, alt: '' });
     img.style.setProperty('--c', playerColor(slot));
-    const key = `${character}:${slot}`;
+    const key = `${character}:${slot}:${px}`;
     const ready = this.portraits.get(key);
     if (ready) img.src = ready;
     else {
       img.dataset.empty = 'true';
       if (render) {
         let job = this.portraitJobs.find((j) => j.key === key);
-        if (!job) this.portraitJobs.push((job = { key, character, slot, targets: [] }));
+        if (!job) this.portraitJobs.push((job = { key, character, slot, px, targets: [] }));
         job.targets.push(img);
         this.pumpPortraits();
       }
@@ -972,7 +1107,7 @@ export class ScreenUi {
       this.portraitTimer = 0;
       const job = this.portraitJobs.shift();
       if (!job) return;
-      const url = portraitUrl(job.character, job.slot, 192);
+      const url = portraitUrl(job.character, job.slot, job.px);
       if (url) {
         this.portraits.set(job.key, url);
         for (const img of job.targets) {
@@ -991,71 +1126,169 @@ export class ScreenUi {
     this.portraitJobs = [];
   }
 
-  /** Figurenwahl: vier Karten mit Bild und Fahrwerten. */
+  /**
+   * Schritt 1, Figurenwahl: vier große Karten mit Bild, Eigenschaft und Fahrwerten. Auf jeder Karte
+   * steht, welche Mitspieler sie gerade fahren (dieselbe Figur darf mehrfach vorkommen).
+   */
   private renderCharacters(m: LobbyModel): void {
     const list = $('char-list');
-    list.replaceChildren();
-    const labels = ['Tempo', 'Antritt', 'Kurven'];
-    CHARACTERS.forEach((c, i) => {
-      const bars = h('span', { class: 'char-bars' });
-      c.bars.forEach((value, k) => {
-        const pips = h('span', { class: 'pips' });
-        for (let n = 1; n <= 5; n++) pips.append(h('i', { class: n <= value ? 'on' : '' }));
-        bars.append(h('span', { class: 'char-bar' }, h('span', { text: labels[k] }), pips));
+    const slot = Math.max(0, m.localSlot);
+    if (slot !== this.charSlot || list.childElementCount !== CHARACTERS.length) {
+      this.charSlot = slot;
+      list.replaceChildren();
+      const labels = ['Tempo', 'Antritt', 'Kurven'];
+      CHARACTERS.forEach((c, i) => {
+        const bars = h('span', { class: 'char-bars' });
+        c.bars.forEach((value, k) => {
+          const pips = h('span', { class: 'pips', title: `${value} von 5` });
+          for (let n = 1; n <= 5; n++) pips.append(h('i', { class: n <= value ? 'on' : '' }));
+          bars.append(h('span', { class: 'char-bar' }, h('span', { class: 'char-bar-label', text: labels[k] }), pips));
+        });
+        const pic = h('span', { class: 'char-pic' }, this.face(i, slot, 'char-face', true, 320), h('span', { class: 'char-mine', text: 'Deine Wahl' }));
+        pic.style.setProperty('--c', playerColor(slot));
+        const card = h(
+          'button',
+          { class: 'char-card', type: 'button' },
+          pic,
+          h(
+            'span',
+            { class: 'char-body' },
+            h('span', { class: 'char-name', text: c.name }),
+            h('span', { class: 'char-trait', text: c.trait }),
+            bars,
+            h('span', { class: 'char-who' }),
+          ),
+        ) as HTMLButtonElement;
+        card.addEventListener('click', () => {
+          this.on.click('click');
+          this.on.setCharacter(i);
+        });
+        list.append(card);
       });
-      const card = h(
-        'button',
-        { class: 'char-card', type: 'button' },
-        this.face(i, Math.max(0, m.localSlot), 'char-face'),
-        h('span', { class: 'char-name', text: c.name }),
-        bars,
-      ) as HTMLButtonElement;
+    }
+    const cards = list.querySelectorAll<HTMLButtonElement>('.char-card');
+    cards.forEach((card, i) => {
       card.dataset.on = String(i === m.character);
       card.setAttribute('aria-pressed', String(i === m.character));
-      card.addEventListener('click', () => {
-        this.on.click('click');
-        this.on.setCharacter(i);
-      });
-      list.append(card);
+      // Wer (außer dir) fährt diese Figur?
+      const who = card.querySelector('.char-who')!;
+      who.replaceChildren(
+        ...m.players
+          .filter((p) => p.slot !== m.localSlot && p.character === i)
+          .map((p) => {
+            const tag = h('span', { class: 'who-chip', text: p.name });
+            tag.style.setProperty('--c', playerColor(p.slot));
+            return tag;
+          }),
+      );
     });
-    $('char-trait').textContent = CHARACTERS[m.character]?.trait ?? '';
+    // Zusammenfassung im Start-Schritt
+    const c = CHARACTERS[m.character];
+    $('sum-char').replaceChildren(
+      this.face(m.character, slot, 'sum-face'),
+      h('span', { class: 'sum-text' }, h('strong', { text: c?.name ?? '' }), h('span', { text: c?.trait ?? '' })),
+    );
   }
 
-  /** Streckenkarten und KI-Stärke in der Lobby. */
-  private renderSetup(m: LobbyModel): void {
+  /** Kleine Karte des Streckenverlaufs (steht unter dem Bild, falls es fehlt). */
+  private trackMap(t: Track, cls: string): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 120 74');
+    svg.setAttribute('class', cls);
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', trackPath(t, 120, 74, 10));
+    svg.append(path);
+    return svg;
+  }
+
+  /** Schritt 2: das Raster der Streckenbilder entsteht einmal; danach ändern sich nur Markierung und Sperre. */
+  private buildTracks(): void {
+    if (this.tracksBuilt) return;
+    this.tracksBuilt = true;
     const list = $('track-list');
-    // Im Turnier wird nicht gewählt, sondern gelost: alle Strecken liegen im Topf.
-    const pool = m.cupRaces > 0;
-    list.dataset.pool = String(pool);
-    $('track-head').textContent = pool ? 'Lostopf – die Strecke wird vor jedem Rennen ausgelost' : 'Strecke';
     list.replaceChildren();
     for (let i = 0; i < OFFERED_TRACKS; i++) {
       const t = getTrack(i);
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 120 74');
-      svg.setAttribute('class', 'track-map');
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', trackPath(t, 120, 74, 8));
-      svg.append(path);
+      const img = h('img', { class: 'track-img', alt: '', src: trackImage(t), decoding: 'async', draggable: 'false' });
+      img.addEventListener('error', () => img.remove());
       const card = h(
         'button',
         { class: 'track-card', type: 'button' },
-        svg,
-        h('span', { class: 'track-name', text: t.def.name }),
-        h('span', { class: 'track-blurb', text: t.def.blurb }),
-        // Was diese Strecke anders macht als die anderen
-        ...(t.def.twist ? [h('span', { class: 'track-twist', text: t.def.twist })] : []),
-        h('span', { class: 'track-meta', text: `${Math.round(t.length / 10) * 10} m · ${'●'.repeat(t.def.grade)}${'○'.repeat(3 - t.def.grade)}` }),
+        h('span', { class: 'track-pic' }, this.trackMap(t, 'track-map'), img, h('span', { class: 'track-num', text: String(i + 1) })),
+        h('span', { class: 'track-name', text: t.def.name, style: `--n:${t.def.name.length}` }),
       ) as HTMLButtonElement;
-      card.dataset.on = String(!pool && i === m.track);
-      card.disabled = !m.isHost || pool;
-      card.setAttribute('aria-pressed', String(!pool && i === m.track));
       card.addEventListener('click', () => {
         this.on.click('click');
         this.on.setTrack(i);
       });
       list.append(card);
     }
+  }
+
+  /** Drei Punkte für die Schwierigkeit einer Strecke. */
+  private grade(t: Track): HTMLElement {
+    const g = h('span', { class: 'grade', title: `Schwierigkeit ${t.def.grade} von 3` });
+    for (let n = 1; n <= 3; n++) g.append(h('i', { class: n <= t.def.grade ? 'on' : '' }));
+    return g;
+  }
+
+  /** Streckenwahl (Schritt 2), Zusammenfassung und Rennoptionen (Schritt 3). */
+  private renderSetup(m: LobbyModel): void {
+    this.buildTracks();
+    const list = $('track-list');
+    // Im Turnier wird nicht gewählt, sondern gelost: alle Strecken liegen im Topf.
+    const pool = m.cupRaces > 0;
+    list.dataset.pool = String(pool);
+    $('step2-label').textContent = pool ? 'Lostopf' : 'Strecke';
+    $('track-head').textContent = pool ? 'Lostopf' : m.isHost ? 'Wähle die Strecke' : 'Die Strecke';
+    $('track-sub').textContent = pool
+      ? `Im Turnier wird nicht gewählt: Vor jedem Rennen lost der Streifen eine dieser ${OFFERED_TRACKS} Strecken aus.`
+      : m.isHost
+        ? `${OFFERED_TRACKS} Strecken – tippe eine an.`
+        : 'Die Strecke wählt der Host.';
+    list.querySelectorAll<HTMLButtonElement>('.track-card').forEach((card, i) => {
+      const on = !pool && i === m.track;
+      card.dataset.on = String(on);
+      card.disabled = !m.isHost || pool;
+      card.setAttribute('aria-pressed', String(on));
+    });
+
+    // Detail der gewählten Strecke – oder der Lostopf
+    const t = getTrack(Math.max(0, Math.min(OFFERED_TRACKS - 1, m.track)));
+    const detail = $('track-detail');
+    detail.dataset.pool = String(pool);
+    const img = $<HTMLImageElement>('td-img');
+    const sumImg = $<HTMLImageElement>('sum-track-img');
+    const meters = `${Math.round(t.length / 10) * 10} m`;
+    if (pool) {
+      img.removeAttribute('src');
+      sumImg.removeAttribute('src');
+      $('td-meta').replaceChildren(h('span', { text: `Turnier · ${m.cupRaces} Rennen` }));
+      $('td-name').textContent = 'Wird ausgelost';
+      $('td-blurb').textContent =
+        'Vor jedem Rennen läuft ein Streifen mit allen Strecken durch und bleibt auf einer stehen. Keine kommt zweimal dran, bevor nicht alle anderen gefahren sind.';
+      $('td-twist').textContent = '';
+      $('sum-track-name').textContent = 'Lostopf';
+      $('sum-track-meta').textContent = `${m.laps} Runden · Strecke wird ausgelost`;
+    } else {
+      const src = trackImage(t);
+      if (img.getAttribute('src') !== src) img.src = src;
+      if (sumImg.getAttribute('src') !== src) sumImg.src = src;
+      $('td-meta').replaceChildren(h('span', { text: `Strecke ${t.index + 1}` }), h('span', { text: meters }), this.grade(t));
+      $('td-name').textContent = t.def.name;
+      $('td-blurb').textContent = t.def.blurb;
+      // Was diese Strecke anders macht als die anderen
+      $('td-twist').textContent = t.def.twist ?? '';
+      $('sum-track-name').textContent = t.def.name;
+      $('sum-track-meta').textContent = `${m.laps} ${m.laps === 1 ? 'Runde' : 'Runden'} · ${meters}`;
+    }
+    $('sum-track').dataset.pool = String(pool);
+    // Steht ein Turnier, zeigt die linke Spalte seinen Stand statt der Strecke.
+    $('sum-track').hidden = m.cup !== null;
+    $('sum-track-head').textContent = m.cup !== null ? 'Turnier' : pool ? 'Turnier' : 'Strecke';
+    $('start-grid').dataset.cup = String(m.cup !== null);
+
     const seg = $('ai-level');
     seg.dataset.off = String(!m.bots);
     for (const btn of seg.querySelectorAll<HTMLButtonElement>('button')) {
@@ -1068,8 +1301,12 @@ export class ScreenUi {
     }
   }
 
-  /** Einstellungen dieses Bildschirms: Grafik und Ton. */
+  /** Einstellungen dieses Bildschirms: Grafik und Ton (im Rennen als Dialog, in der Lobby hinter dem Zahnrad). */
   showSettings(): void {
+    this.showModal('Einstellungen', [this.settingsBody()], [{ label: 'Fertig', primary: true, run: () => undefined }]);
+  }
+
+  private settingsBody(): HTMLElement {
     const on = this.on;
     const cur = on.settings();
     const seg = h('div', { class: 'seg', role: 'group' });
@@ -1106,7 +1343,7 @@ export class ScreenUi {
       box.addEventListener('change', () => set(box.checked));
       return h('label', { class: 'settings-check' }, box, h('span', { text }));
     };
-    const body = h(
+    return h(
       'div',
       { class: 'settings' },
       h('div', { class: 'settings-row' }, h('span', { text: 'Grafik' }), seg),
@@ -1119,7 +1356,6 @@ export class ScreenUi {
       h('div', { class: 'settings-row' }, h('span', { text: 'Geräusche' }), sfx),
       check('Ton aus', cur.muted, (v) => on.setMuted(v)),
     );
-    this.showModal('Einstellungen', [body], [{ label: 'Fertig', primary: true, run: () => undefined }]);
   }
 
   private async copyInvite(): Promise<void> {

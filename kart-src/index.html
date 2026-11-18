@@ -49,110 +49,167 @@
     <p id="home-version" class="home-version"></p>
   </main>
 
-  <!-- Lobby -->
-  <main class="view view-lobby">
-    <header class="lobby-head">
-      <div class="roomcode">
-        <span class="eyebrow">Raumcode</span>
-        <strong id="lobby-code" class="roomcode-value">–</strong>
+  <!-- Lobby: drei Schritte nacheinander – Figur, Strecke, Start -->
+  <main class="view view-lobby" data-step="1">
+    <header class="lobby-bar">
+      <div class="lobby-room">
+        <span class="eyebrow">Raum</span>
+        <strong id="lobby-code" class="lobby-code">–</strong>
       </div>
-      <div class="invite">
-        <span class="eyebrow">Einladungslink</span>
-        <div class="invite-row">
-          <input id="lobby-link" class="invite-link" type="text" readonly>
-          <button id="btn-copy" class="btn btn-small" type="button">Kopieren</button>
-        </div>
+      <div class="lobby-invite">
+        <input id="lobby-link" class="invite-link" type="text" readonly aria-label="Einladungslink">
+        <button id="btn-copy" class="btn btn-small" type="button">Kopieren</button>
       </div>
+      <nav id="lobby-steps" class="lobby-steps" aria-label="Schritte">
+        <button type="button" data-step="1"><b>1</b><span>Figur</span></button>
+        <button type="button" data-step="2"><b>2</b><span id="step2-label">Strecke</span></button>
+        <button type="button" data-step="3"><b>3</b><span>Start</span></button>
+      </nav>
+      <button id="btn-pair-lobby" class="btn-bar btn-pair" type="button"><i id="pair-dot" class="pair-dot" data-on="false"></i><span>Handy koppeln</span></button>
+      <button id="btn-tools" class="btn-bar btn-icon" type="button" aria-label="Einstellungen und Diagnose" title="Einstellungen und Diagnose">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M19.92 9.87 L22.35 10.24 L22.35 13.76 L19.92 14.13 L19.10 16.10 L20.56 18.08 L18.08 20.56 L16.10 19.10 L14.13 19.92 L13.76 22.35 L10.24 22.35 L9.87 19.92 L7.90 19.10 L5.92 20.56 L3.44 18.08 L4.90 16.10 L4.08 14.13 L1.65 13.76 L1.65 10.24 L4.08 9.87 L4.90 7.90 L3.44 5.92 L5.92 3.44 L7.90 4.90 L9.87 4.08 L10.24 1.65 L13.76 1.65 L14.13 4.08 L16.10 4.90 L18.08 3.44 L20.56 5.92 L19.10 7.90 Z M15.4 12 A3.4 3.4 0 1 0 8.6 12 A3.4 3.4 0 1 0 15.4 12 Z"/></svg>
+      </button>
     </header>
 
-    <section class="lobby-body">
-      <div class="players">
-        <h2 class="eyebrow">Spieler</h2>
-        <ol id="lobby-players" class="player-list"></ol>
-        <div class="setup">
-          <h2 class="eyebrow">Deine Figur</h2>
-          <div id="char-list" class="char-list"></div>
-          <p id="char-trait" class="char-trait"></p>
+    <div class="lobby-stage">
+      <!-- Schritt 1: Figur -->
+      <section class="lstep lstep-chars" data-step="1">
+        <div class="lstep-head">
+          <h2 class="lstep-title">Wähle deine Figur</h2>
+          <p class="lstep-sub">Jeder wählt selbst – dieselbe Figur darf mehrfach fahren.</p>
         </div>
-        <div class="setup">
-          <h2 class="eyebrow">Modus</h2>
-          <div class="setup-row mode-row">
-            <div id="mode" class="seg seg-wide" role="group" aria-label="Spielmodus">
-              <button type="button" data-mode="single">Einzelrennen</button>
-              <button type="button" data-mode="cup">Turnier</button>
-            </div>
-            <div id="cup-size-box" class="setup-ai">
-              <span class="setup-label">Rennen</span>
-              <div id="cup-size" class="seg" role="group" aria-label="Anzahl der Rennen im Turnier">
-                <button type="button" data-races="3">3</button>
-                <button type="button" data-races="5">5</button>
-                <button type="button" data-races="10">10</button>
-              </div>
-            </div>
-          </div>
-          <p id="mode-note" class="players-note"></p>
-          <div id="cup-panel" class="cup-panel" hidden>
-            <div class="cup-head">
-              <strong id="cup-title">Turnier</strong>
-              <span id="cup-progress"></span>
-            </div>
-            <ol id="cup-table" class="cup-table"></ol>
-            <button id="btn-cup-end" class="btn btn-quiet btn-small" type="button">Turnier beenden</button>
-          </div>
-        </div>
-        <div class="setup">
-          <h2 id="track-head" class="eyebrow">Strecke</h2>
-          <div id="track-list" class="track-list"></div>
-          <div class="setup-row">
-            <label id="bots-toggle" class="bots-toggle"><input id="chk-bots" type="checkbox"> <span>Freie Plätze mit KI-Gegnern auffüllen</span></label>
-            <div class="setup-ai">
-              <span class="setup-label">Stärke</span>
-              <div id="ai-level" class="seg" role="group" aria-label="Stärke der KI-Gegner">
-                <button type="button" data-level="0">Leicht</button>
-                <button type="button" data-level="1">Mittel</button>
-                <button type="button" data-level="2">Schwer</button>
-              </div>
-            </div>
-            <div class="setup-ai">
-              <span class="setup-label">Runden</span>
-              <div id="lap-count" class="seg" role="group" aria-label="Anzahl der Runden">
-                <button type="button" data-laps="2">2</button>
-                <button type="button" data-laps="3">3</button>
-                <button type="button" data-laps="4">4</button>
-                <button type="button" data-laps="5">5</button>
-              </div>
-            </div>
-          </div>
-          <p id="bots-note" class="players-note"></p>
-        </div>
-      </div>
+        <div id="char-list" class="char-list"></div>
+      </section>
 
-      <aside class="pairing">
-        <h2 class="eyebrow">Dein Controller</h2>
-        <div class="pairing-row">
-          <div id="lobby-qr" class="qr"></div>
-          <div class="pairing-text">
-            <p id="pair-status" class="pair-status">Kein Handy verbunden</p>
-            <ol class="steps">
-              <li>QR-Code mit der Handy-Kamera scannen.</li>
-              <li>Auf dem Handy „Tippen zum Starten“ und Bewegungssensor erlauben.</li>
-              <li>Handy quer halten und kalibrieren.</li>
-            </ol>
-            <p class="pairing-url"><span id="pair-url"></span></p>
+      <!-- Schritt 2: Strecke (im Turnier: Lostopf) -->
+      <section class="lstep lstep-track" data-step="2">
+        <div class="lstep-head">
+          <h2 id="track-head" class="lstep-title">Wähle die Strecke</h2>
+          <p id="track-sub" class="lstep-sub"></p>
+        </div>
+        <div class="track-pick">
+          <div id="track-list" class="track-list"></div>
+          <article id="track-detail" class="track-detail">
+            <div class="td-pic"><img id="td-img" alt="" decoding="async" draggable="false"></div>
+            <div class="td-text">
+              <p id="td-meta" class="td-meta"></p>
+              <h3 id="td-name" class="td-name"></h3>
+              <p id="td-blurb" class="td-blurb"></p>
+              <p id="td-twist" class="track-twist"></p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- Schritt 3: Rennen einstellen, Fahrerfeld, Start -->
+      <section class="lstep lstep-start" data-step="3">
+        <div class="lstep-head">
+          <h2 class="lstep-title">Startaufstellung</h2>
+          <p id="bots-note" class="lstep-sub"></p>
+        </div>
+        <div id="start-grid" class="start-grid">
+          <div class="start-col start-pick">
+            <h3 id="sum-track-head" class="eyebrow">Strecke</h3>
+            <button id="sum-track" class="sum-track" type="button">
+              <span class="sum-pic"><img id="sum-track-img" alt="" decoding="async" draggable="false"></span>
+              <span class="sum-text"><strong id="sum-track-name"></strong><span id="sum-track-meta"></span></span>
+            </button>
+            <div id="cup-panel" class="cup-panel" hidden>
+              <div class="cup-head">
+                <strong id="cup-title">Turnier</strong>
+                <span id="cup-progress"></span>
+              </div>
+              <ol id="cup-table" class="cup-table"></ol>
+              <button id="btn-cup-end" class="btn btn-quiet btn-small" type="button">Turnier beenden</button>
+            </div>
+            <h3 class="eyebrow sum-char-head">Deine Figur</h3>
+            <button id="sum-char" class="sum-char" type="button"></button>
+          </div>
+
+          <div class="start-col start-race">
+            <h3 class="eyebrow">Rennen</h3>
+            <div class="opt-list">
+              <div class="opt">
+                <span class="opt-label">Modus</span>
+                <div id="mode" class="seg seg-wide" role="group" aria-label="Spielmodus">
+                  <button type="button" data-mode="single">Einzelrennen</button>
+                  <button type="button" data-mode="cup">Turnier</button>
+                </div>
+              </div>
+              <div id="cup-size-box" class="opt">
+                <span class="opt-label">Rennen</span>
+                <div id="cup-size" class="seg" role="group" aria-label="Anzahl der Rennen im Turnier">
+                  <button type="button" data-races="3">3</button>
+                  <button type="button" data-races="5">5</button>
+                  <button type="button" data-races="10">10</button>
+                </div>
+              </div>
+              <p id="mode-note" class="opt-note"></p>
+              <div class="opt">
+                <span class="opt-label">Runden</span>
+                <div id="lap-count" class="seg" role="group" aria-label="Anzahl der Runden">
+                  <button type="button" data-laps="2">2</button>
+                  <button type="button" data-laps="3">3</button>
+                  <button type="button" data-laps="4">4</button>
+                  <button type="button" data-laps="5">5</button>
+                </div>
+              </div>
+              <label id="bots-toggle" class="opt opt-switch">
+                <span class="opt-label">KI-Gegner</span>
+                <span class="switch-text" id="bots-text">Freie Plätze auffüllen</span>
+                <input id="chk-bots" class="switch" type="checkbox" aria-label="Freie Plätze mit KI-Gegnern auffüllen">
+              </label>
+              <div class="opt">
+                <span class="opt-label">Stärke</span>
+                <div id="ai-level" class="seg" role="group" aria-label="Stärke der KI-Gegner">
+                  <button type="button" data-level="0">Leicht</button>
+                  <button type="button" data-level="1">Mittel</button>
+                  <button type="button" data-level="2">Schwer</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="start-col start-field">
+            <h3 class="eyebrow">Fahrerfeld</h3>
+            <ol id="lobby-players" class="player-list"></ol>
+            <div id="pair-hint" class="pair-hint" hidden>
+              <i class="pair-dot" data-on="false"></i>
+              <p>Noch kein Handy gekoppelt. Ohne Handy lenkst du am Rechner mit Pfeiltasten oder WASD.</p>
+              <button id="btn-pair-hint" class="btn btn-small" type="button">Koppeln</button>
+            </div>
           </div>
         </div>
-        <button id="btn-settings" class="btn btn-small" type="button">Einstellungen</button>
-        <button id="btn-debug-lobby" class="btn btn-quiet btn-small" type="button">Diagnose ein/aus</button>
-        <div id="debug-slot"></div>
-      </aside>
-    </section>
+      </section>
+    </div>
 
     <footer class="lobby-foot">
       <button id="btn-leave" class="btn btn-quiet" type="button">Lobby verlassen</button>
       <p id="lobby-hint" class="lobby-hint"></p>
+      <button id="btn-step-back" class="btn btn-back" type="button">Zurück</button>
+      <button id="btn-step-next" class="btn btn-primary btn-next" type="button">Weiter</button>
       <button id="btn-ready" class="btn" type="button">Ich bin bereit</button>
       <button id="btn-start" class="btn btn-primary" type="button">Rennen starten</button>
     </footer>
+
+    <!-- Zahnrad: Grafik und Ton, Diagnose -->
+    <div id="lobby-tools" class="tools" hidden>
+      <div class="tools-scrim" data-close="true"></div>
+      <aside class="tools-panel" role="dialog" aria-modal="true" aria-labelledby="tools-title">
+        <div class="tools-head">
+          <h2 id="tools-title">Einstellungen</h2>
+          <button id="btn-tools-close" class="btn btn-small" type="button">Schließen</button>
+        </div>
+        <div id="tools-settings"></div>
+        <div class="tools-debug">
+          <div class="tools-debug-head">
+            <h3 class="eyebrow">Diagnose</h3>
+            <button id="btn-debug-lobby" class="btn btn-small" type="button">Diagnose ein/aus</button>
+          </div>
+          <div id="debug-slot"></div>
+        </div>
+      </aside>
+    </div>
   </main>
 
   <!-- Rennen -->

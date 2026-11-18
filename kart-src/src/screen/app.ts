@@ -319,7 +319,10 @@ export class App {
     });
 
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'F2') this.overlay.visible = !this.overlay.visible;
+      if (e.code !== 'F2') return;
+      this.overlay.visible = !this.overlay.visible;
+      // In der Lobby steht die Diagnose hinter dem Zahnrad: einblenden heißt dort, die Leiste zu öffnen.
+      if (this.overlay.visible && this.ui.view === 'lobby') this.ui.openTools();
     });
     this.sound.music('menu');
     // Ton darf erst nach einer Nutzeraktion starten – jede Berührung oder Taste genügt.
