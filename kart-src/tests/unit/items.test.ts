@@ -22,7 +22,9 @@ import {
   ITEM_TIRE,
   ITEM_TOP,
   NEUTRAL,
-  ROCKET_SPIN_TICKS,
+  ROCKET_FLY_TICKS,
+  ROCKET_MORPH_TICKS,
+  ROCKET_TICKS,
   SPIN_TICKS,
   STALL_TICKS,
   TOW_TICKS,
@@ -474,7 +476,7 @@ describe('Neue Items', () => {
     for (let item = 1; item <= 8; item++) expect(first[item] + last[item] + count(2)[item]).toBeGreaterThan(0);
   });
 
-  it('Rakete gibt es nur auf dem letzten Platz, und selten – der Drache bleibt daneben', () => {
+  it('Rakete gibt es nur auf dem letzten Platz, etwa jede zehnte Kiste – der Drache bleibt daneben', () => {
     const host = runningHost([0, 1, 2, 3]);
     const pick = (host as unknown as { pickItem(place: number, count: number, behind?: number): number }).pickItem.bind(host);
     const share = (place: number, count: number, behind: number, item: number): number => {
@@ -485,96 +487,156 @@ describe('Neue Items', () => {
     for (const place of [1, 2, 3]) expect(share(place, 4, 200, ITEM_ROCKET)).toBe(0);
     expect(share(1, 1, 0, ITEM_ROCKET)).toBe(0);
     expect(share(1, 2, 0, ITEM_ROCKET)).toBe(0);
-    // Letzter: etwa jede zwanzigste Kiste, mit dem Drachen daneben etwas seltener.
-    expect(share(4, 4, 20, ITEM_ROCKET)).toBeGreaterThan(0.03);
-    expect(share(4, 4, 20, ITEM_ROCKET)).toBeLessThan(0.08);
-    expect(share(4, 4, 200, ITEM_ROCKET)).toBeGreaterThan(0.02);
-    expect(share(4, 4, 200, ITEM_ROCKET)).toBeLessThan(0.07);
+    expect(share(4, 4, 20, ITEM_ROCKET)).toBeGreaterThan(0.08);
+    expect(share(4, 4, 20, ITEM_ROCKET)).toBeLessThan(0.13);
+    expect(share(4, 4, 200, ITEM_ROCKET)).toBeGreaterThan(0.06);
+    expect(share(4, 4, 200, ITEM_ROCKET)).toBeLessThan(0.11);
     expect(share(4, 4, 200, ITEM_KITE)).toBeGreaterThan(0.12);
-    expect(share(2, 2, 10, ITEM_ROCKET)).toBeGreaterThan(0.02);
+    expect(share(2, 2, 10, ITEM_ROCKET)).toBeGreaterThan(0.06);
   });
 
-  it('Rakete: schlägt nach einer Sekunde bei allen anderen ein und hält sie länger an als ein Treffer', () => {
+  const progressOf = (host: HostGame, slot: number): number =>
+    (host as unknown as { karts: Map<number, { progress: number }> }).karts.get(slot)!.progress;
+
+  /** Host mit vier Karts: Anna (0) hinten, davor 1, 2, 3 (stehend). */
+  function rocketRace(): { host: HostGame; fx: string[] } {
     const host = runningHost([0, 1, 2, 3]);
     const fx: string[] = [];
     host.onFx = (slot, kind) => fx.push(`${slot}:${kind}`);
-    host.debugPlace(1, 160);
-    host.debugPlace(2, 120);
-    host.debugPlace(3, 80);
     host.debugPlace(0, 30);
-    for (const slot of [1, 2, 3]) {
-      const s = host.authoritative(slot)!;
-      s.vx = Math.sin(s.heading) * 24;
-      s.vz = Math.cos(s.heading) * 24;
-    }
+    host.debugPlace(1, 160, 2);
+    host.debugPlace(2, 230, -2);
+    host.debugPlace(3, 300);
     host.step(NEUTRAL);
-    host.giveItem(0, ITEM_ROCKET);
-    host.step({ steer: 0, buttons: 8 });
-    expect(host.authoritative(0)!.item).toBe(ITEM_NONE);
-    // Noch im Flug: niemand ist getroffen.
-    for (let i = 0; i < 50; i++) host.step(NEUTRAL);
-    for (const slot of [1, 2, 3]) expect(host.authoritative(slot)!.spin).toBe(0);
-    for (let i = 0; i < 12; i++) host.step(NEUTRAL);
-    for (const slot of [1, 2, 3]) {
-      const s = host.authoritative(slot)!;
-      expect(s.spin).toBeGreaterThan(SPIN_TICKS);
-      expect(Math.hypot(s.vx, s.vz)).toBeLessThan(4);
-      expect(fx).toContain(`${slot}:hit`);
-    }
-    // Wer sie gezündet hat, bleibt verschont.
-    expect(host.authoritative(0)!.spin).toBe(0);
-    // Länger als ein gewöhnlicher Treffer: nach dessen Dauer schleudern sie noch.
-    for (let i = 0; i < SPIN_TICKS; i++) host.step(NEUTRAL);
-    for (const slot of [1, 2, 3]) expect(host.authoritative(slot)!.spin).toBeGreaterThan(0);
-    for (let i = 0; i < ROCKET_SPIN_TICKS; i++) host.step(NEUTRAL);
-    for (const slot of [1, 2, 3]) expect(host.authoritative(slot)!.spin).toBe(0);
-  });
+    return { host, fx };
+  }
 
-  it('Rakete: trifft auch, wer gerade schleudert; der Stoßfänger fängt sie ab, am Drachen ist man außer Reichweite', () => {
-    const host = runningHost([0, 1, 2, 3]);
-    const fx: string[] = [];
-    host.onFx = (slot, kind) => fx.push(`${slot}:${kind}`);
-    host.debugPlace(1, 160);
-    host.debugPlace(2, 120);
-    host.debugPlace(3, 80);
-    host.debugPlace(0, 30);
-    host.step(NEUTRAL);
-    host.debugHit(1);
-    host.authoritative(2)!.guard = GUARD_TICKS;
-    host.giveItem(3, ITEM_KITE);
+  it('Rakete: verwandeln, fliegen, beim Fahrer davor landen; er schleudert wie nach einem Kreisel, Anna nicht', () => {
+    const { host, fx } = rocketRace();
+    const a = host.authoritative(0)!;
+    const from = { x: a.x, z: a.z, progress: progressOf(host, 0) };
     host.giveItem(0, ITEM_ROCKET);
-    // Kart 3 zündet seinen Drachen über die Eingabe der KI nicht – hier von Hand: es hängt am Drachen.
-    host.authoritative(3)!.tow = 200;
     host.step({ steer: 0, buttons: 8 });
-    for (let i = 0; i < 62; i++) host.step(NEUTRAL);
-    expect(host.authoritative(1)!.spin).toBeGreaterThan(SPIN_TICKS);
+    expect(a.item).toBe(ITEM_NONE);
+    expect(a.rocket).toBeGreaterThan(0);
+    // Ziel ist der Fahrer einen Platz weiter vorn: Kart 1.
+    expect(a.aimSlot).toBe(1);
+    // Verwandlung: Anna bleibt praktisch stehen und ist unverwundbar.
+    for (let i = 0; i < ROCKET_MORPH_TICKS - 2; i++) host.step(NEUTRAL);
+    expect(Math.hypot(a.x - from.x, a.z - from.z)).toBeLessThan(3);
+    expect(hitKart(a)).toBe(0);
+    // Flug: hoch hinauf …
+    let top = a.y;
+    let flew = 0;
+    for (let i = 0; i < ROCKET_FLY_TICKS - 4; i++) {
+      host.step(NEUTRAL);
+      top = Math.max(top, a.y);
+      if (a.rocket > 0) flew++;
+    }
+    expect(top - TRACK.py[a.seg]).toBeGreaterThan(40);
+    expect(flew).toBeGreaterThan(ROCKET_FLY_TICKS - 10);
+    // … und Landung knapp vor Kart 1.
+    for (let i = 0; i < 10 && a.rocket > 0; i++) host.step(NEUTRAL);
+    expect(a.rocket).toBe(0);
+    const b = host.authoritative(1)!;
+    expect(b.spin).toBeGreaterThan(SPIN_TICKS - 10);
+    expect(b.spin).toBeLessThanOrEqual(SPIN_TICKS);
+    expect(fx).toContain('1:hit');
     expect(host.authoritative(2)!.spin).toBe(0);
-    expect(host.authoritative(2)!.guard).toBe(0);
-    expect(fx).toContain('2:block');
     expect(host.authoritative(3)!.spin).toBe(0);
+    expect(a.spin).toBe(0);
+    expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeLessThan(9);
+    // Der Rennfortschritt springt mit – Anna liegt jetzt vor Kart 1.
+    expect(progressOf(host, 0)).toBeGreaterThan(from.progress + 100);
+    expect(progressOf(host, 0)).toBeGreaterThan(progressOf(host, 1));
+    const st = host.standings();
+    expect(st.find((s) => s.slot === 0)!.place).toBeLessThan(st.find((s) => s.slot === 1)!.place);
+    // Danach fährt Anna normal weiter: ohne Absturz, mit Gas wieder schnell.
+    for (let i = 0; i < 60; i++) host.step(GAS);
+    expect(a.respawn).toBe(0);
+    expect(forwardSpeed(a)).toBeGreaterThan(15);
   });
 
-  it('Rakete: ein neues Rennen löscht eine, die noch fliegt', () => {
-    const host = runningHost([0, 1]);
+  it('Rakete: Ziel bewegt sich – der Landepunkt wandert mit; der Stoßfänger fängt den Treffer ab', () => {
+    const { host, fx } = rocketRace();
+    const b = host.authoritative(1)!;
     host.giveItem(0, ITEM_ROCKET);
     host.step({ steer: 0, buttons: 8 });
+    for (let i = 0; i < ROCKET_TICKS - 30; i++) host.step(NEUTRAL);
+    // Kart 1 ist inzwischen 40 m weiter (kurz vor der Landung versetzt).
+    host.debugPlace(1, 200, 0);
+    b.guard = GUARD_TICKS;
+    for (let i = 0; i < 40; i++) host.step(NEUTRAL);
+    const a = host.authoritative(0)!;
+    expect(a.rocket).toBe(0);
+    expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeLessThan(12);
+    expect(b.spin).toBe(0);
+    expect(b.guard).toBe(0);
+    expect(fx).toContain('1:block');
+  });
+
+  it('Rakete: landet nie über einer Lücke', () => {
+    setTrack(1); // Möwenklippe mit Sprung über eine Lücke
+    const t = TRACK;
+    let gap = -1;
+    for (let i = 0; i < t.n; i++) if (t.edge[i] & EDGE_GAP && gap < 0) gap = i;
+    const host = runningHost([0, 1]);
+    host.debugPlace(0, (gap - 200) * t.step);
+    host.debugPlace(1, (gap - 2) * t.step);
+    host.step(NEUTRAL);
+    host.giveItem(0, ITEM_ROCKET);
+    host.step({ steer: 0, buttons: 8 });
+    const a = host.authoritative(0)!;
+    expect(t.edge[a.aimSeg] & EDGE_GAP).toBe(0);
+    expect(t.respawn[a.aimSeg]).toBe(a.aimSeg);
+    for (let i = 0; i < ROCKET_TICKS + 60; i++) host.step(NEUTRAL);
+    expect(a.rocket).toBe(0);
+    expect(a.respawn).toBe(0);
+    setTrack(0);
+  });
+
+  it('Rakete: ein neues Rennen beendet eine, die noch fliegt', () => {
+    const { host } = rocketRace();
+    host.giveItem(0, ITEM_ROCKET);
+    host.step({ steer: 0, buttons: 8 });
+    for (let i = 0; i < ROCKET_MORPH_TICKS + 20; i++) host.step(NEUTRAL);
     host.newRace();
-    while (host.phase !== RACE_RUNNING) host.step(NEUTRAL);
-    for (let i = 0; i < 80; i++) host.step(NEUTRAL);
-    expect(host.authoritative(1)!.spin).toBe(0);
+    expect(host.authoritative(0)!.rocket).toBe(0);
   });
 
-  it('Rakete im Snapshot: Item und lange Schleuderzeit kommen beim Mitspieler an', () => {
-    const host = runningHost([0, 1]);
-    host.giveItem(1, ITEM_ROCKET);
-    let snap = decodeSnapshot(new DataView(host.snapshot()))!;
-    expect(snap.karts.find((k) => k.slot === 1)!.state.item).toBe(ITEM_ROCKET);
-    host.debugPlace(1, 120);
+  it('Rakete im Snapshot: Flug, Landepunkt und Ziel kommen beim Mitspieler an', () => {
+    const { host } = rocketRace();
     host.giveItem(0, ITEM_ROCKET);
     host.step({ steer: 0, buttons: 8 });
-    for (let i = 0; i < 61; i++) host.step(NEUTRAL);
-    snap = decodeSnapshot(new DataView(host.snapshot()))!;
-    expect(snap.karts.find((k) => k.slot === 1)!.state.spin).toBeGreaterThan(SPIN_TICKS);
+    for (let i = 0; i < ROCKET_MORPH_TICKS + 40; i++) host.step(NEUTRAL);
+    const snap = decodeSnapshot(new DataView(host.snapshot()))!;
+    const k = snap.karts.find((k) => k.slot === 0)!.state;
+    const a = host.authoritative(0)!;
+    expect(k.rocket).toBe(a.rocket);
+    expect(k.aimSlot).toBe(1);
+    expect(k.aimSeg).toBe(a.aimSeg);
+    expect(k.aimX).toBeCloseTo(a.aimX, 3);
+    expect(k.aimY).toBeCloseTo(a.aimY, 3);
+    expect(k.aimZ).toBeCloseTo(a.aimZ, 3);
+    expect(k.y).toBeCloseTo(a.y, 3);
+  });
+
+  it('Rakete: der Mitspieler sagt seinen Flug selbst voraus und landet dort, wo der Host ihn landen lässt', () => {
+    const { host } = rocketRace();
+    host.giveItem(0, ITEM_ROCKET);
+    host.step({ steer: 0, buttons: 8 });
+    host.step(NEUTRAL);
+    // Mitspieler-Sicht: eine Kopie des Zustands, die nur mit stepKart weiterrechnet (Landepunkt vom Host übernommen).
+    const pred: KartState = gridState(0);
+    let maxErr = 0;
+    for (let i = 0; i < ROCKET_TICKS + 5; i++) {
+      Object.assign(pred, host.authoritative(0)!);
+      stepKart(pred, NEUTRAL, { canDrive: true, speedFactor: 1, time: 0 });
+      host.step(NEUTRAL);
+      const a = host.authoritative(0)!;
+      maxErr = Math.max(maxErr, Math.hypot(pred.x - a.x, pred.y - a.y, pred.z - a.z));
+    }
+    expect(maxErr).toBeLessThan(1);
   });
 
   it('KI zündet die Rakete bald nach dem Aufnehmen', () => {

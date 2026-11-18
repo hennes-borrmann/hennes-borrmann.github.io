@@ -160,7 +160,7 @@ export const ITEM_SMOKE = 7;
 export const ITEM_SPRING = 8;
 /** "Abschleppdrache": zieht das Kart ein paar Sekunden von selbst die Strecke entlang – nur für die Hinteren. */
 export const ITEM_KITE = 9;
-/** "Rakete": trifft alle anderen Fahrer und hält sie kurz an – selten, und nur für den Letzten. */
+/** "Rakete": das Kart verwandelt sich in eine Rakete und schlägt beim Fahrer vor ihm ein – selten, und nur für den Letzten. */
 export const ITEM_ROCKET = 10;
 export const ITEM_COUNT = 11;
 
@@ -242,6 +242,18 @@ export interface KartState {
   flags: number;
   /** Gewählte Figur (Index in CHARACTERS) – bestimmt die Fahrwerte. */
   char: number;
+  /**
+   * Rakete: Ticks seit dem Zünden (0 = keine). Bis ROCKET_MORPH_TICKS verwandelt sich das Kart auf der Stelle,
+   * danach fliegt es ROCKET_FLY_TICKS lang in hohem Bogen zum Landepunkt (aim*) und taucht dort wieder als Kart auf.
+   */
+  rocket: number;
+  /** Rakete: Landepunkt und dessen Abschnitt. Der Host führt ihn jeden Tick dem Ziel nach. */
+  aimX: number;
+  aimY: number;
+  aimZ: number;
+  aimSeg: number;
+  /** Rakete: Platz des Karts, auf das sie zufliegt (−1 = keins, sie landet einfach voraus). */
+  aimSlot: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -294,7 +306,7 @@ export const EV_WIND = 1 << 28;
 export const EV_CHARGE = 1 << 29;
 /** Durch ein Portal gefahren: das Kart steht jetzt an dessen Ausgang. */
 export const EV_PORTAL = 1 << 30;
-/** Rakete gezündet. (Das letzte Bit: der Wert ist negativ – nur mit & abfragen, nie mit > 0.) */
+/** Rakete gezündet: die Verwandlung beginnt. (Das letzte Bit: der Wert ist negativ – nur mit & abfragen, nie mit > 0.) */
 export const EV_USE_ROCKET = 1 << 31;
 export const EV_USE_ANY =
   EV_USE_BOOST |
@@ -337,8 +349,14 @@ const TURBO_TICKS = [30, 57, 90];
 export const PAD_TICKS = 60;
 const ITEM_BOOST_TICKS = 100;
 export const SPIN_TICKS = 75;
-/** Rakete: so lange steht ein getroffenes Kart (gut 2 s – länger als nach jedem anderen Treffer). */
-export const ROCKET_SPIN_TICKS = 125;
+/** Rakete: Verwandlung auf der Stelle (gut 1 s), Flug (2,5 s), Scheitelhöhe des Bogens über der Verbindungslinie. */
+export const ROCKET_MORPH_TICKS = 66;
+export const ROCKET_FLY_TICKS = 150;
+export const ROCKET_TICKS = ROCKET_MORPH_TICKS + ROCKET_FLY_TICKS;
+export const ROCKET_HEIGHT = 55;
+/** Rakete: Tempo, mit dem das Kart aus dem Einschlag herausrollt, und wie lange es danach unverwundbar ist. */
+const ROCKET_LAND_SPEED = 20;
+const ROCKET_LAND_SHIELD = 60;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
@@ -480,6 +498,12 @@ export function newState(): KartState {
     roulette: 0,
     flags: 0,
     char: 0,
+    rocket: 0,
+    aimX: 0,
+    aimY: 0,
+    aimZ: 0,
+    aimSeg: 0,
+    aimSlot: -1,
   };
 }
 
@@ -509,6 +533,12 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.roulette = src.roulette;
   dst.flags = src.flags;
   dst.char = src.char;
+  dst.rocket = src.rocket;
+  dst.aimX = src.aimX;
+  dst.aimY = src.aimY;
+  dst.aimZ = src.aimZ;
+  dst.aimSeg = src.aimSeg;
+  dst.aimSlot = src.aimSlot;
   return dst;
 }
 
@@ -548,8 +578,8 @@ export const HIT_BLOCKED = 2;
  * HIT_NONE = gerade unverwundbar, HIT_BLOCKED = der Stoßfänger hat ihn abgefangen.
  */
 export function hitKart(s: KartState): number {
-  // Am Drachen hängend fliegt das Kart über alles hinweg.
-  if (s.shield > 0 || s.spin > 0 || s.respawn > 0 || s.tow > 0) return HIT_NONE;
+  // Am Drachen hängend fliegt das Kart über alles hinweg; als Rakete ist es außer Reichweite.
+  if (s.shield > 0 || s.spin > 0 || s.respawn > 0 || s.tow > 0 || s.rocket > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -567,7 +597,7 @@ export function hitKart(s: KartState): number {
 
 /** Stampfpresse: das Kart wird geplättet und fährt eine Weile flach und langsam. Rückgabe wie hitKart. */
 export function flattenKart(s: KartState): number {
-  if (s.shield > 0 || s.flat > 0 || s.respawn > 0 || s.tow > 0) return HIT_NONE;
+  if (s.shield > 0 || s.flat > 0 || s.respawn > 0 || s.tow > 0 || s.rocket > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -583,31 +613,9 @@ export function flattenKart(s: KartState): number {
   return HIT_SPIN;
 }
 
-/**
- * Rakete: das Kart wird fast angehalten und schleudert länger als nach einem gewöhnlichen Treffer.
- * Sie trifft auch, wer gerade schleudert oder nach einem Treffer noch blinkt; nur der Stoßfänger fängt sie ab.
- * Wer gerade abgesetzt wird oder am Drachen hängt, ist außer Reichweite. Rückgabe wie hitKart.
- */
-export function rocketKart(s: KartState): number {
-  if (s.respawn > 0 || s.tow > 0) return HIT_NONE;
-  if (s.guard > 0) {
-    s.guard = 0;
-    s.shield = 50;
-    return HIT_BLOCKED;
-  }
-  s.spin = ROCKET_SPIN_TICKS;
-  s.shield = ROCKET_SPIN_TICKS + SHIELD_TICKS;
-  s.driftDir = 0;
-  s.driftCharge = 0;
-  s.boost = 0;
-  s.vx *= 0.12;
-  s.vz *= 0.12;
-  return HIT_SPIN;
-}
-
 /** Kurzschluss: der Motor läuft kurz nur gedrosselt. Rückgabe wie hitKart. */
 export function stallKart(s: KartState): number {
-  if (s.respawn > 0 || s.stall > 0 || s.tow > 0) return HIT_NONE;
+  if (s.respawn > 0 || s.stall > 0 || s.tow > 0 || s.rocket > 0) return HIT_NONE;
   if (s.guard > 0) {
     s.guard = 0;
     s.shield = 50;
@@ -959,6 +967,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (s.respawn === 0) ev |= EV_RESPAWNED;
     return ev;
   }
+
+  // --- Rakete: verwandeln, fliegen, landen ---
+  if (s.rocket > 0) return ev | stepRocket(s, itemBtn);
 
   // --- Abschleppdrache: das Kart hängt am Drachen und wird die Strecke entlanggezogen ---
   if (s.tow > 0 && !env.canDrive) s.tow = 0;
@@ -1685,6 +1696,81 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   return ev;
 }
 
+/** Bogenhöhe über der Verbindungslinie beim Flug-Anteil u (0..1). */
+function rocketArc(u: number): number {
+  return ROCKET_HEIGHT * 4 * u * (1 - u);
+}
+
+/** Anteil des Wegs über Grund beim Flug-Anteil u: erst fast senkrecht hinauf, am Ende fast senkrecht hinab. */
+function rocketTravel(u: number): number {
+  return u * u * (3 - 2 * u);
+}
+
+/**
+ * Rakete, ein Schritt. Während der Verwandlung bleibt das Kart, wo es ist (es bremst hart ab, auch in der Luft schwebt
+ * es). Im Flug läuft ein Punkt über Grund mit sanftem Anfahren und Abbremsen auf den Landepunkt zu; die Rakete steht
+ * um den Bogen darüber. Der Landepunkt darf sich unterwegs bewegen (der Host führt ihn dem Ziel nach) – der Punkt
+ * über Grund holt in jedem Schritt so viel auf, dass er zur Landezeit genau dort ist. Der Abschnitt bleibt bis zur
+ * Landung der des Starts, damit Rennfortschritt und Mechanik nichts von dem Flug quer über die Karte mitbekommen.
+ */
+function stepRocket(s: KartState, itemBtn: boolean): number {
+  const t = TRACK;
+  s.rocket++;
+  s.driftDir = 0;
+  s.driftCharge = 0;
+  s.spin = 0;
+  s.stall = 0;
+  s.boost = 0;
+  s.tow = 0;
+  s.draft = 0;
+  s.flat = 0;
+  const held = itemBtn ? FLAG_ITEM_HELD : 0;
+  const k = s.rocket - 1;
+  if (k <= ROCKET_MORPH_TICKS) {
+    s.vx *= 0.8;
+    s.vz *= 0.8;
+    s.vy = 0;
+    s.x += s.vx * DT;
+    s.z += s.vz * DT;
+    s.flags = (s.flags & FLAG_AIR) | held;
+    return 0;
+  }
+  const f = k - ROCKET_MORPH_TICKS;
+  if (f >= ROCKET_FLY_TICKS) {
+    // Landung: im Rauch des Einschlags steht das Kart wieder auf der Strecke und rollt weiter.
+    const seg = s.aimSeg < t.total ? s.aimSeg : 0;
+    s.x = s.aimX;
+    s.y = s.aimY;
+    s.z = s.aimZ;
+    s.seg = seg;
+    s.heading = trackHeading(t, seg);
+    s.vx = Math.sin(s.heading) * ROCKET_LAND_SPEED;
+    s.vz = Math.cos(s.heading) * ROCKET_LAND_SPEED;
+    s.vy = 0;
+    s.rocket = 0;
+    s.shield = Math.max(s.shield, ROCKET_LAND_SHIELD);
+    s.flags = FLAG_AIR | held;
+    return 0;
+  }
+  const u0 = (f - 1) / ROCKET_FLY_TICKS;
+  const u1 = f / ROCKET_FLY_TICKS;
+  const e0 = rocketTravel(u0);
+  const k1 = (rocketTravel(u1) - e0) / (1 - e0);
+  const gy = s.y - rocketArc(u0);
+  const nx = s.x + (s.aimX - s.x) * k1;
+  const nz = s.z + (s.aimZ - s.z) * k1;
+  const ny = gy + (s.aimY - gy) * k1 + rocketArc(u1);
+  s.vx = (nx - s.x) / DT;
+  s.vy = (ny - s.y) / DT;
+  s.vz = (nz - s.z) / DT;
+  s.x = nx;
+  s.y = ny;
+  s.z = nz;
+  if (s.vx * s.vx + s.vz * s.vz > 1) s.heading = Math.atan2(s.vx, s.vz);
+  s.flags = FLAG_AIR | held;
+  return 0;
+}
+
 /**
  * Löst das gehaltene Item aus (Aufrufer prüft Tastenflanke und ob gefahren werden darf). Gibt die Ereignisse zurück;
  * die Sprungfeder setzt dabei das Kart in die Luft (EV_TAKEOFF – der Aufrufer setzt FLAG_AIR).
@@ -1715,6 +1801,16 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
       ev |= EV_USE_EMP;
       break;
     case ITEM_ROCKET:
+      // Verwandlung beginnt. Bis der Host ein Ziel einträgt, gilt die eigene Stelle als Landepunkt.
+      s.rocket = 1;
+      s.aimX = s.x;
+      s.aimY = s.y;
+      s.aimZ = s.z;
+      s.aimSeg = s.seg;
+      s.aimSlot = -1;
+      s.tow = 0;
+      s.boost = 0;
+      s.stall = 0;
       ev |= EV_USE_ROCKET;
       break;
     case ITEM_SMOKE:

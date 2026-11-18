@@ -53,6 +53,10 @@ export interface KartPose {
   dive: boolean;
   /** Im luftleeren Raum (Mondbasis): Raumhelm und Steuerdüsen. */
   space: boolean;
+  /** Rakete: 0 = Kart, bis 1 Fortschritt der Verwandlung (1 = fertige Rakete, die Achse zeigt nach +y). */
+  rocket?: number;
+  /** Rakete: Stärke des Düsenfeuers 0..1. */
+  rocketFlame?: number;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -3353,6 +3357,206 @@ function buildRocket(b: Builder): void {
   b.put(cyl(0.05, 0.062, 0.05, 12), { bone: 0, color: 0x5a5566, pos: [0, -0.005, 0], outline: 0.6 });
 }
 
+// ───────────────────────────── Rakete (Verwandlung) ─────────────────────────────
+//
+// Das Kart klappt die Räder ein, stellt sich auf und wird Stück für Stück mit einer
+// Raketenhülle in seiner Lackfarbe verkleidet. Jedes Teil ist ein eigenes kleines Netz
+// mit Ruhelage (Achse der Rakete = +y von root) und rastet in seinem Zeitfenster der
+// Verwandlung ein: es gleitet aus `from` heran und schnappt mit Überschwinger fest.
+
+interface RocketPiece {
+  geo: ItemGeo;
+  /** Ruhelage. */
+  pos: V3;
+  /** Drehung der Ruhelage um die Achse der Rakete. */
+  turn: number;
+  /** Woher es kommt (Versatz zur Ruhelage). */
+  from: V3;
+  /** Maßstab beim Erscheinen. */
+  grow: number;
+  /** Zeitfenster in der Verwandlung (Anteile 0..1). */
+  a: number;
+  b: number;
+}
+
+/** Halbmesser der Raketenhülle; die Rakete reicht von y ≈ −0,1 (Düse) bis 3,4 (Spitze). */
+const ROCKET_R = 0.8;
+const rocketCache: (RocketPiece[] | null)[] = [null, null, null, null];
+let rocketFlameGeo: THREE.BufferGeometry | null = null;
+
+function rocketPart(fill: (b: Builder) => void): ItemGeo {
+  const b = new Builder(ONE_BONE, 2, true);
+  fill(b);
+  return finishItem(b);
+}
+
+/** Halbe Röhre (Mantelstück) von Winkel a0 über π, mit Deckeln; x = sin, z = cos wie bei three.js. */
+function halfShell(r0: number, r1: number, h: number, a0: number): THREE.BufferGeometry {
+  return new THREE.CylinderGeometry(r1, r0, h, 14, 1, false, a0, Math.PI);
+}
+
+function rocketPieces(slot: number): RocketPiece[] {
+  const hit = rocketCache[slot];
+  if (hit) return hit;
+  const pt = PAINTS[slot];
+  const R = ROCKET_R;
+  const out: RocketPiece[] = [];
+  const add = (geo: ItemGeo, pos: V3, from: V3, a: number, b: number, grow = 0.3, turn = 0): void => {
+    out.push({ geo, pos, from, a, b, grow, turn });
+  };
+  // Düse: Glocke aus dunklem Stahl mit Chromkragen
+  add(
+    rocketPart((b) => {
+      b.put(
+        lathe(
+          [
+            [0.52, -0.32, 0x4a4656],
+            [0.44, -0.12],
+            [0.3, 0.05],
+            [0.42, 0.12, CHROME, true],
+            [0.42, 0.24],
+            [0, 0.26],
+          ],
+          16,
+        ),
+        { bone: 0 },
+      );
+      b.put(cyl(0.3, 0.3, 0.02, 12), { bone: 0, color: 0x1e1b26, pos: [0, -0.3, 0], outline: 0 });
+    }),
+    [0, 0.1, 0],
+    [0, -1.4, 0],
+    0.27,
+    0.4,
+  );
+  // Vier Flossen
+  const FIN = [R - 0.1, 1.15, R + 0.62, 0.25, R + 0.62, -0.2, R - 0.1, 0.12];
+  for (let i = 0; i < 4; i++) {
+    const turn = (i * Math.PI) / 2 + Math.PI / 4;
+    add(
+      rocketPart((b) => {
+        b.put(prism(FIN, 0.08), { bone: 0, color: pt.dark, rot: [0, -HALF_PI, 0] });
+        b.put(prism([R + 0.5, 0.2, R + 0.64, 0.2, R + 0.64, -0.2, R + 0.5, -0.2], 0.1), { bone: 0, color: pt.accent, rot: [0, -HALF_PI, 0], outline: 0.5 });
+      }),
+      [0, 0.15, 0],
+      [Math.sin(turn) * -0.7, 0.2, Math.cos(turn) * -0.7],
+      0.33 + i * 0.035,
+      0.47 + i * 0.035,
+      0.2,
+      turn,
+    );
+  }
+  // Untere Hülle: zwei Hälften, die sich von links und rechts schließen
+  for (const side of [1, -1]) {
+    add(
+      rocketPart((b) => {
+        b.put(halfShell(R * 0.92, R, 1.15, side > 0 ? 0 : Math.PI), { bone: 0, color: pt.base });
+        // Nieten in der Hülle
+        if (b.fine)
+          for (let k = 0; k < 3; k++) {
+            const ang = (side > 0 ? 0.6 : Math.PI + 0.6) + k * 0.9;
+            b.put(sphere(0.035, 0.035, 0.02, 6, 4), { bone: 0, color: pt.light, pos: [Math.sin(ang) * R * 0.99, 0.4, Math.cos(ang) * R * 0.99], outline: 0 });
+          }
+      }),
+      [0, 0.78, 0],
+      [side * 1.5, 0.1, 0],
+      side > 0 ? 0.42 : 0.47,
+      side > 0 ? 0.56 : 0.61,
+      0.6,
+    );
+  }
+  // Ring mit Akzentfarbe zwischen unterer und oberer Hülle: legt sich von außen um die Naht
+  add(
+    rocketPart((b) => {
+      b.put(cyl(R * 1.05, R * 1.05, 0.18, 18), { bone: 0, color: pt.accent });
+    }),
+    [0, 1.44, 0],
+    [0, 0, 0],
+    0.56,
+    0.66,
+    1.9,
+  );
+  // Obere Hülle: vorn und hinten, vorn mit Bullauge
+  for (const side of [1, -1]) {
+    add(
+      rocketPart((b) => {
+        b.put(halfShell(R, R * 0.96, 1.05, side > 0 ? -HALF_PI : HALF_PI), { bone: 0, color: pt.base });
+        if (side > 0) {
+          b.put(cyl(0.3, 0.3, 0.06, 16), { bone: 0, color: CHROME, pos: [0, 0.05, R * 0.98], rot: [HALF_PI, 0, 0], outline: 0.6 });
+          b.put(sphere(0.23, 0.23, 0.06, 12, 6), { bone: 0, color: 0x7fe3ff, pos: [0, 0.05, R * 1.01], outline: 0 });
+          b.put(sphere(0.06, 0.06, 0.02, 6, 4), { bone: 0, color: WHITE, pos: [0.08, 0.13, R * 1.05], outline: 0 });
+        } else {
+          // hinten ein Streifen in Akzentfarbe
+          b.put(box(0.16, 0.95, 0.04), { bone: 0, color: pt.accent, pos: [0, 0, -R * 0.98], outline: 0.4 });
+        }
+      }),
+      [0, 2.06, 0],
+      [0, 0.3, side * 1.5],
+      side > 0 ? 0.6 : 0.64,
+      side > 0 ? 0.73 : 0.77,
+      0.6,
+    );
+  }
+  // Spitze: fällt von oben auf die Hülle
+  add(
+    rocketPart((b) => {
+      b.put(
+        lathe(
+          [
+            [R * 0.96, 0, pt.light],
+            [R * 0.86, 0.32],
+            [R * 0.6, 0.66],
+            [R * 0.3, 0.9, pt.accent, true],
+            [0.08, 1.04],
+            [0, 1.07],
+          ],
+          18,
+        ),
+        { bone: 0 },
+      );
+    }),
+    [0, 2.58, 0],
+    [0, 2.2, 0],
+    0.72,
+    0.86,
+    0.5,
+  );
+  rocketCache[slot] = out;
+  return out;
+}
+
+/** Düsenfeuer: zwei ineinander steckende Kegel nach unten (heller Kern, orange Hülle). */
+function getRocketFlameGeo(): THREE.BufferGeometry {
+  if (rocketFlameGeo) return rocketFlameGeo;
+  const b = new Builder(ONE_BONE, 2, false);
+  b.put(
+    lathe(
+      [
+        [0, 0, 0xff8a1c],
+        [0.42, -0.08],
+        [0.36, -0.7],
+        [0.16, -1.5],
+        [0, -2.1],
+      ],
+      14,
+    ),
+    { bone: 0, outline: 0 },
+  );
+  b.put(
+    lathe(
+      [
+        [0, 0.02, 0xfff4c2],
+        [0.26, -0.06],
+        [0.2, -0.5],
+        [0, -1.1],
+      ],
+      12,
+    ),
+    { bone: 0, outline: 0 },
+  );
+  rocketFlameGeo = finishItem(b).main;
+  return rocketFlameGeo;
+}
+
 let itemGeos: ItemGeo[] | null = null;
 
 /** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
@@ -3602,19 +3806,18 @@ const GESTURES: (Gesture | null)[] = [
     release: 0.3,
     fly: [-0.5, 5, 6, 0, 0.15],
   },
-  // Rakete: hoch über den Kopf recken, kurz halten, dann zündet sie und schießt immer schneller senkrecht davon
+  // Rakete: hochreißen und aufs Armaturenbrett schlagen – die kleine Rakete verpufft, das Kart beginnt sich zu verwandeln
   {
-    dur: 0.6,
+    dur: 0.45,
     // prettier-ignore
     keys: [
       0, ...HOLD, 0, 0, 0, 0,
-      0.2, 0.16, 0.6, 0.08, -0.18, 0, -0.06, -0.34,
-      0.45, 0.16, 0.62, 0.08, -0.2, 0, -0.06, -0.36,
-      0.62, 0.18, 0.5, 0.08, -0.1, 0, 0, -0.2,
-      1, 0.16, 0.1, 0.1, 0, 0, 0, 0,
+      0.3, 0.16, 0.6, 0.08, -0.18, 0, -0.06, -0.34,
+      0.55, 0.1, -0.05, 0.3, 0.2, 0, 0.1, 0.25,
+      1, 0.14, 0.08, 0.2, 0, 0, 0, 0,
     ],
-    release: 0.45,
-    fly: [0, 4, 0.5, -60, 0.45],
+    release: -1,
+    vanish: [0.5, 0.62],
   },
 ];
 
@@ -3811,6 +4014,15 @@ export class KartVisual {
   private flyG = 0;
   private flyDur = 0;
 
+  // Rakete: Hüllenteile, Düsenfeuer, Stand der Verwandlung
+  private readonly rocketForm = new THREE.Group();
+  private readonly rocketMeshes: THREE.Mesh[] = [];
+  private readonly rocketFlame: THREE.Mesh;
+  private fRocket = 0;
+  private fRocketFlame = 0;
+  private rocketSpin = 0;
+  private rocketWas = false;
+
   // Abschleppdrache: eigenes Netz mit kleinem Skelett (Drache + Schwanz) und Leine
   private readonly kite: THREE.SkinnedMesh;
   private readonly kiteOutline: THREE.SkinnedMesh | null;
@@ -3918,6 +4130,27 @@ export class KartVisual {
     this.leash.visible = false;
     this.leash.frustumCulled = false;
     this.root.add(this.leash);
+
+    // Rakete: Hüllenteile (geteilt je Lackfarbe) und Düsenfeuer
+    this.rocketForm.name = 'rocket';
+    this.rocketForm.visible = false;
+    for (const piece of rocketPieces(this.slot)) {
+      const m = new THREE.Mesh(piece.geo.main, this.toon);
+      m.visible = false;
+      if (piece.geo.line) {
+        const line = new THREE.Mesh(piece.geo.line, outlineMaterial());
+        line.name = 'outline';
+        m.add(line);
+      }
+      this.rocketMeshes.push(m);
+      this.rocketForm.add(m);
+    }
+    this.rocketFlame = new THREE.Mesh(getRocketFlameGeo(), this.flameMat);
+    this.rocketFlame.position.set(0, -0.12, 0);
+    this.rocketFlame.renderOrder = 2;
+    this.rocketFlame.visible = false;
+    this.rocketForm.add(this.rocketFlame);
+    this.root.add(this.rocketForm);
 
     this.rebuild();
     this.placeAnchors();
@@ -4216,6 +4449,10 @@ export class KartVisual {
     this.fDive = dive;
     const space = pose.space === true;
     this.fSpace = space;
+    const rocket = pose.rocket ?? 0;
+    this.fRocket = rocket === rocket ? clamp(rocket, 0, 1) : 0;
+    const rf = pose.rocketFlame ?? 0;
+    this.fRocketFlame = rf === rf ? clamp(rf, 0, 1) : 0;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -4288,8 +4525,77 @@ export class KartVisual {
     this.moveDive();
     this.moveSpace();
     this.moveItem();
+    this.moveRocket();
     this.pickEyes(pose);
     this.placeAnchors();
+  }
+
+  /**
+   * Rakete: Räder einklappen, das Kart aufstellen, Hüllenteile nacheinander einrasten lassen, am Ende verschwindet das
+   * Kart in der Hülle und die Düse zündet. Überschreibt dafür, was moveWheels/moveBody gesetzt haben.
+   */
+  private moveRocket(): void {
+    const r = this.fRocket;
+    const bn = this.bones;
+    const rp = this.restPos;
+    if (r <= 0) {
+      if (this.rocketWas) {
+        // Wieder ein Kart: alles, was moveWheels/moveBody nicht selbst jedes Bild setzen, zurück in die Ruhelage.
+        this.rocketWas = false;
+        this.rocketForm.visible = false;
+        bn[B.spin].scale.set(1, 1, 1);
+        for (let i = 0; i < 4; i++) bn[B.wFL + i].position.x = rp[(B.wFL + i) * 3];
+      }
+      return;
+    }
+    this.rocketWas = true;
+    const t = this.time;
+    // Räder klappen unter das Kart, es hebt ein Stück ab.
+    const fold = smooth01(r / 0.22);
+    for (let i = 0; i < 4; i++) {
+      const w = bn[B.wFL + i];
+      const side = rp[(B.wFL + i) * 3] > 0 ? 1 : -1;
+      w.rotation.z = side * fold * HALF_PI;
+      w.position.x = rp[(B.wFL + i) * 3] * (1 - 0.32 * fold);
+      w.position.y = rp[(B.wFL + i) * 3 + 1] + 0.12 * fold;
+    }
+    // Aufstellen: die Nase zeigt nach oben, das Heck bleibt über dem Boden.
+    const pitch = smooth01((r - 0.14) / 0.34);
+    const sb = bn[B.spin];
+    sb.rotation.set(-HALF_PI * pitch, 0, 0);
+    sb.position.set(0, 0.2 * fold + 1.2 * Math.sin(pitch * HALF_PI), 0.5 * pitch);
+    // In der Hülle zusammenrücken und am Ende ganz darin verschwinden.
+    const shrink = r >= 0.9 ? 0.0001 : 1 - 0.32 * smooth01((r - 0.45) / 0.35);
+    sb.scale.setScalar(shrink);
+    this.prop.visible = false;
+
+    // Hüllenteile
+    this.rocketForm.visible = r > 0.25;
+    const pieces = rocketPieces(this.slot);
+    for (let i = 0; i < pieces.length; i++) {
+      const pc = pieces[i];
+      const m = this.rocketMeshes[i];
+      const u = (r - pc.a) / (pc.b - pc.a);
+      if (u <= 0) {
+        m.visible = false;
+        continue;
+      }
+      m.visible = true;
+      const e = easeOutBack(u);
+      const k = 1 - Math.min(1, e);
+      m.position.set(pc.pos[0] + pc.from[0] * k, pc.pos[1] + pc.from[1] * k, pc.pos[2] + pc.from[2] * k);
+      m.rotation.set(0, pc.turn + k * 1.2, 0);
+      m.scale.setScalar(pc.grow + (1 - pc.grow) * Math.max(0, e));
+    }
+    // Im Flug dreht sich die Rakete langsam um ihre Achse; das Feuer flackert.
+    const flame = this.fRocketFlame;
+    this.rocketSpin = flame > 0.5 ? (this.rocketSpin + this.fDt * 3.2) % TAU : this.rocketSpin * Math.max(0, 1 - this.fDt * 4);
+    this.rocketForm.rotation.y = this.rocketSpin;
+    this.rocketFlame.visible = flame > 0.02;
+    if (this.rocketFlame.visible) {
+      const fl = 0.85 + 0.15 * Math.sin(t * 61) + 0.1 * hash(Math.floor(t * 40));
+      this.rocketFlame.scale.set(flame * (0.9 + 0.1 * Math.sin(t * 47)), flame * fl * (0.6 + 0.6 * flame), flame * (0.9 + 0.1 * Math.cos(t * 43)));
+    }
   }
 
   /** Räder: drehen passend zum Tempo, vorn einschlagen, im Gelände rütteln. */
@@ -4753,7 +5059,7 @@ export class KartVisual {
       mul = u < 0.6 ? 1 : 1 - smooth01((u - 0.6) / 0.4);
       if (item === I_GUARD) mul *= 1 + u * 0.7;
       if (item === I_TIRE) rx += tf * 30;
-      else if (item !== I_TOP && item !== I_ROCKET) rx += this.flyV.z < 0 ? -tf * 16 : tf * 10;
+      else if (item !== I_TOP) rx += this.flyV.z < 0 ? -tf * 16 : tf * 10;
     } else {
       // Griff knapp über der Faust (die Hand sitzt am Ende des Unterarms)
       _iv.set(0, 1, 0).applyQuaternion(bn[B.handR].quaternion);
