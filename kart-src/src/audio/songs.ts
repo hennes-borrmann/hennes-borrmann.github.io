@@ -19,6 +19,7 @@ import { DSCHUNGEL_STUECK } from './stuecke/dschungel';
 import { GEWITTER_STUECK } from './stuecke/gewitter';
 import { HAFEN_STUECK } from './stuecke/hafen';
 import { MAGNET_STUECK } from './stuecke/magnet';
+import { GIPFEL_STUECK } from './stuecke/gipfel';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
@@ -444,8 +445,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   rummel: RUMMEL_STUECK,
   // Magnetwerk: eigenes Stück (stuecke/magnet.ts)
   magnet: MAGNET_STUECK,
-  // Gipfelbahn: vorerst das Stück der Wolkenwerft (eigenes folgt)
-  gipfel: NEUE_STUECKE.wolken,
+  // Gipfelbahn: eigenes Stück (stuecke/gipfel.ts)
+  gipfel: GIPFEL_STUECK,
   results: RESULTS,
 };
 
