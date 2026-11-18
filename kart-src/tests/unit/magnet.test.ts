@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { AI_EASY, AI_HARD, AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { planActive } from '../../src/game/mechanics';
 import { EV_FALL, FLAG_AIR, gridState, stepKart, type KartState } from '../../src/game/sim';
-import { EDGE_DRUM, TRACK, TRACK_COUNT, addProgress, drumPoint, getTrack, proj, progDelta, projectOnTrack, rightX, rightZ, setTrack, trackHeading } from '../../src/game/track';
+import { EDGE_BAND, EDGE_DRUM, TRACK, TRACK_COUNT, addProgress, drumPoint, getTrack, proj, progDelta, projectOnTrack, rightX, rightZ, setTrack, trackHeading } from '../../src/game/track';
 
 const MAGNET = 17;
 
@@ -39,7 +39,8 @@ describe('Magnettrommel', () => {
       const t = getTrack(i);
       if (i !== MAGNET) {
         expect(t.drums.length).toBe(0);
-        for (let k = 0; k < t.total; k++) expect(t.roll[k]).toBe(0);
+        // (Verdreht ist sonst nur das Schwebeband der Neonhochbahn an seiner Fassade – neon.test.ts.)
+        for (let k = 0; k < t.total; k++) if ((t.edge[k] & EDGE_BAND) === 0) expect(t.roll[k]).toBe(0);
         continue;
       }
       expect(t.drums.length).toBe(1);

@@ -59,11 +59,13 @@ import {
   pulseCycle,
   tideLevel,
   vehicleAt,
+  BAND_HOVER,
+  REPEL_TICKS,
 } from '../game/mechanics';
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, vehiclePose, walk, type Track } from '../game/track';
+import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, twistRadiusAt, twistRollAt, twistWarp, vehiclePose, walk, type Track } from '../game/track';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -303,6 +305,8 @@ interface KartView {
   boostWas: number;
   /** Magnetwerk: in der Magnettrommel im letzten Bild; Zeit bis zum nächsten Brummen des eigenen Karts. */
   drum: boolean;
+  /** Schwebeband: wie weit das Kart gerade schwebt (0 … 1, weich nachgeführt). */
+  hoverK: number;
   humWait: number;
   /** Riesenkinderzimmer: Größenklasse im letzten Bild (−1/0/1) und der gezeigte Maßstab (weich nachgeführt). */
   sizeWas: number;
@@ -496,6 +500,12 @@ function labelSprite(name: string, color: string): THREE.Sprite {
 }
 
 const Y_UP = new THREE.Vector3(0, 1, 0);
+/**
+ * Schwebeband an der Fassade: Um diesen Anteil der Verdrehung kippt „oben“ der Kamera mit (1 = ganz). Etwas weniger als
+ * ganz: Das Band steht im Bild leicht schräg, die Fassade daneben senkrecht – man sieht, dass man an der Wand fährt,
+ * ohne dass sich die Welt ganz umdreht.
+ */
+const TWIST_CAM_UP = 0.8;
 const ROCKET_Q = new THREE.Quaternion();
 
 /** So viel weiter als in der Rechnung gilt ein Schubring für die Anzeige als durchflogen (das Bild läuft dem Treffer leicht nach). */
@@ -598,6 +608,27 @@ export class RaceScene {
   private readonly camLook = new THREE.Vector3();
   private camFov = 62;
   private camReady = false;
+  /**
+   * Schwebeband an der Fassade: Drehung um die Achse, die einen flach gerechneten Punkt an seine gezeigte Stelle bringt
+   * (twistTurn setzt sie), Punkt auf der Achse, Achsrichtung, Winkel; Abschnitt für Effekte (−1 = keiner).
+   */
+  private readonly dq = new THREE.Quaternion();
+  private readonly dAxis = new THREE.Vector3();
+  private readonly dTan = new THREE.Vector3();
+  private readonly dP = { x: 0, y: 0, z: 0 };
+  private dAngle = 0;
+  private fxSeg = -1;
+  /** Verdrehte Stücke: jeder zweite Abschnitt und das umschließende Rechteck (schnelle Suche für Dinge in der Nähe). */
+  private twistSegs: number[] = [];
+  private twistBox = [0, 0, 0, 0];
+  /**
+   * Kamera an der verdrehten Bahn: geglätteter Winkel (kein Ruck zwischen Abschnitten, nach einem Neuaufsetzen kein
+   * Sprung) und die zuletzt gültige Achse.
+   */
+  private camTwist = 0;
+  private readonly camAxis = new THREE.Vector3();
+  private readonly camTan = new THREE.Vector3(0, 0, 1);
+  private readonly cq = new THREE.Quaternion();
   private shake = 0;
   private hitstop = 0;
   private orbit = 0;
@@ -693,6 +724,18 @@ export class RaceScene {
     if (this.world && this.track === TRACK) return;
     this.disposeWorld();
     this.track = TRACK;
+    this.twistSegs = [];
+    this.twistBox = [Infinity, -Infinity, Infinity, -Infinity];
+    for (let i = 0; i < TRACK.total; i += 2) {
+      if ((TRACK.edge[i] & EDGE_TWIST) === 0) continue;
+      this.twistSegs.push(i);
+      const r = TRACK.twist[i] + TRACK.wh[i] + 4;
+      this.twistBox[0] = Math.min(this.twistBox[0], TRACK.px[i] - r);
+      this.twistBox[1] = Math.max(this.twistBox[1], TRACK.px[i] + r);
+      this.twistBox[2] = Math.min(this.twistBox[2], TRACK.pz[i] - r);
+      this.twistBox[3] = Math.max(this.twistBox[3], TRACK.pz[i] + r);
+    }
+    this.camTwist = 0;
     const lv = LEVELS[this.level];
     const started = performance.now();
     this.world = new World(TRACK, lv.world);
@@ -910,6 +953,7 @@ export class RaceScene {
       slopeWas: 0,
       boostWas: 0,
       drum: false,
+      hoverK: 0,
       humWait: 0,
       sizeWas: 0,
       sizeK: 1,
@@ -1003,7 +1047,8 @@ export class RaceScene {
         }
       }
       for (const g of t.gates) {
-        if (era) break;
+        // (Das Tor der U-Bahn öffnet und schließt still: Man sieht es am Signal.)
+        if (era || t.metro) break;
         const shut = planActive(g.plan, time);
         if (shut === planActive(g.plan, before)) continue;
         // Das hört die ganze Insel – in der Ferne leise.
@@ -1252,11 +1297,93 @@ export class RaceScene {
     this.rocket = warn;
   }
 
-  private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
-    this.pops.show(word, e.x, e.y + 2.6, e.z, style, size);
+  /** Nächster verdrehter Abschnitt zu (x, z) – oder −1, wenn der Punkt nicht bei einem verdrehten Stück liegt. */
+  private nearestTwistSeg(x: number, z: number): number {
+    const t = this.track;
+    const box = this.twistBox;
+    if (x < box[0] || x > box[1] || z < box[2] || z > box[3]) return -1;
+    let best = -1;
+    let bestD = Infinity;
+    for (const s of this.twistSegs) {
+      const dd = (t.px[s] - x) ** 2 + (t.pz[s] - z) ** 2;
+      if (dd < bestD) {
+        bestD = dd;
+        best = s;
+      }
+    }
+    if (best >= 0 && bestD > (t.twist[best] + t.wh[best] + 4) ** 2) best = -1;
+    return best;
   }
 
-  private burst(x: number, y: number, z: number, count: number, speed: number, hex: number, glow: boolean, size = 0.5, life = 0.6, up = 3): void {
+  /**
+   * Verdrehte Fahrbahn (Schwebeband an der Fassade): Gerechnet wird auf der flachen Fahrbahn, gezeigt an der gedrehten
+   * Stelle (track.ts: twistWarp). Bestimmt die Drehung um die Achse an der Stelle (x, z) – hint ist ein Abschnitt in der
+   * Nähe (−1: suchen). false, wo nichts verdreht ist. Je Aufruf eine Zuordnung zur Strecke und ein paar Winkel – keine
+   * Geometrie wird neu berechnet.
+   */
+  private twistTurn(x: number, z: number, hint: number): boolean {
+    const t = this.track;
+    if (this.twistSegs.length === 0) return false;
+    let seg = hint >= 0 && hint < t.total ? hint : this.nearestTwistSeg(x, z);
+    if (seg < 0) return false;
+    projectOnTrack(t, x, z, seg);
+    seg = proj.seg;
+    let f = proj.along / t.step;
+    // Hinter der Mitte des Abschnitts: zwischen dem vorigen und diesem mitteln (sonst springt der Winkel an der Mitte).
+    if (f < 0 && (t.edge[t.prev[seg]] & EDGE_TWIST) !== 0) {
+      seg = t.prev[seg];
+      f += 1;
+    }
+    f = Math.max(0, Math.min(1, f));
+    if ((t.edge[seg] & EDGE_TWIST) === 0) return false;
+    const r = twistRollAt(t, seg, f);
+    const R = twistRadiusAt(t, seg, f);
+    const b = t.next[seg];
+    const L = (p: number, q: number): number => p + (q - p) * f;
+    this.dAxis.set(L(t.px[seg], t.px[b]), L(t.py[seg], t.py[b]) + R, L(t.pz[seg], t.pz[b]));
+    this.dTan.set(L(t.tx[seg], t.tx[b]), 0, L(t.tz[seg], t.tz[b])).normalize();
+    // „Oben“ kippt zur rechten Wand, wenn sich die rechte Seite der Bahn hebt (Drehung um die Fahrtrichtung, negativ).
+    this.dAngle = r;
+    this.dq.setFromAxisAngle(this.dTan, -r);
+    return true;
+  }
+
+  /** Wendet die zuletzt mit twistTurn bestimmte Drehung auf einen Punkt an. */
+  private twistApply(p: THREE.Vector3): THREE.Vector3 {
+    return p.sub(this.dAxis).applyQuaternion(this.dq).add(this.dAxis);
+  }
+
+  /** Effekte (Teilchen, Lautmalerei) eines Karts auf verdrehter Bahn erscheinen an dessen gezeigter Stelle. */
+  private fxAt(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    const p = this.dP;
+    p.x = x;
+    p.y = y;
+    p.z = z;
+    if (this.fxSeg < 0) return p;
+    const t = this.track;
+    // (proj gehört dem Aufrufer – hier nur ausleihen)
+    const ps = proj.seg;
+    const pl = proj.lat;
+    const pa = proj.along;
+    projectOnTrack(t, x, z, this.fxSeg);
+    const seg = proj.seg;
+    if ((t.edge[seg] & EDGE_TWIST) !== 0) twistWarp(t, seg, Math.max(0, Math.min(1, proj.along / t.step)), proj.lat, y - (t.py[seg] + proj.lat * t.bank[seg]), p);
+    proj.seg = ps;
+    proj.lat = pl;
+    proj.along = pa;
+    return p;
+  }
+
+  private pop(word: string, e: RenderEntity, style: string, size = 3.4): void {
+    const p = this.fxAt(e.x, e.y + 2.6, e.z);
+    this.pops.show(word, p.x, p.y, p.z, style, size);
+  }
+
+  private burst(x0: number, y0: number, z0: number, count: number, speed: number, hex: number, glow: boolean, size = 0.5, life = 0.6, up = 3): void {
+    const fp = this.fxAt(x0, y0, z0);
+    const x = fp.x;
+    const y = fp.y;
+    const z = fp.z;
     this.color.set(hex);
     const pool = glow ? this.sparks : this.puffs;
     for (let i = 0; i < count; i++) {
@@ -1560,6 +1687,13 @@ export class RaceScene {
         k.visual.squash(-0.8);
         this.emit('charge', k, local);
         if (local) this.shake = Math.max(this.shake, 0.2);
+      } else if (e.boost > k.boost + 20 && e.boost <= REPEL_TICKS && k.driftDir === 0 && !air && e.seg < this.track.total && (this.track.edge[e.seg] & EDGE_BAND) !== 0) {
+        // Schwebeband: abgestoßen (von einem anderen Kart oder einem Prallpoller) – Schub für beide.
+        this.pop('ZOING!', e, 'cool', 3);
+        this.burst(e.x, e.y + 0.5, e.z, 12, 8, 0x5ff3ff, true, 0.45, 0.4, 2);
+        k.visual.squash(-0.7);
+        this.emit('kick', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.16);
       } else if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0) {
         const turbo = k.driftDir !== 0 ? Math.max(1, k.driftStage) : 0;
         this.pop(turbo ? 'WUSCH!' : 'ZISCH!', e, turbo === 3 ? 'violet' : turbo ? 'cool' : 'warm', 2.6 + turbo * 0.35);
@@ -1847,7 +1981,9 @@ export class RaceScene {
       k.audio.distance = dist;
       k.audio.pan = dist > 0.5 ? Math.max(-1, Math.min(1, this.v1.dot(this.v2) / dist)) : 0;
 
+      this.fxSeg = e.respawn === 0 && e.rocket === 0 && e.seg < t.total && (t.edge[e.seg] & EDGE_TWIST) !== 0 ? e.seg : -1;
       this.detect(k, e, local, dt);
+      this.fxSeg = -1;
 
       const root = k.visual.root;
       root.position.set(e.x, e.y, e.z);
@@ -1864,6 +2000,20 @@ export class RaceScene {
           root.position.addScaledVector(this.v1, -1.6);
         } else root.quaternion.copy(k.rocketQ);
       } else k.rocketQ.copy(root.quaternion);
+      // Schwebeband: Das Kart schwebt eine Handbreit über dem Band (die Räder klappen weg, kartModel.ts) – weich beim
+      // Auf- und Abfahren.
+      const hover = e.respawn === 0 && e.rocket === 0 && e.seg < t.total && (t.edge[e.seg] & EDGE_BAND) !== 0;
+      if (k.fresh) k.hoverK = hover ? 1 : 0;
+      k.hoverK += ((hover ? 1 : 0) - k.hoverK) * Math.min(1, dt * 7);
+      pose.hover = k.hoverK;
+      if (k.hoverK > 0.001 && !flying) root.position.y += BAND_HOVER * k.hoverK;
+      // Schwebeband an der Fassade: an die gezeigte Stelle drehen (gerechnet wird flach).
+      let twistK = false;
+      if (!flying && e.respawn === 0 && e.seg < t.total && (t.edge[e.seg] & EDGE_TWIST) !== 0 && this.twistTurn(e.x, e.z, e.seg)) {
+        this.twistApply(root.position);
+        root.quaternion.premultiply(this.dq);
+        twistK = true;
+      }
       // Von der Presse geplättet: flach wie eine Flunder, dafür etwas breiter – und am Ende federt es zurück.
       k.flatK += ((e.flat > 6 ? 1 : 0) - k.flatK) * Math.min(1, dt * (e.flat > 6 ? 26 : 9));
       // Riesenkinderzimmer: winzig oder riesig – weich nachgeführt; kurz vor dem Ende pulsiert das Kart ruhig
@@ -1878,7 +2028,14 @@ export class RaceScene {
       root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
       k.visual.update(dt, pose);
 
-      if (ground !== NO_GROUND && e.respawn === 0 && !flying) {
+      if (ground !== NO_GROUND && e.respawn === 0 && !flying && twistK) {
+        // An der Fassade liegt der Schatten mit an der Wand: den Bodenpunkt und die Neigung mitdrehen.
+        this.e1.set(groundPitch, e.heading, groundRoll);
+        this.q1.setFromEuler(this.e1).premultiply(this.dq);
+        this.v1.set(e.x, ground, e.z);
+        this.twistApply(this.v1);
+        this.shadows.add(this.v1.x, this.v1.y, this.v1.z, this.q1, 2.5, e.y - ground);
+      } else if (ground !== NO_GROUND && e.respawn === 0 && !flying) {
         this.e1.set(groundPitch, e.heading, groundRoll);
         this.q1.setFromEuler(this.e1);
         this.shadows.add(e.x, ground, e.z, this.q1, 2.5, e.y - ground);
@@ -1886,7 +2043,8 @@ export class RaceScene {
         if (this.track.dark && e.y - ground < 1.2) this.lights.add(e.x, ground, e.z, this.q1);
       }
 
-      this.trail(k, e, speed, air, pose.driftStage, dt);
+      // (Wer schwebt, zieht weder Reifenspuren noch Staub.)
+      this.trail(k, e, speed, air || twistK || k.hoverK > 0.5, pose.driftStage, dt);
 
       if (local) {
         me = e;
@@ -1902,6 +2060,7 @@ export class RaceScene {
         const ls = Math.max(0.5, Math.min(1.7, dist / 20));
         k.label.scale.set(3.6 * ls, 0.9 * ls, 1);
         k.label.position.set(e.x, e.y + 2.5 + ls * 0.4, e.z);
+        if (twistK && this.twistTurn(e.x, e.z, e.seg)) this.twistApply(k.label.position);
         k.label.visible = dist < 90 && dist > 8;
       }
     }
@@ -1921,7 +2080,17 @@ export class RaceScene {
       }
     }
 
-    // Dinge und Hindernisse
+    // Dinge und Hindernisse (auf dem verdrehten Band an die Fassade gedreht)
+    if (this.twistSegs.length > 0 && !this.things.afterPlace) {
+      this.things.afterPlace = (o) => {
+        if (!this.twistTurn(o.position.x, o.position.z, -1)) return;
+        // (Drehung je Bild neu: die Dinge setzen nur ihre Gierung, Neigung von gestern weg)
+        o.rotation.x = 0;
+        o.rotation.z = 0;
+        this.twistApply(o.position);
+        o.quaternion.premultiply(this.dq);
+      };
+    } else if (this.twistSegs.length === 0) this.things.afterPlace = null;
     this.things.update(things, dt, this.time, this.fx);
     this.things.updateHazards(race.hostTick, this.time);
     for (const m of this.mechanics) {
@@ -2334,7 +2503,30 @@ export class RaceScene {
     this.camLook.y += (me.y + 1.15 + rise * 0.4 - this.camLook.y) * Math.min(1, dt * 9);
 
     cam.position.copy(this.camPos);
-    cam.lookAt(this.camLook);
+    // Schwebeband an der Fassade: Die Kamera dreht sich mit dem eigenen Kart an die Wand – um die Achse an seiner Stelle,
+    // mit geglättetem Winkel: Zwischen zwei Abschnitten ruckt nichts, und nach einem Neuaufsetzen dreht sie weich zurück.
+    // „Oben“ kippt nur zu TWIST_CAM_UP mit: Das Band steht im Bild leicht schräg, der Horizont bleibt zu ahnen – man weiß,
+    // wo man ist, ohne dass sich die ganze Welt umdreht.
+    const twisted = this.twistSegs.length > 0 && me.respawn === 0 && me.seg < t.total && (t.edge[me.seg] & EDGE_TWIST) !== 0 && this.twistTurn(me.x, me.z, me.seg);
+    if (twisted) {
+      this.camAxis.copy(this.dAxis);
+      this.camTan.copy(this.dTan);
+    }
+    const wantTwist = twisted ? this.dAngle : 0;
+    this.camTwist += (wantTwist - this.camTwist) * Math.min(1, dt * (twisted ? 7 : 4));
+    if (!this.camReady || Math.abs(this.camTwist) < 1e-4) this.camTwist = twisted ? wantTwist : 0;
+    if (this.camTwist !== 0) {
+      this.v2.copy(this.camLook);
+      this.cq.setFromAxisAngle(this.camTan, -this.camTwist);
+      cam.position.sub(this.camAxis).applyQuaternion(this.cq).add(this.camAxis);
+      this.v2.sub(this.camAxis).applyQuaternion(this.cq).add(this.camAxis);
+      this.cq.setFromAxisAngle(this.camTan, -this.camTwist * TWIST_CAM_UP);
+      cam.up.set(0, 1, 0).applyQuaternion(this.cq);
+      cam.lookAt(this.v2);
+    } else {
+      cam.up.set(0, 1, 0);
+      cam.lookAt(this.camLook);
+    }
     // Leichte Schräglage in Kurven
     cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
     this.applyShake(dt);

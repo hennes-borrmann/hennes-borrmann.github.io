@@ -13,8 +13,8 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt } from '../game/mechanics';
-import { EDGE_DRUM, EDGE_GLIDE, TRACK, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
+import { PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront } from '../game/mechanics';
+import { EDGE_BAND, EDGE_DRUM, EDGE_GLIDE, TRACK, bandMeters, bandOf, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -1511,7 +1511,7 @@ export class App {
         const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
         const pose = newVehiclePose();
         return TRACK.vehicles
-          .filter((v) => !!v.roofs)
+          .filter((v) => !!v.roofs && !v.plan)
           .map((v) => ({
             id: v.id,
             time,
@@ -1560,6 +1560,29 @@ export class App {
           drums: TRACK.drums.map((d) => ({ at: d.first * TRACK.step, length: d.count * TRACK.step, radius: d.radius })),
           roll: (TRACK.roll[seg] * 180) / Math.PI,
           plates: TRACK.holes.filter((h) => (TRACK.edge[h.first] & EDGE_DRUM) !== 0).map((h) => ({ at: h.first * TRACK.step, lat0: h.lat0, lat1: h.lat1, off: planActive(h.plan, time) })),
+        };
+      },
+      // Neonhochbahn, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): die Schwebebänder (Meter ab
+      // Start, Länge), an der Stelle probe (Meter ab Start) die Verdrehung (Grad), ob dort geschwebt wird und wo die beiden
+      // Magnetlinien liegen (seitlich, Meter); die Prallpoller; die U-Bahn (wo die Zugspitzen stehen, Meter ab Linienanfang;
+      // stop = Halt im Bahnhof) und ob das Tor zur Abkürzung über das Zugdach zu ist.
+      band: (seconds?: number, probe = 0) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const seg = Math.max(0, Math.min(TRACK.n - 1, Math.round(probe / TRACK.step)));
+        const b = bandOf(TRACK, seg);
+        const m = b ? bandMeters(TRACK, b, seg, 0) : 0;
+        const metro = TRACK.metro;
+        return {
+          time,
+          bands: TRACK.bands.map((x) => ({ at: x.first * TRACK.step, length: x.count * TRACK.step })),
+          roll: (TRACK.roll[seg] * 180) / Math.PI,
+          hover: (TRACK.edge[seg] & EDGE_BAND) !== 0,
+          lines: b ? [bandLineLat(TRACK.rh[seg], m, time, 0), bandLineLat(TRACK.rh[seg], m, time, 1)] : [],
+          bumpers: TRACK.bumpers.length,
+          trains: TRACK.vehicles.filter((v) => v.plan).map((v) => metroFront(v.plan!, v.train ?? 0, time)),
+          stop: metro ? metro.plan.stop : 0,
+          gate: metro ? TRACK.gates.some((g) => TRACK.branchOf[g.first] === metro.branch && planActive(g.plan, time)) : false,
         };
       },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.

@@ -18,8 +18,13 @@ function bestLap(char: number, drifter: boolean): number {
   // Jede Figur auf ihrem besten Weg – so wie ein Mensch den Weg wählt, der ihm liegt. (Mit gewürfelten Wegen
   // mäße der Test die Abzweigungen statt der Figuren; und auf manchem Weg patzt die KI je nach Figur an einer
   // Stelle, etwa in der Steilkurve hinter der Werkshof-Brücke – das soll den Vergleich der Fahrwerke nicht trüben.)
+  // (Abkürzungen über ein Zugdach – Neonhochbahn – gibt es nur mit Zug; ohne Mechanik sind sie ein Graben.)
+  const trainBits = (TRACK.def.branches ?? []).reduce((m, b, k) => (b.shortcut === 'train' ? m | (1 << k) : m), 0);
   let best = Infinity;
-  for (let route = 0; route < 1 << TRACK.branches.length; route++) best = Math.min(best, withoutMechanics(() => quietLap(char, drifter, route)));
+  for (let route = 0; route < 1 << TRACK.branches.length; route++) {
+    if (route & trainBits) continue;
+    best = Math.min(best, withoutMechanics(() => quietLap(char, drifter, route)));
+  }
   return best;
 }
 

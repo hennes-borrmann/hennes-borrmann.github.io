@@ -59,7 +59,28 @@ export const VEHICLE_SPECS: VehicleSpec[] = [
       [0.12, 1.8],
     ],
   },
+  // U-Bahn der Neonhochbahn: fünf gleiche Wagen, flaches Dach 2,1 m über der Schiene – im Bahnhof auf Höhe der Fahrbahn.
+  {
+    half: 6.1,
+    halfWidth: 2.2,
+    height: 2.1,
+    cars: 5,
+    pitch: 12.6,
+    roofs: [
+      [2.1, 2.1],
+      [2.1, 2.1],
+      [2.1, 2.1],
+      [2.1, 2.1],
+      [2.1, 2.1],
+    ],
+  },
 ];
+
+/**
+ * Neonhochbahn: Magnetzug der U-Bahn (fünf gleiche Wagen mit flachem Dach). Er hält im Bahnhof in einem Graben, das Dach
+ * genau auf Höhe der Fahrbahn: Solange er steht, ist er die Brücke über den Graben (TrackDef.metro, BranchDef.trench).
+ */
+export const VEH_METRO = 5;
 
 /** So weit unter der Dachkante gilt ein Kart noch als „auf dem Dach“ (Meter) – darunter ist der Wagen eine Wand. */
 export const ROOF_STEP = 0.45;
@@ -85,6 +106,60 @@ export interface Vehicle extends VehicleSpec {
   speed: number;
   /** Lage des vordersten Wagens bei Rennzeit 0: Meter hinter der Startlinie. */
   offset: number;
+  /**
+   * U-Bahn (Neonhochbahn): Der Zug fährt nicht auf der Strecke, sondern auf der eigenen Linie (Track.metro) nach dem
+   * Fahrplan plan; train = seine Nummer im Umlauf (0 … plan.trains−1). Ohne plan ein gewöhnliches Fahrzeug.
+   */
+  plan?: MetroPlan;
+  train?: number;
+}
+
+/**
+ * Fahrplan der U-Bahn: Alle period Ticks kommt ein Zug. Er taucht am Anfang der Linie auf (im Tunnel), fährt mit speed
+ * (m/s) heran, bremst mit accel (m/s²) und hält mit der Spitze bei stop (Meter ab Linienanfang) dwell Ticks lang; dann
+ * fährt er an und verschwindet am Ende der Linie wieder im Tunnel. trains Züge teilen sich den Umlauf.
+ */
+export interface MetroPlan {
+  period: number;
+  phase: number;
+  stop: number;
+  speed: number;
+  accel: number;
+  dwell: number;
+  trains: number;
+}
+
+/** Weg (Meter) aus dem Stand nach u Sekunden: anfahren mit accel bis speed, dann gleichmäßig. */
+function metroRun(p: MetroPlan, u: number): number {
+  const tv = p.speed / p.accel;
+  return u <= tv ? 0.5 * p.accel * u * u : 0.5 * p.speed * tv + p.speed * (u - tv);
+}
+
+/** Wie lange (Sekunden) braucht der Zug für d Meter aus dem Stand? (Umkehrung von metroRun) */
+function metroTime(p: MetroPlan, d: number): number {
+  const tv = p.speed / p.accel;
+  const dv = 0.5 * p.speed * tv;
+  return d <= dv ? Math.sqrt((2 * d) / p.accel) : tv + (d - dv) / p.speed;
+}
+
+/** Ticks vom Auftauchen eines Zugs bis zum Halt, und bis zur Abfahrt. */
+export function metroArrive(p: MetroPlan): number {
+  return metroTime(p, p.stop) * 60;
+}
+
+/**
+ * Lage der Zugspitze von Zug k zur Rennzeit time (Ticks): Meter ab Linienanfang. Was außerhalb der Linie liegt (vor dem
+ * Auftauchen, nach dem Verschwinden im Tunnel), gibt es für niemanden (track.ts: metroPose). Reine Funktion der Rennzeit
+ * (wie aller Verkehr).
+ */
+export function metroFront(p: MetroPlan, k: number, time: number): number {
+  const cycle = p.period * p.trains;
+  let c = (time - p.phase - k * p.period) % cycle;
+  if (c < 0) c += cycle;
+  const arr = metroArrive(p);
+  if (c < arr) return p.stop - metroRun(p, (arr - c) / 60);
+  if (c < arr + p.dwell) return p.stop;
+  return p.stop + metroRun(p, (c - arr - p.dwell) / 60);
 }
 
 /** Beschreibung in der Streckendatei: Spuren mit je einem Tempo und ihren Fahrzeugen [Art, Meter]. */
@@ -790,6 +865,48 @@ export interface Drum {
   first: number;
   count: number;
   radius: number;
+}
+
+// --- Schwebeband (Neonhochbahn) -------------------------------------------------------
+// Auf einem Schwebeband (Track.bands, EDGE_BAND) schwebt das Kart über einem Magnetband: die Räder klappen weg (nur
+// Bild), gefahren wird wie auf Asphalt – auch dort, wo sich das Band an eine Fassade dreht: Gerechnet wird flach, nur
+// das Bild wird gedreht (twistWarp in track.ts); die Magnete halten, nichts sackt ab, nichts rutscht.
+//   – Magnetlinien: Zwei Leuchtspuren schlängeln sich spiegelbildlich über das Band und wandern dabei mit
+//     BAND_LINE_SPEED voran. Wer auf einer bleibt, fährt schneller (ein kleiner Dauerschub). Wo sie liegen, folgt
+//     allein aus der Stelle und der Rennzeit – auf jedem Bildschirm gleich.
+//   – Abstoßen: Berühren sich zwei schwebende Karts, stoßen sie sich ab, und beide bekommen kurz Schub (bandRepel in
+//     sim.ts). Ebenso an den Prallpollern am Bandrand.
+
+/** Ein Stück Schwebeband: Abschnitte first … first+count−1. */
+export interface Band {
+  first: number;
+  count: number;
+}
+
+/** Ausschlag der Magnetlinien als Anteil der halben Bandbreite, Wellenlänge und Tempo (Meter, m/s). */
+export const BAND_LINE_K = 0.55;
+export const BAND_LINE_WAVE = 84;
+export const BAND_LINE_SPEED = 11;
+/** So nah (Meter, Kartmitte zur Linie) fährt man „auf“ der Linie. */
+export const BAND_LINE_HALF = 0.9;
+/** Faktor auf das Höchsttempo auf einer Magnetlinie. */
+export const BAND_LINE_PULL = 1.09;
+/** So hoch schwebt das Kart über dem Band (nur Bild). */
+export const BAND_HOVER = 0.32;
+/** Abstoßen: Schub für beide (Ticks) und Abstoßtempo quer (m/s). */
+export const REPEL_TICKS = 38;
+export const REPEL_PUSH = 5.5;
+/** Prallpoller: Halbmesser (Meter) und Schub (Ticks). */
+export const BUMPER_RADIUS = 0.5;
+export const BUMPER_TICKS = 34;
+
+/**
+ * Seitliche Lage der Magnetlinie k (0 oder 1) auf einem Schwebeband der halben Breite rh, s Meter nach dessen Anfang,
+ * zur Rennzeit time (Ticks). Die beiden Linien sind Spiegelbilder: Sie kreuzen sich alle halbe Wellenlänge in der Mitte.
+ */
+export function bandLineLat(rh: number, s: number, time: number, k: number): number {
+  const a = BAND_LINE_K * rh * Math.sin(((s - (BAND_LINE_SPEED * time) / 60) / BAND_LINE_WAVE) * 2 * Math.PI);
+  return k === 0 ? a : -a;
 }
 
 /** So schnell sackt ein Kart an der senkrechten Wand seitlich zum Hallenboden ab (m/s; mal Sinus der Verdrehung). */

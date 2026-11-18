@@ -105,8 +105,9 @@ describe('Vulkaninsel: Bruchstellen', () => {
         }
       } else {
         expect(t.holes.length).toBe(0);
-        // (Größentore – Riesenkinderzimmer – haben keinen Zeitplan: Sie hängen am Kart, nicht an der Rennzeit.)
-        expect(t.gates.filter((g) => g.only === 0).length).toBe(0);
+        // (Größentore – Riesenkinderzimmer – haben keinen Zeitplan: Sie hängen am Kart, nicht an der Rennzeit. Das Tor
+        // zum Zugdach der Neonhochbahn wiederholt sich mit der U-Bahn und sperrt nichts für immer – neon.test.ts.)
+        expect(t.gates.filter((g) => g.only === 0 && !(t.metro && t.branchOf[g.first] === t.metro.branch && g.plan.period > 0)).length).toBe(0);
         for (let k = 0; k < t.total; k++) expect(t.edge[k] & EDGE_BROKEN).toBe(0);
       }
     }

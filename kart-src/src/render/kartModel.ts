@@ -57,6 +57,8 @@ export interface KartPose {
   rocket?: number;
   /** Rakete: Stärke des Düsenfeuers 0..1. */
   rocketFlame?: number;
+  /** Schwebeband (Neonhochbahn): 0 = auf Rädern, 1 = die Räder sind waagerecht weggeklappt, das Kart schwebt. */
+  hover?: number;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -4047,6 +4049,8 @@ export class KartVisual {
   private fRocket = 0;
   private fRocketFlame = 0;
   private rocketSpin = 0;
+  /** Schwebeband: wie weit die Räder weggeklappt sind (0 … 1). */
+  private fHover = 0;
   private rocketWas = false;
 
   // Abschleppdrache: eigenes Netz mit kleinem Skelett (Drache + Schwanz) und Leine
@@ -4479,6 +4483,8 @@ export class KartVisual {
     this.fRocket = rocket === rocket ? clamp(rocket, 0, 1) : 0;
     const rf = pose.rocketFlame ?? 0;
     this.fRocketFlame = rf === rf ? clamp(rf, 0, 1) : 0;
+    const hv = pose.hover ?? 0;
+    this.fHover = hv === hv ? clamp(hv, 0, 1) : 0;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -4542,6 +4548,7 @@ export class KartVisual {
     // Die Teilschritte lesen ihre Werte aus den Feldern – so wandern keine
     // Fließkommazahlen als Argumente durch die Aufrufe.
     this.moveWheels();
+    this.foldWheels();
     this.moveBody();
     this.planItem();
     this.moveDriver();
@@ -4621,6 +4628,26 @@ export class KartVisual {
     if (this.rocketFlame.visible) {
       const fl = 0.85 + 0.15 * Math.sin(t * 61) + 0.1 * hash(Math.floor(t * 40));
       this.rocketFlame.scale.set(flame * (0.9 + 0.1 * Math.sin(t * 47)), flame * fl * (0.6 + 0.6 * flame), flame * (0.9 + 0.1 * Math.cos(t * 43)));
+    }
+  }
+
+  /**
+   * Schwebeband: Die Räder klappen nach außen waagerecht weg (die Lauffläche zeigt dann nach unten aufs Band) und
+   * drehen nicht mehr; vorn schlagen sie trotzdem leicht mit der Lenkung ein. Überschreibt, was moveWheels gesetzt hat.
+   */
+  private foldWheels(): void {
+    const k = smooth01(this.fHover);
+    if (k <= 0 || this.fRocket > 0) return;
+    const bn = this.bones;
+    const rp = this.restPos;
+    for (let i = 0; i < 4; i++) {
+      const w = bn[B.wFL + i];
+      const side = rp[(B.wFL + i) * 3] > 0 ? 1 : -1;
+      // (Aus dem Rollen heraus erst zur Ruhe kommen, dann wegklappen – sonst taumelt das Rad.)
+      w.rotation.x *= 1 - k;
+      w.rotation.z = side * k * HALF_PI;
+      w.position.x = rp[(B.wFL + i) * 3] * (1 + 0.18 * k);
+      w.position.y = rp[(B.wFL + i) * 3 + 1] + 0.1 * k;
     }
   }
 

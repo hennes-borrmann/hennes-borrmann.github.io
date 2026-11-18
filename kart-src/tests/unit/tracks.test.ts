@@ -130,11 +130,15 @@ describe('Alle Strecken', () => {
         const routes = 1 << t.branches.length;
         const lines: string[] = [];
         const best: number[] = [];
+        // Abkürzungen über ein Zugdach (Neonhochbahn) gibt es nur, solange ein Zug hält: Diese Wege fährt die KI mit Zügen
+        // und Tor (sie wartet vor dem Tor, bis es aufgeht). Weil das Warten je Runde verschieden lang dauert, zählt hier nur,
+        // dass der Weg fahrbar ist – die Ersparnis misst der Test der Strecke selbst.
+        const trainBits = (t.def.branches ?? []).reduce((m, b, k) => (b.shortcut === 'train' ? m | (1 << k) : m), 0);
         for (let route = 0; route < routes; route++) {
           let sum = 0;
           for (let slot = 0; slot < 4; slot++) {
             // Verglichen wird der Verlauf der Wege – ohne Verkehr und Lava, die den einen Weg treffen und den anderen nicht.
-            const r = withoutMechanics(() => soloRun(slot, 2, AI_HARD, route));
+            const r = withoutMechanics(() => soloRun(slot, 2, AI_HARD, route), route & trainBits ? ['vehicles', 'gates'] : []);
             expect(r.lapTimes.length).toBe(2);
             expect(r.falls).toBeLessThanOrEqual(1);
             expect(r.wallHits).toBeLessThanOrEqual(4);
@@ -158,7 +162,9 @@ describe('Alle Strecken', () => {
         } else if (t.def.branches?.some((b) => b.shortcut)) {
           // Echte Abkürzungen (ab der Gipfelbahn): Eine mit Risiko spart deutlich (die KI fährt sie ohne Patzer), eine,
           // die sich nur mit Schub lohnt, ist ohne Schub höchstens knapp schneller. Zusammen höchstens fünf Sekunden.
+          // (Wege über ein Zugdach: siehe oben – hier nicht verglichen.)
           t.def.branches.forEach((b, k) => {
+            if (b.shortcut === 'train') return;
             const gain = best[0] - best[1 << k];
             if (b.shortcut === 'risk') {
               expect(gain).toBeGreaterThan(1.5);
@@ -166,7 +172,8 @@ describe('Alle Strecken', () => {
             } else if (b.shortcut === 'item') expect(gain).toBeLessThan(1);
             else expect(Math.abs(gain)).toBeLessThan(2);
           });
-          expect(Math.max(...best) - Math.min(...best)).toBeLessThan(5);
+          const plain = best.filter((_, r) => (r & trainBits) === 0);
+          expect(Math.max(...plain) - Math.min(...plain)).toBeLessThan(5);
         } else {
           // Beide Wege sollen sich lohnen: höchstens zwei Sekunden Unterschied.
           expect(Math.max(...best) - Math.min(...best)).toBeLessThan(2);

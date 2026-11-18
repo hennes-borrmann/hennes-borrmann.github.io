@@ -74,8 +74,9 @@ describe('Wüstenexpress', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
       if (i !== WUESTE) {
-        expect(t.roofed).toBe(false);
-        expect(t.vehicles.some((v) => v.roofs)).toBe(false);
+        // (Die Neonhochbahn hat ihre U-Bahn: Sie fährt auf eigener Linie, nicht auf der Strecke – neon.test.ts.)
+        expect(t.roofed).toBe(t.metro !== null);
+        expect(t.vehicles.some((v) => v.roofs && !v.plan)).toBe(false);
         continue;
       }
       expect(t.def.name).toBe('Wüstenexpress');
