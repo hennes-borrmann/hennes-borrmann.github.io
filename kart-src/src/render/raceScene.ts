@@ -21,6 +21,7 @@ import {
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
+  ITEM_WING,
   PAD_TICKS,
   SPIN_TICKS,
   ROCKET_FLY_TICKS,
@@ -109,6 +110,8 @@ export interface SceneEvent {
     | 'use-kite'
     /** Rakete: Verwandlung beginnt; sie hebt ab; eine fremde stürzt auf das eigene Kart herab (nur eigenes Kart); Einschlag. */
     | 'use-rocket'
+    /** Gleiter: Absprung (die Flügel gehen dann mit 'wings' auf). */
+    | 'use-wing'
     | 'rocket-launch'
     | 'rocket-incoming'
     | 'rocket-hit'
@@ -1634,6 +1637,13 @@ export class RaceScene {
         } else if (k.item === ITEM_EMP) {
           this.pop('KLACK!', e, 'violet', 2.6);
           this.emit('use-emp', k, local);
+        } else if (k.item === ITEM_WING) {
+          this.pop('HUIII!', e, 'cool', 3.4);
+          this.burst(e.x, e.y + 0.2, e.z, 14, 7, 0xe9e6f2, false, 0.7, 0.6, 2);
+          this.burst(e.x, e.y + 0.5, e.z, 8, 5, 0xffe04a, true, 0.4, 0.4, 5);
+          k.visual.squash(-1);
+          this.emit('use-wing', k, local);
+          if (local) this.shake = Math.max(this.shake, 0.18);
         } else if (k.item === ITEM_SPRING) {
           this.pop('BOING!', e, 'cool', 3.2);
           k.visual.squash(-1);

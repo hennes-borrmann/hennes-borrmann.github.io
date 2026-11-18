@@ -54,6 +54,7 @@ import {
   ITEM_KITE,
   ITEM_ROCKET,
   ITEM_SPRING,
+  ITEM_WING,
   ITEM_TIRE,
   ITEM_TOP,
   CHARACTERS,
@@ -662,11 +663,12 @@ export class HostGame implements GameView {
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete
-    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22, 0, 0];
-    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8, 0, 0];
-    else if (place === count) table = [22, 14, 0, 24, 6, 14, 0, 10, 0, ROCKET_WEIGHT];
-    else table = [18, 20, 10, 16, 10, 6, 10, 10, 0, 0];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete, Gleiter
+    // (Den Gleiter bekommt jeder; vorn etwas seltener.)
+    if (count <= 1) table = [40, 14, 8, 0, 10, 0, 6, 22, 0, 0, 12];
+    else if (place === 1) table = [14, 8, 26, 0, 24, 0, 20, 8, 0, 0, 7];
+    else if (place === count) table = [22, 14, 0, 24, 6, 14, 0, 10, 0, ROCKET_WEIGHT, 11];
+    else table = [18, 20, 10, 16, 10, 6, 10, 10, 0, 0, 12];
     // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
     // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
     if (count > 1 && behind > KITE_MIN_GAP) {
@@ -674,7 +676,7 @@ export class HostGame implements GameView {
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
     // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede zehnte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET];
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET, ITEM_WING];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;

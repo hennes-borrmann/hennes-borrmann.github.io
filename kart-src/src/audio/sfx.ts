@@ -177,6 +177,7 @@ const LEVEL: Record<SfxName, number> = {
   'use-kite': 4.5,
   'use-rocket': 3.2,
   'rocket-launch': 3.6,
+  'use-wing': 3.4,
   'rocket-incoming': 2.6,
   'rocket-hit': 3.4,
   warn: 2.2,
@@ -646,6 +647,15 @@ export class SfxPlayer {
         v.noise(5000, 2500, 0.25, 0.08, { type: 'highpass', attack: 0.05, at: 0.95 });
         break;
       }
+      case 'use-wing':
+        // Absprung: dumpfer Luftstoß, darüber ein Pfiff, der nach oben zieht; zum Schluss flattert Stoff
+        // (zwei kurze Rauschstöße) – das eigentliche Aufklappen der Flügel kommt mit 'wings'.
+        v.noise(300, 900, 0.18, 0.3, { type: 'lowpass', brown: true, attack: 0.01 })
+          .noise(900, 3600, 0.45, 0.16, { q: 1.2, attack: 0.04 })
+          .tone('sine', 520, 1560, 0.42, 0.12, { attack: 0.03, vibHz: 9, vibDepth: 0.02 })
+          .noise(2200, 1500, 0.06, 0.12, { q: 3, at: 0.42 })
+          .noise(2400, 1600, 0.06, 0.1, { q: 3, at: 0.52 });
+        break;
       case 'rocket-launch':
         // Zündung: kurzer Knall, dann ein Fauchen, das sich nach oben öffnet und mit der Rakete davonzieht;
         // darunter ein tiefes Grollen, das schnell leiser wird.

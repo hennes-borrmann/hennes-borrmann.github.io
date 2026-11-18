@@ -29,6 +29,7 @@ import {
   ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
+  ITEM_WING,
   bankGrip,
   forwardSpeed,
   type Cmd,
@@ -865,6 +866,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         break;
       case ITEM_EMP:
         press = b.holding > 50 && (ctx.place > 1 || late);
+        break;
+      case ITEM_WING:
+        // Am liebsten vor einer Lücke; sonst auf gerader Strecke mit Bande (dort trägt er ohne Risiko).
+        press = !air && b.holding > 40 && (((edgesAhead(60) & EDGE_GAP) !== 0 && v > 15) || (straight && (edgesAhead(70) & (EDGE_OPEN_L | EDGE_OPEN_R)) === 0));
         break;
       case ITEM_ROCKET:
         // Trifft alle anderen, egal wo – kein Grund zu warten.

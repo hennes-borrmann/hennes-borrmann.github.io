@@ -3024,7 +3024,7 @@ const I_EMP = 6;
 const I_SPRING = 8;
 const I_KITE = 9;
 const I_ROCKET = 10;
-const I_COUNT = 11;
+const I_COUNT = 12;
 
 // Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
 const I_RED = 0xff5a4e;
@@ -3325,6 +3325,18 @@ function buildKiteFolded(b: Builder): void {
   b.put(prism([0, 0, -0.06, 0.035, -0.06, -0.035], 0.02), { bone: 0, color: I_YEL, pos: [-0.07, -0.11, 0], mirror: 0, outline: 0.5 });
 }
 
+/** Gleiter: kleines Fluggerät in der Hand – Rumpfstab mit zwei geschwungenen Flügeln und Leitwerk. */
+function buildGlider(b: Builder): void {
+  const WING = [0, 0, 0.3, 0.06, 0.34, 0.12, 0.06, 0.1];
+  for (const s of [1, -1]) {
+    b.put(prism(WING, 0.02), { bone: 0, color: I_YEL, pos: [0, 0.26, 0], rot: [HALF_PI, 0, s > 0 ? 0 : Math.PI], outline: 0.6 });
+    b.put(prism([0.24, 0.06, 0.34, 0.12, 0.3, 0.07], 0.024), { bone: 0, color: I_RED, pos: [0, 0.26, 0], rot: [HALF_PI, 0, s > 0 ? 0 : Math.PI], outline: 0.4 });
+  }
+  b.put(cyl(0.018, 0.024, 0.34, 6), { bone: 0, color: I_INK, pos: [0, 0.14, 0], outline: 0.5 });
+  b.put(prism([0, 0, 0.09, -0.02, 0.09, 0.03], 0.016), { bone: 0, color: I_TURQ, pos: [0, 0.0, 0], rot: [HALF_PI, 0, 0], outline: 0.4, mirror: 0 });
+  b.put(sphere(0.04, 0.05, 0.04, 8, 5), { bone: 0, color: I_RED, pos: [0, 0.32, 0], outline: 0.5 });
+}
+
 /** Rakete: weißer Rumpf mit roter Spitze und rotem Band, Bullauge, vier Flossen, dunkle Düse. */
 function buildRocket(b: Builder): void {
   b.put(
@@ -3562,7 +3574,7 @@ let itemGeos: ItemGeo[] | null = null;
 /** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
 function getItemGeos(): ItemGeo[] {
   if (itemGeos) return itemGeos;
-  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket];
+  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket, buildGlider];
   const out: ItemGeo[] = [];
   for (let i = 0; i < I_COUNT; i++) {
     const b = new Builder(ONE_BONE, 2, true);
@@ -3818,6 +3830,20 @@ const GESTURES: (Gesture | null)[] = [
     ],
     release: -1,
     vanish: [0.5, 0.62],
+  },
+  // Gleiter: hoch über den Kopf werfen – er klappt auf und wird zu den großen Flügeln am Kart
+  {
+    dur: 0.5,
+    // prettier-ignore
+    keys: [
+      0, ...HOLD, 0, 0, 0, 0,
+      0.2, 0.2, 0.2, -0.05, 0.1, 0, 0.04, 0.1,
+      0.42, 0.14, 0.62, 0.08, -0.2, 0, -0.08, -0.36,
+      0.7, 0.16, 0.5, 0.06, -0.1, 0, 0, -0.2,
+      1, 0.16, 0.1, 0.1, 0, 0, 0, 0,
+    ],
+    release: 0.42,
+    fly: [0, 7, 0.5, 0, 0.25],
   },
 ];
 

@@ -1012,6 +1012,38 @@ async function main() {
     check('Rakete: Anna ist gelandet und liegt danach vor Ben', landedA.rocket === 0 && landedA.respawn === 0 && (await kart(h6.page, 'standings()')).findIndex((x) => x.slot === 0) < (await kart(h6.page, 'standings()')).findIndex((x) => x.slot === 1), `Anna Abschnitt ${landedA.seg}, Ben ${landedB.seg}`);
     check('Rakete: Ben wird gewarnt, Anna nicht', rocketC.banner && !rocketH.banner);
 
+    // Gleiter: Anna springt hoch, breitet die Flügel aus und gleitet schneller als ihr Höchsttempo – Ben sieht es.
+    const recordWing = () => {
+      window.__wing = { glide: 0, from: null, to: null, top: 0, y0: null };
+      window.__wingTimer = setInterval(() => {
+        const e = window.__kart.entities().find((x) => x.slot === 0);
+        if (!e) return;
+        if (window.__wing.y0 === null) window.__wing.y0 = e.y;
+        if (e.flags & 16) {
+          // Wie lange (Rennzeit in Ticks) die Flügel offen sind – unabhängig davon, wie oft die Seite unter Last nachsieht.
+          const now = window.__kart.race().time;
+          if (window.__wing.from === null) window.__wing.from = now;
+          window.__wing.to = now;
+          window.__wing.glide = window.__wing.to - window.__wing.from;
+        }
+        window.__wing.top = Math.max(window.__wing.top, e.y - window.__wing.y0);
+      }, 16);
+    };
+    await sleep(1500);
+    await kart(h6.page, 'place(0, 300, 0)');
+    await sleep(300);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordWing)));
+    const wingAt = await kart(h6.page, 'race().time');
+    await useItem(11);
+    const winged = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 300, wingAt, { timeout: 60000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 300, wingAt, { timeout: 60000 }).catch(() => {});
+    const [wingH, wingC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__wingTimer);
+      return window.__wing;
+    })));
+    check('Gleiter: Anna springt hoch und gleitet mit Flügeln – auf beiden Bildschirmen', winged.wing > 0 && [wingH, wingC].every((w) => w.glide > 120 && w.top > 4), `Host ${wingH.glide.toFixed(0)} Ticks / ${wingH.top.toFixed(1)} m, Ben ${wingC.glide.toFixed(0)} Ticks / ${wingC.top.toFixed(1)} m`);
+
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
     await sleep(800);
     await shot(h6.page, 'race-phase3-host.png');
