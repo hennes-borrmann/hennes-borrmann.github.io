@@ -1023,6 +1023,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // Schwebt eine Armlänge über der Fahrbahn – auch über Lücken hinweg.
     const hover = centerHeight(t, s.seg, proj.along) + tlat * t.bank[s.seg] + heaveAt(t, s.seg, proj.along, env.time) + TOW_LIFT;
     s.y += (hover - s.y) * Math.min(1, 7 * DT);
+    // Gedämpft folgt das Kart der Fahrbahn; an steilen Anstiegen (Kettenlift, 46 %) blieb es dabei bis zu 1,6 m unter
+    // ihr zurück und flog durch Schienen und Boden. Tiefer als knapp über der Fahrbahn darf es nicht hängen.
+    if (s.y < hover - TOW_LIFT * 0.3) s.y = hover - TOW_LIFT * 0.3;
     s.vy = 0;
     // Ende: abgelaufen oder mit der Bremse gekappt – aber nie über einem Abgrund.
     const cut = (cmd.buttons & BTN_BRAKE) !== 0 && s.tow < TOW_TICKS - 30;
@@ -1185,7 +1188,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const diving = t.deep[seg0] !== 0 && y0 < t.sea;
   // Magnettrommel: An Wand und Decke halten die Reifen schlechter (an der Decke DRUM_GRIP, am Boden voll).
   const drumGrip = (t.edge[seg0] & EDGE_DRUM) !== 0 ? 1 - ((1 - DRUM_GRIP) * (1 - Math.cos(t.roll[seg0]))) / 2 : 1;
-  const hold = drumGrip * A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * (wasAir || turnDir === 0 ? 1 : bankGrip(t, seg0, turnDir));
+  // Die Steilkurve gibt nur beim normalen Lenken mehr Halt (man kommt schneller herum). Im Drift dreht das Kart immer
+  // im Verhältnis zum Halt – mit dem Zuschlag drehte es dort fast doppelt so eng und fuhr in die Innenbande.
+  const banked = wasAir || turnDir === 0 || s.driftDir !== 0 ? 1 : bankGrip(t, seg0, turnDir);
+  const hold = drumGrip * A_LAT * ch.grip * (s.size > 0 ? BIG_GRIP : s.size < 0 ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * banked;
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts) – und überall, solange der Gleiter die Flügel ausbreitet
   // (nicht unter Wasser: dort trägt das Wasser).
   const winged = wasAir && s.wing > 0 && !diving;
