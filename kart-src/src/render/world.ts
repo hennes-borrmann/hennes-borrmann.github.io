@@ -736,6 +736,14 @@ export class World {
             if (Math.abs(segDelta(t, i, k)) < 24 && t.branchOf[i] === t.branchOf[k]) continue;
             if (t.py[k] < p[1] - 2 && Math.hypot(t.px[k] - p[0], t.pz[k] - p[2]) < t.wh[k] + 1) free = false;
           }
+          // Neonhochbahn: keine Stütze in der Trasse der U-Bahn (der Zug fuhr sonst durch sie hindurch).
+          const m = t.metro;
+          if (m) {
+            const dx = p[0] - m.x[0];
+            const dz = p[2] - m.z[0];
+            const u = dx * m.tx + dz * m.tz;
+            if (u > -6 && u < m.n + 6 && Math.abs(-dx * m.tz + dz * m.tx) < 3.4) free = false;
+          }
         }
         if (free) {
           const rot = Math.atan2(t.tx[i], t.tz[i]);
