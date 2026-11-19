@@ -833,8 +833,8 @@ async function main() {
     check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
     await h6.page.click('#btn-step-next');
     check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
-    check('Zweiundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 22);
-    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 22);
+    check('Dreiundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 23);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 23);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
@@ -1520,7 +1520,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen zweiundzwanzig Strecken zur Wahl', cards === 22, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen dreiundzwanzig Strecken zur Wahl', cards === 23, `${cards} Karten`);
     await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2334,9 +2334,64 @@ async function main() {
       check('Sprengladung: Anna steht daneben, als sie hochgeht – sie wird geworfen, auch auf Bens Bildschirm', thrown.spin > 0 && seen, `Dreher ${thrown.spin} Ticks, bei Ben ${seen ? 'gesehen' : 'nicht gesehen'}`);
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Baumkronenpfad: Die Hängebrücken heben sich und pendeln quer nach der Rennzeit, die Tannenzapfen fallen im Takt – auf
+    // beiden Bildschirmen gleich. Wer mitten auf einer Brücke steht, pendelt mit ihr. Zwei Abkürzungen mit Risiko: der Ast
+    // ohne Geländer und der hohle Baumriese mit der Öffnung im Boden; im Teich wird getaucht.
+    await pickTrack(h7.page, 22);
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 22, null, { timeout: 5000 });
+    await clickReady(c7.page);
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await clickStart(h7.page);
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 22, null, { timeout: 30000 });
+    let canopySame = true;
+    let swings = 0;
+    let coneDrops = 0;
+    let lastSway = null;
+    for (let sec = 1; sec < 13; sec += 0.5) {
+      const [a, b] = await Promise.all([kart(h7.page, `canopy(${sec})`), kart(c7.page, `canopy(${sec})`)]);
+      const key = (c) => c.bridges.map((x) => `${x.lift.toFixed(3)}/${x.sway.toFixed(3)}`).join() + '|' + c.cones.map((x) => (x.falling ? 1 : 0)).join('');
+      if (key(a) !== key(b)) canopySame = false;
+      const sw = a.bridges[0] ? a.bridges[0].sway : 0;
+      if (lastSway !== null && Math.sign(sw) !== Math.sign(lastSway)) swings++;
+      lastSway = sw;
+      coneDrops += a.cones.filter((x) => x.falling).length;
+    }
+    const canopyInfo = await kart(h7.page, 'canopy()');
+    check(
+      'Baumkronenpfad: Hängebrücken pendeln und Tannenzapfen fallen nach der Rennzeit, auf beiden Bildschirmen gleich; zwei Abkürzungen mit Risiko, Teich',
+      canopySame && swings >= 2 && coneDrops > 3 && canopyInfo.bridges.length >= 3 && canopyInfo.bridges.every((x) => x.arch) && canopyInfo.shortcuts.map((x) => x.kind).join() === 'risk,risk' && canopyInfo.shortcuts[1].gap > 6 && canopyInfo.under > 0,
+      `${canopyInfo.bridges.length} Brücken (${canopyInfo.bridges.map((x) => x.length.toFixed(0) + ' m').join(', ')}), ${swings} Pendelwechsel der ersten in 12 s${canopySame ? '' : ', Bildschirme verschieden'} · ${canopyInfo.cones.length} Zapfen, ${coneDrops} Stichproben gefährlich · Öffnung im Stamm ${canopyInfo.shortcuts[1] ? canopyInfo.shortcuts[1].gap.toFixed(0) : '?'} m · unter Wasser ab ${canopyInfo.under.toFixed(0)} m`,
+    );
+    // Anna mitten auf die erste Brücke, ohne Gas und Lenkung: Sie pendelt mit der Brücke quer (und fällt nicht herunter).
+    {
+      const br = canopyInfo.bridges[0];
+      const mid = br.at + br.length / 2;
+      const r0 = await h7.page.evaluate((m) => {
+        const k = window.__kart;
+        k.place(0, m, 0, -1);
+        const s = k.authoritative(0);
+        return { x: s.x, z: s.z };
+      }, mid);
+      const lat = [];
+      for (let n = 0; n < 14; n++) {
+        await sleep(250);
+        lat.push(
+          await h7.page.evaluate(([x0, z0]) => {
+            const k = window.__kart;
+            const s = k.authoritative(0);
+            return { d: Math.hypot(s.x - x0, s.z - z0), respawn: s.respawn };
+          }, [r0.x, r0.z]),
+        );
+      }
+      const moved = Math.max(...lat.map((q) => q.d));
+      check('Hängebrücke: Anna steht mitten darauf und pendelt mit, ohne herunterzufallen', moved > 0.3 && lat.every((q) => q.respawn === 0), `größte Auslenkung ${moved.toFixed(2)} m`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die zweiundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die dreiundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

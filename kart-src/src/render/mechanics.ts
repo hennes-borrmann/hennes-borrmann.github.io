@@ -24,6 +24,7 @@ import { buildMetro } from './mechanics/metro';
 import { buildAtrium } from './mechanics/atrium';
 import { buildDam } from './mechanics/dam';
 import { buildMine } from './mechanics/mine';
+import { buildCanopy } from './mechanics/canopy';
 import { buildRails } from './mechanics/rails';
 import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
@@ -70,6 +71,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   }
   // Talsperre: Staumauer, Überlaufrinne, Schleuse und Krafthaus (das Band an der Mauer zeichnet mechanics/band.ts)
   if (track.def.theme === 'talsperre') out.push(buildDam(track, detail, world));
+  // Baumkronenpfad: Hängebrücken, Riesen und Holzböcke, der hohle Baumriese, Wasserfall und Teich, Tannenzapfen
+  if (track.def.theme === 'baum') out.push(buildCanopy(track, detail, world));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
   // (Im Dschungel ist ein „Band“ die Querströmung der Furt: die zeichnet mechanics/river.ts.)
@@ -78,9 +81,11 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.tide) out.push(buildTide(track, detail, world));
   if (track.thermals.length > 0 || track.rings.length > 0 || hasGlide(track)) out.push(buildFlight(track, detail));
   if (track.belts.some((b) => b.swim) || track.pulses.some((p) => p.kind === PULSE_BUBBLE)) out.push(buildDive(track, detail));
-  if (track.pulses.some((p) => p.kind === PULSE_AVALANCHE || p.kind === PULSE_ICICLE)) out.push(buildSnow(track, detail));
+  // (Auf dem Baumkronenpfad fallen statt Eiszapfen Tannenzapfen: die zeichnet mechanics/canopy.ts.)
+  if (track.def.theme !== 'baum' && track.pulses.some((p) => p.kind === PULSE_AVALANCHE || p.kind === PULSE_ICICLE)) out.push(buildSnow(track, detail));
   if (track.launchers.length > 0 || track.pulses.some((p) => p.kind === PULSE_METEOR)) out.push(buildMoon(track, detail));
-  if (track.winds.length > 0 || track.pontoons.length > 0) out.push(buildHarbor(track, detail));
+  // (Die Hängebrücken des Baumkronenpfads zeichnet mechanics/canopy.ts.)
+  if (track.winds.length > 0 || (track.pontoons.length > 0 && track.def.theme !== 'baum')) out.push(buildHarbor(track, detail));
   if (track.dark) out.push(buildStorm(track, detail, world));
   if (track.rivers.length > 0) out.push(buildRiver(track, detail));
   if (track.portals.length > 0) out.push(buildMirrors(track, detail));

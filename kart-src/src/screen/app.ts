@@ -13,8 +13,8 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BLAST, PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront } from '../game/mechanics';
-import { EDGE_BAND, EDGE_DRUM, EDGE_GLIDE, TRACK, bandMeters, bandOf, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
+import { PULSE_BLAST, PULSE_BUBBLE, PULSE_ICICLE, PULSE_KICK, pulseCycle, pulseWarning, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront } from '../game/mechanics';
+import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_GLIDE, TRACK, bandMeters, bandOf, heaveAt, newVehiclePose, rightX, rightZ, setTrack, swayAt, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
@@ -1608,6 +1608,30 @@ export class App {
           under,
         };
       },
+      // Baumkronenpfad, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): je Hängebrücke Lage
+      // (Meter ab Start), Länge, wie weit ihre Mitte gerade gehoben und seitlich ausgeschwungen ist; je Tannenzapfen, ob
+      // er gerade gefährlich ist bzw. sich ankündigt; die Abkürzungen (Art, Länge, Länge der Öffnung im hohlen Baumriesen)
+      // und der erste Meter unter dem Teichspiegel.
+      canopy: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        let under = -1;
+        for (let i = 0; i < TRACK.n && under < 0; i++) if (TRACK.deep[i] && TRACK.py[i] < TRACK.sea - 1) under = i * TRACK.step;
+        return {
+          time,
+          bridges: TRACK.pontoons.map((p) => {
+            const mid = p.first + (p.count >> 1);
+            return { at: p.first * TRACK.step, length: p.count * TRACK.step, lift: heaveAt(TRACK, mid, 0, time), sway: swayAt(TRACK, mid, 0, time), arch: p.arch };
+          }),
+          cones: TRACK.pulses.filter((p) => p.kind === PULSE_ICICLE).map((p) => ({ at: p.seg * TRACK.step, lat: p.lat, falling: pulseCycle(p, time) < p.on, warning: pulseWarning(p, time) })),
+          shortcuts: TRACK.branches.map((b, k) => {
+            let gap = 0;
+            for (let i = b.first; i < b.first + b.count; i++) if (TRACK.edge[i] & EDGE_GAP) gap += TRACK.step;
+            return { kind: TRACK.def.branches?.[k]?.shortcut ?? '', length: b.count * TRACK.step, gap };
+          }),
+          under,
+        };
+      },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
         const glides: { from: number; to: number }[] = [];
@@ -1706,6 +1730,8 @@ export class App {
       // Wie ein Kart auf diesem Bildschirm gezeigt wird: Maßstab, wie gold (0 … 1), sichtbar.
       look: (slot: number) => this.scene?.kartLook(slot) ?? null,
       tree: () => this.scene?.debugTree() ?? [],
+      // Höhe des Geländes (wie berechnet und wie gezeichnet) an einer Stelle der Welt
+      ground: (x: number, z: number) => this.scene?.debugGround(x, z) ?? null,
       buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
       place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),

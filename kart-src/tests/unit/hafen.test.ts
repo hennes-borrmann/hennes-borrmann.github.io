@@ -33,13 +33,18 @@ function fullGust(w: { period: number; phase: number; on: number }): number {
 }
 
 describe('Sturmhafen: Böen', () => {
-  it('nur der Sturmhafen hat Wind und Pontons', () => {
+  it('nur der Sturmhafen hat Wind und Pontons (der Baumkronenpfad hat Hängebrücken)', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
       if (i === HAFEN) {
         expect(t.def.name).toBe('Sturmhafen');
         expect(t.winds.length).toBeGreaterThanOrEqual(4);
         expect(t.pontoons.length).toBeGreaterThanOrEqual(5);
+        for (const p of t.pontoons) expect(p.arch || p.sway !== 0).toBe(false);
+      } else if (t.def.id === 'baum') {
+        // Hängebrücken: die Pontons-Mechanik als schwingende Saite, an den Enden fest – kein Wind.
+        expect(t.winds.length).toBe(0);
+        for (const p of t.pontoons) expect(p.arch).toBe(true);
       } else {
         expect(t.winds.length).toBe(0);
         expect(t.pontoons.length).toBe(0);

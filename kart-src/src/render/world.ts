@@ -30,6 +30,7 @@ import type { FxSink } from './fxApi';
 import { SCHACHT, WETTERSCHACHT } from '../game/tracks/kristall';
 import { buildLife, type Life } from './life';
 import { inLake, landCut, landHeight } from './life/talsperreLand';
+import { pondTest } from './life/baumLand';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
@@ -38,7 +39,8 @@ const _tw = { x: 0, y: 0, z: 0 };
 
 const WALL_H = 0.95;
 const WALL_T = 0.5;
-const DECK_D = 1.1;
+/** Dicke einer Brücke bzw. eines Stegs unter der Fahrbahn (auch mechanics/canopy.ts). */
+export const DECK_D = 1.1;
 /** So breit bleibt unter der Bande ein Sims stehen, wenn daneben die Fahrbahn wegbricht (auch mechanics/volcano.ts). */
 export const HOLE_RIM = 0.5;
 /** So tief liegt das Flussbett unter der Höhe der Flöße (auch mechanics/river.ts); der Wasserspiegel liegt RIVER_WATER darunter. */
@@ -247,7 +249,8 @@ export class World {
     const dam = t.def.theme === 'talsperre';
     this.land = dam ? (x, z) => landHeight(x, z, t.sea) : null;
     this.landCut = dam ? (x, z) => landCut(x, z) : null;
-    this.lake = dam ? (x, z) => inLake(x, z, 6) : null;
+    // (Baumkronenpfad: der Waldteich, durch den die Strecke taucht – life/baumLand.ts.)
+    this.lake = dam ? (x, z) => inLake(x, z, 6) : t.def.theme === 'baum' ? pondTest(t) : null;
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -477,6 +480,9 @@ export class World {
         case 'concrete':
           // Beton (Talsperre): heller, warmgrauer Beton mit Fugen, Brüstung aus Betonquadern, weiße Randlinien
           return { a: col(0xc4bfb4), b: col(0xbab5aa), c: col(0x8e897f), band: 3, plain: false, lines: true, line: col(0xf4f0e6), kerbs: false, shoulder: col(0xa8a397), detail: 'plates', barrier: 'stone', wallA: col(0xd2cdc1), wallB: col(0xa9a397) };
+        case 'bark':
+          // Rinde (Baumkronenpfad: der Ast ohne Geländer): dunkle, längs gefurchte Borke mit helleren Graten, keine Markierung
+          return { a: col(0x6e4a30), b: col(0x664429), c: col(0x8f6a48), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0x5a3a24), detail: 'ruts', barrier: 'rope', wallA: wood[1], wallB: col(0xf2e6c8) };
         case 'marble':
           // Tempelplatten: heller Sandstein mit Fugen, Brüstung aus Quadern
           return { a: col(0xe6d6ac), b: col(0xd9c798), c: col(0xa9966a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xbcaa80), detail: 'plates', barrier: 'stone', wallA: col(0xdccb9e), wallB: col(0xc4b286) };
@@ -830,7 +836,8 @@ export class World {
       // Stützen: links und rechts außerhalb der Bande, mit Querträger
       // (Unter dem Band an der Fassade trägt die Fassade – die Halter zeichnet mechanics/band.ts.)
       // (Talsperre: Mauerkrone, Wehrkrone und Schwebeband tragen sich selbst – die Mauer und ihre Halter zeichnet mechanics/dam.ts.)
-      const selfBorne = t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band);
+      // (Baumkronenpfad: Stege, Rampe und Kronenpfad tragen Stämme, Äste und Holzböcke – die zeichnet mechanics/canopy.ts.)
+      const selfBorne = (t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band)) || t.def.theme === 'baum';
       if (deck && !gapI && !gapJ && i % 14 === 7 && (e & (EDGE_RAMP | EDGE_TWIST)) === 0 && !selfBorne) {
         const lat = wh + WALL_T + 0.5;
         let free = true;
@@ -917,7 +924,7 @@ export class World {
     const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : id === 'talsperre' ? rgb(0xb9b2a5) : rgb(0xd9c7a8);
     const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : id === 'talsperre' ? rgb(0xf2b630) : rgb(0x6fd0e6);
     const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : id === 'talsperre' ? rgb(0x8c867b) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, kristall: 0xc77dff, talsperre: 0xffe2a0 }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, kristall: 0xc77dff, talsperre: 0xffe2a0, baum: 0xffd27a }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -1492,6 +1499,9 @@ export class World {
     const nx = Math.max(1, Math.ceil((maxX - minX + 2 * margin) / cell));
     const nz = Math.max(1, Math.ceil((maxZ - minZ + 2 * margin) / cell));
 
+    // Baumkronenpfad: Der Waldteich liegt tiefer als der Waldboden – die große Grundfläche liegt deshalb unter seinem
+    // Grund (sonst deckte sie ihn zu), und das Gelände fällt am Rand des Rasters sanft zu ihr ab (im Dunst).
+    const rim = t.def.theme === 'baum' ? th.farY - 9 : th.farY;
     if (!flat) {
       const h = new Float32Array((nx + 1) * (nz + 1));
       for (let iz = 0; iz <= nz; iz++) {
@@ -1499,7 +1509,7 @@ export class World {
           // Zum Rand hin läuft das Gelände flach aus, damit es an die große Grundfläche anschließt.
           const edge = Math.min(ix, nx - ix, iz, nz - iz) / 5;
           const y = this.heightAt(x0 + ix * cell, z0 + iz * cell);
-          h[iz * (nx + 1) + ix] = th.farY + (y - th.farY) * smooth(edge);
+          h[iz * (nx + 1) + ix] = rim + (y - rim) * smooth(edge);
         }
       }
       this.grid = { x0, z0, nx, nz, cell, h };
@@ -1604,7 +1614,7 @@ export class World {
       (mat as THREE.MeshBasicMaterial).color.multiplyScalar(flat ? 1 : 0.86);
     }
     const base = new THREE.Mesh(plane, mat);
-    base.position.set(this.center.x, th.liquidY ?? th.farY - 0.2, this.center.z);
+    base.position.set(this.center.x, th.liquidY ?? rim - 0.2, this.center.z);
     this.group.add(base);
     if (th.liquidY !== null) this.water = base;
     this.disposables.push(plane, mat);

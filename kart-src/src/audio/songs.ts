@@ -23,6 +23,7 @@ import { GIPFEL_STUECK } from './stuecke/gipfel';
 import { NEON_STUECK } from './stuecke/neon';
 import { TALSPERRE_STUECK } from './stuecke/talsperre';
 import { KRISTALL_STUECK } from './stuecke/kristall';
+import { BAUM_STUECK } from './stuecke/baum';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
@@ -456,6 +457,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   talsperre: TALSPERRE_STUECK,
   // Kristallmine: eigenes Stück (stuecke/kristall.ts)
   kristall: KRISTALL_STUECK,
+  // Baumkronenpfad: eigenes Stück (stuecke/baum.ts)
+  baum: BAUM_STUECK,
   results: RESULTS,
 };
 

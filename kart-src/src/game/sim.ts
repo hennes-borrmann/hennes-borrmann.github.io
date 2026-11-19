@@ -127,6 +127,7 @@ import {
   groundAt,
   groundNow,
   heaveAt,
+  swayAt,
   newVehiclePose,
   proj,
   projectOnTrack,
@@ -1502,6 +1503,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  // Hängebrücke (Baumkronenpfad): Sie pendelt quer – wer auf ihr steht, pendelt mit (wie auf einem Förderband, das hin
+  // und her läuft). Wer springt, bleibt in der Luft, wo er ist.
+  if (t.swaying && !wasAir && t.floatA[seg0] >= 0) {
+    const d = swayAt(t, seg0, along0, env.time) - swayAt(t, seg0, along0, env.time - 1);
+    s.x += rightX(t, seg0) * d;
+    s.z += rightZ(t, seg0) * d;
+  }
+
   // Magnettrommel: Die Schwerkraft zieht weiter zum Hallenboden – an der Wand sackt das Kart seitlich ab (an der rechten
   // Wand nach links, an der linken nach rechts), an der Decke zieht sie es nur von der Bahn weg (das halten die Magnete).
   if (t.drums.length > 0 && (t.edge[seg0] & EDGE_DRUM) !== 0) {
@@ -1529,17 +1538,19 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   let flags = itemBtn ? FLAG_ITEM_HELD : 0;
   // Wer schon unter die Fahrbahn gefallen ist, stößt nirgends mehr an.
   const sunk = y0 < centerHeight(t, s.seg, along) + lat * t.bank[s.seg] + heaveAt(t, s.seg, along, env.time) - STEP_MAX;
-  const side = lat > 0 ? 1 : -1;
+  // (Auf einer pendelnden Hängebrücke pendelt das Geländer mit: gemessen wird gegenüber der Brücke.)
+  const shift = t.swaying && t.floatA[s.seg] >= 0 ? swayAt(t, s.seg, along, env.time) : 0;
+  const side = lat - shift > 0 ? 1 : -1;
   const limit = sideLimit(t, s.seg, side) - KART_RADIUS;
-  if (!sunk && Math.abs(lat) > limit) {
+  if (!sunk && Math.abs(lat - shift) > limit) {
     const open = (t.edge[s.seg] & (side > 0 ? EDGE_OPEN_R : EDGE_OPEN_L)) !== 0;
     if (!open) {
       const nx = rightX(t, s.seg) * side;
       const nz = rightZ(t, s.seg) * side;
-      const over = Math.abs(lat) - limit;
+      const over = Math.abs(lat - shift) - limit;
       s.x -= nx * over;
       s.z -= nz * over;
-      lat = side * limit;
+      lat = shift + side * limit;
       flags |= FLAG_WALL;
       const vn = s.vx * nx + s.vz * nz;
       if (vn > 0) {
@@ -1804,7 +1815,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     return ev | EV_FALL;
   }
 
-  if (!air && Math.abs(lat) > t.rh[s.seg] + 0.3) flags |= FLAG_OFFROAD;
+  if (!air && Math.abs(lat - (t.swaying && t.floatA[s.seg] >= 0 ? swayAt(t, s.seg, along, env.time) : 0)) > t.rh[s.seg] + 0.3) flags |= FLAG_OFFROAD;
 
   // --- Geysire, Lavabomben, Stampfpressen ---
   for (const p of t.pulses) {

@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -106,6 +106,8 @@ export type SfxName =
   | 'siren' // Kristallmine: das Sprenghorn warnt 2,5 s vor einer Sprengung (ortsfest): drei kurze, heisere Hornstöße (~1,3 s)
   | 'rubble' // Kristallmine: im Sprengort bricht das Hangende nach (ortsfest): Grollen, polternde Brocken, rieselnder Staub (~1,4 s)
   | 'lore' // Kristallmine: das eigene Kart rattert in der Lore über das Grubengleis (wird etwa alle 0,4 s aufgerufen und verschmilzt zu einem Bett): tiefes Rollen, blechernes Klappern, Schienenstöße
+  | 'creak' // Baumkronenpfad: eine Hängebrücke knarzt am Ende eines Pendelschlags (ortsfest, bis ~80 m): Holz reibt an Holz – ein tiefer, stockender Ton, der etwas absinkt, darüber das Quietschen des gespannten Seils (~0,7 s)
+  | 'cone' // Baumkronenpfad: ein Tannenzapfen schlägt auf dem Waldweg auf (ortsfest): kurzes Nadelrascheln, dann ein hölzernes „Plock“ mit dumpfem Bauch und ein paar abspringenden Schuppen (~0,35 s)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

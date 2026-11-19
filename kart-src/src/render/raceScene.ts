@@ -64,6 +64,7 @@ import {
   sizeClass,
   sizeScale,
   pulseCycle,
+  pontoonShift,
   tideLevel,
   vehicleAt,
   BAND_HOVER,
@@ -74,6 +75,7 @@ import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, twistRadiusAt, twistRollAt, twistWarp, vehiclePose, walk, type Track } from '../game/track';
 import { CHANNEL, CHANNEL_FLOOR, DAM_AIR, DAM_CZ, RIVER_Y } from './life/talsperreLand';
+import { FALL } from './life/baumLand';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -242,7 +244,10 @@ export interface SceneEvent {
     | 'clamp'
     | 'hum'
     | 'magnetoff'
-    | 'magneton';
+    | 'magneton'
+    /** Baumkronenpfad (ortsfest, slot −1): eine Hängebrücke knarzt am Ende eines Pendelschlags / ein Tannenzapfen schlägt auf. */
+    | 'creak'
+    | 'cone';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -1148,6 +1153,18 @@ export class RaceScene {
         }
         if (Math.floor(time / 24) !== Math.floor(before / 24)) for (const h of t.hazards) this.emitAt('hum', t.px[h.seg], t.py[h.seg] + 2, t.pz[h.seg], 50);
       }
+      // Baumkronenpfad: Der Wasserfall rauscht über die Felsstufe in den Teich, und die Hängebrücken knarzen, wenn sie am
+      // Ende eines Pendelschlags umkehren (ortsfest in ihrer Mitte).
+      if (t.def.theme === 'baum') {
+        if (Math.floor(time / 30) !== Math.floor(before / 30)) this.emitAt('falls', FALL.x - 13, FALL.top - 3, FALL.z + 6, 150);
+        for (const p of t.pontoons) {
+          const d0 = pontoonShift(p, before) - pontoonShift(p, before - 1);
+          const d1 = pontoonShift(p, time) - pontoonShift(p, time - 1);
+          if (d0 * d1 >= 0) continue;
+          const mid = p.first + (p.count >> 1);
+          this.emitAt('creak', t.px[mid], t.py[mid], t.pz[mid], 80);
+        }
+      }
       // Gewitterkamm: fernes Wetterleuchten – der Donner dazu rollt eine knappe Sekunde später heran.
       for (const f of t.flashes) {
         const c0 = (((before + f.phase) % f.period) + f.period) % f.period;
@@ -1190,7 +1207,9 @@ export class RaceScene {
           }
           if (p.kind > PULSE_BUBBLE) {
             // Lawine, Eiszapfen, Meteorit: ortsfest zu hören; Lawine und Meteorit lassen das Bild beben.
-            this.emitAt(p.kind === PULSE_AVALANCHE ? 'avalanche' : p.kind === PULSE_ICICLE ? 'icicle' : 'meteor', p.x, p.y, p.z);
+            // (Baumkronenpfad: statt Eiszapfen schlagen Tannenzapfen auf.)
+            const icicle = t.def.theme === 'baum' ? 'cone' : 'icicle';
+            this.emitAt(p.kind === PULSE_AVALANCHE ? 'avalanche' : p.kind === PULSE_ICICLE ? icicle : 'meteor', p.x, p.y, p.z);
             if (me && p.kind !== PULSE_ICICLE) {
               const d = Math.hypot(me.x - p.x, me.z - p.z);
               if (d < 45) this.shake = Math.max(this.shake, (p.kind === PULSE_METEOR ? 0.6 : 0.35) * (1 - d / 45));
@@ -2828,6 +2847,11 @@ export class RaceScene {
   }
 
   /** Nur für Tests und Messungen: Dreiecke je Bauteil der Szene. */
+  /** Nur für Tests: Höhe des gezeichneten Geländes an (x, z) – null ohne Welt. */
+  debugGround(x: number, z: number): { height: number; drawn: number } | null {
+    return this.world ? { height: this.world.heightAt(x, z), drawn: this.world.groundY(x, z) } : null;
+  }
+
   debugTree(): { name: string; triangles: number }[] {
     const count = (o: THREE.Object3D): number => {
       let n = 0;

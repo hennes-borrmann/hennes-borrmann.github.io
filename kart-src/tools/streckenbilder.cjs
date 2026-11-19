@@ -334,6 +334,18 @@ const SHOTS = {
       [3, 1063, 0],
     ],
   },
+  // Baumkronenpfad: die Holzrampe um den Riesenstamm von Südosten, drei Karts in der oberen Windung (Steilkurve, 40°),
+  // darüber die erste Hängebrücke und die Kronen, ringsum der Herbstwald.
+  baum: {
+    from: { xyz: [40, 48, 38] },
+    to: { xyz: [8, 35, 6] },
+    fov: 55,
+    karts: [
+      [1, 336, -2.5],
+      [2, 344, 2.5],
+      [3, 352, -0.5],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
