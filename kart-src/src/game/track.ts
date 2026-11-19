@@ -2247,6 +2247,16 @@ export function twistRadiusAt(t: Track, seg: number, f = 0): number {
   return (t.edge[b] & EDGE_TWIST) !== 0 ? t.twist[seg] + (t.twist[b] - t.twist[seg]) * f : t.twist[seg];
 }
 
+/**
+ * Krümmung, wie man sie sieht (1/m, positiv = Rechtskurve): Auf einem Schwebeband an der Wand wird flach gerechnet, das
+ * Bild aber verdreht (twistWarp). Von der Kurve, die die flache Bahn dort macht, ist im Bild nur der Anteil cos(Verdrehung)
+ * eine Kurve zur Seite – an der senkrechten Wand biegt sich die Bahn nur noch nach oben oder unten. Den Rest fährt das Band
+ * selbst (sim.ts: twistYaw); die KI plant mit dieser Krümmung.
+ */
+export function curvSeen(t: Track, seg: number): number {
+  return (t.edge[seg] & EDGE_TWIST) !== 0 ? t.curv[seg] * Math.cos(t.roll[seg]) : t.curv[seg];
+}
+
 /** Das Schwebeband, zu dem der Abschnitt gehört – oder null. */
 export function bandOf(t: Track, seg: number): Band | null {
   if ((t.edge[seg] & EDGE_BAND) === 0) return null;

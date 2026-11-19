@@ -2140,7 +2140,7 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
 
     // Magnetwerk: In der Magnettrommel schraubt sich die Bahn über Wand und Decke; die Deckenplatten schalten nach Fahrplan
-    // ab – auf beiden Bildschirmen gleich, links und rechts nie zugleich; an der Wand sackt ein Kart ab.
+    // ab – auf beiden Bildschirmen gleich, links und rechts nie zugleich; an der Wand halten die Magnete ein Kart fest.
     await pickTrack(h7.page, 17);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 17, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2161,7 +2161,7 @@ async function main() {
       `Verdrehung ${dH0.roll.toFixed(0)}° / ${dH1.roll.toFixed(0)}° · Platten bei 1 s ${plateState(dH0)} / ${plateState(dC0)}, bei 4 s ${plateState(dH1)} / ${plateState(dC1)}`,
     );
     if (dH0.drums.length === 1) {
-      // An der rechten Wand (480 m): Anna steht ohne Gas und Lenkung – die Schwerkraft zieht sie nach links zum Hallenboden.
+      // An der rechten Wand (480 m): Anna steht ohne Gas und Lenkung – die Magnete halten sie, sie bleibt in ihrer Spur.
       await kart(h7.page, 'place(0, 480, 0)');
       await sleep(200);
       const sag0 = await h7.page.evaluate(() => { const s = window.__kart.authoritative(0); return { x: s.x, z: s.z, seg: s.seg, time: window.__kart.race().time }; });
@@ -2172,7 +2172,7 @@ async function main() {
         const r = window.__kart.spot(seg, 1, 0);
         return { side: (s.x - a[0]) * (r[0] - a[0]) + (s.z - a[2]) * (r[2] - a[2]), time: window.__kart.race().time };
       }, [sag0.seg]);
-      check('An der rechten Wand sackt Anna ohne Lenken nach links ab', sag1.side < -1.5, `${sag1.side.toFixed(1)} m quer nach ${((sag1.time - sag0.time) / 60).toFixed(1)} s`);
+      check('An der rechten Wand bleibt Anna ohne Lenken in ihrer Spur (nichts sackt ab)', Math.abs(sag1.side) < 0.5, `${sag1.side.toFixed(1)} m quer nach ${((sag1.time - sag0.time) / 60).toFixed(1)} s`);
     }
     await toLobby(h7.page);
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
@@ -2332,6 +2332,30 @@ async function main() {
         else await sleep(30);
       }
       check('Sprengladung: Anna steht daneben, als sie hochgeht – sie wird geworfen, auch auf Bens Bildschirm', thrown.spin > 0 && seen, `Dreher ${thrown.spin} Ticks, bei Ben ${seen ? 'gesehen' : 'nicht gesehen'}`);
+      // Geode: An der senkrechten Wand fährt Anna mit Gas und ohne Lenken geradeaus in ihrer Spur – die Kurve, die man an
+      // der Wand nicht sieht, fährt das Band selbst (vorher wurde man dort nach außen an den Rand gedrückt).
+      const wallAt = await h7.page.evaluate(() => {
+        const k = window.__kart;
+        const band = k.band(0, 0).bands[0];
+        for (let m = band.at; m < band.at + band.length; m += 1) if (k.band(0, m).roll > 89.5) return m + 3;
+        return -1;
+      });
+      if (wallAt > 0) {
+        await kart(h7.page, `place(0, ${wallAt}, 0)`);
+        await sleep(250);
+        await h7.page.keyboard.down('ArrowUp');
+        await sleep(1300);
+        const w = await h7.page.evaluate(() => {
+          const k = window.__kart;
+          const s = k.authoritative(0);
+          const m = s.seg * k.track().step;
+          const a = k.spot(m, 0, 0);
+          const r = k.spot(m, 1, 0);
+          return { side: (s.x - a[0]) * (r[0] - a[0]) + (s.z - a[2]) * (r[2] - a[2]), v: Math.hypot(s.vx, s.vz), roll: k.band(0, m).roll, respawn: s.respawn };
+        });
+        await h7.page.keyboard.up('ArrowUp');
+        check('Geode: An der Wand fährt Anna ohne Lenken geradeaus in ihrer Spur', Math.abs(w.side) < 0.8 && w.respawn === 0 && w.v > 8, `${w.side.toFixed(2)} m quer bei ${w.v.toFixed(1)} m/s (Verdrehung ${w.roll.toFixed(0)}°)`);
+      } else check('Geode: An der Wand fährt Anna ohne Lenken geradeaus in ihrer Spur', false, 'keine senkrechte Wand gefunden');
     }
     await toLobby(h7.page);
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });

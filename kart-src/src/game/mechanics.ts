@@ -934,12 +934,12 @@ export const LIFT_BOOST = 1.6;
 
 // --- Magnettrommel -------------------------------------------------------------------
 // Im Magnetwerk läuft die Fahrbahn an der Innenwand einer riesigen, liegenden Trommel entlang und schraubt sich an ihr
-// hoch: erst die rechte Wand hinauf, über die Decke, die linke Wand wieder hinunter. Magnete halten die Karts auf der
-// Bahn – aber die Schwerkraft zieht weiter zum Hallenboden: An der Wand sackt das Kart seitlich ab, an der Decke
-// greifen die Reifen schlechter.
+// hoch: erst die rechte Wand hinauf, über die Decke, die linke Wand wieder hinunter. Die Magnete halten die Karts fest
+// auf der Bahn – an Wand und Decke fährt es sich wie am Boden (früher sackte man an der Wand ab und rutschte an der Decke;
+// das drückte einen an den Rand, gegen das Lenken half kaum etwas). Die Gefahr sind die Deckenplatten, die abschalten.
 //
 // Gerechnet wird wie überall auf der flachen Fahrbahn. Die Verdrehung (Track.roll, Radiant: 0 = unten, π/2 = rechte
-// Wand, π = Decke) ist für die Physik nur eine Kraft und ein Haftwert – und für die Darstellung der Winkel, um den
+// Wand, π = Decke) ist für die Physik bedeutungslos – sie ist für die Darstellung der Winkel, um den
 // sich die Trommel mit allem, was an ihr hängt, um die Fahrbahn dreht (drumPoint in track.ts): Das Bild zeigt die
 // Bahn aufrecht und die Halle verdreht – für den Fahrer dasselbe, wie an Wand und Decke zu fahren.
 
@@ -953,7 +953,8 @@ export interface Drum {
 // --- Schwebeband (Neonhochbahn) -------------------------------------------------------
 // Auf einem Schwebeband (Track.bands, EDGE_BAND) schwebt das Kart über einem Magnetband: die Räder klappen weg (nur
 // Bild), gefahren wird wie auf Asphalt – auch dort, wo sich das Band an eine Fassade dreht: Gerechnet wird flach, nur
-// das Bild wird gedreht (twistWarp in track.ts); die Magnete halten, nichts sackt ab, nichts rutscht.
+// das Bild wird gedreht (twistWarp in track.ts); die Magnete halten, nichts sackt ab, nichts rutscht. Den Teil der
+// Kurve, den man an der Wand im Bild nicht sieht, fährt das Band selbst (sim.ts: twistYaw).
 //   – Magnetlinien: Zwei Leuchtspuren schlängeln sich spiegelbildlich über das Band und wandern dabei mit
 //     BAND_LINE_SPEED voran. Wer auf einer bleibt, fährt schneller (ein kleiner Dauerschub). Wo sie liegen, folgt
 //     allein aus der Stelle und der Rennzeit – auf jedem Bildschirm gleich.
@@ -992,10 +993,6 @@ export function bandLineLat(rh: number, s: number, time: number, k: number): num
   return k === 0 ? a : -a;
 }
 
-/** So schnell sackt ein Kart an der senkrechten Wand seitlich zum Hallenboden ab (m/s; mal Sinus der Verdrehung). */
-export const DRUM_SAG = 3.4;
-/** Halt der Reifen an der Decke (Anteil; an der Wand die Mitte zwischen 1 und diesem Wert). */
-export const DRUM_GRIP = 0.72;
 
 // --- Zeitalter -----------------------------------------------------------------------
 // Die Zeitriss-Ruine springt im festen Takt zwischen zwei Zeitaltern: „Einst“ (der Tempel steht)
