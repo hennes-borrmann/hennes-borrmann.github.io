@@ -53,6 +53,29 @@ export function scoreRace(cup: CupState, track: number, standings: { slot: numbe
   return { ...cup, done: cup.done + 1, stars, wins, last, played: [...cup.played, track], draw: null };
 }
 
+/**
+ * Startaufstellung (Plätze von vorn nach hinten). Ohne Vorrennen – Einzelrennen und erstes Turnierrennen – wird gelost.
+ * Mit Vorrennen (Turnier ab dem zweiten Rennen) gespiegelt: Der Letzte startet ganz vorn, der Sieger ganz hinten; wer im
+ * Vorrennen nicht dabei war, startet vor allen anderen.
+ * @param slots die Plätze, die mitfahren
+ * @param prev  Platzierungen des vorigen Rennens (1 = Sieger) oder null
+ * @param rnd   Zufall 0 ≤ x < 1
+ */
+export function gridOrder(slots: readonly number[], prev: readonly { slot: number; place: number }[] | null, rnd: () => number): number[] {
+  const out = slots.slice();
+  // Erst mischen (Fisher-Yates) – das bleibt die Reihenfolge, wo das Vorrennen nichts sagt.
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.min(i, Math.floor(rnd() * (i + 1)));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  if (!prev || prev.length === 0) return out;
+  const placeOf = new Map<number, number>();
+  for (const p of prev) placeOf.set(p.slot, p.place);
+  const rankOf = (slot: number): number => placeOf.get(slot) ?? Infinity;
+  // Stabil sortiert: schlechtester Platz zuerst; Unbekannte (Infinity) ganz vorn, untereinander gelost.
+  return out.map((slot, i) => ({ slot, i })).sort((a, b) => rankOf(b.slot) - rankOf(a.slot) || a.i - b.i).map((e) => e.slot);
+}
+
 /** Ein Platz wechselt den Besitzer (Spieler geht, anderer kommt): seine Sterne beginnen bei null. */
 export function resetSlot(cup: CupState, slot: number): CupState {
   if (slot < 0 || slot >= SLOTS) return cup;

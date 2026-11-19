@@ -266,6 +266,8 @@ export class HostGame implements GameView {
   private resultsAtTick = -1;
   private lastTickAt = performance.now();
   private rand = (Date.now() % 2147483646) + 1;
+  /** Startaufstellung, Plätze von vorn nach hinten (leer = nach Platznummer). */
+  private grid: number[] = [];
 
   constructor(
     readonly localSlot: number,
@@ -306,6 +308,23 @@ export class HostGame implements GameView {
     this.rank();
   }
 
+  /**
+   * Startaufstellung für die folgenden newRace(): Plätze von vorn nach hinten (siehe gridOrder in lobby/cup.ts). Wer
+   * fehlt, reiht sich nach Platznummer dahinter ein; ohne Angabe gilt die Platznummer (Platz 0 vorn).
+   */
+  setGrid(order: readonly number[]): void {
+    this.grid = order.slice();
+  }
+
+  /** Startplatz (0 = vorn) eines Karts unter denen, die mitfahren. */
+  private gridIndex(slot: number): number {
+    const present = [...this.karts.keys()];
+    const order = this.grid.filter((s) => present.includes(s));
+    for (const s of present.sort((a, b) => a - b)) if (!order.includes(s)) order.push(s);
+    const i = order.indexOf(slot);
+    return i < 0 ? slot : i;
+  }
+
   /** Alles auf Anfang: Startaufstellung, Ampel läuft. */
   newRace(): void {
     this.raceId = (this.raceId + 1) & 0xff;
@@ -316,7 +335,7 @@ export class HostGame implements GameView {
     this.thingList = [];
     this.boxTimers.fill(0);
     for (const k of this.karts.values()) {
-      copyState(k.state, gridState(k.slot, this.charOf(k.slot, k.bot)));
+      copyState(k.state, gridState(this.gridIndex(k.slot), this.charOf(k.slot, k.bot)));
       copyState(k.prev, k.state);
       k.progress = progDelta(TRACK, 0, k.state.seg);
       k.lap = 1;
