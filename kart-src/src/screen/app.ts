@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BLAST, PULSE_BUBBLE, PULSE_ICICLE, PULSE_KICK, pulseCycle, pulseWarning, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront } from '../game/mechanics';
+import { PULSE_BLAST, PULSE_BUBBLE, PULSE_ICICLE, PULSE_KICK, pulseCycle, pulseWarning, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, vehicleSpeed, bandLineLat, metroFront } from '../game/mechanics';
 import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_GLIDE, TRACK, bandMeters, bandOf, heaveAt, newVehiclePose, rightX, rightZ, setTrack, swayAt, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1632,6 +1632,43 @@ export class App {
           under,
         };
       },
+      // Dächerjagd, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): je Straßenbahn, ob sie gerade
+      // auf ihrer Linie ist, wo (Weltkoordinaten der Spitze, Meter hinter der Startlinie) und wie schnell; die Abkürzungen
+      // (Art, Länge, Zahl der Lücken), wie lang der Gleitflug ist und ab welchem Meter getaucht wird.
+      altstadt: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const lap = TRACK.n * TRACK.step;
+        const pose = newVehiclePose();
+        let under = -1;
+        let glide = 0;
+        for (let i = 0; i < TRACK.n; i++) {
+          if (under < 0 && TRACK.deep[i] && TRACK.py[i] < TRACK.sea - 1) under = i * TRACK.step;
+          if (TRACK.edge[i] & EDGE_GLIDE) glide += TRACK.step;
+        }
+        return {
+          time,
+          trams: TRACK.vehicles
+            .filter((v) => v.line)
+            .map((v) => {
+              const at = vehicleAt(v, time, lap);
+              const p = vehiclePose(TRACK, v, 0, time, pose);
+              return { present: Number.isFinite(at), at: Number.isFinite(at) ? at : -1, x: p.x, z: p.z, speed: vehicleSpeed(v, time) };
+            }),
+          shortcuts: TRACK.branches.map((b, k) => {
+            let gaps = 0;
+            let gapAt = -1;
+            for (let i = b.first + 1; i < b.first + b.count; i++) {
+              if (!(TRACK.edge[i] & EDGE_GAP) || TRACK.edge[i - 1] & EDGE_GAP) continue;
+              gaps++;
+              if (gapAt < 0) gapAt = (i - b.first + 2) * TRACK.step;
+            }
+            return { kind: TRACK.def.branches?.[k]?.shortcut ?? '', length: b.count * TRACK.step, gaps, gapAt };
+          }),
+          glide,
+          under,
+        };
+      },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
         const glides: { from: number; to: number }[] = [];
@@ -1732,6 +1769,9 @@ export class App {
       tree: () => this.scene?.debugTree() ?? [],
       // Höhe des Geländes (wie berechnet und wie gezeichnet) an einer Stelle der Welt
       ground: (x: number, z: number) => this.scene?.debugGround(x, z) ?? null,
+      // Strahlen durch die stehende Welt: je Strahl [x, y, z, dx, dy, dz, weit] der erste Treffer (für Prüfungen, dass nichts
+      // durch die Fahrbahn sticht oder quer über ihr hängt)
+      rays: (rays: number[][]) => this.scene?.debugRays(rays) ?? [],
       buildTimes: () => this.scene?.buildTimes() ?? [],
       audio: () => this.sound.debug(),
       place: (slot: number, meters: number, lat = 0, branch = -1, up = 0) => this.hostGame?.debugPlace(slot, meters, lat, branch, up),

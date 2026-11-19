@@ -74,6 +74,8 @@ export const VEHICLE_SPECS: VehicleSpec[] = [
       [2.1, 2.1],
     ],
   },
+  // Straßenbahn der Dächerjagd: ein alter Zweiwagenzug mit Bügel auf dem Dach – kürzer und schmaler als die der Nachtschicht.
+  { half: 4.4, halfWidth: 1.15, height: 3.0, cars: 2, pitch: 9.4 },
 ];
 
 /**
@@ -81,6 +83,13 @@ export const VEHICLE_SPECS: VehicleSpec[] = [
  * genau auf Höhe der Fahrbahn: Solange er steht, ist er die Brücke über den Graben (TrackDef.metro, BranchDef.trench).
  */
 export const VEH_METRO = 5;
+
+/**
+ * Dächerjagd: die Straßenbahn durch die Gassen. Sie fährt nicht im Kreis um die ganze Runde, sondern nach Fahrplan auf
+ * ihrer Linie (Vehicle.line): ein Stück einer Spur der Hauptstrecke, an dessen Anfang sie aus der Remise kommt und an
+ * dessen Ende sie in eine Seitengasse abbiegt (das zeigt nur das Bild – für die Physik ist sie dort weg).
+ */
+export const VEH_STADTBAHN = 6;
 
 /** So weit unter der Dachkante gilt ein Kart noch als „auf dem Dach“ (Meter) – darunter ist der Wagen eine Wand. */
 export const ROOF_STEP = 0.45;
@@ -112,6 +121,29 @@ export interface Vehicle extends VehicleSpec {
    */
   plan?: MetroPlan;
   train?: number;
+  /**
+   * Straßenbahn (Dächerjagd): Der Zug fährt nach dem Fahrplan line.plan (wie die U-Bahn: auftauchen, anfahren, an der
+   * Haltestelle halten, weiterfahren) auf seiner Linie (TramLine) – sie liegt fast ganz auf der Spur lat der Hauptstrecke.
+   * Ist er nicht auf ihr (noch in der Remise, schon in der Seitengasse), gibt es ihn für niemanden. train = seine Nummer
+   * im Umlauf.
+   */
+  line?: TramLine;
+}
+
+/**
+ * Linie einer Straßenbahn: Punkte im Abstand von einem Meter (Weltkoordinaten) – aus der Remise heraus, auf der Spur die
+ * Gasse entlang und in eine Seitengasse hinein –, je Punkt der nächste Abschnitt der Hauptstrecke, die seitliche Lage dort
+ * und wie weit er hinter der Startlinie liegt (Meter, für „ist sie in der Nähe?“), dazu der Fahrplan.
+ */
+export interface TramLine {
+  n: number;
+  x: Float64Array;
+  y: Float64Array;
+  z: Float64Array;
+  seg: Int32Array;
+  lat: Float64Array;
+  along: Float64Array;
+  plan: MetroPlan;
 }
 
 /**
@@ -167,10 +199,35 @@ export interface TrafficDef {
   lanes: { lat: number; speed: number; cars: [number, number][] }[];
 }
 
-/** Lage des vordersten Wagens zur Rennzeit time (Ticks, auch gebrochen): Meter hinter der Startlinie, 0 ≤ s < lap. */
+/**
+ * Lage des vordersten Wagens zur Rennzeit time (Ticks, auch gebrochen): Meter hinter der Startlinie, 0 ≤ s < lap.
+ * Eine Straßenbahn, die gerade nicht auf ihrer Linie ist (noch in der Remise oder schon abgebogen), ist unendlich weit
+ * weg – so fällt sie bei jedem „ist sie in der Nähe?“ von selbst heraus.
+ */
 export function vehicleAt(v: Vehicle, time: number, lap: number): number {
+  if (v.line) {
+    const f = lineFront(v, time);
+    const n = v.line.n;
+    // (da, solange die Mitte eines Wagens auf der Linie liegt – wie in track.ts: tramPose)
+    if (f - v.half <= 0 || f - v.half - (v.cars - 1) * v.pitch >= n - 1) return Infinity;
+    return v.line.along[Math.max(0, Math.min(n - 1, Math.round(f - v.half)))];
+  }
   const s = (v.offset + (v.speed * time) / 60) % lap;
   return s < 0 ? s + lap : s;
+}
+
+/** Straßenbahn: Lage ihrer Spitze auf der Linie zur Rennzeit time (Meter ab Linienanfang; ≤ 0 = noch in der Remise). */
+export function lineFront(v: Vehicle, time: number): number {
+  return v.line ? metroFront(v.line.plan, v.train ?? 0, time) : 0;
+}
+
+/**
+ * Tempo eines Fahrzeugs zur Rennzeit time (m/s): fest – außer bei der Straßenbahn, die nach Fahrplan anfährt, hält und
+ * weiterfährt. (Gilt nur, solange sie auf ihrer Linie ist.)
+ */
+export function vehicleSpeed(v: Vehicle, time: number): number {
+  if (!v.line) return v.speed;
+  return Math.max(0, (lineFront(v, time + 0.5) - lineFront(v, time - 0.5)) * 60);
 }
 
 /** Windschatten: so weit hinter dem Heck und so weit seitlich der Fahrzeugmitte wirkt er (Meter). */

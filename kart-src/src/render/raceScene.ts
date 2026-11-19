@@ -67,6 +67,8 @@ import {
   pontoonShift,
   tideLevel,
   vehicleAt,
+  vehicleSpeed,
+  VEH_STADTBAHN,
   BAND_HOVER,
   REPEL_TICKS,
 } from '../game/mechanics';
@@ -76,6 +78,7 @@ import { SURFACES } from '../game/surface';
 import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, twistRadiusAt, twistRollAt, twistWarp, vehiclePose, walk, type Track } from '../game/track';
 import { CHANNEL, CHANNEL_FLOOR, DAM_AIR, DAM_CZ, RIVER_Y } from './life/talsperreLand';
 import { FALL } from './life/baumLand';
+import { DAUER, LAEUTEN, TURM } from './life/daecherLand';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -247,7 +250,10 @@ export interface SceneEvent {
     | 'magneton'
     /** Baumkronenpfad (ortsfest, slot −1): eine Hängebrücke knarzt am Ende eines Pendelschlags / ein Tannenzapfen schlägt auf. */
     | 'creak'
-    | 'cone';
+    | 'cone'
+    /** Dächerjagd (ortsfest, slot −1): die Straßenbahn klingelt / ein Schlag der Kirchenglocken. */
+    | 'trambell'
+    | 'bells';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -1165,6 +1171,23 @@ export class RaceScene {
           this.emitAt('creak', t.px[mid], t.py[mid], t.pz[mid], 80);
         }
       }
+      // Dächerjagd: Die Kirchenglocken läuten alle LAEUTEN s Rennzeit DAUER s lang (alle 0,8 s ein Schlag, die drei Glocken
+      // reihum), und die Straßenbahn klingelt, wenn sie an der Haltestelle wieder anfährt.
+      if (t.def.theme === 'daecher') {
+        const c0 = (((before / 60) % LAEUTEN) + LAEUTEN) % LAEUTEN;
+        const c1 = (((time / 60) % LAEUTEN) + LAEUTEN) % LAEUTEN;
+        if (time > 0 && c1 < DAUER && Math.floor(c1 / 0.8) !== Math.floor(c0 / 0.8) && c0 < c1) {
+          const turm = TURM(t);
+          this.emitAt('bells', turm.x, turm.road + 6, turm.z, 420);
+        }
+        for (const v of t.vehicles) {
+          if (!v.line) continue;
+          if (vehicleSpeed(v, before) < 0.05 && vehicleSpeed(v, time) >= 0.05 && Number.isFinite(vehicleAt(v, time, t.n * t.step))) {
+            const p = vehiclePose(t, v, 0, time, this.vpose);
+            this.emitAt('trambell', p.x, p.y + 3, p.z, 90);
+          }
+        }
+      }
       // Gewitterkamm: fernes Wetterleuchten – der Donner dazu rollt eine knappe Sekunde später heran.
       for (const f of t.flashes) {
         const c0 = (((before + f.phase) % f.period) + f.period) % f.period;
@@ -1302,7 +1325,8 @@ export class RaceScene {
         const reach = v.half + ((v.cars - 1) * v.pitch) / 2;
         if (dy < 2.5 && Math.abs(du) < reach + 1.4 && Math.abs(dw) < v.halfWidth + 1.35 && this.honkWait === 0) {
           this.honkWait = 2.2;
-          this.emitAt('honk', p.x, p.y + 1.5, p.z);
+          // (Die Straßenbahn der Dächerjagd hupt nicht, sie klingelt.)
+          this.emitAt(v.kind === VEH_STADTBAHN ? 'trambell' : 'honk', p.x, p.y + (v.kind === VEH_STADTBAHN ? 3 : 1.5), p.z);
         }
         // Vorbeigezogen: eben noch dahinter, jetzt davor – und dicht daneben.
         const side = du > reach ? 1 : du < -reach ? -1 : 0;
@@ -2850,6 +2874,36 @@ export class RaceScene {
   /** Nur für Tests: Höhe des gezeichneten Geländes an (x, z) – null ohne Welt. */
   debugGround(x: number, z: number): { height: number; drawn: number } | null {
     return this.world ? { height: this.world.heightAt(x, z), drawn: this.world.groundY(x, z) } : null;
+  }
+
+  /**
+   * Nur für Tests: Strahlen durch die stehende Welt (Fahrbahn, Gelände, Kulisse, Mechanik – ohne Karts und Teilchen).
+   * Je Strahl [x, y, z, dx, dy, dz, weit]: erster Treffer (Punkt, Abstand, Name des Netzes samt Eltern) oder null.
+   */
+  debugRays(rays: number[][]): ({ x: number; y: number; z: number; dist: number; name: string } | null)[] {
+    if (!this.world) return rays.map(() => null);
+    const rc = new THREE.Raycaster();
+    const targets: THREE.Object3D[] = [this.world.group];
+    for (const m of this.mechanics) targets.push(m.group);
+    const o = new THREE.Vector3();
+    const d = new THREE.Vector3();
+    return rays.map((r) => {
+      o.set(r[0], r[1], r[2]);
+      d.set(r[3], r[4], r[5]).normalize();
+      rc.set(o, d);
+      rc.far = r[6] ?? 1000;
+      const hits = rc.intersectObjects(targets, true).filter((h) => {
+        const m = h.object as THREE.Mesh;
+        const mat = m.material as THREE.Material | undefined;
+        // Konturen (Rückseiten, aufgeblasen) und durchsichtige Schleier zählen nicht
+        return h.object.name !== 'outline' && !(mat && mat.transparent && mat.opacity < 0.95);
+      });
+      if (hits.length === 0) return null;
+      const h = hits[Math.min(hits.length - 1, r[7] ?? 0)];
+      let name = '';
+      for (let q: THREE.Object3D | null = h.object; q && q !== this.scene; q = q.parent) name = (q.name || q.type) + (name ? '/' + name : '');
+      return { x: h.point.x, y: h.point.y, z: h.point.z, dist: h.distance, name };
+    });
   }
 
   debugTree(): { name: string; triangles: number }[] {

@@ -24,6 +24,7 @@ import { NEON_STUECK } from './stuecke/neon';
 import { TALSPERRE_STUECK } from './stuecke/talsperre';
 import { KRISTALL_STUECK } from './stuecke/kristall';
 import { BAUM_STUECK } from './stuecke/baum';
+import { DAECHER_STUECK } from './stuecke/daecher';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
@@ -459,6 +460,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   kristall: KRISTALL_STUECK,
   // Baumkronenpfad: eigenes Stück (stuecke/baum.ts)
   baum: BAUM_STUECK,
+  // Dächerjagd: eigenes Stück (stuecke/daecher.ts)
+  daecher: DAECHER_STUECK,
   results: RESULTS,
 };
 

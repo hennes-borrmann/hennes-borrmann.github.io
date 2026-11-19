@@ -148,6 +148,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
       if (t.twin[i] >= 0 || (t.edge[i] & EDGE_TWIST) !== 0) continue;
       // (Baumkronenpfad: Die stark geneigten Rampen um den Riesenstamm und den hohlen Baumriesen zeigen die Kurve selbst.)
       if (t.def.theme === 'baum' && Math.abs(t.bank[i]) > 0.35) continue;
+      // (Dächerjagd: keine Kurventafeln unter Wasser an den Kaimauern.)
+      if (t.def.theme === 'daecher' && t.deep[i]) continue;
       // Außenseite der Kurve; in Fahrtrichtung lesbar.
       const sgn = k > 0 ? -1 : 1;
       if (t.edge[i] & (sgn < 0 ? 1 : 2)) continue;
@@ -183,7 +185,8 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     // (Ruine, Dschungel-Fluss, Spiegelkabinett, Wüste, Kinderzimmer, Rummel und Magnetwerk bekommen ihre eigenen Pflanzen von der Kulisse – keine Kiefern.)
     // (Die Gipfelbahn auch: Ihre Kulisse legt eigene Bergschultern über das Gelände und pflanzt Fichten am Hang und Laubbäume im Tal darauf.)
     // (Der Baumkronenpfad hat seinen eigenen Herbstwald: life/baum.ts.)
-    const cap = ['ruine', 'dschungel', 'spiegel', 'wueste', 'zimmer', 'rummel', 'magnet', 'gipfel', 'baum'].includes(t.def.theme) ? 0 : Math.round(170 * dense);
+    // (Die Dächerjagd liegt in der Stadt: Ihre Bäume und Gärten pflanzt life/daecher.ts.)
+    const cap = ['ruine', 'dschungel', 'spiegel', 'wueste', 'zimmer', 'rummel', 'magnet', 'gipfel', 'baum', 'daecher'].includes(t.def.theme) ? 0 : Math.round(170 * dense);
     for (let i = 0; i < t.total && spots.length < cap; i++) {
       if (t.surf[i] !== dirt || t.edge[i] & (EDGE_DECK | EDGE_TUNNEL)) continue;
       // Dicht an den Weg heran, dahinter lichter – auf jeder Seite etwa ein Baum alle drei Meter.

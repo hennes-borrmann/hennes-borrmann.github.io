@@ -43,6 +43,7 @@ import {
   pulseCycle,
   tideLevel,
   vehicleAt,
+  vehicleSpeed,
   waterFactor,
   BUBBLE_LIFT,
   DIVE_ACCEL,
@@ -816,6 +817,8 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
       const train = (v.cars - 1) * v.pitch;
       if (d > v.half + 8 || d < -(train + v.half + WAKE_LENGTH + 8)) continue;
     }
+    // Tempo des Fahrzeugs gerade jetzt (die Straßenbahn der Dächerjagd hält an der Haltestelle).
+    const vs = vehicleSpeed(v, time);
     for (let car = 0; car < v.cars; car++) {
       const p = vehiclePose(t, v, car, time, VPOSE);
       if (p.seg < 0) continue;
@@ -861,7 +864,7 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
         const push = KART_RADIUS - dist;
         s.x += (hx * nu - hz * nw) * push;
         s.z += (hz * nu + hx * nw) * push;
-        const vn = (ku - v.speed) * nu + kw * nw;
+        const vn = (ku - vs) * nu + kw * nw;
         if (vn < 0) {
           ku -= nu * vn * 1.3;
           kw -= nw * vn * 1.3;
@@ -887,8 +890,8 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
         // Wer die Ecke von hinten erwischt, verliert einen Teil seines Überschusses.
         const corner = pw >= pu ? 0.35 : 0;
         const loss = Math.max(corner, vn > 0 ? Math.min(0.3, 0.008 + vn * 0.02) : 0);
-        if (loss > 0 && ku > v.speed) ku -= (ku - v.speed) * loss;
-        if (vn > 5 || (corner > 0 && Math.abs(ku - v.speed) > 4)) {
+        if (loss > 0 && ku > vs) ku -= (ku - vs) * loss;
+        if (vn > 5 || (corner > 0 && Math.abs(ku - vs) > 4)) {
           ev |= EV_WALL;
           s.driftDir = 0;
           s.driftCharge = 0;
@@ -898,7 +901,7 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
         const end = du > 0 ? 1 : -1;
         s.x += hx * end * pu;
         s.z += hz * end * pu;
-        const closing = -(ku - v.speed) * end;
+        const closing = -(ku - vs) * end;
         if (closing > 0) {
           if (closing > CRASH_SPEED) {
             const r = hitKart(s);
@@ -906,7 +909,7 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
             else if (r === HIT_SPIN) ev |= EV_HIT;
             kw = (-s.vx * hz + s.vz * hx) * 0.5;
           }
-          ku = v.speed + end * 2;
+          ku = vs + end * 2;
         }
       }
       s.vx = hx * ku - hz * kw;

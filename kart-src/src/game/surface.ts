@@ -3,7 +3,7 @@
 // und laden den Drift schnell, Stahl ist schnell und glatt, Fels und der
 // Stadtasphalt kleben. Die KI plant mit denselben Werten.
 
-export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble' | 'meadow' | 'band' | 'concrete' | 'bark';
+export type SurfaceId = 'asphalt' | 'wood' | 'sand' | 'dirt' | 'gravel' | 'grass' | 'rock' | 'metal' | 'cobble' | 'neon' | 'snow' | 'ice' | 'regolith' | 'panel' | 'marble' | 'meadow' | 'band' | 'concrete' | 'bark' | 'tiles' | 'straw';
 
 export interface Surface {
   id: SurfaceId;
@@ -67,6 +67,12 @@ export const SURFACES: Surface[] = [
   // Rinde (Baumkronenpfad: der Ast ohne Geländer): rau und trocken – hält ordentlich, rollt aber nicht ganz so frei wie
   // die glatten Bohlen.
   { id: 'bark', name: 'Rinde', grip: 0.95, speed: 0.99, accel: 0.98, brake: 0.95, charge: 0.1 },
+  // Dachziegel (Dächerjagd: der Weg über die Dächer): glatt gebrannt und warm von der Sonne – rollt frei, hält aber nicht
+  // ganz so gut wie Pflaster, und gebremst wird auf den gewölbten Ziegeln etwas weicher.
+  { id: 'tiles', name: 'Dachziegel', grip: 0.9, speed: 1.01, accel: 1, brake: 0.85, charge: 0.15 },
+  // Stroh (Dächerjagd: die Markthalle): Stroh und Sägespäne zwischen den Ständen – zäh wie das hohe Gras der Almwiese; eine
+  // Abkürzung hindurch lohnt sich nur mit Schub (der hebt die Bremswirkung des Untergrunds auf, siehe sim.ts).
+  { id: 'straw', name: 'Stroh', grip: 0.82, speed: 0.56, accel: 0.66, brake: 0.9, charge: 0.2 },
 ];
 
 export const SURFACE_INDEX = Object.fromEntries(SURFACES.map((s, i) => [s.id, i])) as Record<SurfaceId, number>;

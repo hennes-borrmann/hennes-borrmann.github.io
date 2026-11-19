@@ -305,6 +305,8 @@ const LEVEL: Record<SfxName, number> = {
   // Baumkronenpfad: Knarzen der Hängebrücke (leiser als ein Treffer, oft zu hören) und der Aufschlag eines Tannenzapfens
   creak: 2.4,
   cone: 3.2,
+  trambell: 2.4,
+  bells: 2.2,
   rumble: 1.2,
   charge: 2,
   // Kristallmine: die Sprengung so kräftig wie der Meteorit (sie kommt ortsfest und muss aus 30 m über Motor und Musik
@@ -508,6 +510,8 @@ export class SfxPlayer {
   private icicleTick = 0;
   private creakTick = 0;
   private coneTick = 0;
+  private bellTick = 0;
+  private tramTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
   private smashTick = 0;
@@ -1898,6 +1902,39 @@ export class SfxPlayer {
           .noise(320, 140, 0.12, 0.22, { type: 'lowpass', brown: true, at: 0.06, attack: 0.003 })
           .noise(2400, 1800, 0.03, 0.1, { q: 3, at: 0.13 + k * 0.02, attack: 0.001 })
           .noise(3100, 2500, 0.025, 0.07, { q: 3, at: 0.19, attack: 0.001 });
+        break;
+      }
+      // --- Dächerjagd ---
+      case 'trambell': {
+        // Die Straßenbahn klingelt (ortsfest an ihrer Spitze): zwei rasche Schläge des Klöppels auf eine helle Schalenglocke –
+        // „bimm-bimm“. Eine Glocke klingt nicht harmonisch: Teiltöne bei 1 : 2,76 : 5,4 der Grundfrequenz (um 1,9 kHz), der
+        // hohe klingt am schnellsten aus; dazu je Schlag ein kurzer, metallischer Anschlag (enges Rauschband um 6 kHz).
+        // Zwei Fassungen reihum (eine Spur höher oder tiefer), damit zwei Bahnen nicht gleich klingen.
+        const k = this.tramTick++ % 2;
+        const f = k === 0 ? 1880 : 1760;
+        for (const at of [0, 0.17]) {
+          v.tone('sine', f, f * 0.995, 0.5, 0.11, { at, attack: 0.002 })
+            .tone('sine', f * 2.76, f * 2.74, 0.28, 0.05, { at, attack: 0.002 })
+            .tone('sine', f * 5.4, f * 5.35, 0.12, 0.025, { at, attack: 0.001 })
+            .noise(6200, 5200, 0.03, 0.05, { q: 4, at, attack: 0.001 });
+        }
+        break;
+      }
+      case 'bells': {
+        // Ein Schlag einer Kirchenglocke im Turm (ortsfest, weit zu hören; alle 0,8 s eine der drei Glocken, solange
+        // geläutet wird). Glockenklang aus Teiltönen einer Kirchenglocke: Unterton (½), Prime (1), kleine Terz (1,2), Quinte
+        // (1,5) und Oktave (2) – die tiefen klingen lang nach (gut 2,5 s), die hohen kürzer; der Schlag selbst ist ein kurzer,
+        // dunkler Anschlag (Rauschband um 1,2 kHz). Drei Glocken reihum: G, H und D – ein G-Dur-Dreiklang, passend zum
+        // Rennstück in D-Dur.
+        const k = this.bellTick++ % 3;
+        const f = [196, 246.9, 293.7][k];
+        v.tone('sine', f * 0.5, f * 0.5, 2.6, 0.16, { attack: 0.01 })
+          .tone('sine', f, f * 0.998, 2.3, 0.2, { attack: 0.004 })
+          .tone('sine', f * 1.2, f * 1.198, 1.6, 0.1, { attack: 0.004 })
+          .tone('sine', f * 1.5, f * 1.497, 1.3, 0.07, { attack: 0.003 })
+          .tone('sine', f * 2, f * 1.995, 1.0, 0.09, { attack: 0.002, tremHz: 4.5 })
+          .tone('triangle', f * 2.6, f * 2.58, 0.5, 0.035, { attack: 0.002 })
+          .noise(1300, 900, 0.07, 0.12, { q: 2, attack: 0.002 });
         break;
       }
       // --- Gewitterkamm ---
