@@ -445,6 +445,9 @@ export class World {
         case 'grass':
           return { a: col(0x86c45c), b: col(0x77b650), c: col(0x6aa646), band: 4, plain: false, lines: true, line: col(0xf7f4e8), kerbs: false, shoulder: null, detail: 'none', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'rock':
+          // (Kristallmine: Unter Tage zeigen gelbe Randlinien – wie die Sicherheitsfarbe im Bergwerk –, wo die Fahrbahn endet;
+          // der Fels der Fahrbahn ist etwas heller als der der Wände.)
+          if (t.def.theme === 'kristall') return { a: rgb(0x5a4c60), b: rgb(0x524558), c: rgb(0xa898b8), band: 3, plain: false, lines: true, line: rgb(0xffc23a), kerbs: false, shoulder: rgb(0x6a5868), detail: 'cracks', barrier: 'rock', wallA: rgb(0x86707e), wallB: rgb(0x6c5a6c) };
           return { a: col(0x57495a), b: col(0x4b3f50), c: crack, band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0x3c3242), detail: 'cracks', barrier: 'rock', wallA: col(0x6b5565), wallB: col(0x54445a) };
         case 'metal':
           return { a: col(0x8792a0), b: col(0x77828f), c: col(0x4d5560), band: 3, plain: false, lines: true, line: col(0xffd23f), kerbs: false, shoulder: col(0x5c6570), detail: 'plates', barrier: 'rail', wallA: col(0x3a4049), wallB: col(0xc9d2dc) };
@@ -1824,6 +1827,7 @@ export class World {
         const near = cv ? th.fogNear + (cv.fogNear - th.fogNear) * c : th.fogNear;
         const far = cv ? th.fogFar + (cv.fogFar - th.fogFar) * c : th.fogFar;
         const sunI = cv ? th.sunIntensity + (cv.sunIntensity - th.sunIntensity) * c : th.sunIntensity;
+        this.hemi.intensity = cv ? th.hemiIntensity + ((cv.hemiIntensity ?? th.hemiIntensity) - th.hemiIntensity) * c : th.hemiIntensity;
         this.fog.color.copy(this.depthFrom.fog);
         this.sun.color.copy(this.depthFrom.sun);
         this.hemi.color.copy(this.depthFrom.hemiSky);

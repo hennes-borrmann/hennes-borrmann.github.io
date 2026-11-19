@@ -83,6 +83,8 @@ export interface Theme {
     sunIntensity: number;
     hemiSky: number;
     hemiGround: number;
+    /** Stärke des Himmelslichts unter Tage (sonst wie über Tage). */
+    hemiIntensity?: number;
   };
 }
 
@@ -98,10 +100,10 @@ export const THEMES: Record<ThemeId, Theme> = {
     fogFar: 380,
     sunDir: [-0.4, 0.75, 0.45],
     sunColor: 0xb4c2ff,
-    sunIntensity: 1.35,
+    sunIntensity: 1.45,
     hemiSky: 0x7c84d8,
     hemiGround: 0x6a3f2c,
-    hemiIntensity: 1.35,
+    hemiIntensity: 1.5,
     disc: 0xf2f0e0,
     discSize: 22,
     clouds: 0x262a52,
@@ -119,7 +121,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     deck: 0x5a4a3e,
     deckDark: 0x30261f,
     pillar: 0x4a3c32,
-    ground: [0x2c2c3c, 0x34323f, 0x3a2f3a, 0x4a4250],
+    ground: [0x383850, 0x423f50, 0x4a3c4a, 0x5c5264],
     liquidY: null,
     liquid: [0x0c3a4a, 0x1a6a78, 0x7fe8e0],
     liquidGlow: false,
@@ -135,15 +137,18 @@ export const THEMES: Record<ThemeId, Theme> = {
       hemiGround: 0x1f4a50,
       surface: [0x1a6a78, 0x3fb8c0, 0xbffcf4],
     },
+    // (Unter Tage nicht zu dunkel: Auch auf einem kleinen Bildschirm müssen Fahrbahnränder und Wände klar zu lesen sein –
+    // Dunst, Himmels- und Bodenlicht gut ein Drittel heller als die Nacht über Tage es nahelegte.)
     cave: {
       y: -6,
-      fog: 0x1c1420,
-      fogNear: 26,
-      fogFar: 170,
-      sunColor: 0xd8b8ff,
-      sunIntensity: 0.95,
-      hemiSky: 0x9a7cc8,
-      hemiGround: 0x5a3a2a,
+      fog: 0x2a1f30,
+      fogNear: 34,
+      fogFar: 200,
+      sunColor: 0xe4c8ff,
+      sunIntensity: 1.25,
+      hemiSky: 0xc8a2ff,
+      hemiGround: 0x7a4e38,
+      hemiIntensity: 1.65,
     },
   },
   // Neonhochbahn: Zukunftsstadt bei Nacht. Tiefer, fast schwarzer Himmel mit violettem Dunst am Horizont (der Widerschein

@@ -36,10 +36,10 @@ const TAU = Math.PI * 2;
 
 // --- Farben ---------------------------------------------------------------------
 
-const C_FELS = rgb(0x3b3040);
-const C_FELS_2 = rgb(0x30283a);
-const C_FELS_D = rgb(0x241e2a);
-const C_SOHLE = rgb(0x2c2622);
+const C_FELS = rgb(0x4a3c50);
+const C_FELS_2 = rgb(0x3d3248);
+const C_FELS_D = rgb(0x2e2636);
+const C_SOHLE = rgb(0x3a322c);
 const C_KALK = rgb(0x8f8a84);
 const C_HOLZ = rgb(0x6a4a2c);
 const C_HOLZ_D = rgb(0x4a321e);
@@ -51,6 +51,9 @@ const C_ROT = rgb(0x9a2a24);
 const C_DACH = rgb(0x2a2630);
 const C_BETON = rgb(0x55525a);
 const C_HALDE = rgb(0x2a2629);
+const C_LUTTE = rgb(0xc8962e);
+const C_FAHRT = rgb(0x8a92a6);
+const PFEIL = rgb(0xffc23a);
 const C_HALDE_2 = rgb(0x332e30);
 const C_WASSER = rgb(0x0f4f5a);
 const C_WASSER_H = rgb(0x2a8a90);
@@ -383,20 +386,20 @@ export function buildKristallLife(world: World): Life {
     void ev;
   };
   /** Kristallgruppe an der Wand: um (x, y, z), nach (nx, ny, nz) gerichtet. */
-  const gruppe = (x: number, y: number, z: number, nx: number, ny: number, nz: number, size: number, col: RGB, n = 4): void => {
+  const gruppe = (x: number, y: number, z: number, nx: number, ny: number, nz: number, size: number, col: RGB, n = 4, r = rnd): void => {
     for (let k = 0; k < n; k++) {
-      const a = rnd() * TAU;
+      const a = r() * TAU;
       const sp = 0.55;
-      const len = size * (0.55 + rnd() * 0.75);
+      const len = size * (0.55 + r() * 0.75);
       kristall(
-        x + (rnd() - 0.5) * size * 0.6,
-        y + (rnd() - 0.5) * size * 0.4,
-        z + (rnd() - 0.5) * size * 0.6,
+        x + (r() - 0.5) * size * 0.6,
+        y + (r() - 0.5) * size * 0.4,
+        z + (r() - 0.5) * size * 0.6,
         nx + Math.cos(a) * sp,
         ny + 0.45 + Math.sin(a) * sp * 0.5,
         nz + Math.sin(a) * sp,
         len,
-        len * (0.16 + rnd() * 0.08),
+        len * (0.16 + r() * 0.08),
         k === 0 ? shade(col, 1.15) : col,
       );
     }
@@ -653,6 +656,208 @@ export function buildKristallLife(world: World): Life {
         const z = s.z + Math.sin(a) * (s.r - 0.3);
         if (inBau(x, y, z, -1, -1)) continue;
         glow.box(x, y, z, 0.5, 0.5, 0.5, LAMPE);
+      }
+    }
+  }
+
+  // --- Freiraum der Fahrbahnen (für den Wandschmuck im Wetterschacht und die Pfeiltafeln) -----------------------
+  const roadGrid = new Map<number, number[]>();
+  for (let i = 0; i < t.total; i++) {
+    const k = key(Math.floor(t.px[i] / CELL), Math.floor(t.pz[i] / CELL));
+    let l = roadGrid.get(k);
+    if (!l) roadGrid.set(k, (l = []));
+    l.push(i);
+  }
+  /**
+   * Stört p keine Fahrbahn? Jede, die waagerecht näher liegt als ihre Bande plus pad, muss mindestens over Meter unter p
+   * liegen (Durchfahrtshöhe) oder mindestens under Meter über p (dann hängt p unter ihrem Deck).
+   */
+  const clearOfRoads = (x: number, y: number, z: number, pad: number, over: number, under: number): boolean => {
+    const gx = Math.floor(x / CELL);
+    const gz = Math.floor(z / CELL);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const l = roadGrid.get(key(gx + dx, gz + dz));
+        if (!l) continue;
+        for (const j of l) {
+          const ox = x - t.px[j];
+          const oz = z - t.pz[j];
+          if (ox * ox + oz * oz > (t.wh[j] + pad) ** 2) continue;
+          const lat = Math.max(-t.wh[j], Math.min(t.wh[j], ox * rightX(t, j) + oz * rightZ(t, j)));
+          const up = y - (t.py[j] + lat * t.bank[j]);
+          if (up < over && up > -under) return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  // --- Wetterschacht: Kristalle, Grubenlampen, Wetterlutten und eine Fahrt (Leiter) an der Wand ------------------
+  // (Alles zwischen den Gängen der Wendel: Über der Fahrbahn bleibt die Durchfahrtshöhe frei, unter ihrem Deck Luft.)
+  {
+    const s = shafts.find((q) => q.x === WETTERSCHACHT.x && q.z === WETTERSCHACHT.z);
+    if (s) {
+      const rw = seeded(2209);
+      const at = (a: number, r: number): [number, number] => [s.x + Math.cos(a) * r, s.z + Math.sin(a) * r];
+      // Leuchtende Kristallgruppen in den Farben der Mine (violett, türkis, pink, selten grün)
+      const farben = [KRISTALL[0], KRISTALL[1], KRISTALL[2], KRISTALL[0], KRISTALL[1], KRISTALL[3]];
+      const NK = 36;
+      const dicht = detail >= 2 ? 0.45 : detail === 1 ? 0.34 : 0.24;
+      for (let k = 0; k < NK; k++) {
+        for (let y = s.floor + 2.5; y < -2; y += 3.4) {
+          const a = ((k + rw() * 0.6) / NK) * TAU;
+          const yy = y + rw() * 1.5;
+          const wahl = rw();
+          const c = farben[Math.floor(rw() * farben.length)];
+          const size = 0.8 + rw() * 0.7;
+          const n = 3 + Math.floor(rw() * 2);
+          if (wahl > dicht) continue;
+          const [x, z] = at(a, s.r - 0.2);
+          if (inBau(x, yy, z, -1, -0.5) || !clearOfRoads(x, yy, z, 2, 5.2, 3)) continue;
+          gruppe(x, yy, z, -Math.cos(a), 0, -Math.sin(a), size, c, n, rw);
+        }
+      }
+      // Direkt über der Bande, im Blick des Fahrers: flache Kristallgruppen, die steil an der Wand hinaufwachsen (sie ragen
+      // höchstens 0,3 m aus der Wand – nicht über die Fahrbahn), je 5 m eine, versetzt zu den Lampen.
+      for (let i = 5; i < t.n; i += 10) {
+        for (const off of [0, 5]) {
+          const j = i + off;
+          if (j >= t.n) continue;
+          const d = Math.hypot(t.px[j] - s.x, t.pz[j] - s.z);
+          if (Math.abs(d - WETTERSCHACHT.r) > 2 || t.py[j] < s.floor || t.py[j] > -1.5) continue;
+          const a0 = Math.atan2(t.pz[j] - s.z, t.px[j] - s.x);
+          const out = rightX(t, j) * Math.cos(a0) + rightZ(t, j) * Math.sin(a0) > 0 ? 1 : -1;
+          const yEdge = t.py[j] + out * t.wh[j] * t.bank[j];
+          const c = farben[Math.floor(rw() * farben.length)];
+          const n = 3 + Math.floor(rw() * 2);
+          const yy = yEdge + 1.2 + rw() * 1.3;
+          for (let m = 0; m < n; m++) {
+            const a = a0 + ((rw() - 0.5) * 2.2) / s.r;
+            const [x, z] = at(a, s.r - 0.1);
+            const y = yy + (rw() - 0.5) * 0.6;
+            const len = 0.8 + rw() * 0.8;
+            const tilt = (rw() - 0.5) * 0.7;
+            if (inBau(x, y, z, -1, -0.5)) continue;
+            kristall(x, y, z, -Math.cos(a) * 0.22 - Math.sin(a) * tilt, 1, -Math.sin(a) * 0.22 + Math.cos(a) * tilt, len, len * 0.22, m === 0 ? shade(c, 1.15) : c);
+          }
+        }
+      }
+      // Grubenlampen an der Wand, alle 10 m entlang der Wendel, gut 3 m über dem äußeren Rand der Fahrbahn
+      for (let i = 0; i < t.n; i += 10) {
+        const d = Math.hypot(t.px[i] - s.x, t.pz[i] - s.z);
+        if (Math.abs(d - WETTERSCHACHT.r) > 2 || t.py[i] < s.floor || t.py[i] > -1.5) continue;
+        const a = Math.atan2(t.pz[i] - s.z, t.px[i] - s.x);
+        const out = rightX(t, i) * Math.cos(a) + rightZ(t, i) * Math.sin(a) > 0 ? 1 : -1;
+        const y = t.py[i] + out * t.wh[i] * t.bank[i] + 3.3;
+        const [x, z] = at(a, s.r - 0.4);
+        if (inBau(x, y, z, -1, -0.5)) continue;
+        glow.box(x, y, z, 0.42, 0.5, 0.42, LAMPE, -a);
+        const [hx, hz] = at(a, s.r - 0.25);
+        holz.box(hx, y + 0.34, hz, 0.7, 0.14, 0.5, C_STAHL_D, -a);
+      }
+      // Wetterlutten: zwei dicke Rohre senkrecht an der Wand – sie bringen frische Wetter hinunter –, mit Flanschen;
+      // neben der ersten führt eine Fahrt (Leiter) von der Sohle bis unter den Schachtkranz.
+      const lutte = new THREE.CylinderGeometry(0.45, 0.45, 2.5, detail >= 1 ? 10 : 8, 1, true);
+      const flansch = new THREE.CylinderGeometry(0.53, 0.53, 0.2, detail >= 1 ? 10 : 8, 1, false);
+      disposables.push(lutte, flansch);
+      const one = new THREE.Vector3(1, 1, 1);
+      const noRot = new THREE.Quaternion();
+      for (const a of [0.95, 2.35]) {
+        const [x, z] = at(a, s.r - 0.3);
+        for (let y = s.floor + 1.25; y < -1.2; y += 2.5) {
+          if (inBau(x, y, z, -1, -0.8)) continue;
+          fels.add(lutte, C_LUTTE, m4.compose(vv.set(x, y, z), noRot, one));
+          fels.add(flansch, C_STAHL_D, m4.compose(vv.set(x, y + 1.25, z), noRot, one));
+        }
+      }
+      {
+        const a = 0.95 + 1.9 / s.r;
+        const step = detail >= 1 ? 0.45 : 0.6;
+        for (const side of [-0.28, 0.28]) {
+          const aa = a + side / s.r;
+          const [x, z] = at(aa, s.r - 0.3);
+          for (let y = s.floor + 1.25; y < -1.6; y += 2.5) {
+            if (inBau(x, y, z, -1, -0.8)) continue;
+            holz.box(x, y, z, 0.08, 2.5, 0.08, C_FAHRT, -aa);
+          }
+        }
+        const [x, z] = at(a, s.r - 0.3);
+        for (let y = s.floor + 0.4; y < -1.6; y += step) {
+          if (inBau(x, y, z, -1, -0.8)) continue;
+          holz.box(x, y, z, 0.06, 0.06, 0.56, C_FAHRT, -a);
+        }
+      }
+    }
+  }
+
+  // --- Kurven an den Schachtausfahrten früh ankündigen: Leuchtpfeil-Tafeln mit Lampe am Außenrand der Kurve ---------
+  // (Wer unter Tage aus dem Schacht in den Stollen fährt – oder aus dem Stollen in den Schacht –, sieht die Richtung, bevor
+  // die Kurve beginnt: Die Tafeln stehen schon 16 m vorher, alle 4 m eine, hoch über der Bande – im Schacht an der Wand,
+  // im Stollen auf einem Pfosten. Die gewöhnlichen Richtungstafeln der Strecke (scenery.ts) stehen tiefer.)
+  {
+    const zonen: [number, number][] = [];
+    for (const s of shafts) {
+      let inside = Math.hypot(t.px[0] - s.x, t.pz[0] - s.z) < s.r;
+      for (let i = 1; i < t.n; i++) {
+        const ins = Math.hypot(t.px[i] - s.x, t.pz[i] - s.z) < s.r;
+        if (ins !== inside && t.py[i] < UNTER) zonen.push([i - 40, i + 50]);
+        inside = ins;
+      }
+    }
+    const inSchacht = (x: number, z: number): (typeof shafts)[number] | null => {
+      for (const s of shafts) if (Math.hypot(x - s.x, z - s.z) < s.r) return s;
+      return null;
+    };
+    for (const [from, to] of zonen) {
+      for (let i0 = from; i0 < to; i0 += 4) {
+        const i = ((i0 % t.n) + t.n) % t.n;
+        // die stärkste Krümmung der nächsten 16 m (mit Vorzeichen)
+        let k = 0;
+        for (let d = 0; d <= 16; d += 2) {
+          const j = (i + d) % t.n;
+          if (Math.abs(t.curv[j]) > Math.abs(k)) k = t.curv[j];
+        }
+        if (Math.abs(k) < 1 / 40) continue;
+        const sgn = k > 0 ? -1 : 1;
+        // (Vor einer Gabelung bleibt deren Seite frei: Dort stehen das Signal und das Weichensignal der Abkürzung.)
+        if (t.branches.some((b) => b.side === sgn && i >= b.from - 30 && i <= b.from + 4)) continue;
+        const rx = rightX(t, i);
+        const rz = rightZ(t, i);
+        let lat = sgn * (t.wh[i] + 0.9);
+        let wand = false;
+        const q = bau[i];
+        const s0 = inSchacht(t.px[i] + rx * lat, t.pz[i] + rz * lat);
+        if (s0) {
+          // im Schacht: an die Wand
+          while (Math.hypot(t.px[i] + rx * lat - s0.x, t.pz[i] + rz * lat - s0.z) < s0.r - 0.3 && Math.abs(lat) < t.wh[i] + 6) lat += sgn * 0.1;
+          wand = true;
+        } else if (q && Math.abs(lat) > q.w - 0.3) {
+          if (q.w - 0.3 < t.wh[i] + 0.5) continue;
+          lat = sgn * (q.w - 0.3);
+        }
+        const x = t.px[i] + rx * lat;
+        const z = t.pz[i] + rz * lat;
+        const yEdge = t.py[i] + sgn * t.wh[i] * t.bank[i];
+        const yb = yEdge + 3.1;
+        if (!clearOfRoads(x, yEdge + 0.3, z, 0.4, 4.5, 2) || !clearOfRoads(x, yb + 1, z, 0.4, 4.5, 2)) continue;
+        if (q && yb + 1 > t.py[i] + q.h * (1 - 0.32 * (lat / q.w) ** 2) - 0.2) continue;
+        const rot = Math.atan2(t.tx[i], t.tz[i]);
+        // Tafel (dunkel), davor drei leuchtende Winkel in Richtung der Kurve, darüber eine Lampe
+        const bx = x - t.tx[i] * 0.05;
+        const bz = z - t.tz[i] * 0.05;
+        holz.box(x, yb, z, 2.4, 1.05, 0.1, C_STAHL_D, rot);
+        if (!wand) holz.box(x + t.tx[i] * 0.12, (yEdge - 0.4 + yb) / 2, z + t.tz[i] * 0.12, 0.16, yb - yEdge + 0.4, 0.16, C_STAHL_D, rot);
+        const dir = k > 0 ? 1 : -1;
+        const ref: [number, number, number] = [bx - t.tx[i] * 20, yb, bz - t.tz[i] * 20];
+        const P = (u: number, v: number): V3 => [bx + rx * u, yb + v, bz + rz * u];
+        for (const c of [-0.72, 0, 0.72]) {
+          const ub = c - dir * 0.26;
+          const ut = c + dir * 0.26;
+          const w = dir * 0.22;
+          quadTo(glow, P(ub, 0.36), P(ub + w, 0.36), P(ut + w, 0), P(ut, 0), ref[0], ref[1], ref[2], PFEIL);
+          quadTo(glow, P(ut, 0), P(ut + w, 0), P(ub + w, -0.36), P(ub, -0.36), ref[0], ref[1], ref[2], PFEIL);
+        }
+        glow.box(x, yb + 0.68, z, 0.5, 0.22, 0.26, LAMPE, rot);
       }
     }
   }
