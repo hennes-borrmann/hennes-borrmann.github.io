@@ -156,9 +156,8 @@ export const RAMPE: TrackDef = {
   ],
   surfaces: [
     [W1 + 0.3, R1 + 0.6, 'band'],
-    // Startplatz: Beton; auf der Sohle des Kriechwegs Flusskiesel
+    // Startplatz: Beton
     [6.9, 7.6, 'concrete'],
-    [46.6, 49.4, 'gravel'],
   ],
   glides: [[R1 + 0.8, 41]],
   thermals: [{ at: 39.5, lat: 3, radius: 7 }],

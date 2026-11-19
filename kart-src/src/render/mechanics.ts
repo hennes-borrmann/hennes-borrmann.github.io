@@ -25,6 +25,7 @@ import { buildAtrium } from './mechanics/atrium';
 import { buildDam } from './mechanics/dam';
 import { buildMine } from './mechanics/mine';
 import { buildCanopy } from './mechanics/canopy';
+import { buildRampe } from './mechanics/rampe';
 import { buildRails } from './mechanics/rails';
 import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
@@ -73,6 +74,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.def.theme === 'talsperre') out.push(buildDam(track, detail, world));
   // Baumkronenpfad: Hängebrücken, Riesen und Holzböcke, der hohle Baumriese, Wasserfall und Teich, Tannenzapfen
   if (track.def.theme === 'baum') out.push(buildCanopy(track, detail, world));
+  // Startrampe: Startsockel, Rakete, Flammengraben, Kriechweg mit Raupentransporter, Serviceturm, Magnetring, Countdown-Tafeln
+  if (track.def.theme === 'rampe') out.push(buildRampe(track, detail, world));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
   // (Im Dschungel ist ein „Band“ die Querströmung der Furt: die zeichnet mechanics/river.ts.)
@@ -85,7 +88,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.def.theme !== 'baum' && track.pulses.some((p) => p.kind === PULSE_AVALANCHE || p.kind === PULSE_ICICLE)) out.push(buildSnow(track, detail));
   if (track.launchers.length > 0 || track.pulses.some((p) => p.kind === PULSE_METEOR)) out.push(buildMoon(track, detail));
   // (Die Hängebrücken des Baumkronenpfads zeichnet mechanics/canopy.ts.)
-  if (track.winds.length > 0 || (track.pontoons.length > 0 && track.def.theme !== 'baum')) out.push(buildHarbor(track, detail));
+  // (Den Abgasstoß der Startrampe zeichnet mechanics/rampe.ts.)
+  if ((track.winds.length > 0 && track.def.theme !== 'rampe') || (track.pontoons.length > 0 && track.def.theme !== 'baum')) out.push(buildHarbor(track, detail));
   if (track.dark) out.push(buildStorm(track, detail, world));
   if (track.rivers.length > 0) out.push(buildRiver(track, detail));
   if (track.portals.length > 0) out.push(buildMirrors(track, detail));
@@ -98,6 +102,6 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   // (Im Magnetwerk zeichnet die Trommel ihre Magnetplatten selbst.)
   // (Das Tor der U-Bahn zeigt mechanics/metro.ts.)
   // (Das Tor der Schleuse auf der Talsperre zeigt mechanics/dam.ts, die Weiche der Kristallmine mechanics/mine.ts.)
-  else if (track.drums.length === 0 && !track.metro && track.def.theme !== 'talsperre' && track.def.theme !== 'kristall' && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
+  else if (track.drums.length === 0 && !track.metro && track.def.theme !== 'talsperre' && track.def.theme !== 'kristall' && track.def.theme !== 'rampe' && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
   return out;
 }

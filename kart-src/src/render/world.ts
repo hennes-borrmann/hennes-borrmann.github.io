@@ -29,6 +29,8 @@ import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RG
 import type { FxSink } from './fxApi';
 import { SCHACHT, WETTERSCHACHT } from '../game/tracks/kristall';
 import { buildLife, type Life } from './life';
+import { APRON, rampeLand, type RampeLand } from './life/rampeLand';
+import { PLATZ } from '../game/tracks/rampe';
 import { inLake, landCut, landHeight } from './life/talsperreLand';
 import { pondTest } from './life/baumLand';
 import { buildScenery } from './scenery';
@@ -230,6 +232,8 @@ export class World {
   readonly land: ((x: number, z: number) => number) | null;
   readonly landCut: ((x: number, z: number) => number) | null;
   readonly lake: ((x: number, z: number) => boolean) | null;
+  /** Startrampe: die Form des Startplatzes (Einschnitte, Küste, Dünenhügel; life/rampeLand.ts) – sonst null. */
+  readonly rampe: RampeLand | null;
   /** Kristallmine: die Schächte (sonst leer). */
   readonly schaechte: Schacht[] = [];
   /** Kristallmine: wie weit die Kamera unter Tage ist (0 über, 1 unter Tage; geglättet). */
@@ -247,6 +251,7 @@ export class World {
     const t = track;
     this.boxScale = new Float32Array(t.boxes.length).fill(1);
     const dam = t.def.theme === 'talsperre';
+    this.rampe = t.def.theme === 'rampe' ? rampeLand(t) : null;
     this.land = dam ? (x, z) => landHeight(x, z, t.sea) : null;
     this.landCut = dam ? (x, z) => landCut(x, z) : null;
     // (Baumkronenpfad: der Waldteich, durch den die Strecke taucht – life/baumLand.ts.)
@@ -476,6 +481,8 @@ export class World {
           // Schwebeband: dunkles, glattes Magnetband mit leuchtenden Rändern (die Magnetlinien zeichnet mechanics/band.ts)
           // (Talsperre: graphitgrau mit cyanfarbenen Kanten, Leitplanke mit bernsteinfarbenem Band.)
           if (t.def.theme === 'talsperre') return { a: rgb(0x2f3542), b: rgb(0x363d4b), c: rgb(0x58e0ff), band: 2, plain: false, lines: true, line: rgb(0x58e0ff), kerbs: false, shoulder: rgb(0x4b5567), detail: 'none', barrier: 'rail', wallA: rgb(0x3a404c), wallB: rgb(0xffb347) };
+          // (Startrampe: graphitgrau mit cyanfarbenen Kanten und orangem Rand – die Farben des Startplatzes.)
+          if (t.def.theme === 'rampe') return { a: rgb(0x343a46), b: rgb(0x3b4250), c: rgb(0x5ff3ff), band: 2, plain: false, lines: true, line: rgb(0x5ff3ff), kerbs: false, shoulder: rgb(0xd8591f), detail: 'none', barrier: 'rail', wallA: rgb(0x3a404c), wallB: rgb(0xff8a2a) };
           return { a: rgb(0x1b2150), b: rgb(0x20275c), c: rgb(0x5ff3ff), band: 2, plain: false, lines: true, line: rgb(0x5ff3ff), kerbs: false, shoulder: rgb(0x2a7fd6), detail: 'none', barrier: 'rail', wallA: rgb(0x1f2240), wallB: rgb(0x5ff3ff) };
         case 'concrete':
           // Beton (Talsperre): heller, warmgrauer Beton mit Fugen, Brüstung aus Betonquadern, weiße Randlinien
@@ -575,6 +582,12 @@ export class World {
       }
     };
 
+    /** Startrampe: Abschnitte der Hauptstraße auf der Sohle des Kriechwegs (dort keine Bande). */
+    const kriechFrei = new Uint8Array(t.total);
+    if (this.rampe) {
+      const k = this.rampe.kriech;
+      for (let i = 0; i < t.n; i++) if (t.px[i] < k.x0 && t.px[i] > k.x1 && Math.abs(t.pz[i] - k.z) < k.half + 0.6 && t.py[i] < k.floor + 0.6) kriechFrei[i] = 1;
+    }
     /** Abschnitte, deren Zaun bzw. Leitplanke schon von einem längeren Stück abgedeckt ist (links, rechts). */
     const railL = new Uint8Array(t.total);
     const railR = new Uint8Array(t.total);
@@ -684,6 +697,13 @@ export class World {
       const whole = f0 === 0 && f1 === 1;
       for (const sgn of [-1, 1]) {
         if (sgn < 0 ? freeL : freeR) continue;
+        // Startrampe: Auf der Sohle des Kriechwegs steht keine Bande – die Raupenböcke fahren dort quer hindurch. Ein
+        // gelb-schwarzer Streifen zeigt den Rand der Straße.
+        if (kriechFrei[q]) {
+          const l0 = sgn < 0 ? -wh : wh - 0.55;
+          top(paint, i, f0, f1, l0, l0 + 0.55, 0.04, Math.floor(i / 2) % 2 === 0 ? cWarn : cInk);
+          continue;
+        }
         // Auf dem Schwebeband steht keine Bande: Die Grenze zeigen die leuchtenden Magnetkanten (mechanics/band.ts). Hier
         // nur die Stirnseite des Bands.
         if ((e & EDGE_BAND) !== 0) {
@@ -837,7 +857,8 @@ export class World {
       // (Unter dem Band an der Fassade trägt die Fassade – die Halter zeichnet mechanics/band.ts.)
       // (Talsperre: Mauerkrone, Wehrkrone und Schwebeband tragen sich selbst – die Mauer und ihre Halter zeichnet mechanics/dam.ts.)
       // (Baumkronenpfad: Stege, Rampe und Kronenpfad tragen Stämme, Äste und Holzböcke – die zeichnet mechanics/canopy.ts.)
-      const selfBorne = (t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band)) || t.def.theme === 'baum';
+      // (Startrampe: Die Wendel hängt am Turm, Brücke und Ring tragen Pylone – das zeichnet mechanics/rampe.ts.)
+      const selfBorne = (t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band)) || t.def.theme === 'baum' || t.def.theme === 'rampe';
       if (deck && !gapI && !gapJ && i % 14 === 7 && (e & (EDGE_RAMP | EDGE_TWIST)) === 0 && !selfBorne) {
         const lat = wh + WALL_T + 0.5;
         let free = true;
@@ -915,15 +936,15 @@ export class World {
     const id = t.def.theme;
     // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
     // Wänden, die Naturstrecken eine Höhle im Fels.
-    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen' || id === 'neon' || id === 'talsperre';
+    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen' || id === 'neon' || id === 'talsperre' || id === 'rampe';
     const H = TUNNEL_H;
     const R = hall ? 0.9 : TUNNEL_ROCK;
     const cRock = rgb(th.ground[2]);
     // (Gipfelbahn: Tunnel im Gletschereis – hellblaues Eis, dunkleres Blau im Scheitel.)
     // (Talsperre: Stollen mit Betonschale, gelb-schwarzer Warnstreifen, dunkle Firste.)
-    const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : id === 'talsperre' ? rgb(0xb9b2a5) : rgb(0xd9c7a8);
-    const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : id === 'talsperre' ? rgb(0xf2b630) : rgb(0x6fd0e6);
-    const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : id === 'talsperre' ? rgb(0x8c867b) : rgb(0xb5543c);
+    const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : id === 'talsperre' ? rgb(0xb9b2a5) : id === 'rampe' ? rgb(0xc4c0b6) : rgb(0xd9c7a8);
+    const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : id === 'talsperre' ? rgb(0xf2b630) : id === 'rampe' ? rgb(0xff6a1f) : rgb(0x6fd0e6);
+    const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : id === 'talsperre' ? rgb(0x8c867b) : id === 'rampe' ? rgb(0x4a4a4f) : rgb(0xb5543c);
     const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, kristall: 0xc77dff, talsperre: 0xffe2a0, baum: 0xffd27a , rampe: 0xffd27a }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
@@ -1224,6 +1245,9 @@ export class World {
     let base: number;
     if (this.land) {
       base = this.land(x, z);
+    } else if (this.rampe) {
+      // Startrampe: ebener Platz, Dünen und Strand, der Hügel der Landung (life/rampeLand.ts)
+      base = this.rampe.base(x, z);
     } else if (th.liquidY === null) {
       base = th.farY;
     } else {
@@ -1269,6 +1293,14 @@ export class World {
     // Unter einer geneigten Fahrbahn (Steilkurve) tiefer: Die Fahrbahn ist dort gewölbt, die Dreiecke des groben
     // Geländerasters spannen gerade darüber und stachen in engen Kurven durch die Fahrbahn.
     if (best >= 0 && d < whb) h -= this.roadSink(t.bank[best], whb - d);
+    // Startrampe: In den Einschnitten (Flammengraben, Kriechweg, Startsockel) liegt kein Gelände – dort zählt die Sohle;
+    // rings um sie liegt das Betonvorfeld eben auf Höhe des Platzes (es deckt den Rand des Rasters ab).
+    if (this.rampe) {
+      const cut = this.rampe.cut(x, z);
+      if (cut === cut) return cut - 0.5;
+      const nd = this.rampe.near(x, z);
+      if (nd < APRON + 12) h = PLATZ.y - 0.36 + (h - (PLATZ.y - 0.36)) * smooth((nd - APRON) / 12);
+    }
     // Gebirgslandschaft: Steigt der Hang gleich neben der Fahrbahn steil an, spannten die Dreiecke des Rasters von
     // einer Ecke im Hang zu einer auf der Fahrbahn quer über deren Rand. Deshalb bleibt das Gelände anderthalb
     // Rasterfelder neben der Bande noch flach (ein Bankett), erst dahinter steigt der Hang.
@@ -1521,9 +1553,15 @@ export class World {
       const snowLine = th.snowLine ?? 12;
       const tube = this.land && this.tunnelSegs.length > 0 ? this.tubeCutter(b, cell) : null;
       const hole = (p: V3): boolean => this.schaechte.some((sch) => Math.hypot(p[0] - sch.x, p[2] - sch.z) < sch.r + 0.5);
+      // (Startrampe: Ecken in einem Einschnitt – dort liegt kein Gelände.)
+      const ramp = this.rampe;
+      const cutMask = new Uint8Array((nx + 1) * (nz + 1));
+      if (ramp) for (let iz = 0; iz <= nz; iz++) for (let ix = 0; ix <= nx; ix++) cutMask[iz * (nx + 1) + ix] = ramp.near(x0 + ix * cell, z0 + iz * cell) <= 0.3 ? 1 : 0;
+      const inCut = (p: V3): boolean => cutMask[Math.round((p[2] - z0) / cell) * (nx + 1) + Math.round((p[0] - x0) / cell)] === 1;
       const tri = (a: V3, bb: V3, c: V3): void => {
         // (Kristallmine: das Loch über einem Schacht)
         if (this.schaechte.length > 0 && (hole(a) || hole(bb) || hole(c))) return;
+        if (ramp && (inCut(a) || inCut(bb) || inCut(c))) return;
         const top = Math.max(a[1], bb[1], c[1]);
         // Was tief unter Wasser liegt, sieht man nicht – außer in einer Unterwasserwelt: dort ist es der Meeresboden.
         if (!th.under && top < liquid - 2.5) return;
@@ -1591,6 +1629,8 @@ export class World {
       for (let ix = 0; ix < cn - 1; ix++) {
         // Kristallmine: Über den Schächten fehlt die Grundfläche (sie läge sonst als Deckel auf dem Loch im Gelände).
         if (this.schaechte.some((sch) => this.overCell(sch, cuts[ix], cuts[ix + 1], cuts[iz], cuts[iz + 1]))) continue;
+        // Startrampe: ebenso über den Einschnitten (Flammengraben und Kriechweg liegen unter dem Meeresspiegel).
+        if (this.rampe && this.overCut(cuts[ix], cuts[ix + 1], cuts[iz], cuts[iz + 1])) continue;
         const a = iz * cn + ix;
         pi.push(a, a + cn, a + 1, a + 1, a + cn, a + cn + 1);
       }
@@ -1653,6 +1693,15 @@ export class World {
   }
 
   /** Berührt der Schacht (samt Trichter) das Feld der Grundfläche [x0, x1] × [z0, z1] (um die Mitte der Strecke)? */
+  /** Startrampe: Berührt das Feld (relativ zur Mitte) einen Einschnitt? (grob über die Ecken und die Mitte, im Raster von 8 m) */
+  private overCut(x0: number, x1: number, z0: number, z1: number): boolean {
+    const r = this.rampe!;
+    for (let x = x0; x <= x1; x += Math.max(4, (x1 - x0) / 20)) {
+      for (let z = z0; z <= z1; z += Math.max(4, (z1 - z0) / 20)) if (r.near(this.center.x + x, this.center.z + z) < 2) return true;
+    }
+    return false;
+  }
+
   private overCell(sch: Schacht, x0: number, x1: number, z0: number, z1: number): boolean {
     const cx = Math.max(this.center.x + x0, Math.min(this.center.x + x1, sch.x));
     const cz = Math.max(this.center.z + z0, Math.min(this.center.z + z1, sch.z));
