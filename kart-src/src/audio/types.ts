@@ -33,6 +33,12 @@ export type SfxName =
   | 'use-rocket' // das Kart verwandelt sich in eine Rakete: Servos surren, sieben Teile rasten metallisch ein, zum Schluss zischt die Düse an (~1,1 s)
   | 'use-wing' // Gleiter: Absprung – Luftstoß nach oben, ein steigender Pfiff, Stoff flattert kurz (~0,6 s)
   | 'use-gold' // Get Gold: Korken ploppt, dann gluckert es fünfmal, immer tiefer, zum Schluss ein zufriedenes „Ah“ (~0,85 s)
+  | 'use-drill' // Bohrer: hochnehmen (er wächst mit einem Schwupp), ausholen, „Ratsch“ in die Erde, der Motor springt an (~0,85 s)
+  | 'drill' // Bohrer: ein Stoß Bohrgeräusch – kreischendes Sägezahn-Mahlen mit Erdknirschen; die Tonhöhe kommt beim Aufruf mit
+  //          (pitch, steigt mit dem Tempo); wird alle 0,06 … 0,2 s aufgerufen und verschmilzt zu einem Dauerton (~0,2 s)
+  | 'drill-rumble' // Bohrer: Grollen unter dem eigenen Kart, er kommt gleich – tiefes Beben, dazwischen reißt der Asphalt (~1,3 s)
+  | 'drill-burst' // Bohrer: er bricht durch die Fahrbahn – Krachen, Geröll, ein Kreischen, das nach oben fährt (~0,5 s)
+  | 'drill-blast' // Bohrer: Explosion – dumpfer Schlag, langes Grollen, Erdklumpen prasseln herab, ein Blechteil klingelt (~1,4 s)
   | 'gold' // Get Gold: ausgetrunken – heller, glänzender Dur-Akkord, der aufwärts aufgeht, mit Glitzern (~1,1 s)
   | 'gold-end' // Get Gold ist abgelaufen: der Akkord rutscht weich abwärts, ein Hauch Glitzern verweht (~0,5 s)
   | 'gold-ram' // ein Gold-Kart haut ein anderes um: dumpfer, schwerer Stoß mit metallischem Nachklang (~0,4 s)

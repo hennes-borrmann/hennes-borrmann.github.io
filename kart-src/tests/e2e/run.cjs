@@ -1239,6 +1239,76 @@ async function main() {
     check('Get Gold: Anna ist unverwundbar (ein Treffer prallt ab)', beforeHit.gold > 0 && beforeHit.gold <= 420 && afterHit.spin === 0 && afterHit.shield === beforeHit.shield, `Gold noch ${beforeHit.gold} Ticks`);
     check('Get Gold: danach ist Anna wieder normal – auf beiden Bildschirmen', goldEnd.gold === 0 && lookEnd.every((l) => l && l.scale < 1.05 && l.gold === 0), JSON.stringify(lookEnd));
 
+    // Bohrer: Anna steckt ihn ein, er wühlt sich unter der Fahrbahn zu Ben (dem Führenden), bricht direkt vor ihm durch und
+    // explodiert – Ben schleudert, Anna nicht. Beide Bildschirme zeigen das Einstecken, den Bohrer (Alter, Durchbruch) und
+    // die Explosion; nur Ben wird gewarnt. Jede Seite schreibt selbst mit (Rennzeit in Ticks).
+    const recordDrill = () => {
+      window.__drill = { plant: 0, seen: 0, firstAt: null, maxAge: 0, stage: 0, surfacedAt: null, goneAt: null, targets: [], banner: false, spin0: 0, spin1: 0, boomDist: -1 };
+      const el = document.getElementById('race-banner');
+      window.__drillTimer = setInterval(() => {
+        const k = window.__kart;
+        const g = window.__drill;
+        const now = k.race().time;
+        if (!el.hidden && el.textContent.includes('Bohrer')) g.banner = true;
+        const list = k.entities();
+        const a = list.find((x) => x.slot === 0);
+        if (a) {
+          g.plant = Math.max(g.plant, a.plant);
+          g.spin0 = Math.max(g.spin0, a.spin);
+        }
+        // Ben: beim Host die Rechnung, bei Ben die eigene Vorhersage (der Treffer kommt mit dem Stand des Hosts)
+        const b = k.authoritative(1) || k.predicted() || list.find((x) => x.slot === 1);
+        if (b) g.spin1 = Math.max(g.spin1, b.spin);
+        const d = k.things().find((t) => t.kind === 5);
+        if (d) {
+          g.seen++;
+          if (g.firstAt === null) g.firstAt = now - d.age;
+          g.maxAge = Math.max(g.maxAge, d.age);
+          if (d.stage > 0 && g.surfacedAt === null) g.surfacedAt = now - d.stage;
+          g.stage = Math.max(g.stage, d.stage);
+          if (!g.targets.includes(d.target)) g.targets.push(d.target);
+          g.last = { x: d.x, z: d.z };
+        } else if (g.seen > 0 && g.goneAt === null) {
+          g.goneAt = now;
+          if (b && g.last) g.boomDist = Math.hypot(b.x - g.last.x, b.z - g.last.z);
+        }
+      }, 16);
+    };
+    await sleep(1500);
+    await h6.page.evaluate(() => {
+      window.__noItemsDrill = setInterval(() => {
+        for (const slot of [2, 3]) window.__kart.giveItem(slot, 0);
+      }, 50);
+    });
+    await kart(h6.page, 'place(2, 40, -2)');
+    await kart(h6.page, 'place(3, 60, 2)');
+    await kart(h6.page, 'place(0, 120, 0)');
+    await kart(h6.page, 'place(1, 260, 0)');
+    await sleep(500);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordDrill)));
+    const drillAt = await kart(h6.page, 'race().time');
+    await useItem(13);
+    // (Unter Last kommt der Tastendruck erst ein paar Schritte später an.)
+    await h6.page.waitForFunction(() => window.__kart.authoritative(0).plant > 0, null, { timeout: 5000 }).catch(() => {});
+    const planting = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 720, drillAt, { timeout: 120000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 720, drillAt, { timeout: 120000 }).catch(() => {});
+    const [drillH, drillC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__drillTimer);
+      return window.__drill;
+    })));
+    await h6.page.evaluate(() => clearInterval(window.__noItemsDrill));
+    const benAfter = await kart(h6.page, 'authoritative(1)');
+    const fmt = (g) => `Einstecken ${g.plant}, Bohrer ${g.seen}× gesehen (bis Alter ${g.maxAge}), durch nach ${g.surfacedAt === null ? '–' : ((g.surfacedAt - g.firstAt) / 60).toFixed(2)} s, Explosion nach ${g.goneAt === null ? '–' : ((g.goneAt - g.firstAt) / 60).toFixed(2)} s`;
+    check('Bohrer: Anna steckt ihn ein (Item weg, Einstecken läuft) – auf beiden Bildschirmen zu sehen', planting.item === 0 && planting.plant > 0 && [drillH, drillC].every((g) => g.plant > 20), `Host ${drillH.plant}, Ben ${drillC.plant} Ticks`);
+    // (Der Durchbruch dauert nur 0,45 s – eine Seite, die unter Last selten nachsieht, kann ihn verpassen; dann zählt, dass
+    // der Bohrer danach weg ist. Mindestens eine Seite muss ihn gesehen haben.)
+    check('Bohrer: er steckt, dreht sich ein, wühlt sich zu Ben und bricht durch – auf beiden Bildschirmen', [drillH, drillC].every((g) => g.seen > 5 && g.maxAge > 120 && g.goneAt !== null) && (drillH.stage > 0 || drillC.stage > 0), `Host: ${fmt(drillH)}, Stufe ${drillH.stage}; Ben: ${fmt(drillC)}, Stufe ${drillC.stage}`);
+    check('Bohrer: höchstens 10 s vom Einstecken bis zur Explosion, gleich auf beiden Bildschirmen', [drillH, drillC].every((g) => g.goneAt - g.firstAt <= 600) && Math.abs(drillH.goneAt - drillC.goneAt) < 40, `Host ${((drillH.goneAt - drillH.firstAt) / 60).toFixed(2)} s, Ben ${((drillC.goneAt - drillC.firstAt) / 60).toFixed(2)} s`);
+    check('Bohrer: sucht Ben (den Führenden), nie Anna', [drillH, drillC].every((g) => g.targets.length === 1 && g.targets[0] === 1), `Host ${JSON.stringify(drillH.targets)}, Ben ${JSON.stringify(drillC.targets)}`);
+    check('Bohrer: Ben schleudert (beim Host und in seiner Vorhersage), Anna nicht', drillH.spin1 > 40 && drillC.spin1 > 0 && drillH.spin0 === 0 && drillC.spin0 === 0 && benAfter.respawn === 0, `Ben ${drillH.spin1} / ${drillC.spin1} Ticks, Abstand bei der Explosion ${drillH.boomDist.toFixed(1)} m`);
+    check('Bohrer: Ben wird gewarnt, Anna nicht', drillC.banner && !drillH.banner);
+
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
     await sleep(800);
     await shot(h6.page, 'race-phase3-host.png');

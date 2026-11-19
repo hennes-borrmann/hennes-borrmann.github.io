@@ -145,9 +145,9 @@ export class GameAudio {
     this.mx?.duck(amount, seconds);
   }
 
-  sfx(name: SfxName, opts: { pan?: number; gain?: number } = {}): void {
+  sfx(name: SfxName, opts: { pan?: number; gain?: number; pitch?: number } = {}): void {
     if (this.paused) return;
-    this.sfxPlayer?.play(name, opts.pan ?? 0, opts.gain ?? 1);
+    this.sfxPlayer?.play(name, opts.pan ?? 0, opts.gain ?? 1, opts.pitch ?? 1);
   }
 
   /** Pro Bild: Motoren und Fahrgeräusche; hält nebenbei die Musik am Laufen. */

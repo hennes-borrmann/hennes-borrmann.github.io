@@ -2,6 +2,7 @@
 
 import {
   ITEM_BOOST,
+  ITEM_DRILL,
   ITEM_EMP,
   ITEM_GLUE,
   ITEM_GOLD,
@@ -104,6 +105,12 @@ export const ITEMS: Record<number, ItemInfo> = {
       '<path d="M8.400 5.800 3.200 7.300v1.900l5.200 1.500z" fill="currentColor"/>' +
       '<path d="M11.400 12.600c.2 1.700.9 2.800 2.100 3.400" fill="none" stroke="currentColor" stroke-width="1.700" stroke-linecap="round"/>' +
       '<path d="M3.700 11.200c1.500 2.100 2.700 3.500 2.700 5a2.700 2.700 0 0 1-5.400 0c0-1.500 1.200-2.900 2.700-5z" fill="currentColor"/>',
+  },
+  [ITEM_DRILL]: {
+    name: 'Bohrer',
+    hint: 'Bohrt sich zum Ersten',
+    // Griff, Motorgehäuse mit ausgespartem Band, darunter der Bohrkopf als Kegel mit schrägen Spiralfugen.
+    icon: '<rect x="6" y="1.4" width="12" height="2.8" rx="1.4" fill="currentColor"/><rect x="10.6" y="3.6" width="2.8" height="2.4" fill="currentColor"/><path fill-rule="evenodd" d="M8.5 5.5h7a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2zM8.6 8.1h6.8v1.3H8.6z" fill="currentColor"/><rect x="9.6" y="11" width="4.8" height="1.8" fill="currentColor"/><path d="M7.5 12.5H16.5L15.72 14.4 8.77 15.6zM9.34 17 15.15 15.8 14.21 18.1 10.28 19.3zM10.85 20.7 13.64 19.5 12 23.5z" fill="currentColor"/>',
   },
 };
 

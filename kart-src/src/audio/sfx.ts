@@ -17,6 +17,8 @@ const MIN_GAP: Partial<Record<SfxName, number>> = {
   'drift-start': 0.2,
   boost: 0.12,
   warn: 0.22,
+  // (Bohrgeräusch: mehrere Bohrer und dichte Folge – nur doppelte Aufrufe im selben Augenblick zusammenfassen.)
+  drill: 0.03,
 };
 const DEFAULT_GAP = 0.04;
 
@@ -191,6 +193,13 @@ const LEVEL: Record<SfxName, number> = {
   'gold-ping': 2.4,
   'rocket-incoming': 2.6,
   'rocket-hit': 3.4,
+  // Bohrer: Einstecken wie die anderen Items, das Bohren als leises Bett, Grollen wie fernes Donnergrollen (nur beim Ziel,
+  // aber es soll unter Motor und Musik durchkommen), Durchbruch und Explosion so kräftig wie der Einschlag der Rakete.
+  'use-drill': 3.2,
+  drill: 1.5,
+  'drill-rumble': 2.4,
+  'drill-burst': 3,
+  'drill-blast': 3.5,
   warn: 2.2,
   hit: 3.8,
   'guard-block': 4.4,
@@ -547,7 +556,10 @@ export class SfxPlayer {
     return this.busyUntil.filter((t) => t > now).length;
   }
 
-  play(name: SfxName, pan = 0, gain = 1): void {
+  /** Tonhöhe des laufenden Aufrufs als Faktor (nur für Rezepte, die sie nutzen – der Bohrer). */
+  private pitch = 1;
+
+  play(name: SfxName, pan = 0, gain = 1, pitch = 1): void {
     if (!this.mx.canPlay()) return;
     const now = this.mx.ctx.currentTime;
     const gap = MIN_GAP[name] ?? DEFAULT_GAP;
@@ -557,6 +569,7 @@ export class SfxPlayer {
     if (this.busyUntil.length >= MAX_VOICES) return;
     this.last.set(name, now);
     const v = new Voice(this.mx, clamp(gain, 0, 1) * LEVEL[name], clamp(pan, -1, 1));
+    this.pitch = clamp(pitch, 0.25, 4);
     this.build(name, v);
     const until = now + v.length;
     this.busyUntil.push(until);
@@ -828,6 +841,70 @@ export class SfxPlayer {
         break;
       case 'warn':
         v.tone('pulse25', 1320, 1318, 0.07, 0.2).tone('pulse25', 1760, 1756, 0.09, 0.2, { at: 0.09 });
+        break;
+
+      // --- Bohrer ---
+      case 'use-drill':
+        // Hochnehmen: ein Klacken, dann ein Schwupp, der aufsteigt (der Bohrer wächst in der Hand); ausholen (Luftzug);
+        // „Ratsch“ in die Erde: dumpfer Stoß, knirschende Erde, Kiesel, ein heller Metallton; dann springt der Motor
+        // an – zweimal Knattern, das in ein Surren übergeht.
+        v.tone('triangle', 920, 760, 0.05, 0.16, { attack: 0.002 })
+          .tone('sine', 190, 560, 0.3, 0.14, { at: 0.03, attack: 0.05 })
+          .noise(500, 1900, 0.28, 0.1, { q: 1.4, at: 0.03, attack: 0.08 })
+          .noise(800, 2800, 0.18, 0.13, { q: 1.1, at: 0.36, attack: 0.1 })
+          .tone('sine', 130, 42, 0.24, 0.5, { at: 0.55 })
+          .noise(1100, 180, 0.3, 0.42, { type: 'lowpass', brown: true, at: 0.55, attack: 0.003 })
+          .noise(2600, 1800, 0.035, 0.12, { q: 2, at: 0.56 })
+          .noise(3100, 2200, 0.03, 0.1, { q: 2, at: 0.6 })
+          .noise(2300, 1600, 0.03, 0.08, { q: 2, at: 0.64 })
+          .tone('triangle', 1480, 1470, 0.08, 0.07, { at: 0.555 })
+          .tone('sawtooth', 62, 74, 0.06, 0.16, { at: 0.66 })
+          .tone('sawtooth', 70, 84, 0.06, 0.16, { at: 0.73 })
+          .tone('sawtooth', 90, 150, 0.16, 0.12, { at: 0.79, attack: 0.03 });
+        break;
+      case 'drill': {
+        // Mahlen: Sägezahn mit schnellem Rattern (Tremolo), eine Oktave darüber ein heller Puls, darunter knirschende Erde.
+        // Die Stöße überlappen sich (weicher Anfang) – aus der Folge wird ein Dauerton, der mit dem Tempo steigt.
+        const p = this.pitch;
+        v.tone('sawtooth', 150 * p, 162 * p, 0.2, 0.12, { attack: 0.04, sustain: 0.5, tremHz: 26 + 22 * p })
+          .tone('pulse25', 300 * p, 318 * p, 0.18, 0.045, { attack: 0.04, sustain: 0.4 })
+          .noise(520 * p, 440 * p, 0.2, 0.14, { q: 2.2, attack: 0.04 })
+          .noise(260, 160, 0.2, 0.12, { type: 'lowpass', brown: true, attack: 0.04 });
+        break;
+      }
+      case 'drill-rumble':
+        // Grollen: tiefes Beben, das anschwillt (zittert im Takt), darunter ein Sub-Ton; zwischendurch reißt der Asphalt.
+        v.noise(170, 90, 1.3, 0.5, { type: 'lowpass', brown: true, attack: 0.45 })
+          .tone('sine', 52, 40, 1.25, 0.42, { attack: 0.5, tremHz: 11 })
+          .tone('triangle', 78, 66, 1.1, 0.12, { attack: 0.4, at: 0.1, tremHz: 7 })
+          .noise(1900, 1200, 0.05, 0.16, { q: 1.6, at: 0.52, attack: 0.002 })
+          .noise(2400, 1500, 0.04, 0.14, { q: 1.6, at: 0.83, attack: 0.002 })
+          .noise(1700, 1000, 0.06, 0.18, { q: 1.6, at: 1.06, attack: 0.002 });
+        break;
+      case 'drill-burst':
+        // Durchbruch: harter Krach, Geröll, das wegspritzt, und ein Kreischen, das mit dem Bohrer nach oben fährt.
+        v.noise(4200, 1400, 0.07, 0.42, { type: 'highpass', attack: 0.002 })
+          .noise(1300, 260, 0.42, 0.42, { type: 'lowpass', brown: true, attack: 0.004 })
+          .tone('sine', 150, 55, 0.22, 0.4)
+          .tone('sawtooth', 320, 1100, 0.45, 0.1, { attack: 0.05 })
+          .tone('pulse25', 640, 2100, 0.4, 0.04, { attack: 0.06 })
+          .noise(2500, 1600, 0.03, 0.12, { q: 2, at: 0.12 })
+          .noise(2000, 1300, 0.03, 0.1, { q: 2, at: 0.2 });
+        break;
+      case 'drill-blast':
+        // Explosion: harter Knall, tiefer Stoß, langes Grollen; dann prasseln Erdklumpen herab, ein Blechteil klingelt.
+        v.noise(3000, 380, 0.13, 0.52, { q: 0.8 })
+          .tone('sine', 110, 26, 0.8, 0.64)
+          .tone('square', 64, 32, 0.24, 0.16)
+          .noise(1000, 70, 1.2, 0.56, { type: 'lowpass', brown: true, attack: 0.004 })
+          .noise(6000, 2500, 0.28, 0.08, { type: 'highpass', at: 0.02 })
+          .noise(900, 500, 0.06, 0.16, { type: 'lowpass', at: 0.42, attack: 0.003 })
+          .noise(1100, 600, 0.05, 0.13, { type: 'lowpass', at: 0.58, attack: 0.003 })
+          .noise(800, 450, 0.06, 0.12, { type: 'lowpass', at: 0.71, attack: 0.003 })
+          .noise(1000, 550, 0.05, 0.1, { type: 'lowpass', at: 0.9, attack: 0.003 })
+          .noise(850, 500, 0.05, 0.08, { type: 'lowpass', at: 1.08, attack: 0.003 })
+          .tone('triangle', 1760, 1750, 0.3, 0.06, { at: 0.47 })
+          .tone('sine', 2640, 2630, 0.2, 0.03, { at: 0.47 });
         break;
 
       // --- Treffer und Stöße ---

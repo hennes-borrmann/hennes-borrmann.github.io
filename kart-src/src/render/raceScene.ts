@@ -21,6 +21,12 @@ import {
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
+  DRILL_DIG_TICKS,
+  DRILL_FORE,
+  DRILL_PLANT_TICKS,
+  DRILL_SIDE,
+  DRILL_RISE_TICKS,
+  DRILL_WARN_TICKS,
   GOLD_ALL,
   GOLD_DRINK_TICKS,
   GOLD_SCALE,
@@ -83,7 +89,7 @@ import { FALL } from './life/baumLand';
 import { DAUER, LAEUTEN, TURM } from './life/daecherLand';
 import { RAKETE } from '../game/tracks/rampe';
 import type { RaceView, RenderEntity } from '../game/view';
-import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
+import { RACE_COUNTDOWN, RACE_RESULTS, THING_DRILL, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
 import { BlobShadows, Bolts, ComicPops, LightPools, Particles, SkidMarks, SpeedLines } from './effects';
 import type { FxSink } from './fxApi';
@@ -150,6 +156,16 @@ export interface SceneEvent {
     | 'rocket-launch'
     | 'rocket-incoming'
     | 'rocket-hit'
+    /**
+     * Bohrer: die Figur steckt ihn in den Boden (Ausholen, Hineinrammen) / ein Stoß Bohrgeräusch (wiederholt, ortsfest; die
+     * Tonhöhe steigt mit dem Tempo, siehe pitch) / es grollt unter dem eigenen Kart, er kommt gleich (nur das Ziel) / er
+     * bricht durch die Fahrbahn / er explodiert.
+     */
+    | 'use-drill'
+    | 'drill'
+    | 'drill-rumble'
+    | 'drill-burst'
+    | 'drill-blast'
     | 'finish'
     /** Aus dem Windschatten ausgeschert: es zieht. */
     | 'draft'
@@ -278,6 +294,8 @@ export interface SceneEvent {
   pan: number;
   /** 0..1 nach Entfernung */
   gain: number;
+  /** Tonhöhe als Faktor (1 = wie im Rezept) – nur wo das Geräusch sie nutzt (Bohrer). */
+  pitch?: number;
 }
 
 /** Was der Ton pro Kart wissen muss. */
@@ -381,6 +399,8 @@ interface KartView {
   /** Kleber: wo der Klumpen die Pistole verlassen hat und wo er ohne Ziel aufklatscht (Welt). */
   shotFrom: THREE.Vector3;
   shotMiss: THREE.Vector3;
+  /** Bohrer: Einstecken im letzten Bild (Ticks, wie KartState.plant). */
+  plant: number;
   roulette: number;
   item: number;
   flags: number;
@@ -602,6 +622,8 @@ export class RaceScene {
   threat = 0;
   /** Eine fremde Rakete hat das eigene Kart als Ziel: 0 = keine, sonst wie weit sie ist (bis 1 = Einschlag). */
   rocket = 0;
+  /** Ein fremder Bohrer hat das eigene Kart als Ziel: 0 = keiner, sonst 0,01 … 1 (1 = er bricht gleich durch). */
+  drill = 0;
   onEvent: ((e: SceneEvent) => void) | null = null;
   /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
   readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
@@ -673,6 +695,8 @@ export class RaceScene {
   /** Get Gold: die Karts, die in diesem Bild gold sind; welche Dinge im letzten Bild wo waren (abgeprallt?). */
   private readonly goldList: RenderEntity[] = [];
   private readonly thingsWere = new Map<number, { x: number; y: number; z: number }>();
+  /** Bohrer, die im letzten Bild da waren (Nummer → Stand, Pause bis zum nächsten Bohrgeräusch, schon gegrollt?). */
+  private readonly drills = new Map<number, { x: number; y: number; z: number; stage: number; target: number; wait: number; rumbled: boolean; seen: boolean }>();
   private localSlot = -1;
   private readonly empHit: KartView[] = [];
   /** Teilchen für Bausteine, die das Teilchensystem nicht kennen (Items, Hindernisse). */
@@ -912,6 +936,8 @@ export class RaceScene {
     this.hitstop = 0;
     this.smoke = 0;
     this.rocket = 0;
+    this.drill = 0;
+    this.drills.clear();
     this.skids.clear();
     this.puffs.clear();
     this.sparks.clear();
@@ -1074,6 +1100,7 @@ export class RaceScene {
       shotDone: false,
       shotFrom: new THREE.Vector3(),
       shotMiss: new THREE.Vector3(),
+      plant: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1522,6 +1549,95 @@ export class RaceScene {
       for (const e of entities) if (e.rocket > 0 && e.slot !== me.slot && e.aimSlot === me.slot) warn = 0.01;
     }
     this.rocket = warn;
+  }
+
+  /**
+   * Bohrer: Bohrgeräusch (immer dichter und höher, je schneller er ist), Durchbruch und Explosion („KAWUMM!“, Wackeln in der
+   * Nähe) – und die Warnung für sein Ziel: Hinweis während der ganzen Fahrt; in der letzten Sekunde vor dem Durchbruch grollt
+   * es, die Kamera bebt, und vor dem Kart reißt die Fahrbahn auf (auf allen Bildschirmen, damit jeder sieht, wen es trifft).
+   */
+  private updateDrills(things: SnapshotThing[], entities: RenderEntity[], me: RenderEntity | null, dt: number): void {
+    let warn = 0;
+    for (const d of this.drills.values()) d.seen = false;
+    for (const th of things) {
+      if (th.kind !== THING_DRILL) continue;
+      let d = this.drills.get(th.id);
+      if (!d) {
+        d = { x: th.x, y: th.y, z: th.z, stage: th.stage, target: th.target, wait: 0, rumbled: false, seen: true };
+        this.drills.set(th.id, d);
+      }
+      d.seen = true;
+      if (th.stage > 0 && d.stage === 0) {
+        // (Das Ziel hört es aus nächster Nähe – voll, ohne Richtung.)
+        if (me && th.target === me.slot) this.onEvent?.({ kind: 'drill-burst', slot: me.slot, local: true, pan: 0, gain: 1 });
+        else this.emitAt('drill-burst', th.x, th.y, th.z, 110);
+        this.pops.show('KRRRK!', th.x, th.y + 3.2, th.z, 'warm', 3.6);
+      }
+      d.x = th.x;
+      d.y = th.y;
+      d.z = th.z;
+      d.stage = th.stage;
+      d.target = th.target;
+      // Bohrgeräusch: beim Eindrehen immer schneller, unter der Erde mit dem Tempo, beim Durchbruch kreischend.
+      const speed = Math.hypot(th.vx, th.vz);
+      const dig = Math.min(1, th.age / DRILL_DIG_TICKS);
+      const pitch = th.stage > 0 ? 2.3 : th.age <= DRILL_DIG_TICKS ? 0.5 + 0.55 * dig * dig : 0.75 + Math.min(1.45, speed / 150);
+      const every = th.stage > 0 ? 0.06 : th.age <= DRILL_DIG_TICKS ? 0.2 - 0.1 * dig : Math.max(0.065, 0.14 - speed * 0.0004);
+      d.wait -= dt;
+      if (d.wait <= 0) {
+        d.wait = every;
+        this.emitDrill(th.x, th.y, th.z, pitch);
+      }
+      // Warnung für das Ziel
+      const left = th.ttl * 60 - DRILL_RISE_TICKS;
+      const target = th.target >= 0 ? entities.find((e) => e.slot === th.target) : undefined;
+      if (me && !me.finished && th.target === me.slot) warn = Math.max(warn, th.stage > 0 ? 1 : left <= DRILL_WARN_TICKS ? 0.5 + 0.5 * (1 - Math.max(0, left) / DRILL_WARN_TICKS) : 0.01);
+      if (target && th.stage === 0 && th.age > DRILL_DIG_TICKS && left <= DRILL_WARN_TICKS) {
+        const k = 1 - Math.max(0, left) / DRILL_WARN_TICKS;
+        // Risse vor dem Kart: auf seiner Spur die Strecke entlang, dort, wo es in knapp einer halben Sekunde ist
+        const t = this.track;
+        const ahead = 4 + Math.hypot(target.vx, target.vz) * 0.4;
+        projectOnTrack(t, target.x, target.z, target.seg < t.total ? target.seg : 0);
+        const kb = t.branchOf[proj.seg];
+        const lat = Math.max(-t.rh[proj.seg], Math.min(t.rh[proj.seg], proj.lat));
+        const seg = walk(t, proj.seg, Math.round(ahead / t.step), kb >= 0 ? 1 << kb : 0);
+        this.things?.warnCracks(t.px[seg] + rightX(t, seg) * lat, t.py[seg] + lat * t.bank[seg], t.pz[seg] + rightZ(t, seg) * lat, seg, Math.atan2(t.tx[seg], t.tz[seg]), k, dt, this.fx);
+        if (target.slot === this.localSlot) {
+          this.shake = Math.max(this.shake, 0.12 + 0.25 * k);
+          if (!d.rumbled) {
+            d.rumbled = true;
+            this.onEvent?.({ kind: 'drill-rumble', slot: target.slot, local: true, pan: 0, gain: 1 });
+          }
+        }
+      }
+    }
+    for (const [id, d] of this.drills) {
+      if (d.seen) continue;
+      this.drills.delete(id);
+      if (d.stage <= 0) continue;
+      // Explodiert
+      this.pops.show('KAWUMM!', d.x, d.y + 3.4, d.z, 'hot', 5.4);
+      if (me && d.target === me.slot) this.onEvent?.({ kind: 'drill-blast', slot: me.slot, local: true, pan: 0, gain: 1 });
+      else this.emitAt('drill-blast', d.x, d.y, d.z, 140);
+      if (me) {
+        const dist = Math.hypot(me.x - d.x, me.z - d.z);
+        if (dist < 40) this.shake = Math.max(this.shake, 0.9 * (1 - dist / 40));
+        if (d.target === me.slot && dist < 12) this.hitstop = Math.max(this.hitstop, 0.08);
+      }
+    }
+    this.drill = warn;
+  }
+
+  /** Ein Stoß Bohrgeräusch an einem Ort (Tonhöhe als Faktor). */
+  private emitDrill(x: number, y: number, z: number, pitch: number): void {
+    if (!this.onEvent) return;
+    this.v1.set(x, y, z).sub(this.camera.position);
+    const dist = this.v1.length();
+    const gain = Math.max(0, 1 - dist / 90);
+    if (gain <= 0.02) return;
+    this.v2.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const pan = dist > 0.5 ? Math.max(-1, Math.min(1, this.v1.dot(this.v2) / dist)) : 0;
+    this.onEvent({ kind: 'drill', slot: -1, local: false, pan, gain, pitch });
   }
 
   /** Nächster verdrehter Abschnitt zu (x, z) – oder −1, wenn der Punkt nicht bei einem verdrehten Stück liegt. */
@@ -2035,6 +2151,20 @@ export class RaceScene {
         k.visual.squash(0.6);
         this.emit('gold-end', k, local);
       }
+      // Bohrer: die Figur holt ihn hervor und steckt ihn ein; im Moment, in dem er steckt, spritzt Erde.
+      if (e.plant > 0 && k.plant === 0) this.emit('use-drill', k, local);
+      if (e.plant === 0 && k.plant > 0) {
+        const c = Math.cos(e.heading);
+        const sn = Math.sin(e.heading);
+        // (rechts neben dem Kart, wo der Host ihn absetzt)
+        const px = e.x - c * DRILL_SIDE + sn * DRILL_FORE;
+        const pz = e.z + sn * DRILL_SIDE + c * DRILL_FORE;
+        const p = this.fxAt(px, e.y + 1.2, pz);
+        this.pops.show('RATSCH!', p.x, p.y + 1.6, p.z, 'warm', 3.2);
+        this.burst(px, e.y + 0.2, pz, 10, 5, 0x8a5a34, false, 0.35, 0.5, 5);
+        k.visual.squash(0.55);
+        if (local) this.shake = Math.max(this.shake, 0.22);
+      }
       // Rakete: Verwandlung, Abheben, Landung
       if (e.rocket > 0 && k.rocket === 0) {
         this.pop('VERWANDLUNG!', e, 'cool', 3.6);
@@ -2254,6 +2384,7 @@ export class RaceScene {
     k.gold = e.gold;
     k.robot = e.robot;
     k.glue = e.glue;
+    k.plant = e.plant;
     k.boost = e.boost;
     k.stall = e.stall;
     k.guard = e.guard;
@@ -2291,6 +2422,7 @@ export class RaceScene {
       this.raceId = race.raceId;
       this.skids.clear();
       this.pops.clear();
+      this.drills.clear();
       this.camReady = false;
       for (const k of this.karts.values()) k.fresh = true;
     }
@@ -2397,6 +2529,8 @@ export class RaceScene {
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
       // Get Gold: Austrinken (Fortschritt), gold, kurz vor dem Ende blinkend.
       pose.drink = e.gold > GOLD_TICKS ? (GOLD_ALL - e.gold + 1) / (GOLD_DRINK_TICKS + 1) : 0;
+      // Bohrer: Einstecken (Fortschritt; bei 0 steckt er im Boden).
+      pose.plant = e.plant > 0 ? (DRILL_PLANT_TICKS - e.plant + 1) / (DRILL_PLANT_TICKS + 1) : 0;
       pose.gold = goldOn(e);
       pose.goldBlink = goldOn(e) && e.gold < GOLD_WARN;
 
@@ -2581,6 +2715,7 @@ export class RaceScene {
     this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
     this.threat = Math.max(0, threat);
     this.updateRockets(entities, me);
+    this.updateDrills(things, entities, me, dt);
     this.bolts.update(dt);
 
     this.puffs.update(dt);
