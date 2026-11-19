@@ -2,9 +2,9 @@
 //
 // Herzstück ist die Magnettrommel (mechanics.ts: Drum): eine riesige, liegende Röhre, an deren Innenwand die Bahn sich
 // einmal ganz herumschraubt – die rechte Wand hinauf, über die Decke, die linke Wand hinunter. Magnete halten die
-// Karts; die Schwerkraft zieht trotzdem zum Hallenboden: An der Wand sackt man seitlich ab, an der Decke greifen die
-// Reifen schlechter. Und die Magnetplatten an der Decke schalten im Takt ab – links und rechts im Wechsel: Wer auf einer
-// abgeschalteten Platte steht, fällt hinunter (und wird vor der Trommel neu aufgesetzt).
+// Karts fest: An Wand und Decke fährt es sich wie am Boden. Aber die Magnetplatten an der Decke schalten im Takt ab –
+// links und rechts im Wechsel: Wer auf einer abgeschalteten Platte steht, fällt hinunter (und wird vor der Trommel neu
+// aufgesetzt).
 // Danach über das Werksgelände: Verladerampe mit Sprung über den Gleisanschluss, Kühltürme, Umspannwerk, zurück zum Tor.
 
 import type { TrackDef } from '../track';
@@ -21,7 +21,7 @@ export const MAGNET: TrackDef = {
   name: 'Magnetwerk',
   theme: 'magnet',
   blurb: 'Werkstor, Montagehalle, die Magnettrommel – die Wand hinauf, über die Decke, die andere Wand hinunter –, Verladerampe mit Sprung über den Gleisanschluss, Kühltürme, Umspannwerk.',
-  twist: 'In der Magnettrommel fährt man an Wand und Decke: An der Wand sackt man ab, an der Decke rutscht man leichter – und die Deckenplatten schalten im Takt ab, links und rechts im Wechsel.',
+  twist: 'In der Magnettrommel fährt man an Wand und Decke – die Magnete halten. Aber die Deckenplatten schalten im Takt ab, links und rechts im Wechsel: Wer auf einer abgeschalteten fährt, fällt.',
   grade: 3,
   scale: 1.6,
   // Werksstraßen aus Asphalt (der Stahl-Untergrund zeichnet gelbe Randlinien – Gelb heißt hier „Platte schaltet gleich ab“)
