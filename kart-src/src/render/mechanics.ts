@@ -22,6 +22,7 @@ import { buildDrum } from './mechanics/drum';
 import { buildBand } from './mechanics/band';
 import { buildMetro } from './mechanics/metro';
 import { buildAtrium } from './mechanics/atrium';
+import { buildDam } from './mechanics/dam';
 import { buildRails } from './mechanics/rails';
 import { buildSizers } from './mechanics/sizers';
 import { buildSnow } from './mechanics/snow';
@@ -66,10 +67,13 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
     const k = track.def.branches?.findIndex((b) => b.shortcut === 'risk') ?? -1;
     if (k >= 0) out.push(buildAtrium(track, k));
   }
+  // Talsperre: Staumauer, Überlaufrinne, Schleuse und Krafthaus (das Band an der Mauer zeichnet mechanics/band.ts)
+  if (track.def.theme === 'talsperre') out.push(buildDam(track, detail, world));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
   if (track.pulses.some((p) => p.kind === PULSE_VENT || p.kind === PULSE_BOMB) || track.floods.length > 0) out.push(buildLava(track, detail));
   // (Im Dschungel ist ein „Band“ die Querströmung der Furt: die zeichnet mechanics/river.ts.)
-  if ((track.belts.some((b) => !b.swim) && track.def.theme !== 'dschungel') || presses) out.push(buildMachines(track, detail));
+  // (Auf der Talsperre ist es das Wasser über der Wehrkrone: das zeichnet mechanics/dam.ts.)
+  if ((track.belts.some((b) => !b.swim) && track.def.theme !== 'dschungel' && track.def.theme !== 'talsperre') || presses) out.push(buildMachines(track, detail));
   if (track.tide) out.push(buildTide(track, detail, world));
   if (track.thermals.length > 0 || track.rings.length > 0 || hasGlide(track)) out.push(buildFlight(track, detail));
   if (track.belts.some((b) => b.swim) || track.pulses.some((p) => p.kind === PULSE_BUBBLE)) out.push(buildDive(track, detail));
@@ -85,6 +89,7 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.era) out.push(buildRift(track, detail));
   // (Im Magnetwerk zeichnet die Trommel ihre Magnetplatten selbst.)
   // (Das Tor der U-Bahn zeigt mechanics/metro.ts.)
-  else if (track.drums.length === 0 && !track.metro && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
+  // (Das Tor der Schleuse auf der Talsperre zeigt mechanics/dam.ts.)
+  else if (track.drums.length === 0 && !track.metro && track.def.theme !== 'talsperre' && (track.holes.length > 0 || track.gates.some((g) => g.only === 0))) out.push(buildVolcano(track, detail));
   return out;
 }

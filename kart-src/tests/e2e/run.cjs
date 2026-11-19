@@ -833,8 +833,8 @@ async function main() {
     check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
     await h6.page.click('#btn-step-next');
     check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
-    check('Zwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 20);
-    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 20);
+    check('Einundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 21);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 21);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
@@ -1520,7 +1520,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen zwanzig Strecken zur Wahl', cards === 20, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen einundzwanzig Strecken zur Wahl', cards === 21, `${cards} Karten`);
     await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2233,9 +2233,57 @@ async function main() {
     }
     check('U-Bahn und Tor zum Zugdach: nach Fahrplan, auf beiden Bildschirmen gleich – offen nur, solange ein Zug hält', same && gateOk && opened > 4, `${opened} von 78 Stichproben offen${same ? '' : ', Bildschirme verschieden'}${gateOk ? '' : ', offen ohne haltenden Zug'}`);
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Talsperre: Das Schleusentor folgt seinem Fahrplan – auf beiden Bildschirmen gleich, mal offen, mal zu. Auf der
+    // Überlaufrinne drückt das Wasser zur Kante: Wer nicht gegenlenkt, wird zur Seite geschoben (oder fällt in die Rinne).
+    // Im Stausee wird getaucht.
+    await pickTrack(h7.page, 20);
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 20, null, { timeout: 5000 });
+    await clickReady(c7.page);
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await clickStart(h7.page);
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 20, null, { timeout: 30000 });
+    let lockSame = true;
+    let lockOpen = 0;
+    let lockShut = 0;
+    for (let sec = 1; sec < 33; sec += 0.5) {
+      const [a, b] = await Promise.all([kart(h7.page, `dam(${sec})`), kart(c7.page, `dam(${sec})`)]);
+      if (a.gate !== b.gate) lockSame = false;
+      if (a.gate) lockShut++;
+      else lockOpen++;
+    }
+    const damInfo = await kart(h7.page, 'dam()');
+    check(
+      'Talsperre: Schleusentor nach Fahrplan, auf beiden Bildschirmen gleich; Turbinen, Überlaufrinne und Stausee sind da',
+      lockSame && lockOpen > 8 && lockShut > 8 && damInfo.turbines >= 2 && damInfo.weir && damInfo.weir.push < -1 && damInfo.under > 0,
+      `${lockOpen} offen / ${lockShut} zu (Takt ${damInfo.period} s)${lockSame ? '' : ', Bildschirme verschieden'} · ${damInfo.turbines} Turbinen · Rinne ${damInfo.weir ? damInfo.weir.length.toFixed(0) + ' m, Schub ' + damInfo.weir.push : 'fehlt'} · unter Wasser ab ${damInfo.under.toFixed(0)} m`,
+    );
+    // Anna mitten auf die Rinne, Vollgas geradeaus: das Wasser schiebt sie nach links (zur Rinne hin) – oder hinein.
+    {
+      const w0 = await h7.page.evaluate(() => {
+        const k = window.__kart;
+        k.place(0, 50, 0, 0);
+        const s = k.authoritative(0);
+        return { x: s.x, z: s.z, seg: s.seg, time: k.race().time };
+      });
+      await h7.page.keyboard.down('ArrowUp');
+      await sleep(900);
+      const w1 = await h7.page.evaluate(([x0, z0, seg]) => {
+        const k = window.__kart;
+        const s = k.authoritative(0);
+        const d = k.track();
+        // seitliche Lage gegenüber dem Startpunkt, quer zur Fahrtrichtung dort (rechts positiv)
+        const e = k.entities().find((q) => q.slot === 0);
+        return { lat: (s.x - x0) * -Math.cos(e ? e.heading : 0) + (s.z - z0) * Math.sin(e ? e.heading : 0), respawn: s.respawn, seg: s.seg, len: d.length, start: seg };
+      }, [w0.x, w0.z, w0.seg]);
+      await h7.page.keyboard.up('ArrowUp');
+      check('Überlaufrinne: das Wasser schiebt Anna ohne Gegenlenken zur Kante (oder in die Rinne)', w1.respawn > 0 || w1.lat < -0.8, `quer ${w1.lat.toFixed(2)} m, neu aufgesetzt ${w1.respawn > 0 ? 'ja' : 'nein'}`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die zwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die einundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

@@ -72,6 +72,7 @@ import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard'
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
 import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, twistRadiusAt, twistRollAt, twistWarp, vehiclePose, walk, type Track } from '../game/track';
+import { CHANNEL, CHANNEL_FLOOR, DAM_AIR, DAM_CZ, RIVER_Y } from './life/talsperreLand';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -1075,6 +1076,11 @@ export class RaceScene {
         if (era || t.metro) break;
         const shut = planActive(g.plan, time);
         if (shut === planActive(g.plan, before)) continue;
+        // Talsperre: Die Schleuse öffnet mit Rauschen (das Wasser gleicht sich aus) und schließt mit dem Klack der Antriebe.
+        if (t.def.theme === 'talsperre') {
+          this.emitAt(shut ? 'magnetoff' : 'drain', t.px[g.first + g.count], t.py[g.first + g.count] + 2, t.pz[g.first + g.count], 160);
+          continue;
+        }
         // Das hört die ganze Insel – in der Ferne leise.
         this.emitAt(shut ? 'collapse' : 'drain', t.px[g.first], t.py[g.first], t.pz[g.first], 600);
         if (shut && me) {
@@ -1112,6 +1118,16 @@ export class RaceScene {
           for (let n = 0; n < 40 && (t.edge[lip] & EDGE_GAP) === 0; n++) lip = t.next[lip];
           if (t.edge[lip] & EDGE_GAP) this.emitAt('falls', t.px[lip], t.py[lip] - 3, t.pz[lip], 170);
         }
+      }
+      // Talsperre: das Tosen am Grundablass (Tosbecken am Mauerfuß) und an der Überlaufrinne; im Krafthaus brummen die
+      // Maschinensätze – hörbar, solange man in der Nähe ist.
+      if (t.def.theme === 'talsperre') {
+        if (Math.floor(time / 30) !== Math.floor(before / 30)) {
+          this.emitAt('falls', 0, RIVER_Y + 2, DAM_CZ - DAM_AIR + 18, 150);
+          const c = CHANNEL[Math.floor(CHANNEL.length / 2)];
+          this.emitAt('falls', c[0], CHANNEL_FLOOR + 2, c[1], 90);
+        }
+        if (Math.floor(time / 24) !== Math.floor(before / 24)) for (const h of t.hazards) this.emitAt('hum', t.px[h.seg], t.py[h.seg] + 2, t.pz[h.seg], 50);
       }
       // Gewitterkamm: fernes Wetterleuchten – der Donner dazu rollt eine knappe Sekunde später heran.
       for (const f of t.flashes) {
