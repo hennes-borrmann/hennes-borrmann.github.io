@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>Vorschau Roboter</title>
+<style>
+  html, body { margin: 0; background: #bfe6fb; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// Nur zur Entwicklung (nicht im Build – vite.config.ts nennt nur index.html und c/index.html): ein Kart allein auf einer
+// Fahrbahn mit Querstreifen im Meter-Abstand, damit man sieht, ob die Füße des Roboters stehen bleiben. Aufruf über den
+// Entwicklungsserver (npx vite, dann /vorschau-roboter.html?w=800&h=600), Bedienung über window.H, z. B. mit Playwright:
+//   H.init({ c: 0, s: 0, q: 2, v: 26 }); H.go(0.62); H.cam('side'); H.draw();
+// Weitere Angaben für init: dt (Schrittweite), slip (Lage der stehenden Sohlen mitschreiben, H.slip()), abortAt (Roboter
+// ab dieser Zeit abgebrochen, wie nach einem Treffer). Liest dafür auch interne Felder des Modells (bones, robStand, robTd).
+import * as THREE from 'three';
+import { KartVisual } from './src/render/kartModel.ts';
+
+const q = new URLSearchParams(location.search);
+const W = Number(q.get('w') ?? 960);
+const Hh = Number(q.get('h') ?? 600);
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, Hh);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe6fb);
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(40, 90, 70);
+scene.add(sun, new THREE.HemisphereLight(0xcfe9ff, 0x8a7a68, 1.3));
+const camera = new THREE.PerspectiveCamera(32, W / Hh, 0.1, 400);
+
+// Fahrbahn: Querstreifen jeden Meter, alle fünf Meter ein breiter.
+const tc = document.createElement('canvas');
+tc.width = 64;
+tc.height = 320;
+const g = tc.getContext('2d');
+g.fillStyle = '#8c8a96';
+g.fillRect(0, 0, 64, 320);
+for (let i = 0; i < 5; i++) {
+  g.fillStyle = i === 0 ? '#f4f1ea' : '#b9b7c2';
+  g.fillRect(0, i * 64, 64, i === 0 ? 10 : 4);
+}
+const tex = new THREE.CanvasTexture(tc);
+tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+tex.repeat.set(1, 120);
+tex.colorSpace = THREE.SRGBColorSpace;
+const road = new THREE.Mesh(new THREE.PlaneGeometry(8, 600), new THREE.MeshLambertMaterial({ map: tex }));
+road.rotation.x = -Math.PI / 2;
+road.position.z = 250;
+scene.add(road);
+const grass = new THREE.Mesh(new THREE.PlaneGeometry(400, 600), new THREE.MeshLambertMaterial({ color: 0x8fc46a }));
+grass.rotation.x = -Math.PI / 2;
+grass.position.set(0, -0.01, 250);
+scene.add(grass);
+// Schatten als Scheibe unter dem Kart
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2;
+shadow.scale.set(0.9, 1.3, 1);
+shadow.position.y = 0.005;
+scene.add(shadow);
+
+const REST = {
+  speed: 0, steer: 0, driftDir: 0, driftStage: 0, boost: false, air: false, spin: 0, guard: false, stall: false,
+  offroad: false, emote: 'none', held: 0, tow: false, glide: false, dive: false, space: false,
+};
+
+const st = { kart: null, v: 26, t: -0.6, z: 0, y: 0, vy: 0, mode: 'side', scale: 1, gold: false, steps: 0, trace: [] };
+const LEAP = 54 / 60;
+const END = 84 / 60;
+
+window.H = {
+  /** c Figur, s Platz, q Detail (0..2), v Tempo (m/s), gold, scale (Maßstab wie im Spiel bei Get Gold), dt Schrittweite (s). */
+  init(o = {}) {
+    if (st.kart) {
+      st.kart.dispose();
+    }
+    st.kart = new KartVisual(o.c ?? 0, o.q ?? 2, o.s ?? o.c ?? 0);
+    scene.add(st.kart.root);
+    st.v = o.v ?? 26;
+    st.t = -(o.pre ?? 0.6);
+    st.z = 0;
+    st.y = 0;
+    st.vy = 0;
+    st.gold = o.gold === true;
+    st.scale = o.scale ?? 1;
+    st.steps = 0;
+    st.trace = [];
+    st.dt = o.dt ?? 1 / 60;
+    st.slip = o.slip ? [] : null;
+    st.abortAt = o.abortAt ?? 0;
+    st.landed = false;
+    st.kart.root.scale.setScalar(st.scale);
+    window.V = st.kart;
+    return true;
+  },
+  /** Bis zur Roboterzeit T (Sekunden seit dem Auslösen) weiterrechnen, Bild für Bild. */
+  go(T) {
+    while (st.t < T - 1e-6) H.step();
+    return H.info();
+  },
+  step() {
+    const k = st.kart;
+    const DT = st.dt;
+    st.t += DT;
+    const T = st.t;
+    let speed = st.v;
+    let air = false;
+    if (T >= LEAP && st.y >= 0) {
+      if (st.vy === 0 && st.y === 0) st.vy = 10.5;
+      speed = Math.max(st.v, 35);
+    }
+    if (st.vy !== 0 || st.y > 0) {
+      st.vy -= 30 * DT;
+      st.y += st.vy * DT;
+      air = true;
+      if (st.y <= 0) {
+        st.y = 0;
+        st.vy = 0;
+        air = false;
+        st.landed = true;
+      }
+    }
+    if (st.landed) speed = Math.max(st.v, 35);
+    st.z += speed * DT;
+    const robot = T > 0 && T < END + 1e-6 && !st.landed && !(st.abortAt && T >= st.abortAt) ? T : 0;
+    k.root.position.set(0, st.y, st.z);
+    k.update(DT, { ...REST, speed, air, robot, gold: st.gold });
+    k.root.updateMatrixWorld(true);
+    // Lage der Sohlen (Ferse und Ballen) je Bein, solange es laut Modell steht – zum Prüfen, dass nichts rutscht.
+    if (st.slip) {
+      for (let i = 0; i < 2; i++) {
+        if (!k.robStand[i]) continue;
+        const foot = k.bones[64 + i]; // B.rFootL / B.rFootR
+        const heel = new THREE.Vector3(0, -0.15, -0.11).applyMatrix4(foot.matrixWorld);
+        const ball = new THREE.Vector3(0, -0.15, 0.22).applyMatrix4(foot.matrixWorld);
+        st.slip.push({ t: +T.toFixed(4), leg: i, td: k.robTd[i], heel: [+heel.y.toFixed(3), +heel.z.toFixed(3)], ball: [+ball.y.toFixed(3), +ball.z.toFixed(3)] });
+      }
+    }
+    if (k.robotSteps !== st.steps) {
+      st.steps = k.robotSteps;
+      const f = k.robotFoot.clone().applyMatrix4(k.root.matrixWorld);
+      st.trace.push({ t: +T.toFixed(3), x: +f.x.toFixed(3), y: +f.y.toFixed(3), z: +f.z.toFixed(3) });
+    }
+    shadow.position.x = 0;
+    shadow.position.z = st.z;
+  },
+  slip() {
+    return st.slip;
+  },
+  info() {
+    const k = st.kart;
+    return { t: +st.t.toFixed(3), z: +st.z.toFixed(2), y: +st.y.toFixed(2), look: k.robotLook, steps: k.robotSteps, trace: st.trace };
+  },
+  /** Kamera: side (von links), right (von rechts), chase (wie im Spiel von hinten), front (schräg von vorn), back34. */
+  cam(mode = 'side', dist = 7.5, hgt = 1.3, fov = 32) {
+    st.mode = mode;
+    st.camDist = dist;
+    st.camH = hgt;
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  },
+  /** Bild zeichnen (Kamera folgt dem Kart). */
+  draw() {
+    const z = st.z;
+    const d = st.camDist ?? 7.5;
+    const h = st.camH ?? 1.3;
+    const yy = st.y;
+    switch (st.mode) {
+      case 'right':
+        camera.position.set(-d, h + yy * 0.5, z);
+        camera.lookAt(0, h + yy * 0.5, z);
+        break;
+      case 'chase':
+        camera.position.set(0, 2.6 + yy * 0.6, z - 6.2);
+        camera.lookAt(0, 1.2 + yy * 0.8, z + 2);
+        break;
+      case 'front':
+        camera.position.set(d * 0.55, h + 0.6, z + d * 0.8);
+        camera.lookAt(0, h, z);
+        break;
+      case 'back34':
+        camera.position.set(d * 0.6, h + 1.2, z - d * 0.75);
+        camera.lookAt(0, h, z);
+        break;
+      case 'face':
+        camera.position.set(d * 0.35, h + 0.4, z + d);
+        camera.lookAt(0, h, z);
+        break;
+      case 'top34':
+        camera.position.set(d * 0.7, h + 1.0, z + d * 0.55);
+        camera.lookAt(0, h, z);
+        break;
+      default:
+        camera.position.set(d, h + yy * 0.5, z);
+        camera.lookAt(0, h + yy * 0.5, z);
+    }
+    renderer.render(scene, camera);
+    return true;
+  },
+  /** Lage der Knochen im Raum der Welt (für Messungen), z. B. H.bone(54). */
+  bone(i) {
+    const b = st.kart.bones[i];
+    const p = new THREE.Vector3().setFromMatrixPosition(b.matrixWorld);
+    return [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)];
+  },
+  renderer,
+};
+H.init();
+H.cam('side');
+H.go(0);
+H.draw();
+window.READY = true;
+</script>
+</body>
+</html>

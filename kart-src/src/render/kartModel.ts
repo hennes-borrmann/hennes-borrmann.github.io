@@ -168,17 +168,26 @@ const B = {
   sJet1: 51,
   sJet2: 52,
   sJet3: 53,
-  rThighL: 54, // Roboter: Oberschenkel (Gelenk an der Karosserie) …
+  rThighL: 54, // Roboter: Oberschenkel (Hüftgelenk am Becken) …
   rThighR: 55,
   rShinL: 56, // … Unterschenkel (Knie) …
   rShinR: 57,
-  rArmL: 58, // … und Arme (Schulter)
+  rArmL: 58, // … Oberarm (Schulter an der Karosserie) …
   rArmR: 59,
   gun: 60, // Kleber: Klebepistole am Heck (Scharnier)
   glueHead: 61, // Kleberklecks auf dem Gesicht …
   glueBody: 62, // … und auf der Haube vor dem Lenkrad
+  rPelvis: 63, // Roboter: Becken (unter dem Heck) …
+  rFootL: 64, // … Fuß (Sprunggelenk) …
+  rFootR: 65,
+  rToeL: 66, // … Zehen (Ballen) …
+  rToeR: 67,
+  rForeL: 68, // … Unterarm (Ellbogen) …
+  rForeR: 69,
+  rHandL: 70, // … und Faust (Handgelenk)
+  rHandR: 71,
 } as const;
-const BONE_COUNT = 63;
+const BONE_COUNT = 72;
 
 // Farben, die alle Karts teilen.
 const DARK = 0x2d2a36; // Gummi, Rahmen
@@ -2505,78 +2514,303 @@ const BUILDERS = [buildKalle, buildVera, buildBert, buildZoe];
 
 // ───────────────────────────── Roboter ─────────────────────────────
 //
-// Das Item „Roboter“: Das Kart richtet sich auf, die Hinterräder klappen waagerecht und werden zu Füßen, die Vorderräder
-// wandern an die Schultern; dazwischen fahren Beine und Arme aus. Sie stecken im selben Netz wie das Kart (kein
-// zusätzlicher Zeichenaufruf) und hängen an eigenen Knochen: Oberschenkel (Hüfte an der Karosserie), Unterschenkel (Knie),
-// Arm (Schulter). Eingeklappt sind sie auf null geschrumpft. Der Fahrer bleibt aufrecht im Sitz – er ist der Kopf.
+// Das Item „Roboter“: Das Kart federt ein und springt hoch, ganz hinten unter dem Heck klappt ein Becken heraus, daran Beine
+// mit Hüft-, Knie- und Sprunggelenk, Fuß und Zehen; die Hinterräder sitzen danach außen auf den Kniegelenken (die Nabe ist
+// die Achse), die Vorderräder wandern als Schulterpanzer an die Schultern, aus denen Arme mit Ellbogen und Fäusten klappen.
+// Die Karosserie steht schräg als Oberkörper über dem Becken, der Fahrer richtet sich im Sitz auf und gleicht die Neigung
+// aus – er ist der Kopf. Dann rennt der Roboter wie ein Sprinter: Ferse aufsetzen, abrollen, über den Ballen abdrücken,
+// Flugphase, das Schwungbein mit stark gebeugtem Knie nach vorn; die Arme schwingen gegengleich mit angewinkelten Ellbogen,
+// Becken und Oberkörper verdrehen sich gegeneinander. Der fünfte Fußaufsatz ist der Absprung: tief in die Knie, explosiv
+// strecken, Arme hochreißen – im Sprung klappt alles der Reihe nach wieder ein.
 //
-// Knochen-Koordinaten: Bein und Arm hängen in Ruhe senkrecht nach unten (−y), +z nach vorn; links bei +x, rechts gespiegelt.
+// Die Gliedmaßen stecken im Zusatz-Netz (nur sichtbar, solange gebraucht) und hängen an Knochenketten: Becken →
+// Oberschenkel (Hüfte, Kugelgelenk) → Unterschenkel (Knie, Scharnier) → Fuß (Sprunggelenk) → Zehen (Ballen) und Oberarm
+// (Schulter, Kugelgelenk) → Unterarm (Ellbogen, Scharnier) → Faust (Handgelenk). Eingeklappt sind sie geschrumpft und
+// angelegt. Knochen-Koordinaten in Ruhe: Bein und Arm hängen senkrecht nach unten (−y), +z nach vorn, links bei +x (rechts
+// gespiegelt); das Becken steht aufrecht, sein Ursprung liegt mitten zwischen den Hüftgelenken.
 
-/** Längen: Oberschenkel, Unterschenkel, Arm (Schulter bis Faustmitte). */
-const ROBOT_THIGH = 0.52;
-const ROBOT_SHIN = 0.55;
-const ROBOT_ARM = 0.68;
-/** Ganz verwandelt: so weit hebt sich die Karosserie, so weit richtet sie sich auf (rad, Nase hoch), so weit rückt sie vor. */
-const ROBOT_LIFT = 1.12;
-const ROBOT_PITCH = 0.5;
-const ROBOT_SHIFT = 0.42;
-/** Lauf: halbe Schrittweite und Fußhub (m), Takt (Doppelschritte je Sekunde bei Höchsttempo), Armschwung (rad). */
-const ROBOT_STRIDE = 0.42;
-const ROBOT_STEP_UP = 0.3;
-const ROBOT_CADENCE = 4.4;
-const ROBOT_SWING = 0.7;
-/** Zeitplan (Sekunden seit dem Auslösen, wie im Spiel: ROBOT_LEAP_AT / 60 = 0,9). */
+/** Bein (m): Oberschenkel, Unterschenkel, Sprunggelenk über der Sohle, Ferse dahinter, Ballen davor, Zehen. */
+const ROBOT_THIGH = 0.66;
+const ROBOT_SHIN = 0.66;
+const ROBOT_ANKLE = 0.15;
+const ROBOT_HEEL = 0.11;
+const ROBOT_BALL = 0.22;
+const ROBOT_TOE = 0.14;
+/** Halber Abstand der Hüftgelenke. */
+const ROBOT_HIP_X = 0.37;
+/** Arm (m): Oberarm, Unterarm (Ellbogen bis Handgelenk). */
+const ROBOT_UPPER = 0.42;
+const ROBOT_FORE = 0.4;
+/** Laufhaltung: Höhe des Beckens, Neigung der Karosserie (rad, Nase hoch), Becken vor der Mitte des Karts. */
+const ROBOT_HIP_Y = ROBOT_THIGH + ROBOT_SHIN + ROBOT_ANKLE - 0.1;
+const ROBOT_PITCH = 0.72;
+const ROBOT_FWD = -0.08;
+/** So weit richtet sich der Fahrer je Figur im Sitz auf (m) – Bert sitzt tief in seiner Wanne. */
+const ROBOT_RISE = [0.15, 0.12, 0.3, 0.12];
+/**
+ * Zeitplan (Sekunden seit dem Auslösen, wie im Spiel: ROBOT_LEAP_AT / 60 = 0,9). Die Schritte kommen in festem Takt: der
+ * erste Fuß setzt bei ROBOT_TD0 auf, alle ROBOT_STEP der nächste, abwechselnd links und rechts – der fünfte (links) ist der
+ * Absprung. So viel Weg legt ein aufgesetzter Fuß höchstens unter dem Roboter zurück (von der Ferse bis zum Abdruck).
+ */
 const ROBOT_T_LEAP = 0.9;
+const ROBOT_STEP = 0.156;
+const ROBOT_TD0 = ROBOT_T_LEAP - 0.045 - 4 * ROBOT_STEP;
+const ROBOT_GROUND = 1.2;
+/** Laufphase (Anteil am Doppelschritt nach dem linken Fußaufsatz), bei der der linke Arm am weitesten vorn ist. */
+const ROBOT_ARM_PHASE = 0.1;
 
-/** Hüftgelenk (links) im Raum der Karosserie. */
-function robotHip(sp: Spec): V3 {
-  return [0.47, 0.3, sp.wr.z + 0.12];
+/** Becken (Mitte zwischen den Hüftgelenken) im Raum der Karosserie: ganz hinten unter dem Heck – darüber steht der Oberkörper. */
+function robotPelvis(sp: Spec): V3 {
+  return [0, 0.16, sp.wr.z - 0.28];
 }
 
-/** Schultergelenk (links) im Raum der Karosserie. */
+/** Schultergelenk (links) im Raum der Karosserie: oben an der Seite neben dem Fahrer. */
 function robotShoulder(sp: Spec): V3 {
-  return [sp.wf.x + 0.02, 0.48, sp.wf.z - 0.32];
+  return [sp.wf.x - 0.12, 0.44, sp.hip[2] + 0.3];
 }
 
-/** Beine und Arme des Roboters: Lack für die Panzerung, Stahl und Chrom für Gelenke und Kolben. */
+/** Vorderrad als Schulterpanzer: Maßstab. */
+const ROBOT_SHOULDER_WHEEL = 0.85;
+
+/** Hinterrad am Knie: Maßstab und Abstand seiner Mitte von der Mitte des Kniegelenks (außen) – die Nabe ist die Achse. */
+const ROBOT_KNEE_WHEEL = 0.6;
+function robotKneeWheel(sp: Spec): number {
+  return 0.125 + sp.wr.w * 0.5 * ROBOT_KNEE_WHEEL;
+}
+
+/** Querschnitt für loft(): Rechteck (halbe Breite, halbe Höhe) mit Fasen c an den Ecken, gegen den Uhrzeigersinn. */
+function chamRing(z: number, hw: number, hh: number, c: number): Ring {
+  if (c <= 0) return { z, p: [hw, -hh, hw, hh, -hw, hh, -hw, -hh] };
+  return { z, p: [hw, -hh + c, hw, hh - c, hw - c, hh, -hw + c, hh, -hw, hh - c, -hw, -hh + c, -hw + c, -hh, hw - c, -hh] };
+}
+
+/**
+ * Panzerteil eines Glieds: kantiger Block von y = 0 abwärts bis y = −len, oben w0 × d0, unten w1 × d1 (Breite x, Tiefe z),
+ * die Längskanten gefast (c), flach schattiert wie gekantetes Blech. Ohne Feinheiten ein schlichter, verjüngter Quader.
+ */
+function plate(w0: number, d0: number, w1: number, d1: number, len: number, c: number, fine: boolean): THREE.BufferGeometry {
+  const f = fine ? Math.min(c, w1 * 0.3, d1 * 0.3) : 0;
+  const g = loft([chamRing(0, w0 / 2, d0 / 2, f), chamRing(len, w1 / 2, d1 / 2, f)], { flat: true });
+  g.rotateX(HALF_PI);
+  return g;
+}
+
+/** Scharnier quer zur Bewegung: Achse entlang x (Länge len, Radius r), mit Feinheiten verchromte Bolzenköpfe an den Enden. */
+function robotHinge(b: Builder, bone: number, mirror: number, at: V3, r: number, len: number, color: number): void {
+  b.put(cyl(r, r, len, b.s(8, 6)), { bone, color, pos: at, rot: [0, 0, HALF_PI], mirror, outline: 0.7 });
+  if (!b.fine) return;
+  for (const s of [1, -1]) {
+    b.put(cyl(r * 0.52, r * 0.6, 0.035, 6), { bone, color: CHROME, pos: [at[0] + s * (len / 2 + 0.012), at[1], at[2]], rot: [0, 0, HALF_PI], mirror, outline: 0.45 });
+  }
+}
+
+/**
+ * Hydraulikschlauch über ein Gelenk: oben am Elternknochen, unten am Kind festgemacht, dazwischen weich verteilt – so biegt
+ * und staucht er sich mit, wenn das Gelenk einknickt. Pfad im Raum des Elternknochens (Ruhelage), y0/y1: Bereich der
+ * Überblendung (im Raum der Karosserie).
+ */
+function robotHose(b: Builder, path: readonly V3[], parent: number, child: number, parentR: number, childR: number, y0: number, y1: number): void {
+  b.put(sweep(path, 0.024, 5, 6), {
+    bone: parent,
+    color: DARK,
+    mirror: parentR,
+    outline: 0.4,
+    skin: (x, y, _z, out) => {
+      const w = smooth01((y0 - y) / (y0 - y1));
+      const left = x >= 0;
+      out[0] = left ? parent : parentR;
+      out[1] = 1 - w;
+      out[2] = left ? child : childR;
+      out[3] = w;
+    },
+  });
+}
+
+/**
+ * Gliedmaßen des Roboters: Lack für die Panzerplatten (Grundton, dunkel, hell, Akzent an Kniescheibe und Gürtelschnalle),
+ * Stahl und Chrom für Kugelgelenke, Scharnierachsen, Bolzen und Kolben, Gummi für die Sohlen. Die Arme sind dunkler als die
+ * Karosserie, vor der sie schwingen.
+ */
 function buildRobot(c: Ctx): void {
   const b = c.b;
   const P = c.p;
+  const sp = c.sp;
   const fine = b.fine;
-  const n = b.s(10, 6);
+  const n = b.s(8, 6);
+  const PV = B.rPelvis;
   const TH = B.rThighL;
   const SH = B.rShinL;
+  const FT = B.rFootL;
+  const TO = B.rToeL;
   const AR = B.rArmL;
+  const FO = B.rForeL;
+  const HA = B.rHandL;
   const RT = B.rThighR;
   const RS = B.rShinR;
+  const RF = B.rFootR;
+  const RO = B.rToeR;
   const RA = B.rArmR;
-  // Oberschenkel: Hüftkugel, kräftige Panzerplatte im Lack mit heller Fase vorn, hinten ein Hydraulikkolben
-  b.put(sphere(0.12, 0.12, 0.12, n, n >> 1), { bone: TH, color: STEEL, mirror: RT, outline: 0.7 });
-  b.put(b.soft(0.3, 0.42, 0.3, 0.08, 4), { bone: TH, color: P.base, pos: [0, -0.25, 0.01], mirror: RT });
-  b.put(box(0.18, 0.26, 0.035), { bone: TH, color: P.light, pos: [0, -0.24, 0.165], mirror: RT, outline: 0.5 });
-  b.put(box(0.035, 0.3, 0.2), { bone: TH, color: P.dark, pos: [0.155, -0.25, 0.01], mirror: RT, outline: 0.5 });
-  if (fine) b.put(cyl(0.03, 0.03, 0.38, 6), { bone: TH, color: CHROME, pos: [0, -0.27, -0.16], mirror: RT, outline: 0.5 });
-  // Unterschenkel: Kniekugel mit Kappe, Schienbein in Dunkellack mit Rillen, Knöchel als Achse zum Fuß (dem Hinterrad)
-  b.put(sphere(0.11, 0.11, 0.11, n, n >> 1), { bone: SH, color: DARK, mirror: RS, outline: 0.7 });
-  b.put(b.soft(0.19, 0.16, 0.09, 0.035, 3), { bone: SH, color: P.accent, pos: [0, 0.01, 0.12], rot: [-0.3, 0, 0], mirror: RS, outline: 0.6 });
-  b.put(b.soft(0.27, 0.44, 0.28, 0.08, 4), { bone: SH, color: P.dark, pos: [0, -0.28, 0.01], mirror: RS });
-  b.put(cyl(0.085, 0.085, 0.1, n), { bone: SH, color: STEEL, pos: [0, -ROBOT_SHIN + 0.035, 0], mirror: RS, outline: 0.6 });
+  const RFo = B.rForeR;
+  const RH = B.rHandR;
+
+  // Becken: Gürtel im Lack mit Schnalle, darunter der dunkle Kern, vorn eine Stahlplatte, seitlich die Lagerschalen der
+  // Hüftgelenke.
+  const hx = ROBOT_HIP_X;
+  b.put(plate(2 * hx + 0.1, 0.36, 2 * hx + 0.1, 0.36, 0.11, 0.035, fine), { bone: PV, color: P.base, pos: [0, 0.17, 0] });
+  b.put(plate(2 * hx - 0.04, 0.32, 0.34, 0.26, 0.26, 0.05, fine), { bone: PV, color: P.dark, pos: [0, 0.07, -0.01] });
+  b.put(plate(0.17, 0.08, 0.11, 0.06, 0.2, 0.025, fine), { bone: PV, color: STEEL, pos: [0, 0.02, 0.15], rot: [0.12, 0, 0], outline: 0.6 });
+  b.put(box(0.13, 0.085, 0.05), { bone: PV, color: P.accent, pos: [0, 0.115, 0.185], outline: 0.5 });
+  b.put(cyl(0.12, 0.12, 0.09, n), { bone: PV, color: DARK, pos: [hx - 0.13, 0, 0], rot: [0, 0, HALF_PI], mirror: PV, outline: 0.6 });
+
+  // Oberschenkel: Kugelgelenk, Panzer im Lack mit heller Platte vorn und dunkler Seitenplatte, hinten ein Hydraulikzylinder
+  b.put(sphere(0.125, 0.125, 0.125, n, 4), { bone: TH, color: STEEL, mirror: RT, outline: 0.7 });
+  b.put(plate(0.3, 0.31, 0.24, 0.25, 0.48, 0.055, fine), { bone: TH, color: P.base, pos: [0, -0.07, 0], mirror: RT });
   if (fine) {
-    // Schienbeinplatte vorn mit zwei Nieten
-    b.put(box(0.17, 0.28, 0.03), { bone: SH, color: P.base, pos: [0, -0.27, 0.15], mirror: RS, outline: 0.5 });
-    for (const y of [-0.17, -0.37]) b.put(sphere(0.022, 0.022, 0.012, 6, 4), { bone: SH, color: CHROME, pos: [0, y, 0.168], mirror: RS, outline: 0 });
+    b.put(plate(0.18, 0.05, 0.14, 0.045, 0.32, 0.018, fine), { bone: TH, color: P.light, pos: [0, -0.15, 0.155], rot: [-0.06, 0, 0], mirror: RT, outline: 0.5 });
+    b.put(box(0.04, 0.3, 0.17), { bone: TH, color: P.dark, pos: [0.14, -0.3, 0], mirror: RT, outline: 0 });
+    b.put(cyl(0.045, 0.045, 0.26, 6), { bone: TH, color: STEEL, pos: [0, -0.32, -0.145], mirror: RT, outline: 0.5 });
   }
-  // Arm: Schulterkugel (das Vorderrad sitzt außen davor), Oberarm im Lack, Ellbogen, Unterarm in Stahl, große Faust
-  b.put(sphere(0.1, 0.1, 0.1, n, n >> 1), { bone: AR, color: STEEL, mirror: RA, outline: 0.7 });
-  b.put(b.soft(0.17, 0.32, 0.18, 0.05, 3), { bone: AR, color: P.base, pos: [0, -0.19, 0], mirror: RA });
-  b.put(sphere(0.085, 0.085, 0.085, n, n >> 1), { bone: AR, color: DARK, pos: [0, -0.37, 0.01], mirror: RA, outline: 0.6 });
-  b.put(b.soft(0.19, 0.26, 0.2, 0.05, 3), { bone: AR, color: STEEL, pos: [0, -0.51, 0.04], rot: [-0.2, 0, 0], mirror: RA });
-  b.put(b.soft(0.25, 0.22, 0.24, 0.08, 4), { bone: AR, color: P.dark, pos: [0, -ROBOT_ARM, 0.07], mirror: RA });
+
+  // Knie: Scharnierachse mit Bolzen (das Hinterrad sitzt außen darauf), Kniescheibe im Akzentton (dreht mit dem Unterschenkel)
+  robotHinge(b, SH, RS, [0, 0, 0], 0.09, 0.27, DARK);
+  b.put(plate(0.2, 0.07, 0.16, 0.06, 0.18, 0.025, fine), { bone: SH, color: P.accent, pos: [0, 0.07, 0.125], rot: [-0.18, 0, 0], mirror: RS, outline: 0.6 });
+
+  // Unterschenkel: dunkler Kern, Schienbeinplatte im Lack, Wade, unten der Ring über dem Sprunggelenk
+  b.put(plate(0.26, 0.27, 0.2, 0.22, 0.5, 0.05, fine), { bone: SH, color: P.dark, pos: [0, -0.08, -0.005], mirror: RS });
+  b.put(plate(0.18, 0.05, 0.13, 0.04, 0.42, 0.016, fine), { bone: SH, color: P.base, pos: [0, -0.12, 0.135], rot: [0.05, 0, 0], mirror: RS, outline: 0.5 });
+  if (fine) b.put(plate(0.18, 0.09, 0.13, 0.06, 0.28, 0.02, fine), { bone: SH, color: P.deep, pos: [0, -0.14, -0.145], rot: [-0.08, 0, 0], mirror: RS, outline: 0.4 });
+  b.put(cyl(0.105, 0.105, 0.06, n), { bone: SH, color: STEEL, pos: [0, -ROBOT_SHIN + 0.09, 0], mirror: RS, outline: 0.5 });
+  // Schlauch hinter dem Knie: vom Zylinder am Oberschenkel zur Wade (nur auf der höchsten Stufe, ebenso am Ellbogen)
+  if (b.detail > 1) {
+    const ky = robotPelvis(sp)[1] - ROBOT_THIGH;
+    robotHose(b, [[0, -0.45, -0.145], [0, -0.62, -0.18], [0, -0.8, -0.17], [0, -0.9, -0.14]], TH, SH, RT, RS, ky + 0.12, ky - 0.16);
+  }
+
+  // Sprunggelenk und Fuß: Achse mit Bolzen, Fußblock (dunkel, oben eine Lackplatte), Gummisohle, Ferse aus Stahl
+  robotHinge(b, FT, RF, [0, 0, 0], 0.07, 0.23, STEEL);
+  const fl = ROBOT_HEEL + ROBOT_BALL;
+  const fz = (ROBOT_BALL - ROBOT_HEEL) / 2;
+  b.put(plate(0.24, 0.11, 0.23, 0.08, fl, 0.03, fine), { bone: FT, color: P.dark, pos: [0, -ROBOT_ANKLE + 0.095, -ROBOT_HEEL], rot: [-HALF_PI, 0, 0], mirror: RF });
+  b.put(box(0.25, 0.04, fl + 0.02), { bone: FT, color: DARK, pos: [0, -ROBOT_ANKLE + 0.02, fz], mirror: RF, outline: 0.6 });
   if (fine) {
-    // Fingerknöchel vorn an der Faust, Daumen innen
-    for (const x of [-0.07, 0, 0.07]) b.put(box(0.05, 0.065, 0.04), { bone: AR, color: P.deep, pos: [x, -ROBOT_ARM - 0.025, 0.2], mirror: RA, outline: 0 });
-    b.put(b.soft(0.06, 0.1, 0.07, 0.025, 3), { bone: AR, color: P.dark, pos: [-0.13, -ROBOT_ARM + 0.02, 0.1], mirror: RA, outline: 0.6 });
+    b.put(plate(0.18, 0.045, 0.2, 0.04, 0.22, 0.015, fine), { bone: FT, color: P.base, pos: [0, -0.02, 0], rot: [-HALF_PI + 0.55, 0, 0], mirror: RF, outline: 0.5 });
+    b.put(box(0.18, 0.07, 0.05), { bone: FT, color: STEEL, pos: [0, -ROBOT_ANKLE + 0.075, -ROBOT_HEEL - 0.005], mirror: RF, outline: 0.5 });
   }
+  // Zehen: Kappe im Lack mit Gummisohle
+  b.put(plate(0.23, 0.075, 0.2, 0.05, ROBOT_TOE, 0.02, fine), { bone: TO, color: P.base, pos: [0, 0.0225, 0], rot: [-HALF_PI, 0, 0], mirror: RO });
+  if (fine) b.put(box(0.23, 0.035, ROBOT_TOE), { bone: TO, color: DARK, pos: [0, -0.0325, ROBOT_TOE / 2], mirror: RO, outline: 0.6 });
+
+  // Oberarm: Kugelgelenk, Panzer in Dunkellack, außen eine helle Platte, vorn ein Kolben
+  b.put(sphere(0.11, 0.11, 0.11, n, 4), { bone: AR, color: STEEL, mirror: RA, outline: 0.7 });
+  b.put(plate(0.2, 0.21, 0.17, 0.18, 0.28, 0.04, fine), { bone: AR, color: P.dark, pos: [0, -0.07, 0], mirror: RA });
+  if (fine) {
+    b.put(box(0.035, 0.2, 0.14), { bone: AR, color: P.light, pos: [0.1, -0.2, 0], mirror: RA, outline: 0.4 });
+    b.put(cyl(0.03, 0.03, 0.2, 6), { bone: AR, color: CHROME, pos: [0, -0.22, 0.11], mirror: RA, outline: 0.45 });
+  }
+
+  // Ellbogen: Scharnier mit Bolzen, hinten ein Ellbogenschutz
+  robotHinge(b, FO, RFo, [0, 0, 0], 0.075, 0.22, DARK);
+  b.put(plate(0.15, 0.06, 0.11, 0.05, 0.13, 0.02, fine), { bone: FO, color: P.base, pos: [0, 0.06, -0.095], rot: [0.25, 0, 0], mirror: RFo, outline: 0.6 });
+
+  // Unterarm: Stulpe aus Stahl, zum Handgelenk hin breiter, außen eine Lackplatte
+  b.put(plate(0.17, 0.19, 0.21, 0.22, 0.3, 0.045, fine), { bone: FO, color: STEEL, pos: [0, -0.06, 0], mirror: RFo });
+  b.put(box(0.04, 0.22, 0.15), { bone: FO, color: P.base, pos: [0.11, -0.22, 0], mirror: RFo, outline: 0.4 });
+  if (b.detail > 1) robotHose(b, [[0, -0.24, 0.11], [0, -0.38, 0.14], [0, -0.52, 0.125]], AR, FO, RA, RFo, robotShoulder(sp)[1] - ROBOT_UPPER + 0.1, robotShoulder(sp)[1] - ROBOT_UPPER - 0.1);
+
+  // Handgelenk und Faust: Stahlgelenk, Faust aus Gummi-Dunkel mit Knöchelplatte im Lack, Fingerglieder, Daumen innen
+  b.put(cyl(0.065, 0.065, 0.16, n), { bone: HA, color: STEEL, rot: [0, 0, HALF_PI], mirror: RH, outline: 0.5 });
+  b.put(plate(0.2, 0.18, 0.19, 0.18, 0.18, 0.035, fine), { bone: HA, color: DARK, pos: [0, -0.04, 0.01], mirror: RH });
+  b.put(box(0.2, 0.11, 0.05), { bone: HA, color: P.base, pos: [0, -0.115, 0.105], mirror: RH, outline: 0.5 });
+  if (fine) {
+    for (const x of [-0.065, 0, 0.065]) b.put(box(0.05, 0.05, 0.04), { bone: HA, color: P.deep, pos: [x, -0.19, 0.075], mirror: RH, outline: 0 });
+    b.put(box(0.06, 0.11, 0.08), { bone: HA, color: DARK, pos: [-0.115, -0.1, 0.05], rot: [0, 0, -0.2], mirror: RH, outline: 0.5 });
+  }
+}
+
+// Bewegung des Roboters (moveRobot): Anteile beim Aus- und Einklappen je Teil, in dieser Reihenfolge.
+const RK_BODY = 0; // Karosserie hebt sich und richtet sich auf
+const RK_PELVIS = 1;
+const RK_THIGH = 2;
+const RK_SHIN = 3;
+const RK_FOOT = 4;
+const RK_REAR = 5; // Hinterräder an die Knie
+const RK_FRONT = 6; // Vorderräder an die Schultern
+const RK_UPPER = 7;
+const RK_FORE = 8;
+const RK_HAND = 9;
+const RK_COUNT = 10;
+
+/**
+ * Schwungbein: Stützstellen der Bahn des Sprunggelenks relativ zur Hüfte (Anteil am Schwung, vor/zurück und Höhe in
+ * Beinlängen, Neigung des Fußes in rad, + = Zehen runter): Ferse hoch zum Gesäß, unter der Hüfte durch, Knie hoch,
+ * Unterschenkel nach vorn gestreckt – dazwischen weich, Anfang (Abheben) und Ende (Fersenaufsatz) rechnet moveRobot.
+ */
+// prettier-ignore
+const SWING_KEYS = [
+  0.1, -0.5, -0.6, 1.1,
+  0.27, -0.36, -0.3, 1.4,
+  0.46, -0.02, -0.31, 0.8,
+  0.66, 0.33, -0.48, -0.05,
+  0.85, 0.45, -0.74, -0.22,
+];
+/** Zahl der Stützstellen samt Abheben und Fersenaufsatz. */
+const SWING_N = SWING_KEYS.length / 4 + 2;
+/** Wo der Schwung beginnt, solange noch kein Fuß abgehoben hat (je Bein: vor/zurück, Höhe relativ zur Hüfte). */
+const ROBOT_OFF0 = [-0.5, 0.25 - ROBOT_HIP_Y, -0.5, 0.25 - ROBOT_HIP_Y];
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Q_ID = new THREE.Quaternion();
+/** Eingeklappt: Oberschenkel nach hinten unter den Boden, Unterschenkel ganz eingeknickt, Fuß angelegt; Arme an der Seite. */
+const R_FOLD_THIGH = new THREE.Quaternion().setFromAxisAngle(X_AXIS, 1.45);
+const R_FOLD_SHIN = new THREE.Quaternion().setFromAxisAngle(X_AXIS, 2.7);
+const R_FOLD_FOOT = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -0.9);
+const R_FOLD_ARM = new THREE.Quaternion().setFromAxisAngle(X_AXIS, 1.5);
+const R_FOLD_FORE = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -2.6);
+const R_FOLD_HAND = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -0.8);
+
+/** Größe eines Glieds beim Ausklappen: wächst in der ersten Hälfte heraus, rastet mit dem Überschwinger ein. */
+function robotGrow(k: number): number {
+  if (k <= 0) return 1e-4;
+  return Math.max(1e-4, k >= 1 ? 1 + (k - 1) * 0.6 : smooth01(k / 0.45));
+}
+
+/** Maßstab eines Knochens, damit sein Glied die Größe g hat, obwohl der Elternknochen gp groß ist. */
+function robotRatio(g: number, gp: number): number {
+  return Math.min(g / Math.max(gp, 1e-4), 60);
+}
+
+/** Fersenaufsatz vor der Hüfte (m), damit ein Fuß, der so weit unter dem Roboter durchwandert, um die Mitte abrollt. */
+function robotHeelAhead(travel: number): number {
+  return -0.1 - ROBOT_HEEL - (ROBOT_BALL - 0.06) / 2 + travel / 2;
+}
+
+/** Weiche Kurve durch Stützstellen: x ab buf[xo], y ab buf[yo], je n Werte (x aufsteigend); Tangenten aus den Nachbarn. */
+function spline(buf: ArrayLike<number>, xo: number, yo: number, n: number, s: number): number {
+  let i = 0;
+  while (i < n - 2 && s > buf[xo + i + 1]) i++;
+  const x0 = buf[xo + i];
+  const x1 = buf[xo + i + 1];
+  const h = x1 - x0 || 1;
+  const t = clamp((s - x0) / h, 0, 1);
+  const y0 = buf[yo + i];
+  const y1 = buf[yo + i + 1];
+  const m0 = i > 0 ? ((y1 - buf[yo + i - 1]) / (x1 - buf[xo + i - 1])) * h : y1 - y0;
+  const m1 = i < n - 2 ? ((buf[yo + i + 2] - y0) / (buf[xo + i + 2] - x0)) * h : y1 - y0;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * m1;
+}
+
+const _bm = new THREE.Matrix4();
+const _by = new THREE.Vector3();
+const _bz = new THREE.Vector3();
+
+/** Drehung eines Glieds: x = Achse des Scharniers, das Glied zeigt in Richtung down (−y des Knochens). */
+function robotBasis(x: THREE.Vector3, down: THREE.Vector3, out: THREE.Quaternion): void {
+  _by.copy(down).negate();
+  _bz.crossVectors(x, _by);
+  _bm.makeBasis(x, _by, _bz);
+  out.setFromRotationMatrix(_bm);
 }
 
 // ───────────────────────────── Kleber ─────────────────────────────
@@ -4361,6 +4595,22 @@ const _pp = new THREE.Vector3();
 const _pq = new THREE.Quaternion();
 const _ps = new THREE.Vector3();
 const _pk = new Float32Array(PLANT_KEY);
+// Roboter (moveRobot): Drehungen, Punkte und eine Matrix im Raum des Karts
+const _rq = new THREE.Quaternion();
+const _rq2 = new THREE.Quaternion();
+const _rq3 = new THREE.Quaternion();
+const _rm = new THREE.Matrix4();
+const _rm2 = new THREE.Matrix4();
+const _re = new THREE.Euler();
+const _rp = new THREE.Vector3();
+const _rf = new THREE.Vector3();
+const _rh = new THREE.Vector3();
+const _ra = new THREE.Vector3();
+const _rd = new THREE.Vector3();
+const _rx = new THREE.Vector3();
+const _ry = new THREE.Vector3();
+const _rz = new THREE.Vector3();
+const _rk = new THREE.Vector3();
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -4568,6 +4818,11 @@ export class KartVisual {
   private goldCol: Float32Array | null = null;
   private goldD: Float32Array | null = null;
   private goldA: Float32Array | null = null;
+  // … und für die Gliedmaßen des Roboters im Zusatz-Netz: Originalfarben, Gold (Klebepistole und Kleckse behalten ihre
+  // Farbe), zuletzt gezeigter Stand.
+  private exBase: Float32Array | null = null;
+  private exGold: Float32Array | null = null;
+  private exShown = 0;
 
   // Rakete: Hüllenteile, Düsenfeuer, Stand der Verwandlung
   private readonly rocketForm = new THREE.Group();
@@ -4580,21 +4835,26 @@ export class KartVisual {
   private fHover = 0;
   private rocketWas = false;
 
-  // Roboter: Sekunden seit dem Auslösen (laut Spiel), Anteile der Verwandlung (Heben, Beine, Arme, Räder flach), Laufen,
-  // Ducken, Absprung, Beinhaltung in der Luft; Ausblenden nach Abbruch; Schrittphase; Neigung, die der Fahrer ausgleicht.
+  // Roboter: Sekunden seit dem Auslösen (laut Spiel); ob gerade etwas davon zu sehen ist; Einklappen nach Abbruch (1 … 0);
+  // Anteile beim Aus- und Einklappen je Teil (RK_…); Neigung, die der Fahrer ausgleicht; Lage des Beckens. Je Bein: steht
+  // es gerade (seit welchem Aufsatz), Drehpunkt des Fußes auf der Fahrbahn, Sprunggelenk beim Abheben (relativ zur Hüfte)
+  // und im letzten Bild; Drehungen von Oberschenkel, Unterschenkel und Fuß im Raum des Karts; Stützstellen des Schwungs.
   private fRobot = 0;
   private robWas = false;
   private robFade = 0;
-  private robLift = 0;
-  private robLegs = 0;
-  private robArms = 0;
-  private robFlat = 0;
-  private robGait = 0;
-  private robCrouch = 0;
-  private robLeap = 0;
-  private robAir = 0;
-  private robPhase = 0;
+  private readonly robK = new Float32Array(RK_COUNT);
   private robLean = 0;
+  private robRise = 0;
+  private readonly robPelvisQ = new THREE.Quaternion();
+  private readonly robStand = [false, false];
+  private readonly robTd = [0, 0];
+  private readonly robPivot = new Float32Array(6);
+  private readonly robOff = new Float32Array(ROBOT_OFF0);
+  private readonly robAnk = new Float32Array(6);
+  private readonly robQ0 = new THREE.Quaternion();
+  private readonly robQ1 = new THREE.Quaternion();
+  private readonly robQ2 = new THREE.Quaternion();
+  private readonly robTmp = new Float32Array(4 * SWING_N);
 
   // Kleber: Pistole (Sekunden seit dem Auslösen, Ziel, wie weit ausgeklappt, Ausrichtung) und Kleckse (Restzeit, Aufploppen).
   private fGun = 0;
@@ -4773,7 +5033,7 @@ export class KartVisual {
 
   /** Roboter: wie weit das Kart gerade verwandelt gezeigt wird (0 … 1, Beine) – für Tests. */
   get robotLook(): number {
-    return this.robWas ? clamp(this.robLegs, 0, 1) : 0;
+    return this.robWas ? clamp(Math.min(this.robK[RK_THIGH], this.robK[RK_SHIN]), 0, 1) : 0;
   }
 
   /** Kleber: wie weit die Pistole ausgeklappt ist (0 … 1) und wie groß die Kleckse gerade sind (0 … 1) – für Tests. */
@@ -4880,15 +5140,25 @@ export class KartVisual {
     set(B.sJet1, B.chassis, [-jf[0] - 0.01, jf[1], jf[2]]);
     set(B.sJet2, B.chassis, [jr[0] + 0.01, jr[1], jr[2]]);
     set(B.sJet3, B.chassis, [-jr[0] - 0.01, jr[1], jr[2]]);
-    // Roboter: Hüfte und Schulter an der Karosserie, Knie am Oberschenkel
-    const hp = robotHip(sp);
+    // Roboter: Becken unter dem Heck, daran die Beine (Hüfte, Knie, Sprunggelenk, Ballen); Arme an den Schultern der
+    // Karosserie (Schulter, Ellbogen, Handgelenk)
+    const pv = robotPelvis(sp);
     const sh = robotShoulder(sp);
-    set(B.rThighL, B.chassis, hp);
-    set(B.rThighR, B.chassis, [-hp[0], hp[1], hp[2]]);
+    set(B.rPelvis, B.chassis, pv);
+    set(B.rThighL, B.rPelvis, [ROBOT_HIP_X, 0, 0]);
+    set(B.rThighR, B.rPelvis, [-ROBOT_HIP_X, 0, 0]);
     set(B.rShinL, B.rThighL, [0, -ROBOT_THIGH, 0]);
     set(B.rShinR, B.rThighR, [0, -ROBOT_THIGH, 0]);
+    set(B.rFootL, B.rShinL, [0, -ROBOT_SHIN, 0]);
+    set(B.rFootR, B.rShinR, [0, -ROBOT_SHIN, 0]);
+    set(B.rToeL, B.rFootL, [0, -ROBOT_ANKLE + 0.05, ROBOT_BALL]);
+    set(B.rToeR, B.rFootR, [0, -ROBOT_ANKLE + 0.05, ROBOT_BALL]);
     set(B.rArmL, B.chassis, sh);
     set(B.rArmR, B.chassis, [-sh[0], sh[1], sh[2]]);
+    set(B.rForeL, B.rArmL, [0, -ROBOT_UPPER, 0]);
+    set(B.rForeR, B.rArmR, [0, -ROBOT_UPPER, 0]);
+    set(B.rHandL, B.rForeL, [0, -ROBOT_FORE, 0]);
+    set(B.rHandR, B.rForeR, [0, -ROBOT_FORE, 0]);
     // Kleber: Pistole am Heck; Kleckse vorn am Kopf (über den Augen) und auf der Haube vor dem Lenkrad (zur Fahrt hin gekippt)
     set(B.gun, B.chassis, GUN_AT[this.character]);
     const mo = MOUTH[this.character];
@@ -4919,8 +5189,8 @@ export class KartVisual {
     // Ebenso die Tauchausrüstung (Veras Brille ist immer da und klappt nur herunter).
     this.hideDive();
     this.hideSpace();
-    // … Beine und Arme des Roboters, die Klebepistole und die Kleckse.
-    for (const i of [B.rThighL, B.rThighR, B.rArmL, B.rArmR, B.gun, B.glueHead, B.glueBody]) this.bones[i].scale.setScalar(0);
+    // … Becken (samt Beinen) und Arme des Roboters, die Klebepistole und die Kleckse.
+    for (const i of [B.rPelvis, B.rArmL, B.rArmR, B.gun, B.glueHead, B.glueBody]) this.bones[i].scale.setScalar(0);
   }
 
   private hideSpace(): void {
@@ -5048,6 +5318,19 @@ export class KartVisual {
     // Neu gebaut, also in den Originalfarben: beim nächsten Bild wird der Stand wieder hergestellt.
     this.goldShown = 0;
     this.goldGlint = -1;
+    // Zusatz-Netz: nur die Ecken an Knochen des Roboters werden gold.
+    const ex = this.extra.geometry;
+    const exCol = ex.getAttribute('color') as THREE.BufferAttribute;
+    const exSkin = ex.getAttribute('skinIndex') as THREE.BufferAttribute;
+    const eb = new Float32Array(exCol.array as Float32Array);
+    const eg = new Float32Array(eb);
+    for (let i = 0; i < exCol.count; i++) {
+      const bone = exSkin.getX(i);
+      if ((bone >= B.rThighL && bone <= B.rArmR) || bone >= B.rPelvis) goldOf(eb[i * 3], eb[i * 3 + 1], eb[i * 3 + 2], eg, i * 3);
+    }
+    this.exBase = eb;
+    this.exGold = eg;
+    this.exShown = 0;
   }
 
   /**
@@ -5089,6 +5372,17 @@ export class KartVisual {
       }
     }
     attr.needsUpdate = true;
+    // Gliedmaßen des Roboters: ohne Ausbreitung und Glanz, nur der Anteil.
+    const eb = this.exBase;
+    const eg = this.exGold;
+    const ek = clamp(k, 0, 1);
+    if (eb && eg && ek !== this.exShown) {
+      const ea = this.extra.geometry.getAttribute('color') as THREE.BufferAttribute;
+      const eo = ea.array as Float32Array;
+      for (let i = 0; i < eo.length; i++) eo[i] = eb[i] + (eg[i] - eb[i]) * ek;
+      ea.needsUpdate = true;
+      this.exShown = ek;
+    }
   }
 
   private swapOutline(
@@ -5356,179 +5650,364 @@ export class KartVisual {
   }
 
   /**
-   * Roboter: Das Kart hebt sich und richtet sich auf, Beine fahren aus (die Hinterräder klappen waagerecht und werden Füße),
-   * Arme klappen aus (die Vorderräder wandern an die Schultern). Dann rennt er – Schritt für Schritt, mit Wippen und Armschwung –,
-   * duckt sich, springt ab und klappt im Sprung alles wieder ein. Läuft nach moveBody und überschreibt Räder und Karosserie.
+   * Roboter: Verwandeln (das Kart federt ein, springt hoch, Becken, Beine und Arme klappen der Reihe nach heraus, die Räder
+   * wandern an Knie und Schultern), Rennen, Absprung und Zurückklappen im Sprung. Läuft nach moveBody und überschreibt
+   * Räder und Karosserie. Alles wird im Raum des Karts (unter dem Drift-Knochen) gerechnet und dann in die Knochen
+   * übersetzt; die Beine löst eine Zwei-Knochen-Rechnung (Knie nach vorn), ein aufgesetzter Fuß steht fest auf der Fahrbahn.
    */
   private moveRobot(): void {
     const T = this.fRobot;
     const dt = this.fDt;
+    const k = this.robK;
+    const L = ROBOT_T_LEAP;
+    const at = (a: number, d: number): number => clamp((T - a) / d, 0, 1);
     if (T > 0) {
-      const L = ROBOT_T_LEAP;
-      const at = (a: number, d: number): number => clamp((T - a) / d, 0, 1);
-      if (T < L) {
-        this.robLift = easeOutBack(at(0.06, 0.36));
-        this.robLegs = easeOutBack(at(0.03, 0.32));
-        this.robArms = easeOutBack(at(0.18, 0.28));
-        this.robFlat = smooth01(at(0.03, 0.22));
-      } else {
-        // Im Sprung zurück: erst die Arme, dann Karosserie und Beine, zuletzt stellen sich die Räder auf.
-        this.robLift = 1 - smooth01(at(L + 0.08, 0.34));
-        this.robLegs = 1 - smooth01(at(L + 0.14, 0.28));
-        this.robArms = 1 - smooth01(at(L + 0.03, 0.24));
-        this.robFlat = 1 - smooth01(at(L + 0.24, 0.18));
-      }
-      this.robGait = smooth01(at(0.34, 0.1)) * (1 - smooth01(at(0.76, 0.06)));
-      this.robCrouch = smooth01(at(0.76, 0.1)) * (1 - smooth01(at(L, 0.05)));
-      this.robLeap = smooth01(at(L, 0.06)) * (1 - smooth01(at(L + 0.16, 0.28)));
-      this.robAir = smooth01(at(L - 0.03, 0.08));
+      // Ausfahren der Reihe nach, jedes Teil rastet mit einem kleinen Überschwinger ein; im Sprung umgekehrt wieder ein.
+      const out = (a: number, d: number, b: number, e: number): number => (T < b ? easeOutBack(at(a, d)) : 1 - smooth01(at(b, e)));
+      const glide = (a: number, d: number, b: number, e: number): number => (T < b ? smooth01(at(a, d)) : 1 - smooth01(at(b, e)));
+      k[RK_BODY] = glide(0.04, 0.2, 1.0, 0.26);
+      k[RK_PELVIS] = out(0.03, 0.1, 1.15, 0.1);
+      k[RK_THIGH] = out(0.06, 0.12, 1.11, 0.12);
+      k[RK_SHIN] = out(0.09, 0.12, 1.08, 0.12);
+      k[RK_FOOT] = out(0.13, 0.1, 1.05, 0.1);
+      k[RK_REAR] = glide(0.05, 0.16, 1.06, 0.14);
+      k[RK_FRONT] = glide(0.13, 0.18, 1.05, 0.16);
+      k[RK_UPPER] = out(0.17, 0.12, 1.02, 0.12);
+      k[RK_FORE] = out(0.23, 0.1, 0.99, 0.1);
+      k[RK_HAND] = out(0.29, 0.1, 0.96, 0.1);
       this.robFade = 1;
     } else if (this.robFade > 0) {
       // Abgebrochen (Treffer) oder früher gelandet: alles klappt zügig ein.
       const was = this.robFade;
       this.robFade = Math.max(0, was - dt / 0.22);
-      const k = this.robFade / was;
-      this.robLift *= k;
-      this.robLegs *= k;
-      this.robArms *= k;
-      this.robFlat *= k;
-      this.robGait *= k;
-      this.robCrouch *= k;
-      this.robLeap *= k;
+      const f = this.robFade / was;
+      for (let i = 0; i < RK_COUNT; i++) k[i] *= f;
     }
     const bn = this.bones;
     const rp = this.restPos;
-    if (this.robFade <= 0 || this.fRocket > 0) {
-      if (this.robWas) {
-        // Wieder ein Kart: was moveWheels/moveBody nicht selbst jedes Bild setzen, zurück in die Ruhelage.
-        this.robWas = false;
-        this.robLean = 0;
-        this.robFade = 0;
-        bn[B.chassis].position.z = 0;
-        for (const i of [B.rThighL, B.rThighR, B.rArmL, B.rArmR]) bn[i].scale.setScalar(0);
-        for (let i = 0; i < 4; i++) {
-          const o = (B.wFL + i) * 3;
-          bn[B.wFL + i].position.x = rp[o];
-          bn[B.wFL + i].position.z = rp[o + 2];
-        }
-      }
+    let any = 0;
+    for (let i = 0; i < RK_COUNT; i++) any = Math.max(any, k[i]);
+    if (this.robFade <= 0 || any < 1e-3 || this.fRocket > 0) {
+      if (this.robWas) this.robotReset();
       return;
     }
     this.robWas = true;
     const sp = this.spec;
-    const lift = this.robLift;
-    const legs = Math.max(0, this.robLegs);
-    const arms = Math.max(0, this.robArms);
-    const flat = this.robFlat;
-    const gait = this.robGait;
-    const crouch = this.robCrouch;
-    const leap = this.robLeap;
-    const airK = this.robAir;
-
-    // Schrittfolge: rennt im Takt des Tempos (langsam gemächlicher); jeder aufgesetzte Fuß zählt.
-    const p0 = this.robPhase;
-    this.robPhase = (p0 + dt * ROBOT_CADENCE * (0.5 + 0.5 * this.fV1) * gait) % 64;
-    const ph = this.robPhase * TAU;
-
-    // Karosserie: heben, aufrichten (Nase hoch), vorrücken; beim Rennen wippen und wiegen, vor dem Absprung in die Knie,
-    // im Sprung nach vorn gestreckt.
     const ch = bn[B.chassis];
-    const pitch = -ROBOT_PITCH * lift + 0.3 * leap + 0.12 * crouch;
-    ch.position.y += ROBOT_LIFT * lift - 0.05 * Math.cos(2 * ph) * gait - 0.22 * crouch + 0.05 * leap;
-    ch.position.z = ROBOT_SHIFT * lift;
-    ch.rotation.x += pitch;
-    ch.rotation.z += 0.07 * Math.sin(ph) * gait;
-    this.robLean = -pitch;
-    ch.updateMatrix();
-    bn[B.drift].updateMatrix();
-    bn[B.spin].updateMatrix();
-    const cpx = ch.rotation.x;
+    const fade = this.robFade >= 1;
+    // Räder: moveWheels setzt nur Drehung und Höhe – vor dem Mischen auch den Rest der Ruhelage.
+    for (let i = 0; i < 4; i++) {
+      const o = (B.wFL + i) * 3;
+      bn[B.wFL + i].position.x = rp[o];
+      bn[B.wFL + i].position.z = rp[o + 2];
+    }
 
-    // Beine: Fußziel je Schrittphase (unter der Hüfte vor und zurück, in der Luft nach hinten gestreckt, dann angezogen),
-    // zweigliedrig gelöst – das Knie zeigt nach vorn. Das Hinterrad sitzt waagerecht am Knöchel: der Fuß.
-    const hip = robotHip(sp);
-    const T1 = ROBOT_THIGH * legs;
-    const S1 = ROBOT_SHIN * legs;
-    const wr = sp.wr;
+    // — Anteile der Bewegungsarten —
+    // Laufen (ab dem ersten Schritt), Ducken vor dem Absprung, explosives Strecken, Flug, Anhocken im Sprung.
+    const run = T > 0 ? smooth01(at(0.13, 0.1)) : 0;
+    const crouch = T > 0 ? smooth01(at(0.68, 0.17)) * (1 - smooth01(at(0.858, 0.035))) : 0;
+    const spring = T > 0 ? smooth01(at(0.852, 0.05)) * (1 - smooth01(at(0.99, 0.1))) : 0;
+    const airW = T > 0 ? smooth01(at(L - 0.01, 0.05)) : 1;
+    const tuck = T > 0 ? smooth01(at(0.97, 0.12)) : 1;
+    const S2 = 2 * ROBOT_STEP;
+    // Tempo im Raum des Karts (bei Get Gold ist das Kart größer, die Fahrbahn zieht darunter also langsamer durch).
+    const sc = Math.abs(this.root.scale.z) > 1e-3 ? Math.abs(this.root.scale.z) : 1;
+    const v = Math.max(0, this.lastSpeed) / sc;
+    const ts = Math.min(ROBOT_GROUND / Math.max(v, 1e-3), 0.8 * ROBOT_STEP);
+    // Schrittphase je Bein (0 = eigener Fußaufsatz) und des ganzen Laufs (0 = irgendein Aufsatz)
+    const tauL = (((T - ROBOT_TD0) % S2) + S2) % S2;
+    const phL = tauL / S2;
+    const tauS = (((T - ROBOT_TD0) % ROBOT_STEP) + ROBOT_STEP) % ROBOT_STEP;
+    const stanceS = Math.min(ts / ROBOT_STEP, 0.8);
+    // Wippen: im Stand federt das Becken ein, in der Flugphase steigt es.
+    const ps = tauS / ROBOT_STEP;
+    const bounce = ps < stanceS ? -0.06 * Math.sin((Math.PI * ps) / stanceS) : 0.08 * Math.sin((Math.PI * (ps - stanceS)) / (1 - stanceS));
+    // Schwung des linken Arms (+1 vorn): vorn, wenn das linke Bein hinten abgedrückt hat, hinten, wenn sein Knie vorn hochkommt.
+    // Die Schultern drehen mit den Armen, das Becken dagegen (die Hüfte des Schwungbeins kommt mit dem Knie nach vorn).
+    const sw = Math.cos(TAU * (phL - ROBOT_ARM_PHASE));
+
+    // — Becken (Raum des Karts): Höhe, Kippen nach vorn, Verdrehen zum Schwungbein, Absenken der Schwungseite —
+    const hipY = ROBOT_HIP_Y + run * (1 - airW) * bounce - 0.32 * crouch + 0.12 * spring;
+    const yawP = 0.15 * sw * run * (1 - airW);
+    const rollP = 0.05 * Math.cos(TAU * (phL - 0.06)) * run * (1 - airW);
+    this.robPelvisQ.setFromEuler(_re.set(0.1 + 0.12 * crouch - 0.1 * spring, yawP, rollP, 'YXZ'));
+    // — Karosserie als Oberkörper: aufgerichtet, nickt mit jedem Schritt, dreht gegen das Becken, legt sich vor dem Absprung vor —
+    const pitchUp = ROBOT_PITCH - 0.24 * crouch + 0.2 * spring + 0.035 * Math.sin(TAU * ps) * run * (1 - airW);
+    _rq.setFromEuler(_re.set(-pitchUp, -0.09 * sw * run * (1 - airW), -0.035 * Math.cos(TAU * (phL - 0.06)) * run * (1 - airW), 'YXZ'));
+    const pk = robotPelvis(sp);
+    _rp.set(pk[0], pk[1], pk[2]).applyQuaternion(_rq);
+    _rv.set(0, hipY, ROBOT_FWD).sub(_rp);
+    // Mischen mit der Lage als Kart (moveBody): erst federt es ein, dann springt es hoch.
+    const body = k[RK_BODY];
+    ch.position.y -= 0.08 * Math.sin(Math.PI * at(0, 0.1)) * (T > 0 ? 1 : 0);
+    ch.position.x = 0;
+    ch.position.z = 0;
+    ch.position.lerp(_rv, body);
+    ch.quaternion.slerp(_rq, body);
+    ch.scale.lerp(_rv.set(1, 1, 1), Math.min(1, body * 3));
+    ch.updateMatrix();
+    this.robLean = (pitchUp * 0.95 + 0.12) * body;
+    this.robRise = ROBOT_RISE[this.character] * body;
+    // Räder: erst fahren sie mit der Karosserie mit (je mehr die sich hebt), unten wandern sie dann an Knie und Schultern.
+    for (let i = 0; i < 4; i++) {
+      const w = bn[B.wFL + i];
+      _rp.copy(w.position).applyMatrix4(ch.matrix);
+      w.position.lerp(_rp, body);
+      _rq.copy(ch.quaternion).multiply(w.quaternion);
+      w.quaternion.slerp(_rq, body);
+    }
+
+    // Becken: an der Karosserie, aber selbst aufrecht.
+    const pv = bn[B.rPelvis];
+    const gP = robotGrow(k[RK_PELVIS]);
+    pv.position.set(pk[0], pk[1] + 0.12 * (1 - Math.min(1, k[RK_PELVIS])), pk[2]);
+    _rq2.copy(ch.quaternion).invert().multiply(this.robPelvisQ);
+    pv.quaternion.copy(Q_ID).slerp(_rq2, clamp(k[RK_PELVIS], 0, 1));
+    pv.scale.setScalar(gP);
+    pv.updateMatrix();
+    // Becken im Raum des Karts
+    _rm.multiplyMatrices(ch.matrix, pv.matrix);
+    _rq3.copy(ch.quaternion).multiply(pv.quaternion);
+
+    // — Beine —
+    const vt = this.robTmp;
+    const gT = robotGrow(k[RK_THIGH]);
+    const gS = robotGrow(k[RK_SHIN]);
+    const gF = robotGrow(k[RK_FOOT]);
+    const legL = ROBOT_THIGH + ROBOT_SHIN;
+    // Vorwärts für die Knie: die Blickrichtung des Beckens
+    _rf.set(0, 0, 1).applyQuaternion(_rq3);
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? 1 : -1;
-      _rv.set(side * hip[0], hip[1], hip[2]).applyMatrix4(ch.matrix);
-      const hy = _rv.y;
-      const hz = _rv.z;
-      const p = (this.robPhase + (i === 0 ? 0 : 0.5)) % 1;
-      const pBefore = (p0 + (i === 0 ? 0 : 0.5)) % 1;
-      let fz: number;
-      let fy: number;
-      if (p < 0.5) {
-        fz = ROBOT_STRIDE * (1 - 4 * p);
-        fy = 0;
+      const thigh = bn[i === 0 ? B.rThighL : B.rThighR];
+      const shin = bn[i === 0 ? B.rShinL : B.rShinR];
+      const foot = bn[i === 0 ? B.rFootL : B.rFootR];
+      const toe = bn[i === 0 ? B.rToeL : B.rToeR];
+      // Hüftgelenk im Raum des Karts
+      _rh.set(side * ROBOT_HIP_X, 0, 0).applyMatrix4(_rm);
+      const td0 = ROBOT_TD0 + i * ROBOT_STEP;
+      const tau = (((T - td0) % S2) + S2) % S2;
+      const tdNow = T - tau;
+      // Der Absprung (fünfter Aufsatz) endet spätestens, wenn das Kart abhebt.
+      const tsi = Math.abs(tdNow - (ROBOT_TD0 + 4 * ROBOT_STEP)) < 1e-3 ? Math.min(ts, L - tdNow) : ts;
+      const stance = fade && T > 0 && tdNow >= td0 - 1e-4 && tdNow < L - 0.01 && tau < tsi && k[RK_FOOT] > 0.9;
+      let pitch: number;
+      let bend = 0;
+      const o3 = i * 3;
+      if (stance) {
+        const travel = v * tsi;
+        if (!this.robStand[i] || Math.abs(this.robTd[i] - tdNow) > 1e-4) {
+          // Aufsetzen: die Ferse kommt so weit vor der Hüfte auf, dass der Fuß um die Mitte unter dem Roboter abrollt.
+          this.robStand[i] = true;
+          this.robTd[i] = tdNow;
+          const ztd = robotHeelAhead(travel);
+          this.robPivot[o3] = side * (ROBOT_HIP_X - 0.03);
+          this.robPivot[o3 + 1] = 0;
+          this.robPivot[o3 + 2] = _rh.z + ztd - v * tau;
+          if (run > 0.4) {
+            this.robotSteps++;
+            bn[B.drift].updateMatrix();
+            bn[B.spin].updateMatrix();
+            this.robotFoot
+              .set(this.robPivot[o3], 0, this.robPivot[o3 + 2] + ROBOT_HEEL)
+              .applyMatrix4(bn[B.drift].matrix)
+              .applyMatrix4(bn[B.spin].matrix);
+          }
+        } else {
+          this.robPivot[o3 + 2] -= v * dt;
+        }
+        // Abrollen: Ferse (Zehen leicht hoch) → ganze Sohle → Drehen über den Ballen, die Zehen bleiben flach am Boden.
+        const u = tau / tsi;
+        let lz: number;
+        let pz = this.robPivot[o3 + 2];
+        if (u < 0.45) {
+          pitch = -0.17 * (1 - smooth01(u / 0.22));
+          lz = -ROBOT_HEEL;
+        } else {
+          pitch = 0.9 * smooth01((u - 0.45) / 0.55);
+          lz = ROBOT_BALL;
+          pz += ROBOT_HEEL + ROBOT_BALL;
+          bend = pitch;
+        }
+        // Sprunggelenk = Drehpunkt − gedrehter Abstand zum Drehpunkt (Sohle liegt bei −ROBOT_ANKLE)
+        const cp = Math.cos(pitch);
+        const sn = Math.sin(pitch);
+        _ra.set(this.robPivot[o3], ROBOT_ANKLE * cp + lz * sn, pz - (-ROBOT_ANKLE * sn + lz * cp));
       } else {
-        const q = (p - 0.5) * 2;
-        fz = ROBOT_STRIDE * (2 * smooth01(q) - 1);
-        fy = ROBOT_STEP_UP * Math.sin(Math.PI * q);
+        if (this.robStand[i]) {
+          // Abheben: Lage des Sprunggelenks relativ zur Hüfte merken – dort beginnt der Schwung.
+          this.robStand[i] = false;
+          this.robOff[i * 2] = this.robAnk[o3 + 2] - _rh.z;
+          this.robOff[i * 2 + 1] = this.robAnk[o3 + 1] - _rh.y;
+        }
+        // Schwung: Ferse hoch zum Gesäß, Knie hoch nach vorn, Unterschenkel streckt sich, Fuß greift zurück zur Fahrbahn.
+        const s = clamp((tau - Math.min(tsi, tau)) / (S2 - tsi), 0, 1);
+        const ztd = robotHeelAhead(v * ts);
+        // Sprunggelenk beim nächsten Fersenaufsatz (Zehen 0,17 rad hoch)
+        const c0 = Math.cos(-0.17);
+        const s0 = Math.sin(-0.17);
+        // Puffer: n Stützstellen je für Anteil, vor/zurück, Höhe, Neigung – vorn das Abheben, hinten der Fersenaufsatz.
+        const n = SWING_N;
+        vt[0] = 0;
+        vt[n] = this.robOff[i * 2];
+        vt[2 * n] = this.robOff[i * 2 + 1];
+        vt[3 * n] = 0.9;
+        for (let j = 1; j < n - 1; j++) {
+          vt[j] = SWING_KEYS[j * 4 - 4];
+          vt[n + j] = SWING_KEYS[j * 4 - 3] * legL;
+          vt[2 * n + j] = SWING_KEYS[j * 4 - 2] * legL;
+          vt[3 * n + j] = SWING_KEYS[j * 4 - 1];
+        }
+        vt[n - 1] = 1;
+        vt[2 * n - 1] = ztd + ROBOT_ANKLE * s0 + ROBOT_HEEL * c0;
+        vt[3 * n - 1] = ROBOT_ANKLE * c0 - ROBOT_HEEL * s0 - _rh.y;
+        vt[4 * n - 1] = -0.17;
+        let az = spline(vt, 0, n, n, s);
+        let ay = spline(vt, 0, 2 * n, n, s);
+        pitch = spline(vt, 0, 3 * n, n, s);
+        bend = s < 0.15 ? 0.8 * (1 - smooth01(s / 0.15)) : 0;
+        // Absprung: das freie Bein reißt das Knie hoch.
+        if (i === 1 && spring > 0) {
+          az += (0.32 * legL - az) * spring;
+          ay += (-0.46 * legL - ay) * spring;
+          pitch += (-0.1 - pitch) * spring;
+        }
+        _ra.set(_rh.x - side * 0.03, _rh.y + ay, _rh.z + az);
+        // Nicht in die Fahrbahn treten
+        if (_ra.y < 0.17) _ra.y = 0.17;
       }
-      const foot = wr.w * 0.5 * flat + wr.r * (1 - flat);
-      let ty = foot + 0.02 + fy * gait;
-      let tz = hz + 0.05 + fz * gait;
-      // In der Luft: beim Absprung ein Bein vorn, eins hinten gestreckt; danach angezogen
-      if (airK > 0) {
-        const reach = T1 + S1;
-        const ay = hy - reach * (0.62 + 0.3 * leap);
-        const az = hz + reach * (0.12 - 0.4 * leap + side * 0.22 * leap);
-        ty += (ay - ty) * airK;
-        tz += (az - tz) * airK;
+      // Im Sprung: das Absprungbein hängt gestreckt nach hinten, das andere bleibt vorn angezogen; dann beide anhocken.
+      if (airW > 0) {
+        const hz = i === 0 ? -0.42 : 0.3;
+        const hy = i === 0 ? -0.7 : -0.46;
+        const hp = i === 0 ? 0.9 : -0.1;
+        _rk.set(_rh.x - side * 0.03, _rh.y + legL * (hy + (-0.4 - hy) * tuck), _rh.z + legL * (hz + (0.02 - hz) * tuck));
+        _ra.lerp(_rk, airW);
+        pitch += (hp + (0.35 - hp) * tuck - pitch) * airW;
+        bend *= 1 - airW;
       }
-      ty = Math.min(ty, hy - 0.04);
-      const dy = hy - ty;
-      const dz = tz - hz;
-      const d = clamp(Math.hypot(dy, dz), 1e-4, (T1 + S1) * 0.998);
-      const alpha = Math.atan2(dz, dy);
-      let thW = alpha;
-      let knee = 0;
-      if (T1 > 1e-4) {
-        thW += Math.acos(clamp((T1 * T1 + d * d - S1 * S1) / (2 * T1 * d), -1, 1));
-        knee = Math.PI - Math.acos(clamp((T1 * T1 + S1 * S1 - d * d) / (2 * T1 * S1), -1, 1));
-      }
-      const th = bn[i === 0 ? B.rThighL : B.rThighR];
-      th.rotation.set(-thW - cpx, 0, 0);
-      th.scale.setScalar(Math.max(legs, 1e-4));
-      bn[i === 0 ? B.rShinL : B.rShinR].rotation.set(knee, 0, 0);
-      // Knöchel (Ende des Unterschenkels) → Mitte des Rads darunter
-      const shW = thW - knee;
-      const ay = hy - T1 * Math.cos(thW) - S1 * Math.cos(shW) - (wr.w * 0.5 * flat + 0.02) * legs;
-      const az = hz + T1 * Math.sin(thW) + S1 * Math.sin(shW);
-      const w = bn[i === 0 ? B.wRL : B.wRR];
-      const o = (i === 0 ? B.wRL : B.wRR) * 3;
-      const k = smooth01(Math.min(1, legs));
-      w.position.set(rp[o] + (side * (hip[0] + 0.07) - rp[o]) * k, w.position.y + (ay - w.position.y) * k, rp[o + 2] + (az - rp[o + 2]) * k);
-      w.rotation.x = (((w.rotation.x % TAU) + TAU) % TAU) * (1 - flat);
-      w.rotation.y = 0;
-      w.rotation.z = side * HALF_PI * flat;
-      // Aufgesetzt: Staub und ein Stampfen
-      if (gait > 0.4 && pBefore > 0.75 && p < 0.25) {
-        this.robotSteps++;
-        this.robotFoot.copy(w.position).applyMatrix4(bn[B.drift].matrix).applyMatrix4(bn[B.spin].matrix);
-        this.robotFoot.y -= wr.w * 0.5 * flat;
+      this.robAnk[o3] = _ra.x;
+      this.robAnk[o3 + 1] = _ra.y;
+      this.robAnk[o3 + 2] = _ra.z;
+
+      // Zwei Knochen: Knie im Abstand ROBOT_THIGH von der Hüfte, nach vorn geknickt
+      _rd.subVectors(_ra, _rh);
+      let D = _rd.length();
+      if (D < 1e-5) _rd.set(0, -1, 0);
+      else _rd.multiplyScalar(1 / D);
+      D = clamp(D, 0.12, legL * 0.998);
+      _rx.crossVectors(_rf, _rd);
+      if (_rx.lengthSq() < 1e-8) _rx.set(1, 0, 0);
+      _rx.normalize();
+      _rz.crossVectors(_rd, _rx);
+      const ca = clamp((ROBOT_THIGH * ROBOT_THIGH + D * D - ROBOT_SHIN * ROBOT_SHIN) / (2 * ROBOT_THIGH * D), -1, 1);
+      const sa = Math.sqrt(1 - ca * ca);
+      // Richtung des Oberschenkels, Knie, Richtung des Unterschenkels
+      _ry.copy(_rd).multiplyScalar(ca).addScaledVector(_rz, sa);
+      _rk.copy(_rh).addScaledVector(_ry, ROBOT_THIGH);
+      _rd.multiplyScalar(D).add(_rh).sub(_rk).normalize();
+      // Oberschenkel: Achse x = Kniescharnier, −y entlang des Knochens
+      robotBasis(_rx, _ry, this.robQ0);
+      robotBasis(_rx, _rd, this.robQ1);
+      // Fuß: Neigung im Raum des Karts (nach vorn ausgerichtet), Sprunggelenk begrenzt
+      this.robQ2.setFromAxisAngle(X_AXIS, pitch);
+      _rq2.copy(this.robQ1).invert().multiply(this.robQ2);
+      _re.setFromQuaternion(_rq2, 'XYZ');
+      _re.x = clamp(_re.x, -0.75, 1.05);
+      _rq2.setFromEuler(_re);
+      // In die Knochen: jeweils relativ zum (schon gesetzten) Elternknochen, aus der eingeklappten Lage heraus.
+      _rq.copy(_rq3).invert().multiply(this.robQ0);
+      thigh.quaternion.copy(R_FOLD_THIGH).slerp(_rq, clamp(k[RK_THIGH], 0, 1));
+      thigh.scale.setScalar(robotRatio(gT, gP));
+      _rq.copy(this.robQ0).invert().multiply(this.robQ1);
+      shin.quaternion.copy(R_FOLD_SHIN).slerp(_rq, clamp(k[RK_SHIN], 0, 1));
+      shin.scale.setScalar(robotRatio(gS, gT));
+      foot.quaternion.copy(R_FOLD_FOOT).slerp(_rq2, clamp(k[RK_FOOT], 0, 1));
+      foot.scale.setScalar(robotRatio(gF, gS));
+      toe.quaternion.setFromAxisAngle(X_AXIS, -bend * clamp(k[RK_FOOT], 0, 1));
+
+      // Hinterrad: außen am Knie, die Nabe sitzt auf der Achse des Gelenks und dreht mit dem Unterschenkel (kleiner als am Kart)
+      const wr = bn[i === 0 ? B.wRL : B.wRR];
+      const kr = k[RK_REAR];
+      if (kr > 0) {
+        thigh.updateMatrix();
+        shin.updateMatrix();
+        _rm2.multiplyMatrices(_rm, thigh.matrix).multiply(shin.matrix);
+        _rv.set(side * robotKneeWheel(sp), 0, 0).applyMatrix4(_rm2);
+        _rq.copy(_rq3).multiply(thigh.quaternion).multiply(shin.quaternion);
+        wr.position.lerp(_rv, kr);
+        wr.quaternion.slerp(_rq, kr);
+        wr.scale.setScalar(1 + (ROBOT_KNEE_WHEEL - 1) * Math.min(1, kr));
       }
     }
 
-    // Arme: hängen an der Schulter, schwingen gegen das Bein derselben Seite; vor dem Absprung nach hinten ausholen, im Sprung
-    // nach vorn strecken. Eingeklappt liegen sie nach vorn an der Seite. Das Vorderrad sitzt außen an der Schulter und dreht mit.
+    // — Arme: schwingen gegengleich zu den Beinen, Ellbogen angewinkelt; vor dem Absprung nach hinten, dann hochreißen —
+    const gU = robotGrow(k[RK_UPPER]);
+    const gFo = robotGrow(k[RK_FORE]);
+    const gH = robotGrow(k[RK_HAND]);
     const shp = robotShoulder(sp);
+    const yawC = _re.setFromQuaternion(ch.quaternion, 'YXZ').y;
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? 1 : -1;
-      const swing = ROBOT_SWING * Math.cos(ph + (i === 0 ? 0 : Math.PI)) * gait + 0.9 * crouch - 2.4 * leap;
-      const world = -1.5 + (swing + 1.5) * Math.min(arms, 1.15);
-      const a = bn[i === 0 ? B.rArmL : B.rArmR];
-      a.rotation.set(world - cpx, 0, side * (0.38 + 0.18 * leap + 0.06 * Math.sin(ph * 2) * gait));
-      a.scale.setScalar(Math.max(arms, 1e-4));
-      _rv.set(side * (shp[0] + 0.12), shp[1], shp[2]).applyMatrix4(ch.matrix);
+      // +1: dieser Arm ist vorn (das Bein derselben Seite hinten)
+      const a = (i === 0 ? sw : -sw) * run;
+      let sig = 0.2 + 1.0 * a;
+      let elb = 1.5 + 0.35 * a;
+      const abd = 0.22 + 0.1 * crouch;
+      const cross = 0.14 * Math.max(0, a);
+      sig += (-1.0 - sig) * crouch;
+      elb += (1.25 - elb) * crouch;
+      sig += (2.5 - sig) * spring;
+      elb += (0.45 - elb) * spring;
+      sig += (0.75 - sig) * tuck * airW;
+      elb += (1.7 - elb) * tuck * airW;
+      _rq.setFromEuler(_re.set(0, yawC - side * cross, side * abd, 'YXZ'));
+      _rq2.setFromAxisAngle(X_AXIS, -sig);
+      _rq.multiply(_rq2);
+      const arm = bn[i === 0 ? B.rArmL : B.rArmR];
+      _rq2.copy(ch.quaternion).invert().multiply(_rq);
+      arm.quaternion.copy(R_FOLD_ARM).slerp(_rq2, clamp(k[RK_UPPER], 0, 1));
+      arm.scale.setScalar(gU);
+      const fore = bn[i === 0 ? B.rForeL : B.rForeR];
+      _rq2.setFromAxisAngle(X_AXIS, -elb);
+      fore.quaternion.copy(R_FOLD_FORE).slerp(_rq2, clamp(k[RK_FORE], 0, 1));
+      fore.scale.setScalar(robotRatio(gFo, gU));
+      const hand = bn[i === 0 ? B.rHandL : B.rHandR];
+      _rq2.setFromAxisAngle(X_AXIS, -0.25 - 0.3 * spring);
+      hand.quaternion.copy(R_FOLD_HAND).slerp(_rq2, clamp(k[RK_HAND], 0, 1));
+      hand.scale.setScalar(robotRatio(gH, gFo));
+
+      // Vorderrad: Schulterpanzer außen am Schultergelenk, dreht mit dem Oberarm
       const w = bn[i === 0 ? B.wFL : B.wFR];
-      const o = (i === 0 ? B.wFL : B.wFR) * 3;
-      const k = smooth01(Math.min(1, arms));
-      w.position.set(rp[o] + (_rv.x - rp[o]) * k, w.position.y + (_rv.y - w.position.y) * k, rp[o + 2] + (_rv.z - rp[o + 2]) * k);
-      w.rotation.x = (((w.rotation.x % TAU) + TAU) % TAU) * (1 - k) + world * k;
-      w.rotation.y *= 1 - k;
+      const kw = k[RK_FRONT];
+      if (kw > 0) {
+        _rq.copy(ch.quaternion).multiply(arm.quaternion);
+        _rp.set(side * shp[0], shp[1], shp[2]).applyMatrix4(ch.matrix);
+        _rv.set(side * (0.12 + sp.wf.w * 0.5 * ROBOT_SHOULDER_WHEEL), 0.04, 0).applyQuaternion(_rq).add(_rp);
+        w.position.lerp(_rv, kw);
+        w.quaternion.slerp(_rq, kw);
+        w.scale.setScalar(1 + (ROBOT_SHOULDER_WHEEL - 1) * Math.min(1, kw));
+      }
+    }
+  }
+
+  /** Roboter vorbei: was moveWheels/moveBody nicht selbst jedes Bild setzen, zurück in die Ruhelage. */
+  private robotReset(): void {
+    const bn = this.bones;
+    const rp = this.restPos;
+    this.robWas = false;
+    this.robLean = 0;
+    this.robRise = 0;
+    this.robFade = 0;
+    this.robK.fill(0);
+    this.robStand[0] = this.robStand[1] = false;
+    this.robOff.set(ROBOT_OFF0);
+    bn[B.chassis].position.set(0, bn[B.chassis].position.y, 0);
+    for (const i of [B.rPelvis, B.rArmL, B.rArmR]) bn[i].scale.setScalar(0);
+    for (let i = 0; i < 4; i++) {
+      const o = (B.wFL + i) * 3;
+      bn[B.wFL + i].position.set(rp[o], rp[o + 1], rp[o + 2]);
+      bn[B.wFL + i].scale.set(1, 1, 1);
     }
   }
 
@@ -5744,7 +6223,9 @@ export class KartVisual {
       this.gTy,
       lean + this.gTz,
     );
-    torso.position.y = rp[B.torso * 3 + 1] + this.fHop * 0.04;
+    // Als Roboter richtet sich der Fahrer im Sitz auf: er ist der Kopf und schaut über die Brust.
+    torso.position.y = rp[B.torso * 3 + 1] + this.fHop * 0.04 + this.robRise;
+    torso.position.z = rp[B.torso * 3 + 2] + this.robRise * 0.3;
     torso.updateMatrix();
 
     // Kopf: federt nach, schaut in die Kurve, wird bei Schub nach hinten gedrückt
