@@ -1449,7 +1449,7 @@ export class App {
           if (gap < 0 && TRACK.edge[i] & 4) gap = i;
           if (open < 0 && (TRACK.edge[i] & 7) === 3) open = i;
         }
-        return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
+        return { index: TRACK.index, name: TRACK.def.name, length: TRACK.length, step: TRACK.step, gapAt: gap * TRACK.step, openAt: open * TRACK.step, halfWidth: open >= 0 ? TRACK.wh[open] : 0 };
       },
       // Streckenmechanik, wie dieser Bildschirm sie gerade sieht: Verkehr (Meter hinter der
       // Startlinie, Spur, Ort) und die Stellen der Geysire und Lavabomben.

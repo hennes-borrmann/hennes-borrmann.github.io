@@ -104,8 +104,6 @@ import {
   RAIL_VGAS,
   RAIL_VMAX,
   RAIL_VMIN,
-  DRUM_GRIP,
-  DRUM_SAG,
   BAND_LINE_HALF,
   BAND_LINE_PULL,
   BUMPER_RADIUS,
@@ -121,6 +119,7 @@ import {
   bandOf,
   EDGE_DRUM,
   EDGE_FLOAT,
+  EDGE_TWIST,
   EDGE_RAIL,
   EDGE_RIVER,
   EDGE_GAP,
@@ -147,6 +146,7 @@ import {
   segDelta,
   sideLimit,
   trackHeading,
+  twistRollAt,
   vehiclePose,
   walk,
   type Track,
@@ -1188,6 +1188,21 @@ function railProject(t: Track, x: number, z: number, hint: number, time: number,
 }
 
 /**
+ * Schwebeband an der Wand (EDGE_TWIST): So schnell (rad/s, Vorzeichen wie die Lenkung: positiv = nach rechts) dreht das
+ * Band ein Kart mit, das an der Stelle (seg, along, lat) mit der Geschwindigkeit (vx, vz) fährt. Gerechnet wird die Bahn
+ * flach; im Bild ist sie verdreht (track.ts: twistWarp), und von ihrer Kurve sieht man dort nur den Anteil cos(Verdrehung)
+ * (track.ts: curvSeen). Den Rest dreht das Band – sonst müsste man an der Wand gegen eine Kurve lenken, die man nicht
+ * sieht, und würde ohne Lenken an den Rand gedrückt. (Außen ist der Bogen weiter als innen: daher 1 − Krümmung · lat.)
+ */
+export function twistYaw(t: Track, seg: number, along: number, lat: number, vx: number, vz: number): number {
+  if ((t.edge[seg] & EDGE_TWIST) === 0) return 0;
+  const k = t.curv[seg];
+  const hide = 1 - Math.cos(twistRollAt(t, seg, Math.max(0, Math.min(1, along / t.step))));
+  const u = vx * t.tx[seg] + vz * t.tz[seg];
+  return (u * k * hide) / Math.max(0.3, 1 - k * lat);
+}
+
+/**
  * Abstoßen auf dem Schwebeband (der Host ruft es für jedes Paar sich berührender Karts auf): Schweben beide, stoßen sie
  * sich ab – auseinandergeschoben, jedes mit REPEL_PUSH/2 von der Berührstelle weg – und beide bekommen kurz Schub.
  * Gibt true zurück, wenn es so war (dann gilt kein gewöhnlicher Rempler).
@@ -1479,12 +1494,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const turnDir = s.driftDir !== 0 ? s.driftDir : steer > 0 ? 1 : steer < 0 ? -1 : 0;
   // Tauchen: unter dem Meeresspiegel einer Tauchstrecke trägt das Wasser (siehe mechanics.ts).
   const diving = t.deep[seg0] !== 0 && y0 < t.sea;
-  // Magnettrommel: An Wand und Decke halten die Reifen schlechter (an der Decke DRUM_GRIP, am Boden voll).
-  const drumGrip = (t.edge[seg0] & EDGE_DRUM) !== 0 ? 1 - ((1 - DRUM_GRIP) * (1 - Math.cos(t.roll[seg0]))) / 2 : 1;
   // Die Steilkurve gibt nur beim normalen Lenken mehr Halt (man kommt schneller herum). Im Drift dreht das Kart immer
   // im Verhältnis zum Halt – mit dem Zuschlag drehte es dort fast doppelt so eng und fuhr in die Innenbande.
   const banked = wasAir || turnDir === 0 || s.driftDir !== 0 ? 1 : bankGrip(t, seg0, turnDir);
-  const hold = drumGrip * A_LAT * ch.grip * (golden ? GOLD_GRIP : big ? BIG_GRIP : small ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * banked;
+  const hold = A_LAT * ch.grip * (golden ? GOLD_GRIP : big ? BIG_GRIP : small ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * banked;
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts) – und überall, solange der Gleiter die Flügel ausbreitet
   // (nicht unter Wasser: dort trägt das Wasser).
   const winged = wasAir && s.wing > 0 && !diving;
@@ -1520,7 +1533,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     // (geringe Haftung) rutscht das Heck sichtbar nach außen.
     const speed = Math.hypot(vf, vl);
     // Auf losem Grund rutscht das Kart länger quer, bevor es wieder spurt.
-    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip * (diving ? DIVE_GRIP : 1) * drumGrip;
+    const grip = (s.driftDir !== 0 ? GRIP_DRIFT : spinning ? 2.5 : GRIP) * ground.grip * ground.grip * (diving ? DIVE_GRIP : 1);
     vl *= Math.exp(-grip * DT);
     vf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, speed * speed - vl * vl));
 
@@ -1637,6 +1650,20 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  // Schwebeband an der Wand: Die Kurve, die man im Bild nicht sieht, fährt das Band selbst – es dreht Nase und Fahrt mit
+  // (wie das Wagendach im Bogen). Geradeaus im Bild heißt dann: Lenkrad gerade, man bleibt in seiner Spur.
+  if (!wasAir && (t.edge[seg0] & EDGE_TWIST) !== 0) {
+    const a = -twistYaw(t, seg0, along0, lat0, s.vx, s.vz) * DT;
+    if (a !== 0) {
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      const vx = s.vx;
+      s.vx = vx * cos + s.vz * sin;
+      s.vz = -vx * sin + s.vz * cos;
+      s.heading = wrapAngle(s.heading + a);
+    }
+  }
+
   // Fluss: das Floß nimmt mit, was auf ihm steht – flussab, mit dem Tempo seiner Bahn.
   if (!wasAir && (t.edge[seg0] & EDGE_RIVER) !== 0) {
     const lane = raftLane(t, seg0, along0, lat0, env.time);
@@ -1652,14 +1679,6 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     const d = swayAt(t, seg0, along0, env.time) - swayAt(t, seg0, along0, env.time - 1);
     s.x += rightX(t, seg0) * d;
     s.z += rightZ(t, seg0) * d;
-  }
-
-  // Magnettrommel: Die Schwerkraft zieht weiter zum Hallenboden – an der Wand sackt das Kart seitlich ab (an der rechten
-  // Wand nach links, an der linken nach rechts), an der Decke zieht sie es nur von der Bahn weg (das halten die Magnete).
-  if (t.drums.length > 0 && (t.edge[seg0] & EDGE_DRUM) !== 0) {
-    const sag = -DRUM_SAG * Math.sin(t.roll[seg0]);
-    s.x += rightX(t, seg0) * sag * DT;
-    s.z += rightZ(t, seg0) * sag * DT;
   }
 
   // Böe: schiebt quer, am Boden wie in der Luft. Im Windschatten und an den Enden ihres Bereichs läuft sie aus.

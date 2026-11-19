@@ -1,4 +1,4 @@
-// Magnetwerk: Magnettrommel (mechanics.ts: Drum, DRUM_SAG, DRUM_GRIP; track.ts: roll, drumPoint; sim.ts) und
+// Magnetwerk: Magnettrommel (mechanics.ts: Drum; track.ts: roll, drumPoint; sim.ts) und
 // Deckenplatten, die im Takt abschalten (Bruchstellen mit wiederkehrendem Plan).
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -76,7 +76,7 @@ describe('Magnettrommel', () => {
     }
   });
 
-  it('an der rechten Wand sackt man nach links ab, an der linken nach rechts – unten und an der Decke nicht', () => {
+  it('die Magnete halten: an Wand und Decke kein Abdriften, und das Lenken wirkt wie am Boden', () => {
     const t = setTrack(MAGNET);
     const d = t.drums[0];
     const find = (want: number): number => {
@@ -84,19 +84,28 @@ describe('Magnettrommel', () => {
       for (let k = 0; k < d.count; k++) if (Math.abs(t.roll[d.first + k] - want) < Math.abs(t.roll[best] - want)) best = d.first + k;
       return best;
     };
+    // Eine halbe Sekunde ohne Lenken (die Bahn ist dort fast gerade) und eine Viertelsekunde mit vollem Einschlag.
     const drift = (seg: number): number => {
       const s = at(seg, 0, 18);
       const l0 = lat(s);
-      for (let k = 1; k <= 60; k++) stepKart(s, { steer: 0, buttons: 0 }, { canDrive: true, speedFactor: 1, time: 4000 + k });
+      for (let k = 1; k <= 30; k++) stepKart(s, { steer: 0, buttons: 1 }, { canDrive: true, speedFactor: 1, time: 4000 + k });
       return lat(s) - l0;
     };
-    const right = drift(find(Math.PI / 2));
-    const left = drift(find(1.5 * Math.PI));
-    const top = drift(find(Math.PI));
-    console.log(`Magnettrommel, eine Sekunde ohne Lenken: rechte Wand ${right.toFixed(2)} m, Decke ${top.toFixed(2)} m, linke Wand ${left.toFixed(2)} m`);
-    expect(right).toBeLessThan(-2);
-    expect(left).toBeGreaterThan(2);
-    expect(Math.abs(top)).toBeLessThan(0.5);
+    const turn = (seg: number): number => {
+      const s = at(seg, 0, 18);
+      const h0 = s.heading;
+      for (let k = 1; k <= 15; k++) stepKart(s, { steer: 127, buttons: 1 }, { canDrive: true, speedFactor: 1, time: 4000 + k });
+      return h0 - s.heading;
+    };
+    const floor = find(0.05);
+    const right = find(Math.PI / 2);
+    const top = find(Math.PI);
+    const left = find(1.5 * Math.PI);
+    console.log(`Magnettrommel, eine halbe Sekunde ohne Lenken: rechte Wand ${drift(right).toFixed(2)} m, Decke ${drift(top).toFixed(2)} m, linke Wand ${drift(left).toFixed(2)} m`);
+    for (const seg of [right, top, left]) {
+      expect(Math.abs(drift(seg))).toBeLessThan(0.6);
+      expect(turn(seg)).toBeCloseTo(turn(floor), 2);
+    }
   });
 
   it('Deckenplatten schalten im Takt ab – links und rechts nie zugleich; wer auf einer abgeschalteten steht, fällt', () => {

@@ -33,6 +33,7 @@ import {
   ITEM_WING,
   bankGrip,
   forwardSpeed,
+  twistYaw,
   goldOn,
   type Cmd,
   type KartState,
@@ -42,6 +43,8 @@ import { CRAWLER_LEG_HALF, CRAWLER_LEG_HALF_WIDTH, CRAWLER_LEG_U, CRAWLER_LEG_W,
 import { SURFACES } from './surface';
 import {
   EDGE_BAND,
+  EDGE_TWIST,
+  curvSeen,
   bandMeters,
   bandOf,
   EDGE_GAP,
@@ -207,7 +210,7 @@ function curvatureAhead(fromM: number, toM: number): number {
   let sum = 0;
   let count = 0;
   for (let d = fromM; d <= toM; d += 2) {
-    sum += t.curv[aheadSeg(d)];
+    sum += curvSeen(t, aheadSeg(d));
     count++;
   }
   return sum / count;
@@ -219,7 +222,7 @@ function maxCurvatureAhead(toM: number): number {
   let max = 0;
   for (let d = 0; d <= toM; d += 2) {
     const i = aheadSeg(d);
-    const c = t.curv[i];
+    const c = curvSeen(t, i);
     // … und loser Untergrund entsprechend enger.
     max = Math.max(max, Math.abs(c) / (bankGrip(t, i, c > 0 ? 1 : -1) * (SURFACES[t.surf[i]] ?? SURFACES[0]).grip));
   }
@@ -702,17 +705,25 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       if (fast) riverWant = (fast.lat0 + fast.lat1) / 2;
     }
     // Bruchstellen: was bei meiner Ankunft weggebrochen ist (oder gerade bricht), ist gesperrt.
-    for (const h of t.holes) {
-      let d = -1;
-      for (let k = 0; k < PATH.length && k * t.step <= range + 12; k++) {
-        if (PATH[k] >= h.first && PATH[k] < h.first + h.count) {
-          d = k * t.step;
-          break;
+    // (Liegen mehrere hintereinander – die Deckenplatten der Magnettrommel –, sperrt nur die nächste offene hart; die
+    // weiteren sind nur zu meiden. Sonst wären links und rechts zugleich gesperrt, und die KI bliebe in der Mitte, die zu
+    // beiden Platten gehört.)
+    let holeNear = Infinity;
+    for (let pass = 0; pass < 2; pass++) {
+      for (const h of t.holes) {
+        let d = -1;
+        for (let k = 0; k < PATH.length && k * t.step <= range + 12; k++) {
+          if (PATH[k] >= h.first && PATH[k] < h.first + h.count) {
+            d = k * t.step;
+            break;
+          }
         }
+        if (d < 0) continue;
+        const eta = (d / Math.max(v, 8)) * 60;
+        if (!planActive(h.plan, ctx.time + eta + 45) && !planActive(h.plan, ctx.time + eta)) continue;
+        if (pass === 0) holeNear = Math.min(holeNear, d);
+        else block(h.lat0 - KART_HALF - 0.7, h.lat1 + KART_HALF + 0.7, d <= holeNear + 6 ? 1 : 0.6);
       }
-      if (d < 0) continue;
-      const eta = (d / Math.max(v, 8)) * 60;
-      if (planActive(h.plan, ctx.time + eta + 45) || planActive(h.plan, ctx.time + eta)) block(h.lat0 - KART_HALF - 0.7, h.lat1 + KART_HALF + 0.7, 1);
     }
     // Portale: Was mich bei der Ankunft zurückwürfe, ist gesperrt. Was vorwärts führt, ist ein Ziel – für den,
     // der es wagt (je Anfahrt einmal entschieden). Kurz vor und nach einem Wechsel gilt ein Rahmen als unsicher.
@@ -862,8 +873,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const blow = windPush(t, proj.seg, proj.along, proj.lat, ctx.time);
     if (blow !== 0) err += Math.atan2(blow * (air ? 1.4 : 1), Math.max(v, 10)) * (b.level > 0 ? 1 : 0.7);
   }
-  // Rechts lenken verkleinert die Blickrichtung → Vorzeichen umdrehen.
-  const wantYaw = -err * 4.2;
+  // Rechts lenken verkleinert die Blickrichtung → Vorzeichen umdrehen. (Auf dem Schwebeband an der Wand dreht das Band
+  // selbst mit – den Teil muss die Lenkung nicht mehr leisten.)
+  let wantYaw = -err * 4.2;
+  if (!air && (t.edge[s.seg] & EDGE_TWIST) !== 0) {
+    projectOnTrack(t, s.x, s.z, s.seg);
+    wantYaw -= twistYaw(t, proj.seg, proj.along, proj.lat, s.vx, s.vz);
+  }
 
   // --- Festgefahren? Kurz zurücksetzen. ---
   if (b.reverse > 0) {
