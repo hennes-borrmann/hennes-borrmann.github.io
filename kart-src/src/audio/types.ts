@@ -23,7 +23,12 @@ export type SfxName =
   | 'use-guard' // Stoßfänger (Schutz) aktiviert
   | 'use-emp' // Kurzschluss (elektrischer Schlag für die Gegner)
   | 'use-smoke' // Nebelkerze (Zischen, Puff)
-  | 'use-spring' // Sprungfeder (Boing, aber eigenständig)
+  | 'use-robot' // Roboter: das Kart verwandelt sich – zwei Servos surren hoch, vier Teile rasten ein, Hydraulik zischt, zum Schluss piept er „bi-bup“ (~0,65 s)
+  | 'robot-step' // Roboter: ein Fuß setzt auf – kurzes, metallisches Stampfen (~0,15 s)
+  | 'robot-jump' // Roboter: Satz nach vorn – Hydraulikstoß, Schlag, dann laufen die Servos rückwärts und es rastet ein (~0,7 s)
+  | 'use-glue' // Kleber: die Pistole klappt aus – Servo, Scharnier klackt, die Kartusche schmatzt (~0,45 s)
+  | 'glue-shot' // Kleber: der Klumpen verlässt die Düse – nasses „Pflopp“ (~0,3 s)
+  | 'glue-hit' // Kleber: er klatscht auf – „Platsch“, dann zwei Tropfen (~0,45 s)
   | 'use-kite' // Abschleppdrache steigt auf (Flattern, Sirren der Schnur)
   | 'use-rocket' // das Kart verwandelt sich in eine Rakete: Servos surren, sieben Teile rasten metallisch ein, zum Schluss zischt die Düse an (~1,1 s)
   | 'use-wing' // Gleiter: Absprung – Luftstoß nach oben, ein steigender Pfiff, Stoff flattert kurz (~0,6 s)

@@ -84,6 +84,12 @@ describe('Protokoll', () => {
     s.size = -873;
     // Get Gold: Restzeit samt Austrinken (bis 468 Ticks) – 16 Bit
     s.gold = 461;
+    // Roboter (bis 84 Ticks), Kleber: Restzeit beim Getroffenen (240), Pistole des Schützen (bis 72) und ihr Ziel (−1 … 3)
+    s.robot = 84;
+    s.glue = 240;
+    s.glueShot = 72;
+    s.glueAim = 3;
+    s.item = 14;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -112,13 +118,22 @@ describe('Protokoll', () => {
     expect(k.state.x).toBeCloseTo(s.x, 4);
     expect(k.state.vz).toBeCloseTo(-17.5, 5);
     expect([k.state.seg, k.state.boost, k.state.driftDir, k.state.driftCharge]).toEqual([s.seg, 42, -1, 130]);
-    expect([k.state.item, k.state.nextItem, k.state.roulette]).toEqual([ITEM_OIL, 2, 9]);
+    expect([k.state.item, k.state.nextItem, k.state.roulette]).toEqual([14, 2, 9]);
     expect(snap.track).toBe(2);
     expect(k.state.char).toBe(3);
     expect(k.state.tow).toBe(201);
     expect([k.state.draft, k.state.flat]).toEqual([185, 130]);
     expect(k.state.size).toBe(-873);
     expect(k.state.gold).toBe(461);
+    expect([k.state.robot, k.state.glue, k.state.glueShot, k.state.glueAim]).toEqual([84, 240, 72, 3]);
+    // Ohne Ziel bleibt es −1.
+    s.glueAim = -1;
+    const none = decodeSnapshot(
+      new DataView(
+        encodeSnapshot({ tick: 1, raceId: 1, phase: RACE_RUNNING, goTick: 0, laps: 1, boxes: 0, track: 2, karts: [{ slot: 0, bot: false, ptick: 1, ack: 1, state: s, lap: 1, place: 1, finished: false, finishTicks: 0 }], things: [] }),
+      ),
+    )!;
+    expect(none.karts[0].state.glueAim).toBe(-1);
     expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([Math.fround(s.y), 4.5, 700, 99, 12]);
     expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 });
     expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 });

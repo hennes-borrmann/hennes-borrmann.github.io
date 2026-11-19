@@ -179,8 +179,11 @@ export const ITEM_GUARD = 5;
 export const ITEM_EMP = 6;
 /** "Nebelkerze": Rauchwolke hinter dem Kart, die die Sicht nimmt. */
 export const ITEM_SMOKE = 7;
-/** "Sprungfeder": Hüpfer aus dem Stand – über Hindernisse, Öl und Abkürzungen. */
-export const ITEM_SPRING = 8;
+/**
+ * "Roboter": Das Kart verwandelt sich während der Fahrt in einen laufenden Roboter, der ein paar Schritte rennt, einen Satz
+ * nach vorn macht und sich im Sprung zurückverwandelt – ein kleiner Schub, und der Satz trägt über Öl und Hindernisse.
+ */
+export const ITEM_ROBOT = 8;
 /** "Abschleppdrache": zieht das Kart ein paar Sekunden von selbst die Strecke entlang – nur für die Hinteren. */
 export const ITEM_KITE = 9;
 /** "Rakete": das Kart verwandelt sich in eine Rakete und schlägt beim Fahrer vor ihm ein – selten, und nur für den Letzten. */
@@ -192,7 +195,13 @@ export const ITEM_WING = 11;
  * schneller, unverwundbar, ohne Bremse neben der Fahrbahn, und wen es berührt, den haut es um. Hinten häufiger.
  */
 export const ITEM_GOLD = 12;
-export const ITEM_COUNT = 13;
+// (13 ist vergeben.)
+/**
+ * "Kleber": Hinten klappt eine Klebepistole aus und schießt einen Kleberklumpen auf den Fahrer direkt hinter dir
+ * (bis GLUE_RANGE Meter) – ihm klebt vier Sekunden lang Kleber auf dem Bildschirm. Kein Tempoverlust; der Stoßfänger fängt ihn ab.
+ */
+export const ITEM_GLUE = 14;
+export const ITEM_COUNT = 15;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -291,6 +300,20 @@ export interface KartState {
    * von GOLD_TICKS bis 1 ist das Kart gold. Unverwundbar ist es vom ersten Schluck an.
    */
   gold: number;
+  /**
+   * Roboter: Ticks seit dem Auslösen (0 = Kart). Bis ROBOT_MORPH_TICKS verwandelt sich das Kart, bis ROBOT_LEAP_AT läuft der
+   * Roboter, dann springt er und verwandelt sich im Sprung zurück; mit der Landung (spätestens ROBOT_TICKS) ist er wieder ein Kart.
+   */
+  robot: number;
+  /** Kleber: verbleibende Ticks, die dem Fahrer Kleber auf dem Bildschirm klebt (0 = keiner). Bremst nicht. */
+  glue: number;
+  /**
+   * Kleber, Schütze: Ticks seit dem Auslösen (0 = keine Pistole draußen). Bei GLUE_FIRE verlässt der Klumpen die Pistole,
+   * bei GLUE_HIT kommt er an, bis GLUE_SHOT_TICKS klappt sie wieder ein.
+   */
+  glueShot: number;
+  /** Kleber, Schütze: Platz des Karts, auf das der Klumpen zufliegt (−1 = keins, er klatscht hinter dir auf die Fahrbahn). Setzt der Host. */
+  glueAim: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -307,7 +330,8 @@ export const EV_USE_TOP = 1 << 8;
 export const EV_USE_GUARD = 1 << 9;
 export const EV_USE_EMP = 1 << 10;
 export const EV_USE_SMOKE = 1 << 11;
-export const EV_USE_SPRING = 1 << 12;
+/** Roboter: die Verwandlung beginnt. */
+export const EV_USE_ROBOT = 1 << 12;
 /** Nach einem Sprung hart gelandet. */
 export const EV_LAND = 1 << 13;
 /** Abgestürzt – das Kart wird zurückgesetzt. */
@@ -353,7 +377,7 @@ export const EV_USE_ANY =
   EV_USE_GUARD |
   EV_USE_EMP |
   EV_USE_SMOKE |
-  EV_USE_SPRING |
+  EV_USE_ROBOT |
   EV_USE_KITE |
   EV_USE_ROCKET;
 
@@ -415,6 +439,26 @@ export const GOLD_VMAX = 1.11;
 const GOLD_ACCEL = 1.15;
 export const GOLD_SCALE = 1.4;
 const GOLD_GRIP = 1;
+/**
+ * Roboter: Verwandeln (0,5 s, das Kart fährt dabei weiter), Laufen (0,4 s), dann der Satz: so steil (wie früher die
+ * Sprungfeder – gut 1,8 m hoch, gut 0,7 s in der Luft, über Öl, Reifen und Hindernisse hinweg) und mindestens so schnell
+ * nach vorn. Im Sprung verwandelt er sich zurück; spätestens ROBOT_TICKS nach dem Auslösen ist er wieder ein Kart.
+ * Gewinn auf gerader Strecke gegenüber Weiterfahren: rund 0,35 s (ein Zisch bringt knapp 0,6 s).
+ */
+export const ROBOT_MORPH_TICKS = 30;
+export const ROBOT_LEAP_AT = 54;
+export const ROBOT_TICKS = 84;
+export const ROBOT_JUMP = 10.5;
+export const ROBOT_LEAP = 35;
+/**
+ * Kleber: Pistole ausklappen und zielen (0,45 s), Flug des Klumpens (0,3 s), Einklappen; so lange klebt er (4 s); so weit
+ * hinter dir (Meter auf der Strecke) trifft er den Nächsten.
+ */
+export const GLUE_FIRE = 27;
+export const GLUE_HIT = 45;
+export const GLUE_SHOT_TICKS = 72;
+export const GLUE_TICKS = 240;
+export const GLUE_RANGE = 25;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
@@ -428,7 +472,6 @@ const AIR_EPS = 0.15;
 const AIR_STEER = 0.35;
 /** Bergab schneller, bergauf langsamer: Anteil der Steigung, der auf die Höchstgeschwindigkeit wirkt. */
 const SLOPE_EFFECT = 0.6;
-const SPRING_SPEED = 10.5;
 export const RESPAWN_TICKS = 55;
 const RESPAWN_HEIGHT = 2.4;
 export const GUARD_TICKS = 12 * 60;
@@ -564,6 +607,10 @@ export function newState(): KartState {
     aimSlot: -1,
     wing: 0,
     gold: 0,
+    robot: 0,
+    glue: 0,
+    glueShot: 0,
+    glueAim: -1,
   };
 }
 
@@ -601,6 +648,10 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.aimSlot = src.aimSlot;
   dst.wing = src.wing;
   dst.gold = src.gold;
+  dst.robot = src.robot;
+  dst.glue = src.glue;
+  dst.glueShot = src.glueShot;
+  dst.glueAim = src.glueAim;
   return dst;
 }
 
@@ -654,8 +705,9 @@ export function hitKart(s: KartState): number {
   }
   s.spin = SPIN_TICKS;
   s.shield = SPIN_TICKS + SHIELD_TICKS;
-  // Getroffen klappen die Flügel zu.
+  // Getroffen klappen die Flügel zu, und ein Roboter fällt in sich zusammen (er ist wieder ein Kart).
   s.wing = 0;
+  s.robot = 0;
   s.driftDir = 0;
   s.driftCharge = 0;
   s.boost = 0;
@@ -674,6 +726,7 @@ export function flattenKart(s: KartState): number {
   }
   s.flat = FLAT_TICKS;
   s.shield = FLAT_TICKS + 40;
+  s.robot = 0;
   s.driftDir = 0;
   s.driftCharge = 0;
   s.boost = 0;
@@ -694,6 +747,22 @@ export function stallKart(s: KartState): number {
   s.boost = 0;
   s.driftDir = 0;
   s.driftCharge = 0;
+  return HIT_SPIN;
+}
+
+/**
+ * Kleber: Der Klumpen trifft – dem Fahrer klebt GLUE_TICKS lang Kleber auf dem Bildschirm (ein neuer Treffer frischt ihn auf).
+ * Gebremst wird nicht. Rückgabe wie hitKart: HIT_NONE, wenn er nicht zu treffen ist (Get Gold, am Drachen, als Rakete, beim
+ * Wiederaufsetzen), HIT_BLOCKED, wenn der Stoßfänger ihn abfängt.
+ */
+export function glueKart(s: KartState): number {
+  if (s.respawn > 0 || s.tow > 0 || s.rocket > 0 || s.gold > 0) return HIT_NONE;
+  if (s.guard > 0) {
+    s.guard = 0;
+    s.shield = 50;
+    return HIT_BLOCKED;
+  }
+  s.glue = GLUE_TICKS;
   return HIT_SPIN;
 }
 
@@ -973,7 +1042,7 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
       ) {
         inWake = true;
       }
-      // Darüber hinweg (Sprungfeder, Schanze) oder auf einer anderen Ebene: kein Kontakt.
+      // Darüber hinweg (Satz des Roboters, Schanze) oder auf einer anderen Ebene: kein Kontakt.
       // Bei Wagen mit befahrbarem Dach zählt die Höhe des Dachs an dieser Stelle: Wer (fast) auf Dachhöhe ist,
       // fährt darauf – nur darunter ist der Wagen eine Wand.
       if (dy > (v.roofs ? roofTop(v, car, du) + p.slope * du - ROOF_STEP : v.height) || dy < -1.5) continue;
@@ -1249,6 +1318,14 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.gold--;
     if (s.gold === GOLD_TICKS) s.size = 0;
   }
+  // Roboter: Verwandeln, Laufen, Satz – spätestens jetzt ist er wieder ein Kart.
+  if (s.robot > 0 && ++s.robot > ROBOT_TICKS) s.robot = 0;
+  // Kleber: läuft ab; beim Schützen klappt die Pistole nach dem Schuss wieder ein.
+  if (s.glue > 0) s.glue--;
+  if (s.glueShot > 0 && ++s.glueShot > GLUE_SHOT_TICKS) {
+    s.glueShot = 0;
+    s.glueAim = -1;
+  }
   // Größe läuft ab – außer in der Abkürzung, die nur diese Größe einlässt (im Mauseloch bleibt man winzig).
   if (s.size !== 0) {
     const k = s.seg < t.total ? t.branchOf[s.seg] : -1;
@@ -1348,13 +1425,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   // --- Schiene (Achterbahn-Rummel): das Kart sitzt auf einer Schiene und rollt wie ein Achterbahnwagen ---
   // Bergab schießt es los, bergauf verliert es Schwung, den Lifthügel zieht die Kette hinauf. Lenken wechselt die
-  // Schiene; herunterfallen kann man nicht. Wer (von einer Sprungfeder) hoch über der Schiene fliegt, landet erst.
+  // Schiene; herunterfallen kann man nicht. Wer (nach einem Satz) hoch über der Schiene fliegt, landet erst.
   if (t.rails.length > 0 && (t.edge[s.seg] & EDGE_RAIL) !== 0) {
     const size = s.gold > 0 ? 0 : s.size;
     railProject(t, s.x, s.z, s.seg, env.time, size);
     const seg = proj.seg;
     const rail = railOf(t, seg);
     if (rail && s.y <= centerHeight(t, seg, proj.along) + proj.lat * t.bank[seg] + RAIL_CATCH && Math.abs(proj.lat) <= t.wh[seg] + 1) {
+      // Auf der Schiene ist man ein Kart (ein Roboter, der darauf landet, ist es wieder).
+      s.robot = 0;
       const canSteer = env.canDrive && !spinning;
       const steer = canSteer ? Math.max(-1, Math.min(1, cmd.steer / 127)) : 0;
       // Welche Schiene: die nächste – mit Lenkeinschlag die Nachbarschiene in Lenkrichtung.
@@ -1483,7 +1562,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       s.driftDir = 0;
       s.driftCharge = 0;
     }
-  } else if (driftBtn && !wasAir && vf > DRIFT_MIN_SPEED && Math.abs(steer) > 0.2) {
+  } else if (driftBtn && !wasAir && s.robot === 0 && vf > DRIFT_MIN_SPEED && Math.abs(steer) > 0.2) {
     s.driftDir = steer > 0 ? 1 : -1;
     s.driftCharge = 0;
     ev |= EV_DRIFT_START;
@@ -1958,8 +2037,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   s.y += s.vy * DT;
   if (s.y <= g) {
     if (wasAir && s.vy < -5) ev |= EV_LAND;
-    // Wieder Boden unter den Rädern: Flügel zu.
-    if (wasAir) s.wing = 0;
+    // Wieder Boden unter den Rädern: Flügel zu – und wer als Roboter abgesprungen ist, landet als Kart.
+    if (wasAir) {
+      s.wing = 0;
+      if (s.robot > ROBOT_LEAP_AT) s.robot = 0;
+    }
     s.y = g;
     // Am Boden ist die Steiggeschwindigkeit die des Hangs. Endet der Hang
     // (Kuppe, Schanze), nimmt das Kart sie mit und hebt ab.
@@ -1990,6 +2072,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.spin = 0;
     s.stall = 0;
     s.wing = 0;
+    s.robot = 0;
     s.shield = RESPAWN_TICKS + 70;
     s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
     return ev | EV_FALL;
@@ -2097,6 +2180,25 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     }
   }
 
+  // --- Roboter: nach ein paar Schritten ein Satz nach vorn ---
+  // (Mindestens ROBOT_LEAP schnell, in Blickrichtung; vom Boden aus auch nach oben. Wer gerade in der Luft ist, wird nur schneller.)
+  if (s.robot === ROBOT_LEAP_AT && drive) {
+    const hx = Math.sin(s.heading);
+    const hz = Math.cos(s.heading);
+    const lf = s.vx * hx + s.vz * hz;
+    const lv = ROBOT_LEAP * env.speedFactor;
+    if (lf < lv) {
+      s.vx += hx * (lv - lf);
+      s.vz += hz * (lv - lf);
+    }
+    if (!air) {
+      s.vy = Math.max(s.vy, ROBOT_JUMP);
+      s.y += AIR_EPS + 0.05;
+      flags |= FLAG_AIR;
+      ev |= EV_TAKEOFF;
+    }
+  }
+
   // --- Item auslösen (bei Tastendruck, nicht beim Halten) ---
   if (itemBtn && (s.flags & FLAG_ITEM_HELD) === 0 && drive && s.item !== ITEM_NONE) {
     const used = useItem(s, air);
@@ -2186,10 +2288,10 @@ function stepRocket(s: KartState, itemBtn: boolean): number {
 
 /**
  * Löst das gehaltene Item aus (Aufrufer prüft Tastenflanke und ob gefahren werden darf). Gibt die Ereignisse zurück;
- * die Sprungfeder setzt dabei das Kart in die Luft (EV_TAKEOFF – der Aufrufer setzt FLAG_AIR).
- * noSpring: Auf den Schienen der Achterbahn bleibt die Feder aufgehoben (sie würde das Kart vom Deck ohne Bande werfen).
+ * der Gleiter setzt dabei das Kart in die Luft (EV_TAKEOFF – der Aufrufer setzt FLAG_AIR).
+ * onRail: Auf den Schienen der Achterbahn bleiben Roboter und Gleiter aufgehoben (sie würden das Kart vom Deck ohne Bande werfen).
  */
-function useItem(s: KartState, air: boolean, noSpring = false): number {
+function useItem(s: KartState, air: boolean, onRail = false): number {
   let ev = 0;
   let used = true;
   switch (s.item) {
@@ -2224,25 +2326,36 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
       s.tow = 0;
       s.boost = 0;
       s.stall = 0;
-      // Als Rakete ist das Kart kein Gold mehr.
+      // Als Rakete ist das Kart kein Gold mehr (und kein Roboter).
       s.gold = 0;
+      s.robot = 0;
       ev |= EV_USE_ROCKET;
       break;
     case ITEM_SMOKE:
       ev |= EV_USE_SMOKE;
       break;
-    case ITEM_SPRING:
-      // Aus der Luft heraus geht kein zweiter Sprung – das Item bleibt.
-      if (air || noSpring) used = false;
+    case ITEM_ROBOT:
+      // Verwandeln geht nur am Boden (in der Luft hätte der Roboter nichts unter den Füßen) und nicht, solange schon einer läuft.
+      // Ein Drift endet dabei ohne Mini-Turbo.
+      if (air || onRail || s.robot > 0) used = false;
       else {
-        s.vy = SPRING_SPEED;
-        s.y += AIR_EPS + 0.05;
-        ev |= EV_USE_SPRING | EV_TAKEOFF;
+        s.robot = 1;
+        s.driftDir = 0;
+        s.driftCharge = 0;
+        ev |= EV_USE_ROBOT;
+      }
+      break;
+    case ITEM_GLUE:
+      // Die Pistole klappt aus; das Ziel trägt der Host ein (glueAim). Eine zweite, solange sie draußen ist, bleibt aufgehoben.
+      if (s.glueShot > 0) used = false;
+      else {
+        s.glueShot = 1;
+        s.glueAim = -1;
       }
       break;
     case ITEM_WING:
-      // Wie die Feder: auf den Schienen bleibt er aufgehoben. Aus der Luft heraus geht er – er fängt einen auf.
-      if (noSpring) used = false;
+      // Wie der Roboter: auf den Schienen bleibt er aufgehoben. Aus der Luft heraus geht er – er fängt einen auf.
+      if (onRail) used = false;
       else {
         s.vy = Math.max(s.vy, WING_LAUNCH);
         s.y += AIR_EPS + 0.05;
@@ -2267,6 +2380,7 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
       s.tow = TOW_TICKS;
       s.boost = 0;
       s.stall = 0;
+      s.robot = 0;
       ev |= EV_USE_KITE;
       break;
     default:

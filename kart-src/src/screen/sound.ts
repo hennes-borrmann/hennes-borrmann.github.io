@@ -44,10 +44,16 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'use-top',
   'use-emp',
   'use-smoke',
-  'use-spring',
   'use-kite',
   'use-rocket',
   'use-wing',
+  // Roboter und Kleber: man hört andere sich verwandeln, stampfen und springen, die Pistole ausklappen, schießen und treffen
+  'use-robot',
+  'robot-step',
+  'robot-jump',
+  'use-glue',
+  'glue-shot',
+  'glue-hit',
   // Get Gold: man hört andere trinken, golden werden, umhauen und Items abprallen lassen
   'use-gold',
   'gold',

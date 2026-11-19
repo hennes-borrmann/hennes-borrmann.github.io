@@ -80,9 +80,11 @@ const EMPTY_HUD = {
   bannerTone: 'info' as const,
   fps: null,
   smoke: 0,
+  glue: 0,
+  glueHits: 0,
 };
 
-const HOST_ONLY_FX = new Set<FxKind>(['hit', 'bump', 'pickup', 'finish', 'block', 'stall', 'lap', 'finallap']);
+const HOST_ONLY_FX = new Set<FxKind>(['hit', 'bump', 'pickup', 'finish', 'block', 'stall', 'glue', 'lap', 'finallap']);
 
 type Role = 'none' | 'host' | 'client';
 
@@ -1201,6 +1203,8 @@ export class App {
       bannerTone: wrongWay || rocket > 0 || threat > 0 || (trackNote !== null && trackNoteBad) ? 'bad' : 'info',
       fps: this.showFps && this.scene ? this.scene.stats.fps : null,
       smoke: this.scene?.smoke ?? 0,
+      glue: this.scene?.glue ?? 0,
+      glueHits: this.scene?.glueHits ?? 0,
     });
 
     if (race.phase === RACE_RESULTS && !this.resultsShown) {
@@ -1792,7 +1796,7 @@ export class App {
         const t = TRACK.tide;
         return t ? { time, phase: tidePhase(t, time), level: tideLevel(t, time), period: t.period, wall: performance.timeOrigin + performance.now() } : null;
       },
-      scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke } : null),
+      scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke, glue: this.scene.glue, glueHits: this.scene.glueHits } : null),
       // Wie ein Kart auf diesem Bildschirm gezeigt wird: Maßstab, wie gold (0 … 1), sichtbar.
       look: (slot: number) => this.scene?.kartLook(slot) ?? null,
       tree: () => this.scene?.debugTree() ?? [],

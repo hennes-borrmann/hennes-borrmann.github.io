@@ -411,6 +411,8 @@ const VIBRATION: Record<FxKind, number | number[]> = {
   finish: [0, 70, 60, 70, 60, 150],
   block: [0, 40, 30, 40],
   stall: [0, 30, 40, 30, 40, 30, 40, 30],
+  // Kleber: ein satter Platscher, dann zieht es nach
+  glue: [0, 70, 50, 30, 60, 20],
   land: 40,
   fall: [0, 160],
   lap: 30,
@@ -428,6 +430,7 @@ const FLASH_TONE: Record<FxKind, string> = {
   finish: 'go',
   block: 'item',
   stall: 'bad',
+  glue: 'bad',
   land: 'plain',
   fall: 'bad',
   lap: 'go',
