@@ -41,6 +41,7 @@ import {
   PULSE_METEOR,
   PULSE_ROD,
   PULSE_KICK,
+  PULSE_BLAST,
   PONTOON_LINK,
   pontoonLift,
   type Pontoon,
@@ -69,7 +70,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -188,6 +189,8 @@ export interface PathFeatures {
   bands?: { from: number; to: number; radius?: number; twists?: [number, number][] }[];
   /** Prallpoller am Rand eines Schwebebands (lat in Metern): Wer sie streift, prallt ab und bekommt Schub (sim.ts). */
   bumpers?: { at: number; lat: number }[];
+  /** Sprengladungen (Kristallmine): gehen im Takt hoch und werfen, wer daneben ist (mechanics.ts, PULSE_BLAST). */
+  blasts?: { at: number; lat: number; period: number; phase: number }[];
   /** Schubmagnete auf einer Schiene (lat = Lage dieser Schiene): ziehen im Takt an (mechanics.ts, PULSE_KICK). */
   kicks?: { at: number; lat: number; period: number; phase: number }[];
   /**
@@ -1229,6 +1232,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const b of p.f.bolts ?? []) pulse(PULSE_BOLT, b);
     for (const b of p.f.rods ?? []) pulse(PULSE_ROD, b);
     for (const b of p.f.kicks ?? []) pulse(PULSE_KICK, b);
+    for (const b of p.f.blasts ?? []) pulse(PULSE_BLAST, b);
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
@@ -1637,6 +1641,8 @@ const PULSE_KINDS = [
   { radius: 6, on: 54, warn: 90 },
   // Schubmagnet: 3 m vor bis 3 m hinter der Stelle; zieht gut eine Sekunde, eine Dreiviertelsekunde vorher läuft das Licht an
   { radius: 3, on: 75, warn: 45 },
+  // Sprengladung: kurzer, harter Knall mit großem Umkreis; zweieinhalb Sekunden vorher brennt die Zündschnur, blinkt die Lampe
+  { radius: 3.6, on: 24, warn: 150 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;

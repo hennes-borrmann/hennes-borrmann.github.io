@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -102,6 +102,10 @@ export type SfxName =
   | 'hum' // Magnetwerk: das eigene Kart fährt in der Trommel: tiefes Netzbrummen der Magnete mit Obertönen, das leicht schwebt (wird etwa alle 0,4 s aufgerufen und verschmilzt zu einem Bett; der Pegel des Aufrufs trägt die Verdrehung – an der Decke lauter und heller)
   | 'magnetoff' // Magnetwerk: eine Deckenplatte schaltet ab (ortsfest, bis ~120 m zu hören): Klack des Schützes, dann ein fallender elektrischer Seufzer (~0,6 s)
   | 'magneton' // Magnetwerk: die Deckenplatte schaltet wieder an (ortsfest): ein steigender Einschaltton, der in einen hellen Klack des Ankers mündet (~0,35 s)
+  | 'blast' // Kristallmine: eine Sprengladung geht hoch (ortsfest, weit zu hören): harter Knall, tiefe Druckwelle, nachrieselndes Geröll mit Hall im Stollen (~1,6 s)
+  | 'siren' // Kristallmine: das Sprenghorn warnt 2,5 s vor einer Sprengung (ortsfest): drei kurze, heisere Hornstöße (~1,3 s)
+  | 'rubble' // Kristallmine: im Sprengort bricht das Hangende nach (ortsfest): Grollen, polternde Brocken, rieselnder Staub (~1,4 s)
+  | 'lore' // Kristallmine: das eigene Kart rattert in der Lore über das Grubengleis (wird etwa alle 0,4 s aufgerufen und verschmilzt zu einem Bett): tiefes Rollen, blechernes Klappern, Schienenstöße
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

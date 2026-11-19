@@ -15,6 +15,9 @@
 // Talsperre: dasselbe Band in den Farben des Abends (cyan und bernstein statt cyan und pink) – statt der Fassade steht
 // rechts die Luftseite der Staumauer (die zeichnet mechanics/dam.ts); das Band hängt auf ganzer Länge an Auslegern, die
 // in der Mauer verankert sind (keine Stützen hinunter in die Schlucht).
+//
+// Kristallmine: Magnetlinien in Eis und Amethyst; statt der Fassade die Felswand der Riesengeode (life/kristall.ts) – das
+// Band hängt an Haltern, die in ihr verankert sind, und steht am Ein- und Ausgang auf Stützen in der Mulde.
 
 import * as THREE from 'three';
 import { BAND_LINE_K, BAND_LINE_SPEED, BAND_LINE_WAVE } from '../../game/mechanics';
@@ -22,6 +25,8 @@ import { EDGE_TWIST, rightX, rightZ, twistWarp, type Track } from '../../game/tr
 import { DAM_AIR, damRadius } from '../life/talsperreLand';
 import { MeshBuilder, seeded, shade, type RGB, type V3 } from '../build';
 import type { MechanicView } from '../mechanics';
+import { GEODE } from '../../game/tracks/kristall';
+import { geodeFloor, geodeForm } from '../life/kristall';
 import { THEMES } from '../themes';
 import { rgb, toonMaterial } from '../toon';
 
@@ -49,6 +54,9 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   const VIOLET = dam ? rgb(0xffa94a) : VIOLET_N;
   const DARK = dam ? rgb(0x2b303b) : DARK_N;
   const STEEL = dam ? rgb(0x6c717c) : STEEL_N;
+  // Kristallmine: Das Band liegt an der Wand der Riesengeode (die zeichnet life/kristall.ts) – keine Fassade, Halter zur
+  // Felswand, Stützen hinab in die Mulde; Magnetlinien in Eis und Amethyst.
+  const mine = t.def.theme === 'kristall';
 
   const tmp = { x: 0, y: 0, z: 0 };
   /** Punkt auf dem Band (gezeigte Stelle): Abschnitt i, Anteil f zum nächsten, seitlich lat, h über der Fahrbahn. */
@@ -74,7 +82,7 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
   g.lineCap = 'round';
-  const colors = dam ? ['#58e0ff', '#ffb347'] : ['#5ff3ff', '#ff4fc0'];
+  const colors = dam ? ['#58e0ff', '#ffb347'] : mine ? ['#5ff3ff', '#c77dff'] : ['#5ff3ff', '#ff4fc0'];
   for (let k = 0; k < 2; k++) {
     const sign = k === 0 ? 1 : -1;
     const path = (): void => {
@@ -221,6 +229,28 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
         if (t.roll[i] < 0.6) beam(solid, P(i, 0, -t.rh[i] * 0.4, -SLAB), F(out + 0.3, under[1] - 6), 0.3, shade(STEEL, 0.85));
         solid.box(anchor[0], anchor[1], anchor[2], 1.3, 1.3, 0.5, shade(STEEL, 0.75), Math.atan2(t.tx[i], t.tz[i]));
         glow.box(anchor[0], anchor[1] + 0.85, anchor[2], 0.5, 0.18, 0.5, PINK);
+      }
+    }
+  } else if (mine) {
+    // Kristallmine: Halter alle 6 m waagerecht von der Unterseite des Bands zur Felswand der Geode; wo es noch fast flach
+    // liegt (am Ein- und Ausgang), steht es auf Stützen in der Mulde.
+    const g = geodeForm(t);
+    for (const b of t.bands) {
+      for (let k = 2; k < b.count - 2; k += 6) {
+        const i = (b.first + k) % t.n;
+        const under = P(i, 0, 0, -SLAB);
+        const dx = under[0] - GEODE.x;
+        const dz = under[2] - GEODE.z;
+        const d = Math.hypot(dx, dz);
+        if (d > g.r - 0.5) continue;
+        if (t.roll[i] > 0.45) {
+          const wallP: V3 = [GEODE.x + (dx / d) * (g.r + 0.3), under[1], GEODE.z + (dz / d) * (g.r + 0.3)];
+          beam(solid, under, wallP, 0.5, STEEL);
+          glow.box(wallP[0] - (dx / d) * 0.5, wallP[1], wallP[2] - (dz / d) * 0.5, 0.6, 0.6, 0.6, VIOLET);
+        } else {
+          const foot: V3 = [under[0], geodeFloor(t, d) - 0.5, under[2]];
+          if (foot[1] < under[1] - 0.5) beam(solid, under, foot, 0.8, STEEL);
+        }
       }
     }
   } else if (twisted.length > 0) {

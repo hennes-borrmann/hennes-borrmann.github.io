@@ -833,8 +833,8 @@ async function main() {
     check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
     await h6.page.click('#btn-step-next');
     check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
-    check('Einundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 21);
-    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 21);
+    check('Zweiundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 22);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 22);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
@@ -1520,7 +1520,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen einundzwanzig Strecken zur Wahl', cards === 21, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen zweiundzwanzig Strecken zur Wahl', cards === 22, `${cards} Karten`);
     await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2281,9 +2281,62 @@ async function main() {
       check('Überlaufrinne: das Wasser schiebt Anna ohne Gegenlenken zur Kante (oder in die Rinne)', w1.respawn > 0 || w1.lat < -0.8, `quer ${w1.lat.toFixed(2)} m, neu aufgesetzt ${w1.respawn > 0 ? 'ja' : 'nein'}`);
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Kristallmine: Die Weiche zum Sprengort folgt ihrem Fahrplan, die Sprengladungen gehen im Takt hoch – auf beiden
+    // Bildschirmen gleich. Wer an einer Ladung steht, wenn sie hochgeht, wird geworfen (auch auf dem Bildschirm des anderen).
+    const KRISTALL = 21;
+    await pickTrack(h7.page, KRISTALL);
+    await c7.page.waitForFunction((k) => window.__kart.lobby().track === k, KRISTALL, { timeout: 5000 });
+    await clickReady(c7.page);
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await clickStart(h7.page);
+    await c7.page.waitForFunction((k) => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === k, KRISTALL, { timeout: 30000 });
+    {
+      let mineSame = true;
+      let open = 0;
+      let shut = 0;
+      for (let sec = 1; sec < 29; sec += 0.5) {
+        const [a, b] = await Promise.all([kart(h7.page, `mine(${sec})`), kart(c7.page, `mine(${sec})`)]);
+        if (a.gate !== b.gate || a.blasts.map((x) => x.cycle.toFixed(3)).join() !== b.blasts.map((x) => x.cycle.toFixed(3)).join()) mineSame = false;
+        if (a.gate) shut++;
+        else open++;
+      }
+      const info = await kart(h7.page, 'mine()');
+      check(
+        'Kristallmine: Weiche zum Sprengort nach Fahrplan, Sprengladungen im Takt – auf beiden Bildschirmen gleich; Lorenbahn und Wandfahrt sind da',
+        mineSame && open > 8 && shut > 8 && info.blasts.length >= 3 && info.rails > 400 && info.roll > 85,
+        `${open} offen / ${shut} zu (Takt ${info.period} s)${mineSame ? '' : ', Bildschirme verschieden'} · ${info.blasts.length} Ladungen · ${info.rails.toFixed(0)} m Lorenbahn · Band bis ${info.roll.toFixed(0)}°`,
+      );
+      // Anna stellt sich an die erste Ladung, kurz bevor sie hochgeht.
+      const b0 = info.blasts[0];
+      const wait = ((b0.period - b0.cycle) % b0.period) + (b0.period - b0.cycle < 1.2 ? b0.period : 0);
+      await sleep(Math.max(0, (wait - 0.8) * 1000));
+      const thrown = await h7.page.evaluate(async ([at, lat]) => {
+        const k = window.__kart;
+        let spin = 0;
+        let vy = 0;
+        for (let n = 0; n < 120 && spin === 0; n++) {
+          k.place(0, at, lat);
+          await new Promise((r) => setTimeout(r, 16));
+          const s = k.authoritative(0);
+          spin = s.spin;
+          vy = Math.max(vy, s.vy);
+        }
+        return { spin, vy };
+      }, [b0.at, b0.lat]);
+      let seen = false;
+      for (const until = Date.now() + 1500; Date.now() < until && !seen; ) {
+        const e = (await kart(c7.page, 'entities()')).find((q) => q.slot === 0);
+        if (e && e.spin > 0) seen = true;
+        else await sleep(30);
+      }
+      check('Sprengladung: Anna steht daneben, als sie hochgeht – sie wird geworfen, auch auf Bens Bildschirm', thrown.spin > 0 && seen, `Dreher ${thrown.spin} Ticks, bei Ben ${seen ? 'gesehen' : 'nicht gesehen'}`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die einundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die zweiundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

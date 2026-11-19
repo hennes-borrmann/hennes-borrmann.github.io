@@ -81,6 +81,7 @@ import {
   LIFT_BOOST,
   KICK_TICKS,
   PULSE_KICK,
+  PULSE_BLAST,
   RAIL_BOOST,
   RAIL_BRAKE,
   RAIL_CATCH,
@@ -698,6 +699,8 @@ const DRAFT_PULL = 1.2;
 /** Nur wer das Heck mit der Kartmitte innerhalb der Fahrzeugbreite (plus so viel) trifft, fährt wirklich auf. */
 const CRASH_INSET = 0.3;
 const VENT_LAUNCH = 10.5;
+/** So hoch wirft eine Sprengladung (Kristallmine) ein Kart (m/s). */
+const BLAST_LAUNCH = 7.5;
 /** Internes Bit aus stepTraffic: das Kart wurde verschoben. */
 const TRAFFIC_MOVED = 1 << 30;
 
@@ -1033,6 +1036,23 @@ export function hovering(t: Track, s: KartState): boolean {
 }
 
 /**
+ * Weiche (Kristallmine): An der Mündung einer Abzweigung auf Schienen liegen beide Gleise ineinander, und wer auf dem Gleis
+ * zur Abzweigung hin rollt, gerät von selbst auf sie (das nächste Gleis zählt). Ist ihr Tor zu, ist die Weiche auf geradeaus
+ * gestellt: Dann zählt dort die Hauptstrecke, und das Kart bleibt auf ihr. Ordnet sonst wie projectOnTrack zu (Ergebnis in proj).
+ */
+function railProject(t: Track, x: number, z: number, hint: number, time: number, size: number): void {
+  projectOnTrack(t, x, z, hint);
+  if (t.gates.length === 0) return;
+  const m = t.twin[proj.seg];
+  if (m < 0 || t.branchOf[proj.seg] < 0 || (t.edge[m] & EDGE_RAIL) === 0 || !gateShut(t, proj.seg, time, size)) return;
+  const dx = x - t.px[m];
+  const dz = z - t.pz[m];
+  proj.seg = m;
+  proj.lat = dx * -t.tz[m] + dz * t.tx[m];
+  proj.along = dx * t.tx[m] + dz * t.tz[m];
+}
+
+/**
  * Abstoßen auf dem Schwebeband (der Host ruft es für jedes Paar sich berührender Karts auf): Schweben beide, stoßen sie
  * sich ab – auseinandergeschoben, jedes mit REPEL_PUSH/2 von der Berührstelle weg – und beide bekommen kurz Schub.
  * Gibt true zurück, wenn es so war (dann gilt kein gewöhnlicher Rempler).
@@ -1164,6 +1184,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         s.tow = 0;
         s.boost = Math.max(s.boost, 45);
         ev |= EV_TOW_END;
+        // Auf Schienen setzt er es gleich aufs Gleis: In der steilen Wendel der Kristallmine flöge es sonst mit vollem Zug
+        // geradeaus davon, ehe die Schiene es fassen kann.
+        if ((t.edge[s.seg] & EDGE_RAIL) !== 0) s.y = hover - TOW_LIFT;
       }
     }
     s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
@@ -1174,7 +1197,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // Bergab schießt es los, bergauf verliert es Schwung, den Lifthügel zieht die Kette hinauf. Lenken wechselt die
   // Schiene; herunterfallen kann man nicht. Wer (von einer Sprungfeder) hoch über der Schiene fliegt, landet erst.
   if (t.rails.length > 0 && (t.edge[s.seg] & EDGE_RAIL) !== 0) {
-    projectOnTrack(t, s.x, s.z, s.seg);
+    const size = s.gold > 0 ? 0 : s.size;
+    railProject(t, s.x, s.z, s.seg, env.time, size);
     const seg = proj.seg;
     const rail = railOf(t, seg);
     if (rail && s.y <= centerHeight(t, seg, proj.along) + proj.lat * t.bank[seg] + RAIL_CATCH && Math.abs(proj.lat) <= t.wh[seg] + 1) {
@@ -1221,7 +1245,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       if (!env.canDrive) v = 0;
       s.x += t.tx[seg] * v * DT;
       s.z += t.tz[seg] * v * DT;
-      projectOnTrack(t, s.x, s.z, seg);
+      railProject(t, s.x, s.z, seg, env.time, size);
       const seg1 = proj.seg;
       // Seitlich genau auf die Spur (in Kurven wandert sie sonst).
       s.x += rightX(t, seg1) * (lat - proj.lat);
@@ -1846,8 +1870,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     if (r === HIT_BLOCKED) ev |= EV_BLOCK;
     else if (r === HIT_SPIN) {
       ev |= EV_HIT;
-      // Der Geysir wirft das Kart hoch, Bombe und Eiszapfen nur ein Stück.
-      s.vy = p.kind === PULSE_VENT ? VENT_LAUNCH : 4.5;
+      // Der Geysir wirft das Kart hoch, die Sprengladung ein gutes Stück, Bombe und Eiszapfen nur ein wenig.
+      s.vy = p.kind === PULSE_VENT ? VENT_LAUNCH : p.kind === PULSE_BLAST ? BLAST_LAUNCH : 4.5;
       s.y += AIR_EPS + 0.05;
       flags |= FLAG_AIR;
     }

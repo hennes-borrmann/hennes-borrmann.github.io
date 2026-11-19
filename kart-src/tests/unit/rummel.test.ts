@@ -34,7 +34,7 @@ const lat = (s: KartState): number => {
 const speed = (s: KartState): number => Math.hypot(s.vx, s.vz);
 
 describe('Schienen', () => {
-  it('Schienen hat nur der Rummel (Achterbahn) und die Gipfelbahn (Sommerrodelbahn, ohne Schubmagnete): je ein Stück mit zwei Schienen, Kettenlift und Bremsstrecke, ohne Lücke und ohne Looping', () => {
+  it('Schienen hat nur der Rummel (Achterbahn), die Gipfelbahn (Sommerrodelbahn, ohne Schubmagnete) und die Kristallmine (Lorenbahn mit Weiche): je zwei Schienen, ohne Lücke und ohne Looping', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
       if (t.def.id === 'gipfel') {
@@ -54,6 +54,21 @@ describe('Schienen', () => {
           steep = Math.max(steep, Math.abs(t.py[t.next[seg]] - t.py[seg]) / t.step);
         }
         expect(steep).toBeLessThan(0.75);
+        continue;
+      }
+      if (t.def.id === 'kristall') {
+        // Lorenbahn: zwei Gleise, ohne Kette (es geht nur hinunter), mit Bremsstrecken in der Wendel – und an der Weiche
+        // ein zweites Stück auf der Abzweigung durch den Sprengort, mit denselben zwei Gleisen.
+        expect(t.rails.length).toBe(2);
+        for (const r of t.rails) {
+          expect(r.lanes).toEqual([-2, 2]);
+          expect(r.lifts.length).toBe(0);
+          for (let k = 0; k < r.count; k++) expect(t.edge[r.first + k] & EDGE_GAP).toBe(0);
+        }
+        expect(t.rails[0].brakes.length).toBeGreaterThan(0);
+        expect(t.rails[0].count * t.step).toBeGreaterThan(400);
+        expect(t.branchOf[t.rails[1].first]).toBe(0);
+        expect(t.pulses.some((p) => p.kind === PULSE_KICK)).toBe(false);
         continue;
       }
       if (i !== RUMMEL) {

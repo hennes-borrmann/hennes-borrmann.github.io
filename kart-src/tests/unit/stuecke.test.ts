@@ -8,6 +8,7 @@ import { MAGNET_STUECK } from '../../src/audio/stuecke/magnet';
 import { GIPFEL_STUECK } from '../../src/audio/stuecke/gipfel';
 import { NEON_STUECK } from '../../src/audio/stuecke/neon';
 import { TALSPERRE_STUECK } from '../../src/audio/stuecke/talsperre';
+import { KRISTALL_STUECK } from '../../src/audio/stuecke/kristall';
 import { RUMMEL_STUECK } from '../../src/audio/stuecke/rummel';
 import { ZIMMER_STUECK } from '../../src/audio/stuecke/zimmer';
 import { WUESTE_STUECK } from '../../src/audio/stuecke/wueste';
@@ -32,6 +33,7 @@ const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'gipfel', def: GIPFEL_STUECK },
   { schluessel: 'neon', def: NEON_STUECK },
   { schluessel: 'talsperre', def: TALSPERRE_STUECK },
+  { schluessel: 'kristall', def: KRISTALL_STUECK },
 ];
 
 // Maßstab sind die vier ursprünglichen Rennstücke (in songs.ts) – weder die aus songs-neu.ts

@@ -304,6 +304,13 @@ const LEVEL: Record<SfxName, number> = {
   magneton: 3.4,
   rumble: 1.2,
   charge: 2,
+  // Kristallmine: die Sprengung so kräftig wie der Meteorit (sie kommt ortsfest und muss aus 30 m über Motor und Musik
+  // kommen), das Horn wie die Pfeife des Wüstenexpress, der Nachbruch wie der Bruch der Vulkaninsel, das Rattern der Lore
+  // wie das Rollen der Achterbahn (ein Bett).
+  blast: 2.6,
+  siren: 1.1,
+  rubble: 3.4,
+  lore: 0.95,
 };
 
 interface ToneOpts {
@@ -487,6 +494,7 @@ export class SfxPlayer {
   private readonly busyUntil: number[] = [];
   private tick = 0;
   private passTick = 0;
+  private blastTick = 0;
   private burnTick = 0;
   private splashTick = 0;
   private windTick = 0;
@@ -2147,6 +2155,67 @@ export class SfxPlayer {
         break;
       }
       // --- Maschinen und Wasser ---
+      // --- Kristallmine ---
+      case 'blast': {
+        // Sprengung im Stollen: ein harter, breitbandiger Knall (1 ms Anstieg), sofort die tiefe Druckwelle – ein Sinus, der
+        // von 90 auf 28 Hz fällt, und lang ausklingendes braunes Rauschen –, ein dumpfes Rechteck als Wucht; der Stollen hallt
+        // (zwei leisere, gedämpfte Wiederholungen des Knalls nach 0,13 und 0,29 s), dann rieselt Geröll: kurze Brocken aus
+        // Mittenrauschen in weiten Abständen. Abgrenzung: 'meteor' heult vorher, 'press' klingt metallisch.
+        const k = this.blastTick++ % 3;
+        const g = METEOR_GRAVEL[k];
+        v.noise(7000, 2500, 0.05, 0.55, { type: 'highpass', attack: 0.001 })
+          .noise(2400, 700, 0.12, 0.6, { q: 0.7, attack: 0.001 })
+          .tone('sine', 90, 28, 0.9, 0.7)
+          .noise(700, 70, 1.5, 0.6, { type: 'lowpass', brown: true, attack: 0.005 })
+          .tone('square', 55, 34, 0.25, 0.12)
+          .noise(1800, 600, 0.08, 0.22, { q: 0.8, at: 0.13, attack: 0.004 })
+          .noise(1400, 500, 0.08, 0.12, { q: 0.8, at: 0.29, attack: 0.004 })
+          .noise(260, 120, 1.2, 0.2, { type: 'lowpass', brown: true, attack: 0.2, at: 0.3 });
+        for (let i = 0; i < g.length; i += 2) v.noise(g[i + 1], g[i + 1] * 0.6, 0.05, 0.15 - 0.02 * i, { q: 1.5, at: g[i] + 0.15, attack: 0.003 });
+        break;
+      }
+      case 'siren':
+        // Sprenghorn: drei kurze, heisere Hornstöße (Sägezahn mit leichtem Flattern und eine Quinte darüber, dazu ein enges
+        // Rauschband als Luft), jeder 0,28 s lang – „tuut, tuut, tuut“.
+        for (let i = 0; i < 3; i++) {
+          const at = i * 0.42;
+          v.tone('sawtooth', 330, 322, 0.3, 0.13, { at, attack: 0.03, sustain: 0.75, vibHz: 7, vibDepth: 0.01 })
+            .tone('sawtooth', 494, 486, 0.3, 0.06, { at, attack: 0.03, sustain: 0.75 })
+            .noise(1300, 1200, 0.3, 0.05, { q: 3, at, attack: 0.03 });
+        }
+        break;
+      case 'rubble': {
+        // Nachbruch: Das Hangende gibt nach – ein tiefes Grollen schwillt an (braunes Rauschen), dann poltern Brocken immer
+        // dichter und tiefer (wie beim Bruch der Vulkaninsel, nur ohne Lava), zuletzt rieselt Staub (leises, helles Rauschen).
+        const k = this.blastTick % 3;
+        const rb = CRACK_RUBBLE[k];
+        v.noise(420, 90, 1.3, 0.45, { type: 'lowpass', brown: true, attack: 0.25 }).tone('sine', 70, 40, 0.8, 0.25, { at: 0.2, attack: 0.1 });
+        for (let i = 0; i < rb.length; i += 2) {
+          v.noise(rb[i + 1], rb[i + 1] * 0.6, 0.06, 0.32 - 0.02 * i, { q: 1.3, at: rb[i] + 0.25, attack: 0.003 }).tone('sine', 140 - i * 6, 80, 0.08, 0.12, { at: rb[i] + 0.25 });
+        }
+        v.noise(5000, 3500, 0.7, 0.05, { type: 'highpass', attack: 0.2, at: 0.6 });
+        break;
+      }
+      case 'lore': {
+        // Die Lore auf dem Grubengleis, alle 0,4 s aufgerufen – gebaut wie 'coaster' (drei versetzte, weich schwellende
+        // Schichten, damit nichts im Takt pumpt): tiefes Rollen, statt mitschwingendem Holz ein blechernes Klappern (enge
+        // Bänder um 1,5–2,6 kHz, je Aufruf reihum versetzt), dazu die Schienenstöße – auf dem kurzen Grubengleis dichter.
+        const k = this.coasterTick++;
+        const joints = COASTER_JOINTS[k % COASTER_JOINTS.length];
+        for (let i = 0; i < 3; i++) {
+          const at = i * 0.133;
+          v.noise(240 - 10 * i, 160, 1.3, 0.07, { type: 'lowpass', brown: true, attack: 0.42, at })
+            .noise(1500 + 380 * ((k + i) % 3), 1400 + 300 * ((k + i) % 3), 1.3, 0.05, { q: 4, attack: 0.42, at: at + 0.067 });
+        }
+        for (let i = 0; i < joints.length; i++) {
+          const at = joints[i];
+          v.noise(2300, 1600, 0.03, 0.09, { q: 2, at, attack: 0.002 })
+            .tone('triangle', 900, 700, 0.05, 0.05, { at })
+            .noise(2000, 1400, 0.03, 0.07, { q: 2, at: at + 0.06, attack: 0.002 })
+            .tone('sine', 120, 70, 0.06, 0.09, { at: at + 0.06 });
+        }
+        break;
+      }
       case 'press':
         // Stampfpresse: ganz kurz zischt die Hydraulik, dann (ab 0,06 s) der Schlag –
         // tiefer Sinus und braunes Rauschen als Bauch, ein harter Aufprall-Knack, darüber
