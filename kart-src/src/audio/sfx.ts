@@ -302,6 +302,9 @@ const LEVEL: Record<SfxName, number> = {
   hum: 1.2,
   magnetoff: 3.3,
   magneton: 3.4,
+  // Baumkronenpfad: Knarzen der Hängebrücke (leiser als ein Treffer, oft zu hören) und der Aufschlag eines Tannenzapfens
+  creak: 2.4,
+  cone: 3.2,
   rumble: 1.2,
   charge: 2,
   // Kristallmine: die Sprengung so kräftig wie der Meteorit (sie kommt ortsfest und muss aus 30 m über Motor und Musik
@@ -503,6 +506,8 @@ export class SfxPlayer {
   private avalancheTick = 0;
   private snowTick = 0;
   private icicleTick = 0;
+  private creakTick = 0;
+  private coneTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
   private smashTick = 0;
@@ -1862,6 +1867,37 @@ export class SfxPlayer {
           v.noise(fm, fm * (0.8 + 0.4 * r()), 0.6, 0.06, { q: 0.5, attack: 0.26, at: 0.03 + i * 0.167 });
         }
         v.noise(2600 + 1000 * r(), 4500 + 1000 * r(), 0.75, 0.025, { type: 'highpass', attack: 0.35 });
+        break;
+      }
+      // --- Baumkronenpfad ---
+      case 'creak': {
+        // Eine Hängebrücke kehrt am Ende ihres Pendelschlags um (ortsfest in ihrer Mitte, Reichweite 80 m, je Brücke alle
+        // 2,5–2,8 s): Holz reibt an Holz. Der Ton stockt – ein Sägezahn um 150–190 Hz, der in 0,6 s eine kleine Terz
+        // absinkt, mit 22–31 Hz Tremolo (das Haften und Rutschen der Bohlen an den Querhölzern) hinter einem Bandpass,
+        // dazu ein raues Band um 900 Hz im selben Takt. Darüber quietscht das gespannte Seil: ein Dreieck um 620–700 Hz,
+        // das kurz ansteigt. Drei Fassungen reihum (andere Tonhöhe, anderes Stocken), sonst klänge jede Brücke gleich.
+        const k = this.creakTick++ % 3;
+        const f = [172, 151, 190][k];
+        const tr = [24, 31, 22][k];
+        v.tone('sawtooth', f, f * 0.84, 0.62, 0.16, { attack: 0.05, tremHz: tr, sustain: 0.5 })
+          .tone('triangle', f * 2.02, f * 1.7, 0.5, 0.05, { attack: 0.06, tremHz: tr, at: 0.04 })
+          .noise(900, 760, 0.55, 0.09, { q: 2.2, attack: 0.08 })
+          .tone('triangle', 620 + k * 40, 700 + k * 40, 0.24, 0.035, { attack: 0.03, at: 0.3, vibHz: 9, vibDepth: 0.01 });
+        break;
+      }
+      case 'cone': {
+        // Ein Tannenzapfen schlägt auf dem Waldweg auf (ortsfest): erst rascheln die Nadeln, wo er sich vom Ast gelöst hat
+        // (Hochpass-Rauschen, weich einsetzend), dann ein hölzernes „Plock“ – ein Sinus, der von 330 auf 170 Hz fällt,
+        // mit kurzem Holzoberton (Dreieck ×2,6) und einem dumpfen Bauch aus braunem Rauschen –, danach springen ein paar
+        // Schuppen ab (kurze, hohe Klicks). Reihum zwei Fassungen.
+        const k = this.coneTick++ % 2;
+        const f = k === 0 ? 330 : 290;
+        v.noise(4200, 5200, 0.16, 0.05, { type: 'highpass', attack: 0.04 })
+          .tone('sine', f, f * 0.52, 0.11, 0.3, { at: 0.06, attack: 0.002 })
+          .tone('triangle', f * 2.6, f * 2.2, 0.05, 0.08, { at: 0.06, attack: 0.001 })
+          .noise(320, 140, 0.12, 0.22, { type: 'lowpass', brown: true, at: 0.06, attack: 0.003 })
+          .noise(2400, 1800, 0.03, 0.1, { q: 3, at: 0.13 + k * 0.02, attack: 0.001 })
+          .noise(3100, 2500, 0.025, 0.07, { q: 3, at: 0.19, attack: 0.001 });
         break;
       }
       // --- Gewitterkamm ---

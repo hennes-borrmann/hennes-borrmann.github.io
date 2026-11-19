@@ -588,7 +588,12 @@ export function gustWarning(w: Wind, time: number): number {
 // eigenen Takt. Zwischen zwei Pontons und zum festen Kai hin liegen gelenkige Übergänge:
 // dort läuft die Höhe gleichmäßig vom einen zum anderen. Wer auf dem Kamm ankommt, hebt ab.
 
-/** Ein schwimmendes Stück Fahrbahn. */
+/**
+ * Ein schwimmendes Stück Fahrbahn – oder eine Hängebrücke (Baumkronenpfad): Die ist an beiden Enden fest und schwingt
+ * wie eine gezupfte Saite – in der Mitte am meisten, zu den Enden hin immer weniger (arch). Eine Hängebrücke hebt und
+ * senkt sich nicht nur, sie pendelt auch quer (sway): Die Fahrbahn samt Geländer wandert seitlich, und wer auf ihr
+ * fährt, wandert mit.
+ */
 export interface Pontoon {
   /** Erster Abschnitt und Anzahl (zusammenhängend auf einem Weg). */
   first: number;
@@ -597,6 +602,11 @@ export interface Pontoon {
   amp: number;
   period: number;
   phase: number;
+  /** Hängebrücke: Ausschlag über die Länge wie sin(π·u), Enden fest, ohne gelenkige Übergänge davor und dahinter. */
+  arch: boolean;
+  /** Seitliches Pendeln: Ausschlag in Metern (nach rechts positiv) und Periode in Ticks (0 = pendelt nicht). */
+  sway: number;
+  swayPeriod: number;
 }
 
 /** Länge des Übergangs an jedem Ende eines Pontons (Meter): je zur Hälfte auf ihm und davor. */
@@ -605,6 +615,16 @@ export const PONTOON_LINK = 6;
 /** So weit liegt der Ponton zur Rennzeit time über (oder unter) seiner Ruhelage. */
 export function pontoonLift(p: Pontoon, time: number): number {
   return p.amp * Math.sin(((time + p.phase) / p.period) * 2 * Math.PI);
+}
+
+/**
+ * So weit ist die Hängebrücke zur Rennzeit time seitlich ausgeschwungen (Meter, nach rechts positiv; in der Mitte – zu den
+ * Enden hin gewichtet wie die Höhe). Das Pendeln läuft eine Viertelperiode hinter dem Heben her: Die Brücke zieht in der
+ * Mitte eine liegende Acht.
+ */
+export function pontoonShift(p: Pontoon, time: number): number {
+  if (p.sway === 0 || p.swayPeriod <= 0) return 0;
+  return p.sway * Math.sin(((time + p.phase) / p.swayPeriod) * 2 * Math.PI - Math.PI / 2);
 }
 
 // --- Zeitpläne, Bruchstellen und Tore ------------------------------------------------

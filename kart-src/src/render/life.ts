@@ -29,6 +29,7 @@ import { buildGipfelLife } from './life/gipfel';
 import { buildNeonLife } from './life/neon';
 import { buildTalsperreLife } from './life/talsperre';
 import { buildKristallLife } from './life/kristall';
+import { buildBaumLife } from './life/baum';
 import type { World } from './world';
 
 export interface Life {
@@ -89,6 +90,8 @@ export function buildLife(world: World): Life | null {
       return buildTalsperreLife(world);
     case 'kristall':
       return buildKristallLife(world);
+    case 'baum':
+      return buildBaumLife(world);
     default:
       return null;
   }

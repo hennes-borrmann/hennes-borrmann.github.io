@@ -44,6 +44,7 @@ import {
   PULSE_BLAST,
   PONTOON_LINK,
   pontoonLift,
+  pontoonShift,
   type Pontoon,
   type Wind,
   GATE_WARN,
@@ -70,7 +71,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -165,8 +166,11 @@ export interface PathFeatures {
   /**
    * Pontons: [from, to] schwimmt und hebt und senkt sich mit dem Seegang – amp Meter (ohne Angabe 0,7),
    * period und phase in Sekunden (ohne Angabe 3,4 und 0). Die Enden sind gelenkige Übergänge.
+   * Hängebrücke (arch, Baumkronenpfad): an beiden Enden fest, dazwischen schwingt sie wie eine Saite (in der Mitte voll,
+   * zu den Enden hin wie sin(π·u)) – und pendelt quer: sway = seitlicher Ausschlag in der Mitte (Meter), swayPeriod in
+   * Sekunden (ohne Angabe die doppelte period). Wer auf ihr fährt, wird mitgenommen; das Geländer pendelt mit.
    */
-  pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number }[];
+  pontoons?: { from: number; to: number; amp?: number; period?: number; phase?: number; arch?: boolean; sway?: number; swayPeriod?: number }[];
   /**
    * Magnettrommel (Magnetwerk): Von from bis to läuft die Fahrbahn an der Innenwand einer liegenden Trommel entlang
    * (radius = Halbmesser, ohne Angabe 26 m) und schraubt sich an ihr hoch. turns = Stützstellen [Stelle, Winkel in
@@ -513,6 +517,8 @@ export interface Track {
    * Höhe über der Ruhelage = floatWA·Hub(floatA) + floatWB·Hub(floatB); −1 = keiner.
    */
   pontoons: Pontoon[];
+  /** Pendelt eine der Hängebrücken auch seitlich (Pontoon.sway)? */
+  swaying: boolean;
   floatA: Int16Array;
   floatB: Int16Array;
   floatWA: Float32Array;
@@ -1170,6 +1176,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     sizers: [],
     branchOnly: new Int8Array(def.branches?.length ?? 0),
     pontoons: [],
+    swaying: false,
     floatA: new Int16Array(total).fill(-1),
     floatB: new Int16Array(total).fill(-1),
     floatWA: new Float32Array(total),
@@ -1263,16 +1270,28 @@ export function buildTrack(def: TrackDef, index = 0): Track {
       const last = segAt(p, po.to);
       const count = Math.max(1, last - first + 1);
       const id = track.pontoons.length;
-      track.pontoons.push({ first, count, amp: po.amp ?? 0.7, period: Math.round((po.period ?? 3.4) * 60), phase: Math.round((po.phase ?? 0) * 60) });
+      const period = Math.round((po.period ?? 3.4) * 60);
+      const arch = po.arch === true;
+      track.pontoons.push({
+        first,
+        count,
+        amp: po.amp ?? 0.7,
+        period,
+        phase: Math.round((po.phase ?? 0) * 60),
+        arch,
+        sway: po.sway ?? 0,
+        swayPeriod: po.swayPeriod !== undefined ? Math.round(po.swayPeriod * 60) : 2 * period,
+      });
       // Gewicht je Abschnitt: 1 auf dem Ponton, über den Übergang (halb auf ihm, halb davor) auf 0 fallend.
       // Liegt der nächste Ponton direkt dahinter, ergänzen sich beide Gewichte im Übergang zu 1.
-      const half = Math.max(1, Math.round(PONTOON_LINK / 2 / step));
+      // Hängebrücke: fest an beiden Enden, dazwischen wie eine Saite (sin(π·u)) – ohne Übergang davor und dahinter.
+      const half = arch ? 0 : Math.max(1, Math.round(PONTOON_LINK / 2 / step));
       let seg = first;
       for (let k = 0; k < half; k++) seg = prev[seg];
       for (let k = -half; k < count + half; k++, seg = next[seg]) {
         // Abstand der Abschnittsmitte zum nächsten Ende des Pontons, nach außen negativ
         const inside = Math.min(k + 0.5, count - k - 0.5);
-        const w = Math.max(0, Math.min(1, inside / (2 * half) + 0.5));
+        const w = arch ? Math.sin((Math.PI * (k + 0.5)) / count) : Math.max(0, Math.min(1, inside / (2 * half) + 0.5));
         if (w <= 0) continue;
         edge[seg] |= EDGE_FLOAT;
         if (track.floatA[seg] < 0) {
@@ -1513,6 +1532,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     }
   }
   if (def.metro) buildMetro(track, def.metro);
+  track.swaying = track.pontoons.some((p) => p.sway !== 0);
   return track;
 }
 
@@ -1937,6 +1957,27 @@ export function heaveAt(t: Track, seg: number, along: number, time: number): num
   return h + (nodeHeave(t, j, time) - h) * f;
 }
 
+/** Seitliches Pendeln einer Hängebrücke an einem Abschnitt (Mitte) zur Rennzeit time. */
+function nodeShift(t: Track, seg: number, time: number): number {
+  const a = t.floatA[seg];
+  if (a < 0) return 0;
+  const b = t.floatB[seg];
+  return t.floatWA[seg] * pontoonShift(t.pontoons[a], time) + (b < 0 ? 0 : t.floatWB[seg] * pontoonShift(t.pontoons[b], time));
+}
+
+/**
+ * Hängebrücke: so weit ist die Fahrbahn an dieser Stelle zur Rennzeit time seitlich ausgeschwungen (Meter, nach rechts
+ * positiv) – samt Geländer. Außerhalb 0. Zwischen zwei Abschnitten wird wie bei der Höhe gemittelt.
+ */
+export function swayAt(t: Track, seg: number, along: number, time: number): number {
+  if (!t.swaying || t.pontoons.length === 0) return 0;
+  const j = along >= 0 ? t.next[seg] : t.prev[seg];
+  if (t.floatA[seg] < 0 && t.floatA[j] < 0) return 0;
+  const f = Math.min(1, Math.abs(along) / t.step);
+  const h = nodeShift(t, seg, time);
+  return h + (nodeShift(t, j, time) - h) * f;
+}
+
 /** Fehlt an dieser Stelle zur Rennzeit time die Fahrbahn (Bruchstelle)? */
 export function holeAt(t: Track, seg: number, lat: number, time: number): boolean {
   if ((t.edge[seg] & EDGE_BROKEN) === 0) return false;
@@ -2100,6 +2141,8 @@ export function raftLane(t: Track, seg: number, along: number, lat: number, time
 
 /** Höhe des Bodens zur Rennzeit time: wie groundAt, auf Pontons samt Seegang – und ohne das, was weggebrochen ist. */
 export function groundNow(t: Track, seg: number, along: number, lat: number, time: number): number {
+  // (Auf einer pendelnden Hängebrücke zählt die Lage gegenüber der Brücke.)
+  if (t.swaying && t.floatA[seg] >= 0 && t.pontoons.length > 0) lat -= swayAt(t, seg, along, time);
   const g = groundAt(t, seg, along, lat);
   if (g === NO_GROUND) return g;
   if (t.holes.length > 0 && holeAt(t, seg, lat, time)) return NO_GROUND;
