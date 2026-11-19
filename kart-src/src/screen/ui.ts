@@ -105,6 +105,10 @@ export interface RaceHudModel {
   fps: number | null;
   /** 0..1: wie dicht der Rauch vor der Kamera ist. */
   smoke: number;
+  /** Kleber: so viele Sekunden klebt noch Kleber auf dem Bildschirm (0 = keiner). */
+  glue: number;
+  /** Kleber: zählt die Treffer – ein neuer Treffer bringt neue Kleckse. */
+  glueHits: number;
 }
 
 export interface SettingsModel {
@@ -126,6 +130,111 @@ export interface ResultRow {
   timeSec: number;
   /** Im Turnier: Sterne für dieses Rennen (fehlt, solange die Wertung noch nicht da ist). */
   gain?: number;
+}
+
+/** Kleber auf dem Bildschirm: Farben (Grundton mit Schatten, Rahmweiß obenauf, Glanz) und Tusche. */
+const GLUE_BASE = '#f5dd99';
+const GLUE_FILL = '#fff2c6';
+const GLUE_GLINT = '#fffdf5';
+const GLUE_INK = '#16131c';
+
+/** Geschlossener, weicher Pfad durch Punkte (Catmull-Rom als kubische Bézierkurven). */
+function smoothPath(pts: [number, number][]): string {
+  const n = pts.length;
+  const f = (v: number): string => v.toFixed(1);
+  let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n];
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % n];
+    const p3 = pts[(i + 2) % n];
+    d += `C${f(p1[0] + (p2[0] - p0[0]) / 6)} ${f(p1[1] + (p2[1] - p0[1]) / 6)} ${f(p2[0] - (p3[0] - p1[0]) / 6)} ${f(p2[1] - (p3[1] - p1[1]) / 6)} ${f(p2[0])} ${f(p2[1])}`;
+  }
+  return d + 'Z';
+}
+
+/**
+ * Kleckse für einen Treffer (SVG, 1600 × 1000, füllt den Bildschirm): sieben bis acht Batzen rund um die Mitte – zusammen etwa
+ * 40 % der Fläche, die Mitte bleibt größtenteils frei –, jeder mit Spritzern, Laufnasen, Glanz und Tuscherand.
+ */
+function glueSvg(seed: number): string {
+  let r = (seed * 7919 + 13) % 2147483647 || 1;
+  const rnd = (): number => {
+    r = (r * 16807) % 2147483647;
+    return r / 2147483647;
+  };
+  const count = 7 + Math.floor(rnd() * 2);
+  const ink: string[] = [];
+  const fill: string[] = [];
+  const shine: string[] = [];
+  const drips: string[] = [];
+  const dripsLit: string[] = [];
+  const turn = rnd() * Math.PI * 2;
+  for (let i = 0; i < count; i++) {
+    // Ringsum verteilt; ein Batzen ragt näher an die Mitte heran.
+    const a = turn + (i / count) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
+    const near = i === 0;
+    const dist = near ? 230 + rnd() * 50 : 350 + rnd() * 190;
+    const cx = 800 + Math.cos(a) * dist * 1.35;
+    const cy = 500 + Math.sin(a) * dist * 0.85;
+    const R = near ? 95 + rnd() * 25 : 122 + rnd() * 78;
+    const pts: [number, number][] = [];
+    const N = 20;
+    const p1 = rnd() * 6;
+    const p2 = rnd() * 6;
+    for (let k = 0; k < N; k++) {
+      const t = (k / N) * Math.PI * 2;
+      const rr = R * (1 + 0.14 * Math.sin(3 * t + p1) + 0.09 * Math.sin(5 * t + p2) + 0.05 * Math.sin(8 * t + p1 + p2));
+      pts.push([cx + Math.cos(t) * rr, cy + Math.sin(t) * rr * 0.9]);
+    }
+    const blob = smoothPath(pts);
+    const delay = (i * 0.035).toFixed(3);
+    ink.push(`<path d="${blob}"/>`);
+    fill.push(`<path d="${blob}"/>`);
+    // Spritzer rundherum
+    for (let k = 0; k < 3; k++) {
+      const t = rnd() * Math.PI * 2;
+      const d = R * (1.15 + rnd() * 0.35);
+      const s = R * (0.07 + rnd() * 0.09);
+      const c = `<circle cx="${(cx + Math.cos(t) * d).toFixed(1)}" cy="${(cy + Math.sin(t) * d).toFixed(1)}" r="${s.toFixed(1)}"/>`;
+      ink.push(c);
+      fill.push(c);
+    }
+    // Laufnasen: vom unteren Rand nach unten, sie wachsen langsam (CSS)
+    const nd = 1 + Math.floor(rnd() * 3);
+    for (let k = 0; k < nd; k++) {
+      const x = cx + (rnd() - 0.5) * R * 1.1;
+      const w = R * (0.13 + rnd() * 0.1);
+      const len = R * (0.6 + rnd() * 0.9);
+      const top = cy + R * 0.45;
+      const shape = `<rect x="${(x - w / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${len.toFixed(1)}" rx="${(w / 2).toFixed(1)}"/><circle cx="${x.toFixed(1)}" cy="${(top + len).toFixed(1)}" r="${(w * 0.72).toFixed(1)}"/>`;
+      // Heller Streifen auf der Laufnase und ein Licht im Tropfen
+      const lit = `<rect x="${(x - w * 0.32).toFixed(1)}" y="${top.toFixed(1)}" width="${(w * 0.3).toFixed(1)}" height="${(len * 0.9).toFixed(1)}" rx="${(w * 0.15).toFixed(1)}" fill="${GLUE_FILL}"/><circle cx="${(x - w * 0.22).toFixed(1)}" cy="${(top + len - w * 0.2).toFixed(1)}" r="${(w * 0.2).toFixed(1)}" fill="${GLUE_GLINT}"/>`;
+      const dur = (3.2 + rnd() * 1.2).toFixed(2);
+      drips.push(`<g class="gv-drip" style="animation-duration:${dur}s">${shape}</g>`);
+      dripsLit.push(`<g class="gv-drip" style="animation-duration:${dur}s">${shape}${lit}</g>`);
+    }
+    // Obenauf heller (derselbe Umriss, kleiner und nach oben links versetzt – unten rechts bleibt ein Schattenrand), dazu
+    // Glanzlichter: ein schräger Streifen und ein Punkt.
+    const gx = cx - R * 0.34;
+    const gy = cy - R * 0.4;
+    shine.push(
+      `<g class="gv-pop" style="animation-delay:${delay}s">` +
+        `<path d="${blob}" fill="${GLUE_FILL}" transform="translate(${(cx - R * 0.07).toFixed(1)} ${(cy - R * 0.1).toFixed(1)}) scale(0.83) translate(${(-cx).toFixed(1)} ${(-cy).toFixed(1)})"/>` +
+        `<ellipse cx="${gx.toFixed(1)}" cy="${gy.toFixed(1)}" rx="${(R * 0.26).toFixed(1)}" ry="${(R * 0.075).toFixed(1)}" fill="${GLUE_GLINT}" transform="rotate(-32 ${gx.toFixed(1)} ${gy.toFixed(1)})"/>` +
+        `<circle cx="${(cx - R * 0.02).toFixed(1)}" cy="${(cy - R * 0.55).toFixed(1)}" r="${(R * 0.05).toFixed(1)}" fill="${GLUE_GLINT}"/>` +
+        `<ellipse cx="${(cx + R * 0.3).toFixed(1)}" cy="${(cy + R * 0.18).toFixed(1)}" rx="${(R * 0.08).toFixed(1)}" ry="${(R * 0.04).toFixed(1)}" fill="${GLUE_GLINT}" opacity="0.8"/></g>`,
+    );
+  }
+  // Zuerst alles in Tusche mit dickem Rand, darüber die Füllung: so umläuft die Linie die Kleckse als Ganzes.
+  return (
+    `<svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">` +
+    `<g class="gv-slide">` +
+    `<g fill="${GLUE_INK}" stroke="${GLUE_INK}" stroke-width="16" stroke-linejoin="round">${drips.join('')}${ink.map((x) => `<g class="gv-pop">${x}</g>`).join('')}</g>` +
+    `<g fill="${GLUE_BASE}">${dripsLit.join('')}${fill.map((x) => `<g class="gv-pop">${x}</g>`).join('')}</g>` +
+    shine.join('') +
+    `</g></svg>`
+  );
 }
 
 /** Adresse des Vorschaubilds einer Strecke (liegt neben der Seite unter karten/). */
@@ -651,6 +760,7 @@ export class ScreenUi {
         this.hudCache.smoke = '0';
         $('smoke-veil').style.opacity = '0';
       }
+      this.renderGlue(0, 0);
       for (const [key, id] of [
         ['banner', 'race-banner'],
         ['flag', 'finish-flag'],
@@ -709,6 +819,7 @@ export class ScreenUi {
       this.hudCache.smoke = smoke;
       $('smoke-veil').style.opacity = smoke;
     }
+    this.renderGlue(m.glue, m.glueHits);
 
     const state = m.rolling ? 'rolling' : m.item === ITEM_NONE ? 'none' : `item${m.item}`;
     if (this.hudCache.item !== state) {
@@ -728,6 +839,34 @@ export class ScreenUi {
       this.hudCache.flag = text;
       flag.textContent = text;
       flag.hidden = !text;
+    }
+  }
+
+  /**
+   * Kleber auf dem Bildschirm: Bei jedem Treffer landen neue Kleckse (Lage aus der Trefferzahl – kein Zufall pro Bild), sie
+   * ploppen auf, ihre Laufnasen tropfen langsam nach unten, in der letzten Sekunde verblassen sie.
+   */
+  private renderGlue(left: number, hits: number): void {
+    const veil = $('glue-veil');
+    const on = left > 0.02;
+    if (!on) {
+      if (!veil.hidden) {
+        veil.hidden = true;
+        veil.replaceChildren();
+        this.hudCache.glueHits = '';
+      }
+      return;
+    }
+    const key = String(hits);
+    if (this.hudCache.glueHits !== key || veil.hidden) {
+      this.hudCache.glueHits = key;
+      veil.innerHTML = glueSvg(hits);
+      veil.hidden = false;
+    }
+    const op = Math.min(1, left / 0.9).toFixed(2);
+    if (this.hudCache.glueOp !== op) {
+      this.hudCache.glueOp = op;
+      veil.style.opacity = op;
     }
   }
 

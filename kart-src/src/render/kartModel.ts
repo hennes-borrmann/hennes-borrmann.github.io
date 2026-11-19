@@ -9,7 +9,9 @@
 // solange sichtbar – je einer für die Flammen sowie zwei für die Effekte
 // (Schutzring, Blitze, Qualm samt Kontur). Macht 3 Aufrufe im Normalfall,
 // höchstens 6. Items kommen nur bei Bedarf dazu: der Gegenstand in der Hand
-// (2 Aufrufe samt Kontur) und im Drachenzug Drache (2) und Leine (1).
+// (2 Aufrufe samt Kontur), im Drachenzug Drache (2) und Leine (1), als
+// Roboter, mit ausgeklappter Klebepistole oder mit Kleber im Gesicht ein
+// eigenes Netz am selben Skelett (2 samt Kontur).
 //
 // Die Kontur ist eine umgestülpte Hülle (siehe toon.ts). Ihr Netz enthält nur
 // die Teile, die eine Linie bekommen sollen; die Dicke steckt je Ecke in der
@@ -65,6 +67,17 @@ export interface KartPose {
   gold?: boolean;
   /** Get Gold läuft gleich ab: die Goldfarbe blinkt. */
   goldBlink?: boolean;
+  /**
+   * Roboter: Sekunden seit dem Auslösen (0 = Kart) – verwandeln (bis 0,5), rennen, Satz (ab 0,9), im Sprung zurück.
+   * Wird es 0, solange noch etwas ausgeklappt ist (Treffer, frühe Landung), klappt alles zügig ein.
+   */
+  robot?: number;
+  /** Kleber: Sekunden seit dem Auslösen der Klebepistole (0 = eingeklappt). */
+  glueGun?: number;
+  /** Kleber: worauf die Pistole zielt – Punkt im Raum von root (null = einfach nach hinten auf die Fahrbahn). */
+  glueAim?: THREE.Vector3 | null;
+  /** Kleber: so viele Sekunden klebt dem Fahrer noch Kleber auf Gesicht und Haube (0 = keiner). */
+  glue?: number;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -152,8 +165,17 @@ const B = {
   sJet1: 51,
   sJet2: 52,
   sJet3: 53,
+  rThighL: 54, // Roboter: Oberschenkel (Gelenk an der Karosserie) …
+  rThighR: 55,
+  rShinL: 56, // … Unterschenkel (Knie) …
+  rShinR: 57,
+  rArmL: 58, // … und Arme (Schulter)
+  rArmR: 59,
+  gun: 60, // Kleber: Klebepistole am Heck (Scharnier)
+  glueHead: 61, // Kleberklecks auf dem Gesicht …
+  glueBody: 62, // … und auf der Haube vor dem Lenkrad
 } as const;
-const BONE_COUNT = 54;
+const BONE_COUNT = 63;
 
 // Farben, die alle Karts teilen.
 const DARK = 0x2d2a36; // Gummi, Rahmen
@@ -2478,6 +2500,189 @@ function buildZoe(c: Ctx): void {
 
 const BUILDERS = [buildKalle, buildVera, buildBert, buildZoe];
 
+// ───────────────────────────── Roboter ─────────────────────────────
+//
+// Das Item „Roboter“: Das Kart richtet sich auf, die Hinterräder klappen waagerecht und werden zu Füßen, die Vorderräder
+// wandern an die Schultern; dazwischen fahren Beine und Arme aus. Sie stecken im selben Netz wie das Kart (kein
+// zusätzlicher Zeichenaufruf) und hängen an eigenen Knochen: Oberschenkel (Hüfte an der Karosserie), Unterschenkel (Knie),
+// Arm (Schulter). Eingeklappt sind sie auf null geschrumpft. Der Fahrer bleibt aufrecht im Sitz – er ist der Kopf.
+//
+// Knochen-Koordinaten: Bein und Arm hängen in Ruhe senkrecht nach unten (−y), +z nach vorn; links bei +x, rechts gespiegelt.
+
+/** Längen: Oberschenkel, Unterschenkel, Arm (Schulter bis Faustmitte). */
+const ROBOT_THIGH = 0.52;
+const ROBOT_SHIN = 0.55;
+const ROBOT_ARM = 0.68;
+/** Ganz verwandelt: so weit hebt sich die Karosserie, so weit richtet sie sich auf (rad, Nase hoch), so weit rückt sie vor. */
+const ROBOT_LIFT = 1.12;
+const ROBOT_PITCH = 0.5;
+const ROBOT_SHIFT = 0.42;
+/** Lauf: halbe Schrittweite und Fußhub (m), Takt (Doppelschritte je Sekunde bei Höchsttempo), Armschwung (rad). */
+const ROBOT_STRIDE = 0.42;
+const ROBOT_STEP_UP = 0.3;
+const ROBOT_CADENCE = 4.4;
+const ROBOT_SWING = 0.7;
+/** Zeitplan (Sekunden seit dem Auslösen, wie im Spiel: ROBOT_LEAP_AT / 60 = 0,9). */
+const ROBOT_T_LEAP = 0.9;
+
+/** Hüftgelenk (links) im Raum der Karosserie. */
+function robotHip(sp: Spec): V3 {
+  return [0.47, 0.3, sp.wr.z + 0.12];
+}
+
+/** Schultergelenk (links) im Raum der Karosserie. */
+function robotShoulder(sp: Spec): V3 {
+  return [sp.wf.x + 0.02, 0.48, sp.wf.z - 0.32];
+}
+
+/** Beine und Arme des Roboters: Lack für die Panzerung, Stahl und Chrom für Gelenke und Kolben. */
+function buildRobot(c: Ctx): void {
+  const b = c.b;
+  const P = c.p;
+  const fine = b.fine;
+  const n = b.s(10, 6);
+  const TH = B.rThighL;
+  const SH = B.rShinL;
+  const AR = B.rArmL;
+  const RT = B.rThighR;
+  const RS = B.rShinR;
+  const RA = B.rArmR;
+  // Oberschenkel: Hüftkugel, kräftige Panzerplatte im Lack mit heller Fase vorn, hinten ein Hydraulikkolben
+  b.put(sphere(0.12, 0.12, 0.12, n, n >> 1), { bone: TH, color: STEEL, mirror: RT, outline: 0.7 });
+  b.put(b.soft(0.3, 0.42, 0.3, 0.08, 4), { bone: TH, color: P.base, pos: [0, -0.25, 0.01], mirror: RT });
+  b.put(box(0.18, 0.26, 0.035), { bone: TH, color: P.light, pos: [0, -0.24, 0.165], mirror: RT, outline: 0.5 });
+  b.put(box(0.035, 0.3, 0.2), { bone: TH, color: P.dark, pos: [0.155, -0.25, 0.01], mirror: RT, outline: 0.5 });
+  if (fine) b.put(cyl(0.03, 0.03, 0.38, 6), { bone: TH, color: CHROME, pos: [0, -0.27, -0.16], mirror: RT, outline: 0.5 });
+  // Unterschenkel: Kniekugel mit Kappe, Schienbein in Dunkellack mit Rillen, Knöchel als Achse zum Fuß (dem Hinterrad)
+  b.put(sphere(0.11, 0.11, 0.11, n, n >> 1), { bone: SH, color: DARK, mirror: RS, outline: 0.7 });
+  b.put(b.soft(0.19, 0.16, 0.09, 0.035, 3), { bone: SH, color: P.accent, pos: [0, 0.01, 0.12], rot: [-0.3, 0, 0], mirror: RS, outline: 0.6 });
+  b.put(b.soft(0.27, 0.44, 0.28, 0.08, 4), { bone: SH, color: P.dark, pos: [0, -0.28, 0.01], mirror: RS });
+  b.put(cyl(0.085, 0.085, 0.1, n), { bone: SH, color: STEEL, pos: [0, -ROBOT_SHIN + 0.035, 0], mirror: RS, outline: 0.6 });
+  if (fine) {
+    // Schienbeinplatte vorn mit zwei Nieten
+    b.put(box(0.17, 0.28, 0.03), { bone: SH, color: P.base, pos: [0, -0.27, 0.15], mirror: RS, outline: 0.5 });
+    for (const y of [-0.17, -0.37]) b.put(sphere(0.022, 0.022, 0.012, 6, 4), { bone: SH, color: CHROME, pos: [0, y, 0.168], mirror: RS, outline: 0 });
+  }
+  // Arm: Schulterkugel (das Vorderrad sitzt außen davor), Oberarm im Lack, Ellbogen, Unterarm in Stahl, große Faust
+  b.put(sphere(0.1, 0.1, 0.1, n, n >> 1), { bone: AR, color: STEEL, mirror: RA, outline: 0.7 });
+  b.put(b.soft(0.17, 0.32, 0.18, 0.05, 3), { bone: AR, color: P.base, pos: [0, -0.19, 0], mirror: RA });
+  b.put(sphere(0.085, 0.085, 0.085, n, n >> 1), { bone: AR, color: DARK, pos: [0, -0.37, 0.01], mirror: RA, outline: 0.6 });
+  b.put(b.soft(0.19, 0.26, 0.2, 0.05, 3), { bone: AR, color: STEEL, pos: [0, -0.51, 0.04], rot: [-0.2, 0, 0], mirror: RA });
+  b.put(b.soft(0.25, 0.22, 0.24, 0.08, 4), { bone: AR, color: P.dark, pos: [0, -ROBOT_ARM, 0.07], mirror: RA });
+  if (fine) {
+    // Fingerknöchel vorn an der Faust, Daumen innen
+    for (const x of [-0.07, 0, 0.07]) b.put(box(0.05, 0.065, 0.04), { bone: AR, color: P.deep, pos: [x, -ROBOT_ARM - 0.025, 0.2], mirror: RA, outline: 0 });
+    b.put(b.soft(0.06, 0.1, 0.07, 0.025, 3), { bone: AR, color: P.dark, pos: [-0.13, -ROBOT_ARM + 0.02, 0.1], mirror: RA, outline: 0.6 });
+  }
+}
+
+// ───────────────────────────── Kleber ─────────────────────────────
+//
+// Die Klebepistole steckt hinten im Kart (eigener Knochen, eingeklappt auf null geschrumpft): Sie klappt am Scharnier hoch,
+// schwenkt aufs Ziel, zieht zusammen, schießt und klappt wieder ein. Der Kleber, der einen trifft, klebt als Klecks auf
+// Gesicht und Haube (zwei Knochen), mit Laufnasen.
+//
+// Pistole: Scharnier im Ursprung, der Lauf zeigt nach −z (nach hinten), Griff unten.
+
+/** Scharnier der Klebepistole im Raum der Karosserie, je Figur (hinten rechts über dem Heck – neben dem Fahrer zu sehen). */
+const GUN_AT: readonly V3[] = [
+  [-0.3, 0.56, -0.9],
+  [-0.3, 0.54, -0.86],
+  [-0.32, 0.56, -0.95],
+  [-0.3, 0.5, -0.8],
+];
+/** Größe der Pistole und Mündung der Düse im Raum der Pistole. */
+const GUN_K = 1.45;
+const GUN_MUZZLE: V3 = [0, 0.4 * GUN_K, -0.56 * GUN_K];
+/** Zeitplan der Pistole (Sekunden seit dem Auslösen, wie im Spiel: GLUE_FIRE / 60): Schuss, Beginn des Einklappens. */
+const GUN_FIRE_AT = 0.45;
+const GUN_BACK_AT = 0.95;
+/** Kleber: Rahmweiß, mit hellen Glanzpunkten. */
+const GLUE = 0xfff1c2;
+const GLUE_SHINE = 0xfffdf4;
+
+function buildGlueGun(c: Ctx): void {
+  const b = c.b;
+  const G = B.gun;
+  const n = b.s(12, 8);
+  const k = GUN_K;
+  const BODY = c.p.accent;
+  const Y = 0.13 * k;
+  const at = (x: number, y: number, z: number): V3 => [x * k, Y + y * k, z * k];
+  // Scharnier und Stiel
+  b.put(box(0.16 * k, 0.07 * k, 0.16 * k), { bone: G, color: DARK, pos: [0, 0.035 * k, 0], outline: 0.6 });
+  b.put(cyl(0.035 * k, 0.035 * k, Y + 0.16 * k, 8), { bone: G, color: STEEL, pos: [0, (Y + 0.16 * k) / 2, 0], outline: 0.5 });
+  // Gehäuse mit Griff und Abzug
+  b.put(b.soft(0.2 * k, 0.19 * k, 0.36 * k, 0.06 * k, 5), { bone: G, color: BODY, pos: at(0, 0.27, -0.02) });
+  b.put(box(0.08 * k, 0.17 * k, 0.09 * k), { bone: G, color: DARK, pos: at(0, 0.16, 0.08), rot: [0.35, 0, 0], outline: 0.6 });
+  b.put(box(0.03 * k, 0.07 * k, 0.03 * k), { bone: G, color: CHROME, pos: at(0, 0.16, -0.01), rot: [0.5, 0, 0], outline: 0.4 });
+  // Lauf und Düse (Messing), vorn hängt ein Rest Kleber
+  b.put(cyl(0.046 * k, 0.05 * k, 0.2 * k, n), { bone: G, color: STEEL, pos: at(0, 0.27, -0.3), rot: [HALF_PI, 0, 0], outline: 0.6 });
+  b.put(cone(0.06 * k, 0.12 * k, n), { bone: G, color: 0xffc23a, pos: at(0, 0.27, -0.42), rot: [-HALF_PI, 0, 0], outline: 0.6 });
+  b.put(sphere(0.045 * k, 0.06 * k, 0.045 * k, 8, 6), { bone: G, color: GLUE, pos: at(0, 0.235, -0.53), outline: 0.5 });
+  // Kleberstange steckt hinten heraus, dazu ein Farbring
+  b.put(cyl(0.052 * k, 0.052 * k, 0.2 * k, n), { bone: G, color: GLUE, pos: at(0, 0.29, 0.22), rot: [HALF_PI, 0, 0], outline: 0.6 });
+  b.put(cyl(0.062 * k, 0.062 * k, 0.035 * k, n), { bone: G, color: c.p.dark, pos: at(0, 0.29, 0.15), rot: [HALF_PI, 0, 0], outline: 0.5 });
+  if (b.fine) {
+    // Glanzstreifen auf dem Gehäuse
+    b.put(box(0.022 * k, 0.03 * k, 0.26 * k), { bone: G, color: WHITE, pos: at(0.075, 0.33, -0.03), outline: 0 });
+  }
+}
+
+/** Ein Klecks Kleber: flacher Batzen aus Beulen, darunter Laufnasen mit dicken Tropfen. size = Durchmesser des Batzens. */
+function glueSplat(b: Builder, bone: number, size: number, front: V3, drips: readonly number[]): void {
+  const r = size / 2;
+  const n = b.s(10, 6);
+  b.put(sphere(r, r * 0.85, r * 0.42, n, n >> 1), { bone, color: GLUE, outline: 0.75 });
+  const lumps: readonly V3[] = [
+    [0.62, 0.32, 0.46],
+    [-0.58, 0.18, 0.5],
+    [0.18, -0.55, 0.42],
+    [-0.3, 0.6, 0.4],
+  ];
+  for (const [x, y, k] of lumps) b.put(sphere(r * k, r * k, r * k * 0.7, n, n >> 1), { bone, color: GLUE, pos: [x * r, y * r, 0], outline: 0.75 });
+  for (let i = 0; i < drips.length; i++) {
+    const x = drips[i] * r;
+    const len = r * (0.55 + 0.35 * ((i * 7) % 3));
+    b.put(cyl(r * 0.13, r * 0.16, len, 6), { bone, color: GLUE, pos: [x, -r * 0.55 - len / 2, r * 0.05], outline: 0.6 });
+    b.put(sphere(r * 0.2, r * 0.24, r * 0.2, 7, 5), { bone, color: GLUE, pos: [x, -r * 0.55 - len, r * 0.05], outline: 0.6 });
+  }
+  if (b.fine) {
+    b.put(sphere(r * 0.2, r * 0.13, r * 0.05, 6, 4), { bone, color: GLUE_SHINE, pos: [front[0] - r * 0.3, front[1] + r * 0.35, front[2] + r * 0.38], outline: 0 });
+    b.put(sphere(r * 0.08, r * 0.08, r * 0.04, 5, 3), { bone, color: GLUE_SHINE, pos: [front[0] + r * 0.1, front[1] + r * 0.5, front[2] + r * 0.36], outline: 0 });
+  }
+}
+
+/** Höhe der Kleberkappe über dem Klecks im Gesicht und wie weit sie nach hinten reicht, je Figur (Kopfgröße, Helm, Ohren). */
+const GLUE_CAP: readonly V3[] = [
+  [0, 0.26, -0.33],
+  [0, 0.21, -0.38],
+  [0, 0.27, -0.32],
+  [0, 0.25, -0.26],
+];
+
+/** Kleber auf Gesicht (über den Augen) samt Kappe über den Kopf (von hinten zu sehen) und auf der Haube. */
+function buildGlueSplats(c: Ctx): void {
+  const b = c.b;
+  glueSplat(b, B.glueHead, 0.36, [0, 0, 0], [-0.55, 0.7]);
+  // Über den Kopf geschwappt: eine flache Kappe, an der es hinten und seitlich herunterläuft.
+  const cap = GLUE_CAP[c.sp === SPECS[0] ? 0 : c.sp === SPECS[1] ? 1 : c.sp === SPECS[2] ? 2 : 3];
+  const n = b.s(10, 6);
+  b.put(sphere(0.25, 0.085, 0.26, n, n >> 1), { bone: B.glueHead, color: GLUE, pos: cap, outline: 0.75 });
+  b.put(sphere(0.12, 0.07, 0.12, n, n >> 1), { bone: B.glueHead, color: GLUE, pos: [cap[0] + 0.1, cap[1] + 0.04, cap[2] - 0.05], outline: 0.75 });
+  if (b.fine) b.put(sphere(0.06, 0.02, 0.04, 6, 4), { bone: B.glueHead, color: GLUE_SHINE, pos: [cap[0] - 0.08, cap[1] + 0.075, cap[2] + 0.02], outline: 0 });
+  for (const [x, len] of [
+    [0.17, 0.16],
+    [-0.06, 0.24],
+    [-0.2, 0.11],
+  ] as const) {
+    const z = cap[2] - 0.2;
+    b.put(cyl(0.025, 0.03, len, 6), { bone: B.glueHead, color: GLUE, pos: [x, cap[1] - len / 2, z], outline: 0.6 });
+    b.put(sphere(0.038, 0.045, 0.038, 7, 5), { bone: B.glueHead, color: GLUE, pos: [x, cap[1] - len, z], outline: 0.6 });
+  }
+  glueSplat(b, B.glueBody, 0.4, [0, 0, 0], [-0.7, 0.1, 0.8]);
+}
+
 // ───────────────────────────── Gleitflügel ─────────────────────────────
 //
 // Über Flugstrecken klappt jedes Kart Flügel aus. Sie stecken im selben Netz
@@ -3029,11 +3234,12 @@ const I_TIRE = 2;
 const I_TOP = 4;
 const I_GUARD = 5;
 const I_EMP = 6;
-const I_SPRING = 8;
+const I_ROBOT = 8;
 const I_KITE = 9;
 const I_ROCKET = 10;
 const I_GOLD = 12;
-const I_COUNT = 13;
+// (13 ist vergeben, 14 ist der Kleber.)
+const I_COUNT = 15;
 
 // Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
 const I_RED = 0xff5a4e;
@@ -3293,17 +3499,34 @@ function buildSmokeCan(b: Builder): void {
   b.put(sphere(0.026, 0.026, 0.026, 6, 4), { bone: 0, color: 0xff8a1c, pos: [-0.006, 0.405, 0], outline: 0 });
 }
 
-/** Sprungfeder: gelbe Spirale zwischen zwei roten Tellern. */
-function buildSpring(b: Builder): void {
-  const path: V3[] = [];
-  const N = 64;
-  for (let i = 0; i <= N; i++) {
-    const a = (i / N) * 4.5 * TAU;
-    path.push([Math.cos(a) * 0.1, 0.03 + (i / N) * 0.31, Math.sin(a) * 0.1]);
-  }
-  b.put(sweep(path, 0.022, 6), { bone: 0, color: I_YEL, outline: 0.7 });
-  b.put(cyl(0.135, 0.135, 0.04, 14), { bone: 0, color: I_RED, pos: [0, 0.01, 0] });
-  b.put(cyl(0.135, 0.135, 0.04, 14), { bone: 0, color: I_RED, pos: [0, 0.36, 0] });
+/** Roboter: kleiner Blechroboter – Kopf mit Antenne und Augen, Kasten mit rotem Knopf, Ärmchen, Räder als Füße. */
+function buildToyRobot(b: Builder): void {
+  const TIN = 0xd9e2ee;
+  b.put(b.soft(0.21, 0.17, 0.15, 0.035, 6), { bone: 0, color: I_TURQ, pos: [0, 0.16, 0] });
+  b.put(b.soft(0.17, 0.13, 0.14, 0.04, 6), { bone: 0, color: TIN, pos: [0, 0.31, 0] });
+  for (const x of [-0.042, 0.042]) b.put(sphere(0.024, 0.024, 0.012, 8, 6), { bone: 0, color: I_YEL, pos: [x, 0.32, 0.07], outline: 0.45 });
+  b.put(box(0.07, 0.014, 0.01), { bone: 0, color: I_INK, pos: [0, 0.278, 0.071], outline: 0 });
+  b.put(cyl(0.009, 0.009, 0.07, 5), { bone: 0, color: STEEL, pos: [0, 0.41, 0], outline: 0.4 });
+  b.put(sphere(0.024, 0.024, 0.024, 8, 6), { bone: 0, color: I_RED, pos: [0, 0.45, 0], outline: 0.5 });
+  b.put(cyl(0.03, 0.03, 0.03, 10), { bone: 0, color: I_RED, pos: [0, 0.17, 0.078], rot: [HALF_PI, 0, 0], outline: 0.5 });
+  b.put(box(0.045, 0.13, 0.055), { bone: 0, color: TIN, pos: [0.13, 0.15, 0], rot: [0, 0, 0.2], mirror: 0, outline: 0.6 });
+  b.put(cyl(0.05, 0.05, 0.04, 10), { bone: 0, color: I_INK, pos: [0.06, 0.05, 0], rot: [0, 0, HALF_PI], mirror: 0, outline: 0.6 });
+  // Aufziehschlüssel im Rücken
+  b.put(cyl(0.008, 0.008, 0.05, 5), { bone: 0, color: CHROME, pos: [0, 0.17, -0.1], rot: [HALF_PI, 0, 0], outline: 0.3 });
+  b.put(box(0.09, 0.035, 0.012), { bone: 0, color: I_YEL, pos: [0, 0.17, -0.13], outline: 0.4 });
+}
+
+/** Kleber: weiße Tube mit gelbem Etikett, die rote Tülle offen – vorn quillt schon Kleber heraus. */
+function buildGlueTube(b: Builder): void {
+  const TUBE = 0xf3f1fb;
+  b.put(cyl(0.072, 0.07, 0.24, 14), { bone: 0, color: TUBE, pos: [0, 0.17, 0] });
+  b.put(box(0.16, 0.035, 0.03), { bone: 0, color: TUBE, pos: [0, 0.04, 0], outline: 0.6 });
+  b.put(cyl(0.074, 0.074, 0.1, 14), { bone: 0, color: I_YEL, pos: [0, 0.18, 0], outline: 0 });
+  b.put(sphere(0.026, 0.034, 0.012, 8, 6), { bone: 0, color: I_RED, pos: [0, 0.18, 0.074], outline: 0.35 });
+  b.put(cone(0.072, 0.045, 14), { bone: 0, color: TUBE, pos: [0, 0.29, 0], outline: 0.6 });
+  b.put(cone(0.03, 0.07, 10), { bone: 0, color: I_RED, pos: [0, 0.32, 0], outline: 0.5 });
+  b.put(sphere(0.035, 0.04, 0.035, 8, 6), { bone: 0, color: GLUE, pos: [0.012, 0.395, 0.006], outline: 0.5 });
+  b.put(sphere(0.016, 0.03, 0.016, 6, 5), { bone: 0, color: GLUE, pos: [0.03, 0.36, 0.02], outline: 0.4 });
 }
 
 /** Abschleppdrache, zusammengefaltet: schmale Raute mit Augen, Schwanz aufgerollt. */
@@ -3642,11 +3865,27 @@ let itemGeos: ItemGeo[] | null = null;
 /** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
 function getItemGeos(): ItemGeo[] {
   if (itemGeos) return itemGeos;
-  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket, buildGlider, buildGoldBottle];
+  const fns: (((b: Builder) => void) | null)[] = [
+    buildBottle,
+    buildTire,
+    buildOilCan,
+    buildTop,
+    buildShield,
+    buildPlug,
+    buildSmokeCan,
+    buildToyRobot,
+    buildKiteFolded,
+    buildRocket,
+    buildGlider,
+    buildGoldBottle,
+    null,
+    buildGlueTube,
+  ];
   const out: ItemGeo[] = [];
   for (let i = 0; i < I_COUNT; i++) {
     const b = new Builder(ONE_BONE, 2, true);
-    if (i > 0) fns[i - 1](b);
+    const fn = i > 0 ? fns[i - 1] : null;
+    if (fn) fn(b);
     else b.put(box(0.001, 0.001, 0.001), { bone: 0, outline: 0 });
     const g = finishItem(b);
     // Die Rakete ist schlank – etwas größer, damit man sie in der Hand erkennt.
@@ -3858,7 +4097,7 @@ const GESTURES: (Gesture | null)[] = [
     vanish: [0.7, 0.86],
   },
   G_BACK, // Nebelkerze
-  // Sprungfeder: hoch und kräftig nach unten drücken
+  // Roboter: hochhalten und kräftig aufs Armaturenbrett drücken – das Blechspielzeug verpufft, das Kart verwandelt sich
   {
     dur: 0.5,
     // prettier-ignore
@@ -3915,6 +4154,10 @@ const GESTURES: (Gesture | null)[] = [
   },
   // Get Gold: keine Geste – das Austrinken folgt dem Spielstand (pose.drink, siehe planItem und drinkHands).
   null,
+  // (13 ist vergeben.)
+  null,
+  // Kleber: die Tube über die Schulter nach hinten werfen – hinten klappt die Klebepistole aus
+  G_BACK,
 ];
 
 // ───────────────────────────── Get Gold ─────────────────────────────
@@ -3992,6 +4235,7 @@ const _dv = new THREE.Vector3();
 const _dg = new THREE.Vector3();
 const _dc = new THREE.Vector3();
 const _dx = new THREE.Vector3();
+const _rv = new THREE.Vector3();
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -4005,7 +4249,13 @@ export class KartVisual {
     exhaustL: new THREE.Vector3(),
     exhaustR: new THREE.Vector3(),
     head: new THREE.Vector3(),
+    /** Kleber: Mündung der Klebepistole (nur gültig, solange sie ausgeklappt ist). */
+    gunMuzzle: new THREE.Vector3(),
   };
+  /** Roboter: zählt die Schritte (jeder aufgesetzte Fuß) – das Spiel lässt dort Staub aufwirbeln. */
+  robotSteps = 0;
+  /** Roboter: wo der letzte Fuß aufgesetzt hat (Raum von root). */
+  readonly robotFoot = new THREE.Vector3();
 
   /** Figur und Kartform (0..3, siehe DRIVER_NAMES). */
   readonly character: number;
@@ -4032,6 +4282,9 @@ export class KartVisual {
   private readonly decals: THREE.SkinnedMesh;
   private bodyOutline: THREE.SkinnedMesh | null = null;
   private fxOutline: THREE.SkinnedMesh | null = null;
+  /** Roboter-Beine und -Arme, Klebepistole, Kleckse: eigenes Netz am selben Skelett, nur sichtbar, solange etwas davon gebraucht wird. */
+  private readonly extra: THREE.SkinnedMesh;
+  private extraOutline: THREE.SkinnedMesh | null = null;
   private readonly geos: THREE.BufferGeometry[] = [];
   /** uv der Augen innerhalb ihrer Zelle (0..1) und ihre erste Ecke im Aufkleber-Netz. */
   private eyeUv = new Float32Array(0);
@@ -4192,6 +4445,32 @@ export class KartVisual {
   private fHover = 0;
   private rocketWas = false;
 
+  // Roboter: Sekunden seit dem Auslösen (laut Spiel), Anteile der Verwandlung (Heben, Beine, Arme, Räder flach), Laufen,
+  // Ducken, Absprung, Beinhaltung in der Luft; Ausblenden nach Abbruch; Schrittphase; Neigung, die der Fahrer ausgleicht.
+  private fRobot = 0;
+  private robWas = false;
+  private robFade = 0;
+  private robLift = 0;
+  private robLegs = 0;
+  private robArms = 0;
+  private robFlat = 0;
+  private robGait = 0;
+  private robCrouch = 0;
+  private robLeap = 0;
+  private robAir = 0;
+  private robPhase = 0;
+  private robLean = 0;
+
+  // Kleber: Pistole (Sekunden seit dem Auslösen, Ziel, wie weit ausgeklappt, Ausrichtung) und Kleckse (Restzeit, Aufploppen).
+  private fGun = 0;
+  private fGunAim: THREE.Vector3 | null = null;
+  private gunOut = 0;
+  private gunYaw = 0;
+  private gunPitch = 0.3;
+  private fGlue = 0;
+  private glueU = 0;
+  private glueLast = 0;
+
   // Abschleppdrache: eigenes Netz mit kleinem Skelett (Drache + Schwanz) und Leine
   private readonly kite: THREE.SkinnedMesh;
   private readonly kiteOutline: THREE.SkinnedMesh | null;
@@ -4250,6 +4529,8 @@ export class KartVisual {
     this.fx = mesh(this.toon, 'fx');
     this.flames = mesh(this.flameMat, 'flames');
     this.fx.visible = false;
+    this.extra = mesh(this.toon, 'extra');
+    this.extra.visible = false;
     this.flames.visible = false;
     this.flames.renderOrder = 2;
     empty.dispose();
@@ -4355,6 +4636,20 @@ export class KartVisual {
     return this.goldShown;
   }
 
+  /** Roboter: wie weit das Kart gerade verwandelt gezeigt wird (0 … 1, Beine) – für Tests. */
+  get robotLook(): number {
+    return this.robWas ? clamp(this.robLegs, 0, 1) : 0;
+  }
+
+  /** Kleber: wie weit die Pistole ausgeklappt ist (0 … 1) und wie groß die Kleckse gerade sind (0 … 1) – für Tests. */
+  get gunLook(): number {
+    return clamp(this.gunOut, 0, 1);
+  }
+
+  get glueLook(): number {
+    return clamp(this.bones[B.glueHead].scale.x, 0, 1);
+  }
+
   setDetail(detail: KartDetail): void {
     if (detail === this.detail) return;
     this.detail = detail;
@@ -4450,6 +4745,21 @@ export class KartVisual {
     set(B.sJet1, B.chassis, [-jf[0] - 0.01, jf[1], jf[2]]);
     set(B.sJet2, B.chassis, [jr[0] + 0.01, jr[1], jr[2]]);
     set(B.sJet3, B.chassis, [-jr[0] - 0.01, jr[1], jr[2]]);
+    // Roboter: Hüfte und Schulter an der Karosserie, Knie am Oberschenkel
+    const hp = robotHip(sp);
+    const sh = robotShoulder(sp);
+    set(B.rThighL, B.chassis, hp);
+    set(B.rThighR, B.chassis, [-hp[0], hp[1], hp[2]]);
+    set(B.rShinL, B.rThighL, [0, -ROBOT_THIGH, 0]);
+    set(B.rShinR, B.rThighR, [0, -ROBOT_THIGH, 0]);
+    set(B.rArmL, B.chassis, sh);
+    set(B.rArmR, B.chassis, [-sh[0], sh[1], sh[2]]);
+    // Kleber: Pistole am Heck; Kleckse vorn am Kopf (über den Augen) und auf der Haube vor dem Lenkrad (zur Fahrt hin gekippt)
+    set(B.gun, B.chassis, GUN_AT[this.character]);
+    const mo = MOUTH[this.character];
+    set(B.glueHead, B.head, [0.03, mo[1] + 0.16, mo[2] - 0.06]);
+    set(B.glueBody, B.chassis, [0.06, sp.steer[1] - 0.04, sp.steer[2] + 0.3], [-0.95, 0, 0]);
+    this.bones[B.gun].rotation.order = 'YXZ';
     this.bones[B.wFL].rotation.order = 'YXZ';
     this.bones[B.wFR].rotation.order = 'YXZ';
     // Flügel: erst um die eigene Längsachse verwinden, dann V-Stellung, dann nach hinten anklappen.
@@ -4474,6 +4784,8 @@ export class KartVisual {
     // Ebenso die Tauchausrüstung (Veras Brille ist immer da und klappt nur herunter).
     this.hideDive();
     this.hideSpace();
+    // … Beine und Arme des Roboters, die Klebepistole und die Kleckse.
+    for (const i of [B.rThighL, B.rThighR, B.rArmL, B.rArmR, B.gun, B.glueHead, B.glueBody]) this.bones[i].scale.setScalar(0);
   }
 
   private hideSpace(): void {
@@ -4514,6 +4826,12 @@ export class KartVisual {
     DIVE_BUILDERS[this.character](ctx);
     diveBubbles(main);
     SPACE_BUILDERS[this.character](ctx);
+    // Roboter und Kleber: ein eigenes Netz, das nur gezeichnet wird, solange es gebraucht wird – sonst kostet es nichts.
+    const ex = new Builder(this.rest, this.detail, lines);
+    const exCtx: Ctx = { ...ctx, b: ex };
+    buildRobot(exCtx);
+    buildGlueGun(exCtx);
+    buildGlueSplats(exCtx);
     const fx = new Builder(this.rest, this.detail, lines);
     buildFx(fx, this.paint.base);
     const fl = new Builder(this.rest, this.detail, false);
@@ -4523,6 +4841,10 @@ export class KartVisual {
 
     const mainGeo = main.finish();
     const fxGeo = fx.finish();
+    const exGeo = ex.finish();
+    this.geos.push(exGeo.main);
+    this.extra.geometry = exGeo.main;
+    this.extraOutline = this.swapOutline(this.extra, this.extraOutline, exGeo.outline);
     const decalGeo = decal.finish().main;
     const flameGeo = fl.finish().main;
     this.flameGeo = flameGeo;
@@ -4714,6 +5036,13 @@ export class KartVisual {
     this.fDrink = dk === dk ? clamp(dk, 0, 1) : 0;
     this.fGold = pose.gold === true;
     this.fGoldBlink = pose.goldBlink === true;
+    const rb = pose.robot ?? 0;
+    this.fRobot = rb === rb ? Math.max(0, rb) : 0;
+    const gg = pose.glueGun ?? 0;
+    this.fGun = gg === gg ? Math.max(0, gg) : 0;
+    this.fGunAim = pose.glueAim ?? null;
+    const gl = pose.glue ?? 0;
+    this.fGlue = gl === gl ? Math.max(0, gl) : 0;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -4779,6 +5108,7 @@ export class KartVisual {
     this.moveWheels();
     this.foldWheels();
     this.moveBody();
+    this.moveRobot();
     this.planItem();
     this.moveDriver();
     this.moveExtras();
@@ -4789,6 +5119,8 @@ export class KartVisual {
     this.moveItem();
     this.moveRocket();
     this.moveGold();
+    this.moveGlue();
+    this.extra.visible = this.robWas || this.gunOut > 0.0005 || this.bones[B.glueHead].scale.x > 0;
     this.pickEyes(pose);
     this.placeAnchors();
   }
@@ -4883,6 +5215,263 @@ export class KartVisual {
     if (this.rocketFlame.visible) {
       const fl = 0.85 + 0.15 * Math.sin(t * 61) + 0.1 * hash(Math.floor(t * 40));
       this.rocketFlame.scale.set(flame * (0.9 + 0.1 * Math.sin(t * 47)), flame * fl * (0.6 + 0.6 * flame), flame * (0.9 + 0.1 * Math.cos(t * 43)));
+    }
+  }
+
+  /**
+   * Roboter: Das Kart hebt sich und richtet sich auf, Beine fahren aus (die Hinterräder klappen waagerecht und werden Füße),
+   * Arme klappen aus (die Vorderräder wandern an die Schultern). Dann rennt er – Schritt für Schritt, mit Wippen und Armschwung –,
+   * duckt sich, springt ab und klappt im Sprung alles wieder ein. Läuft nach moveBody und überschreibt Räder und Karosserie.
+   */
+  private moveRobot(): void {
+    const T = this.fRobot;
+    const dt = this.fDt;
+    if (T > 0) {
+      const L = ROBOT_T_LEAP;
+      const at = (a: number, d: number): number => clamp((T - a) / d, 0, 1);
+      if (T < L) {
+        this.robLift = easeOutBack(at(0.06, 0.36));
+        this.robLegs = easeOutBack(at(0.03, 0.32));
+        this.robArms = easeOutBack(at(0.18, 0.28));
+        this.robFlat = smooth01(at(0.03, 0.22));
+      } else {
+        // Im Sprung zurück: erst die Arme, dann Karosserie und Beine, zuletzt stellen sich die Räder auf.
+        this.robLift = 1 - smooth01(at(L + 0.08, 0.34));
+        this.robLegs = 1 - smooth01(at(L + 0.14, 0.28));
+        this.robArms = 1 - smooth01(at(L + 0.03, 0.24));
+        this.robFlat = 1 - smooth01(at(L + 0.24, 0.18));
+      }
+      this.robGait = smooth01(at(0.34, 0.1)) * (1 - smooth01(at(0.76, 0.06)));
+      this.robCrouch = smooth01(at(0.76, 0.1)) * (1 - smooth01(at(L, 0.05)));
+      this.robLeap = smooth01(at(L, 0.06)) * (1 - smooth01(at(L + 0.16, 0.28)));
+      this.robAir = smooth01(at(L - 0.03, 0.08));
+      this.robFade = 1;
+    } else if (this.robFade > 0) {
+      // Abgebrochen (Treffer) oder früher gelandet: alles klappt zügig ein.
+      const was = this.robFade;
+      this.robFade = Math.max(0, was - dt / 0.22);
+      const k = this.robFade / was;
+      this.robLift *= k;
+      this.robLegs *= k;
+      this.robArms *= k;
+      this.robFlat *= k;
+      this.robGait *= k;
+      this.robCrouch *= k;
+      this.robLeap *= k;
+    }
+    const bn = this.bones;
+    const rp = this.restPos;
+    if (this.robFade <= 0 || this.fRocket > 0) {
+      if (this.robWas) {
+        // Wieder ein Kart: was moveWheels/moveBody nicht selbst jedes Bild setzen, zurück in die Ruhelage.
+        this.robWas = false;
+        this.robLean = 0;
+        this.robFade = 0;
+        bn[B.chassis].position.z = 0;
+        for (const i of [B.rThighL, B.rThighR, B.rArmL, B.rArmR]) bn[i].scale.setScalar(0);
+        for (let i = 0; i < 4; i++) {
+          const o = (B.wFL + i) * 3;
+          bn[B.wFL + i].position.x = rp[o];
+          bn[B.wFL + i].position.z = rp[o + 2];
+        }
+      }
+      return;
+    }
+    this.robWas = true;
+    const sp = this.spec;
+    const lift = this.robLift;
+    const legs = Math.max(0, this.robLegs);
+    const arms = Math.max(0, this.robArms);
+    const flat = this.robFlat;
+    const gait = this.robGait;
+    const crouch = this.robCrouch;
+    const leap = this.robLeap;
+    const airK = this.robAir;
+
+    // Schrittfolge: rennt im Takt des Tempos (langsam gemächlicher); jeder aufgesetzte Fuß zählt.
+    const p0 = this.robPhase;
+    this.robPhase = (p0 + dt * ROBOT_CADENCE * (0.5 + 0.5 * this.fV1) * gait) % 64;
+    const ph = this.robPhase * TAU;
+
+    // Karosserie: heben, aufrichten (Nase hoch), vorrücken; beim Rennen wippen und wiegen, vor dem Absprung in die Knie,
+    // im Sprung nach vorn gestreckt.
+    const ch = bn[B.chassis];
+    const pitch = -ROBOT_PITCH * lift + 0.3 * leap + 0.12 * crouch;
+    ch.position.y += ROBOT_LIFT * lift - 0.05 * Math.cos(2 * ph) * gait - 0.22 * crouch + 0.05 * leap;
+    ch.position.z = ROBOT_SHIFT * lift;
+    ch.rotation.x += pitch;
+    ch.rotation.z += 0.07 * Math.sin(ph) * gait;
+    this.robLean = -pitch;
+    ch.updateMatrix();
+    bn[B.drift].updateMatrix();
+    bn[B.spin].updateMatrix();
+    const cpx = ch.rotation.x;
+
+    // Beine: Fußziel je Schrittphase (unter der Hüfte vor und zurück, in der Luft nach hinten gestreckt, dann angezogen),
+    // zweigliedrig gelöst – das Knie zeigt nach vorn. Das Hinterrad sitzt waagerecht am Knöchel: der Fuß.
+    const hip = robotHip(sp);
+    const T1 = ROBOT_THIGH * legs;
+    const S1 = ROBOT_SHIN * legs;
+    const wr = sp.wr;
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1;
+      _rv.set(side * hip[0], hip[1], hip[2]).applyMatrix4(ch.matrix);
+      const hy = _rv.y;
+      const hz = _rv.z;
+      const p = (this.robPhase + (i === 0 ? 0 : 0.5)) % 1;
+      const pBefore = (p0 + (i === 0 ? 0 : 0.5)) % 1;
+      let fz: number;
+      let fy: number;
+      if (p < 0.5) {
+        fz = ROBOT_STRIDE * (1 - 4 * p);
+        fy = 0;
+      } else {
+        const q = (p - 0.5) * 2;
+        fz = ROBOT_STRIDE * (2 * smooth01(q) - 1);
+        fy = ROBOT_STEP_UP * Math.sin(Math.PI * q);
+      }
+      const foot = wr.w * 0.5 * flat + wr.r * (1 - flat);
+      let ty = foot + 0.02 + fy * gait;
+      let tz = hz + 0.05 + fz * gait;
+      // In der Luft: beim Absprung ein Bein vorn, eins hinten gestreckt; danach angezogen
+      if (airK > 0) {
+        const reach = T1 + S1;
+        const ay = hy - reach * (0.62 + 0.3 * leap);
+        const az = hz + reach * (0.12 - 0.4 * leap + side * 0.22 * leap);
+        ty += (ay - ty) * airK;
+        tz += (az - tz) * airK;
+      }
+      ty = Math.min(ty, hy - 0.04);
+      const dy = hy - ty;
+      const dz = tz - hz;
+      const d = clamp(Math.hypot(dy, dz), 1e-4, (T1 + S1) * 0.998);
+      const alpha = Math.atan2(dz, dy);
+      let thW = alpha;
+      let knee = 0;
+      if (T1 > 1e-4) {
+        thW += Math.acos(clamp((T1 * T1 + d * d - S1 * S1) / (2 * T1 * d), -1, 1));
+        knee = Math.PI - Math.acos(clamp((T1 * T1 + S1 * S1 - d * d) / (2 * T1 * S1), -1, 1));
+      }
+      const th = bn[i === 0 ? B.rThighL : B.rThighR];
+      th.rotation.set(-thW - cpx, 0, 0);
+      th.scale.setScalar(Math.max(legs, 1e-4));
+      bn[i === 0 ? B.rShinL : B.rShinR].rotation.set(knee, 0, 0);
+      // Knöchel (Ende des Unterschenkels) → Mitte des Rads darunter
+      const shW = thW - knee;
+      const ay = hy - T1 * Math.cos(thW) - S1 * Math.cos(shW) - (wr.w * 0.5 * flat + 0.02) * legs;
+      const az = hz + T1 * Math.sin(thW) + S1 * Math.sin(shW);
+      const w = bn[i === 0 ? B.wRL : B.wRR];
+      const o = (i === 0 ? B.wRL : B.wRR) * 3;
+      const k = smooth01(Math.min(1, legs));
+      w.position.set(rp[o] + (side * (hip[0] + 0.07) - rp[o]) * k, w.position.y + (ay - w.position.y) * k, rp[o + 2] + (az - rp[o + 2]) * k);
+      w.rotation.x = (((w.rotation.x % TAU) + TAU) % TAU) * (1 - flat);
+      w.rotation.y = 0;
+      w.rotation.z = side * HALF_PI * flat;
+      // Aufgesetzt: Staub und ein Stampfen
+      if (gait > 0.4 && pBefore > 0.75 && p < 0.25) {
+        this.robotSteps++;
+        this.robotFoot.copy(w.position).applyMatrix4(bn[B.drift].matrix).applyMatrix4(bn[B.spin].matrix);
+        this.robotFoot.y -= wr.w * 0.5 * flat;
+      }
+    }
+
+    // Arme: hängen an der Schulter, schwingen gegen das Bein derselben Seite; vor dem Absprung nach hinten ausholen, im Sprung
+    // nach vorn strecken. Eingeklappt liegen sie nach vorn an der Seite. Das Vorderrad sitzt außen an der Schulter und dreht mit.
+    const shp = robotShoulder(sp);
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1;
+      const swing = ROBOT_SWING * Math.cos(ph + (i === 0 ? 0 : Math.PI)) * gait + 0.9 * crouch - 2.4 * leap;
+      const world = -1.5 + (swing + 1.5) * Math.min(arms, 1.15);
+      const a = bn[i === 0 ? B.rArmL : B.rArmR];
+      a.rotation.set(world - cpx, 0, side * (0.38 + 0.18 * leap + 0.06 * Math.sin(ph * 2) * gait));
+      a.scale.setScalar(Math.max(arms, 1e-4));
+      _rv.set(side * (shp[0] + 0.12), shp[1], shp[2]).applyMatrix4(ch.matrix);
+      const w = bn[i === 0 ? B.wFL : B.wFR];
+      const o = (i === 0 ? B.wFL : B.wFR) * 3;
+      const k = smooth01(Math.min(1, arms));
+      w.position.set(rp[o] + (_rv.x - rp[o]) * k, w.position.y + (_rv.y - w.position.y) * k, rp[o + 2] + (_rv.z - rp[o + 2]) * k);
+      w.rotation.x = (((w.rotation.x % TAU) + TAU) % TAU) * (1 - k) + world * k;
+      w.rotation.y *= 1 - k;
+    }
+  }
+
+  /**
+   * Kleber: Die Pistole klappt am Heck hoch (mit Überschwinger), schwenkt aufs Ziel, zieht sich zusammen, schießt (Rückstoß)
+   * und klappt wieder ein; ihre Mündung steht danach in anchors.gunMuzzle. Getroffen: Kleckse auf Gesicht und Haube ploppen
+   * auf, sacken langsam nach unten und schrumpfen in der letzten halben Sekunde weg.
+   */
+  private moveGlue(): void {
+    const bn = this.bones;
+    const dt = this.fDt;
+    const T = this.fGun;
+    const gun = bn[B.gun];
+    const fire = GUN_FIRE_AT;
+    if (T > 0) this.gunOut = T < GUN_BACK_AT ? easeOutBack(clamp((T - 0.1) / 0.24, 0, 1)) : 1 - smooth01((T - GUN_BACK_AT) / 0.2);
+    else this.gunOut = Math.max(0, this.gunOut - dt / 0.15);
+    const out = this.gunOut;
+    if (out <= 0.0005) {
+      if (gun.scale.x !== 0) gun.scale.setScalar(0);
+    } else {
+      const ch = bn[B.chassis];
+      const g = GUN_AT[this.character];
+      // Ziel: Richtung im Raum von root → Gierung im Raum der Karosserie (Drift und Schleudern herausgerechnet); dazu ein
+      // Bogen nach oben, der mit der Entfernung wächst. Ohne Ziel: gerade nach hinten, leicht nach oben.
+      let yaw = 0;
+      let pitch = 0.32;
+      const aim = this.fGunAim;
+      if (aim) {
+        this.anchor(_rv, g[0], g[1] + 0.27, g[2]);
+        const dx = aim.x - _rv.x;
+        const dy = aim.y - _rv.y;
+        const dz = aim.z - _rv.z;
+        const flat = Math.hypot(dx, dz);
+        let yr = Math.atan2(-dx, -dz) - this.fDriftYaw - this.fSpinYaw;
+        yr -= Math.round(yr / TAU) * TAU;
+        yaw = clamp(yr, -1.2, 1.2);
+        pitch = Math.atan2(dy, Math.max(flat, 0.5)) + 0.14 + Math.min(0.3, flat * 0.012);
+      }
+      this.gunYaw = damp(this.gunYaw, yaw, 12, dt);
+      this.gunPitch = damp(this.gunPitch, pitch, 12, dt);
+      const aimK = smooth01(clamp((T - 0.24) / 0.12, 0, 1));
+      // Zusammenziehen vor dem Schuss, Rückstoß danach
+      const squeeze = T < fire ? smooth01(clamp((T - fire + 0.1) / 0.1, 0, 1)) : 0;
+      const kick = T >= fire && T < fire + 0.45 ? Math.exp(-(T - fire) * 11) : 0;
+      gun.rotation.set(-(1 - out) * HALF_PI * 1.05 + (this.gunPitch * aimK - ch.rotation.x) * Math.min(1, out) + kick * 0.25, this.gunYaw * aimK, 0);
+      const o = B.gun * 3;
+      gun.position.set(this.restPos[o], this.restPos[o + 1], this.restPos[o + 2] + 0.1 * kick);
+      const sc = Math.max(out, 1e-4);
+      gun.scale.set(sc * (1 + 0.14 * squeeze - 0.06 * kick), sc * (1 - 0.1 * squeeze + 0.12 * kick), sc * (1 - 0.14 * squeeze + 0.18 * kick));
+      gun.updateMatrix();
+      ch.updateMatrix();
+      bn[B.drift].updateMatrix();
+      bn[B.spin].updateMatrix();
+      this.anchors.gunMuzzle
+        .set(GUN_MUZZLE[0], GUN_MUZZLE[1], GUN_MUZZLE[2])
+        .applyMatrix4(gun.matrix)
+        .applyMatrix4(ch.matrix)
+        .applyMatrix4(bn[B.drift].matrix)
+        .applyMatrix4(bn[B.spin].matrix);
+    }
+
+    // Kleckse: ein neuer Treffer lässt sie wieder aufploppen
+    const left = this.fGlue;
+    if (left > this.glueLast + 0.05) this.glueU = 0;
+    this.glueLast = left;
+    this.glueU = Math.min(1, this.glueU + dt / 0.14);
+    const k = left > 0 ? easeOutBack(this.glueU) * Math.min(1, left / 0.45) : 0;
+    const hb = bn[B.glueHead];
+    if (k <= 0) {
+      if (hb.scale.x !== 0) {
+        hb.scale.setScalar(0);
+        bn[B.glueBody].scale.setScalar(0);
+      }
+      return;
+    }
+    const sag = 1 + 0.35 * clamp(1 - left / 4, 0, 1);
+    for (const i of [B.glueHead, B.glueBody]) {
+      const b = bn[i];
+      b.scale.set(k, k * sag, k);
+      b.position.y = this.restPos[i * 3 + 1] - 0.04 * (sag - 1);
     }
   }
 
@@ -5014,7 +5603,7 @@ export class KartVisual {
 
     const torso = bn[B.torso];
     torso.rotation.set(
-      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.swimS * 0.24 + this.spaceAir * 0.16 + this.gTx,
+      -boostS * 0.16 + clamp(-acc * 0.004, -0.1, 0.12) + loseS * 0.26 - winS * 0.08 - airS * 0.06 + this.glideS * 0.2 + this.swimS * 0.24 + this.spaceAir * 0.16 + this.gTx + this.robLean,
       this.gTy,
       lean + this.gTz,
     );
@@ -5474,9 +6063,9 @@ export class KartVisual {
           // Druck baut sich auf (Flasche zittert und bläht sich), dann knallt der Korken
           rz += Math.sin(t * 80) * 0.14 * smooth01((p - 0.14) / 0.16) * (1 - u);
           mul = u < 0.4 ? 1 + 0.35 * smooth01(u / 0.4) : 1.35 * (1 - smooth01((u - 0.4) / 0.6));
-        } else if (this.gItem === I_SPRING) {
-          // zusammendrücken, beim Loslassen schnalzt sie nach oben weg
-          sy = 1 - 0.5 * smooth01((p - 0.28) / 0.14) + 1.1 * smooth01(u / 0.6);
+        } else if (this.gItem === I_ROBOT) {
+          // aufs Armaturenbrett gedrückt: der kleine Roboter wird gestaucht, dann ploppt er weg
+          sy = 1 - 0.4 * smooth01((p - 0.28) / 0.14) + 0.6 * smooth01(u / 0.6);
           mul = 1 - smooth01(u);
         } else {
           mul = (1 - smooth01(u)) * (u > 0 ? 0.8 + 0.2 * Math.sin(t * 90) : 1);

@@ -5,8 +5,8 @@ import { HostGame } from '../../src/game/hostGame';
 import { BELT_EDGE, BELT_RAMP, FLAT_TICKS, PULSE_PRESS, WATER_FROM, pulseCycle, tideLevel } from '../../src/game/mechanics';
 import {
   BTN_GAS, BTN_ITEM, CHARACTERS, EV_BLOCK, EV_FALL, EV_FLAT, EV_RESPAWNED,
-  EV_USE_GUARD, EV_USE_KITE, EV_USE_SPRING, FLAG_AIR, ITEM_GUARD, ITEM_KITE,
-  ITEM_NONE, ITEM_OIL, ITEM_SPRING, ITEM_TIRE, ITEM_TOP, NEUTRAL, RESPAWN_TICKS,
+  EV_USE_GUARD, EV_USE_KITE, EV_USE_ROBOT, FLAG_AIR, ITEM_GUARD, ITEM_KITE,
+  ITEM_NONE, ITEM_OIL, ITEM_ROBOT, ITEM_TIRE, ITEM_TOP, NEUTRAL, RESPAWN_TICKS,
   V_MAX, forwardSpeed, gridState, stepKart, type Cmd, type KartState,
 } from '../../src/game/sim';
 import { TRACK, groundAt, proj, projectOnTrack, rightX, rightZ, segDelta, setTrack, trackHeading } from '../../src/game/track';
@@ -134,7 +134,7 @@ describe('Zeitklemme an Presse und steigender Wasserlinie', () => {
 describe('Item-Tastendruck relativ zum Pressentreffer', () => {
   const faelle = [
     { name: 'Schutzschild', item: ITEM_GUARD, ereignis: EV_USE_GUARD },
-    { name: 'Sprungfeder', item: ITEM_SPRING, ereignis: EV_USE_SPRING },
+    { name: 'Roboter', item: ITEM_ROBOT, ereignis: EV_USE_ROBOT },
     { name: 'Abschleppdrache', item: ITEM_KITE, ereignis: EV_USE_KITE },
   ].flatMap((item) => [-1, 0, 1].map((versatz) => ({ ...item, versatz })));
   it.each(faelle)('$name: Tastendruck $versatz Tick relativ zum Aufschlag', ({ item, ereignis, versatz }) => {
@@ -146,9 +146,10 @@ describe('Item-Tastendruck relativ zum Pressentreffer', () => {
       for (let d = -1; d <= 1; d++) events.push(stepKart(s, d === versatz ? ITEM : NEUTRAL, umgebung(start + d)));
       expect(events[versatz + 1] & ereignis).not.toBe(0);
       expect(s.item).toBe(ITEM_NONE);
-      // Ein Tick Vorsprung genügt beim Schild/Drachen; die Feder ist dann noch unter 2.5 m.
+      // Ein Tick Vorsprung genügt beim Schild/Drachen; der Roboter verwandelt sich da erst am Boden – und fällt geplättet zusammen.
       // Im Trefferschritt kommt jedes Item zu spät: Presse steht im Ablauf vor Item-Nutzung.
-      const geschuetzt = versatz === -1 && item !== ITEM_SPRING;
+      const geschuetzt = versatz === -1 && item !== ITEM_ROBOT;
+      if (item === ITEM_ROBOT && versatz === -1) expect(s.robot).toBe(0);
       expect(events[1] & EV_FLAT).toBe(geschuetzt ? 0 : EV_FLAT);
       expect(s.flat).toBe(geschuetzt ? 0 : FLAT_TICKS - 1);
       expect(s.spin).toBe(0);

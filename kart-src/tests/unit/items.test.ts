@@ -18,7 +18,6 @@ import {
   ITEM_COUNT,
   ITEM_ROCKET,
   ITEM_SMOKE,
-  ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
@@ -28,6 +27,7 @@ import {
   ROCKET_FLY_TICKS,
   ROCKET_MORPH_TICKS,
   ROCKET_TICKS,
+  ROBOT_JUMP,
   SPIN_TICKS,
   STALL_TICKS,
   TOW_TICKS,
@@ -212,31 +212,6 @@ describe('Neue Items', () => {
     setTrack(0);
   });
 
-  it('Sprungfeder: Hüpfer aus der Fahrt, in der Luft kein zweiter', () => {
-    const s = gridState(0);
-    placeAt(s, 30, 0, 20);
-    s.item = ITEM_SPRING;
-    let ev = stepKart(s, PRESS, ENV);
-    expect(ev & EV_TAKEOFF).toBeTruthy();
-    expect(s.item).toBe(ITEM_NONE);
-    let peak = 0;
-    let airTicks = 0;
-    s.item = ITEM_SPRING;
-    for (let i = 0; i < 90; i++) {
-      // Taste loslassen und in der Luft erneut drücken: nichts passiert, das Item bleibt.
-      ev = stepKart(s, i === 10 ? PRESS : GAS, ENV);
-      if (s.flags & FLAG_AIR) {
-        airTicks++;
-        peak = Math.max(peak, s.y - TRACK.py[s.seg]);
-      }
-    }
-    expect(s.item).toBe(ITEM_SPRING);
-    expect(peak).toBeGreaterThan(1.2);
-    expect(airTicks).toBeGreaterThan(25);
-    expect(airTicks).toBeLessThan(70);
-    console.log(`Sprungfeder: ${peak.toFixed(1)} m hoch, ${(airTicks / 60).toFixed(2)} s in der Luft`);
-  });
-
   it('Stoßfänger fängt genau einen Treffer ab', () => {
     const s = gridState(0);
     s.item = ITEM_GUARD;
@@ -320,10 +295,8 @@ describe('Neue Items', () => {
     placeAt(a, 20, 0);
     placeAt(b, 34, 0);
     host.giveItem(0, ITEM_TIRE);
-    host.giveItem(1, ITEM_SPRING);
-    // Kart 1 hat keine Eingaben (kein Mitspieler verbunden) – den Hüpfer direkt auslösen.
-    b.item = ITEM_NONE;
-    b.vy = 10.5;
+    // Kart 1 hat keine Eingaben (kein Mitspieler verbunden) – den Hüpfer (wie den Satz des Roboters) direkt auslösen.
+    b.vy = ROBOT_JUMP;
     b.y += 0.3;
     b.flags |= FLAG_AIR;
     host.step({ steer: 0, buttons: 8 });

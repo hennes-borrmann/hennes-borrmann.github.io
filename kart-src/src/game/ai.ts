@@ -27,7 +27,9 @@ import {
   ITEM_OIL,
   ITEM_ROCKET,
   ITEM_SMOKE,
-  ITEM_SPRING,
+  ITEM_ROBOT,
+  ITEM_GLUE,
+  GLUE_RANGE,
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
@@ -958,6 +960,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   }
   // In einer Rauchwolke sieht auch die KI schlecht: sie eiert.
   if (ctx.smoke && !air) steer = Math.max(-1, Math.min(1, steer + Math.sin(ctx.tick * 0.23 + b.line) * 0.45));
+  // Kleber auf der Scheibe: Sie sieht nur durch Lücken und fährt unsicherer – sie schlingert etwas (langsamer wird sie davon nicht).
+  else if (s.glue > 0 && !air) steer = Math.max(-1, Math.min(1, steer + (Math.sin(ctx.tick * 0.17 + b.line * 2) + 0.6 * Math.sin(ctx.tick * 0.41 + 1)) * 0.22));
 
   // --- Items ---
   let press = false;
@@ -1030,9 +1034,23 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         // Der Drache lenkt selbst – sofort nutzen.
         press = b.holding > 25 && !air;
         break;
-      case ITEM_SPRING:
-        // Nur wo nichts passieren kann: gerade, mit Bande, kein Sprung voraus.
-        press = late && straight && !air && (edgesAhead(70) & (EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R)) === 0;
+      case ITEM_ROBOT: {
+        // Ein kleiner Schub: auf gerader Strecke mit Bande zünden, wo der Satz sicher landet (laufen und springen dauern zusammen
+        // gut 50 m) – nicht vor einer Lücke, einer offenen Kante oder auf den Schienen. Wer gerade schleudert, wartet.
+        const rail = s.seg < t.total && (t.edge[s.seg] & EDGE_RAIL) !== 0;
+        press =
+          !air &&
+          !rail &&
+          s.robot === 0 &&
+          b.holding > 40 &&
+          v > 12 &&
+          maxCurvatureAhead(55) < 1 / 60 &&
+          (edgesAhead(80) & (EDGE_GAP | EDGE_OPEN_L | EDGE_OPEN_R | EDGE_RAIL)) === 0;
+        break;
+      }
+      case ITEM_GLUE:
+        // Abwehr: abfeuern, sobald jemand dicht dahinter fährt (in Reichweite); wer zu lange wartet, schießt auf gut Glück.
+        press = s.glueShot === 0 && b.holding > 30 && ((behind > 2 && behind < GLUE_RANGE - 5) || late);
         break;
     }
   }

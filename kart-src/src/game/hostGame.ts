@@ -53,9 +53,13 @@ import {
   ITEM_SMOKE,
   ITEM_KITE,
   ITEM_ROCKET,
-  ITEM_SPRING,
+  ITEM_ROBOT,
   ITEM_WING,
   ITEM_GOLD,
+  ITEM_GLUE,
+  GLUE_HIT,
+  GLUE_RANGE,
+  glueKart,
   ITEM_TIRE,
   ITEM_TOP,
   CHARACTERS,
@@ -643,6 +647,9 @@ export class HostGame implements GameView {
     if (ev & EV_USE_TOP) this.spawnTop(k);
     if (ev & EV_USE_EMP) this.shortCircuit(k);
     if (ev & EV_USE_ROCKET) this.aimRocket(k, true);
+    // Kleber: Pistole draußen – Ziel wählen; der Klumpen kommt an.
+    if (k.state.glueShot === 1) this.aimGlue(k);
+    if (k.state.glueShot === GLUE_HIT) this.glueHit(k);
     if (ev & EV_USE_KITE) this.fx(k, 'boost');
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.fx(k, 'boost');
     // Treffer durch die Strecke selbst (Verkehr, Geysir, Lavabombe) sagt der Bildschirm eines
@@ -674,12 +681,13 @@ export class HostGame implements GameView {
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete, Gleiter, Get Gold
-    // (Den Gleiter bekommt jeder; vorn etwas seltener. Get Gold auch – vorn selten, hinten etwa jede zehnte Kiste.)
-    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5];
-    else if (place === 1) table = [14, 8, 25, 0, 23, 0, 19, 8, 0, 0, 7, 3];
-    else if (place === count) table = [18, 11, 0, 22, 6, 14, 0, 8, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST];
-    else table = [16, 18, 10, 15, 10, 6, 9, 9, 0, 0, 12, 7];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Roboter, Abschleppdrache, Rakete, Gleiter, Get Gold, Kleber
+    // (Den Gleiter bekommt jeder; vorn etwas seltener. Get Gold auch – vorn selten, hinten etwa jede zehnte Kiste. Den Kleber
+    // – Abwehr wie Öl, er trifft den Nächsten dahinter – eher vorn und in der Mitte, hinten selten, allein gar nicht.)
+    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5, 0];
+    else if (place === 1) table = [14, 8, 21, 0, 21, 0, 17, 8, 0, 0, 7, 3, 10];
+    else if (place === count) table = [18, 9, 0, 22, 6, 14, 0, 8, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST, 2];
+    else table = [16, 16, 8, 15, 10, 6, 8, 9, 0, 0, 12, 7, 8];
     // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
     // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
     if (count > 1 && behind > KITE_MIN_GAP) {
@@ -687,7 +695,7 @@ export class HostGame implements GameView {
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
     // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede elfte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD];
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_ROBOT, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD, ITEM_GLUE];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;
@@ -847,6 +855,35 @@ export class HostGame implements GameView {
     if (!target || target.finished) return;
     const o = target.state;
     if (Math.hypot(o.x - s.x, o.z - s.z) <= ROCKET_HIT_RANGE && Math.abs(o.y - s.y) < 5) this.applyHit(target);
+  }
+
+  /**
+   * Kleber: Ziel ist der Fahrer direkt hinter dem Schützen – der Nächste dahinter auf der Strecke, höchstens GLUE_RANGE Meter
+   * zurück. Ist dort niemand (oder ist der Nächste weiter weg), fliegt der Klumpen ins Leere und klatscht auf die Fahrbahn.
+   */
+  private aimGlue(k: HostKart): void {
+    let target: HostKart | null = null;
+    let gap = Infinity;
+    for (const o of this.karts.values()) {
+      if (o === k || o.finished) continue;
+      const d = (k.progress - o.progress) * TRACK.step;
+      if (d > 0 && d < gap) {
+        gap = d;
+        target = o;
+      }
+    }
+    k.state.glueAim = target && gap <= GLUE_RANGE && target.state.respawn === 0 ? target.slot : -1;
+  }
+
+  /** Kleber: Der Klumpen kommt an. (Wer inzwischen abgestürzt und woanders aufgesetzt ist, entkommt.) */
+  private glueHit(k: HostKart): void {
+    const target = k.state.glueAim >= 0 ? this.karts.get(k.state.glueAim) : undefined;
+    if (!target || target.finished) return;
+    const o = target.state;
+    if (Math.hypot(o.x - k.state.x, o.z - k.state.z) > GLUE_RANGE * 2 || Math.abs(o.y - k.state.y) > 8) return;
+    const r = glueKart(o);
+    if (r === HIT_BLOCKED) this.fx(target, 'block');
+    else if (r !== HIT_NONE) this.fx(target, 'glue');
   }
 
   private applyHit(k: HostKart): void {

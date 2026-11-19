@@ -1018,17 +1018,80 @@ async function main() {
     const kiteCut = await kart(h6.page, 'authoritative(0)');
     check('Die Bremse kappt den Drachen', kiteCut.tow === 0 && kiteCut.respawn === 0, `noch ${kiteCut.tow} Ticks`);
 
-    // Sprungfeder
+    // Roboter: Anna verwandelt sich (am Boden), rennt, springt ab und landet wieder als Kart – Ben sieht die Verwandlung.
+    // Jede Seite schreibt selbst mit (ohne Grafikkarte dauert jede Abfrage von außen lange).
+    const recordRobot = () => {
+      window.__robot = { ticks: 0, legs: 0, steps: 0, air: false, done: false };
+      window.__robotTimer = setInterval(() => {
+        const e = window.__kart.entities().find((x) => x.slot === 0);
+        const look = window.__kart.look(0);
+        const r = window.__robot;
+        if (!e || !look) return;
+        r.ticks = Math.max(r.ticks, e.robot);
+        r.legs = Math.max(r.legs, look.robot);
+        r.steps = Math.max(r.steps, look.steps);
+        if (e.robot > 54 && e.flags & 8) r.air = true;
+        if (r.ticks > 0 && e.robot === 0) r.done = true;
+      }, 16);
+    };
     await kart(h6.page, 'place(0, 20, 0)');
-    await sleep(200);
+    await kart(h6.page, 'place(1, 200, -2)');
+    await sleep(300);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordRobot)));
+    const robotAt = await kart(h6.page, 'race().time');
     await useItem(8);
-    let hop = 0;
-    for (let i = 0; i < 12; i++) {
-      await sleep(50);
-      const a = await kart(h6.page, 'authoritative(0)');
-      if (a.flags & 8) hop++;
-    }
-    check('Sprungfeder: das Kart hüpft', hop >= 2, `${hop} Messungen in der Luft`);
+    const robotStart = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 150, robotAt, { timeout: 60000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 150, robotAt, { timeout: 60000 }).catch(() => {});
+    const [robotH, robotC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__robotTimer);
+      return window.__robot;
+    })));
+    const robotEnd = await kart(h6.page, 'authoritative(0)');
+    check('Roboter: Anna verwandelt sich, rennt und springt – auf beiden Bildschirmen zu sehen', robotStart.item === 0 && [robotH, robotC].every((r) => r.ticks > 54 && r.legs > 0.9 && r.air), `Host ${robotH.ticks} Ticks / Beine ${robotH.legs.toFixed(2)} / ${robotH.steps} Schritte, Ben ${robotC.ticks} Ticks / Beine ${robotC.legs.toFixed(2)} / ${robotC.steps} Schritte`);
+    check('Roboter: danach wieder ein Kart, ohne Absturz', robotH.done && robotEnd.robot === 0 && robotEnd.respawn === 0, `Roboter ${robotEnd.robot}, Abschnitt ${robotEnd.seg}`);
+
+    // Kleber: Anna (vorn) schießt auf Ben direkt hinter ihr. Ben bekommt Kleber auf den Bildschirm (vier Sekunden), Anna nicht;
+    // Ben sieht Annas Pistole ausklappen.
+    const recordGlue = () => {
+      window.__glue = { gun: 0, me: 0, veil: false, svg: false, shown: 0, other: 0 };
+      window.__glueTimer = setInterval(() => {
+        const k = window.__kart;
+        const g = window.__glue;
+        const look = k.look(0);
+        if (look) g.gun = Math.max(g.gun, look.gun);
+        const sc = k.scene();
+        if (sc) g.shown = Math.max(g.shown, sc.glue);
+        const veil = document.getElementById('glue-veil');
+        if (veil && !veil.hidden) {
+          g.veil = true;
+          if (veil.querySelector('svg path')) g.svg = true;
+        }
+        const own = k.predicted ? k.predicted() : null;
+        if (own) g.me = Math.max(g.me, own.glue);
+        const anna = k.entities().find((x) => x.slot === 0);
+        if (anna) g.other = Math.max(g.other, anna.glue);
+      }, 16);
+    };
+    await kart(h6.page, 'place(0, 330, 0)');
+    await kart(h6.page, 'place(1, 318, 0)');
+    await sleep(400);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordGlue)));
+    const glueAt = await kart(h6.page, 'race().time');
+    await useItem(14);
+    const aimedGlue = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 90, glueAt, { timeout: 60000 }).catch(() => {});
+    const glueB = await kart(h6.page, 'authoritative(1)');
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 90, glueAt, { timeout: 60000 }).catch(() => {});
+    const [glueH, glueC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__glueTimer);
+      return window.__glue;
+    })));
+    check('Kleber: Annas Pistole zielt auf Ben (direkt dahinter) und klappt auf beiden Bildschirmen aus', aimedGlue.glueShot > 0 && aimedGlue.glueAim === 1 && glueH.gun > 0.9 && glueC.gun > 0.9, `Ziel ${aimedGlue.glueAim}, Pistole Host ${glueH.gun.toFixed(2)} / Ben ${glueC.gun.toFixed(2)}`);
+    check('Kleber: Ben ist getroffen – Kleckse auf seinem Bildschirm, nicht auf Annas', glueB.glue > 150 && glueC.me > 200 && glueC.veil && glueC.svg && glueC.shown > 3 && !glueH.veil && glueH.shown === 0, `Host ${glueB.glue} Ticks, Bens Vorhersage ${glueC.me}, Bens Bildschirm ${glueC.shown.toFixed(2)} s`);
+    await sleep(4500);
+    const glueGone = await c6.page.evaluate(() => ({ hidden: document.getElementById('glue-veil').hidden, glue: window.__kart.scene().glue }));
+    check('Kleber: nach gut vier Sekunden ist Bens Sicht wieder frei', glueGone.hidden && glueGone.glue === 0, `Schleier ${glueGone.hidden ? 'weg' : 'noch da'}`);
 
     // Rakete: Anna (Letzte) verwandelt sich, fliegt in hohem Bogen über die Karte und schlägt bei Ben (einen Platz weiter
     // vorn) ein. Ben schleudert so lange wie nach einem Kreisel, Anna taucht vor ihm auf; Ben wird vorher gewarnt.
