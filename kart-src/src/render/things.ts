@@ -1,5 +1,5 @@
 // Alles, was außer den Karts auf der Strecke unterwegs ist: Rollreifen,
-// Ölflecken, Brummkreisel, Rauchwolken – und die pendelnden Hindernisse der
+// Ölflecken, Brummkreisel, Rauchwolken, Bohrer – und die pendelnden Hindernisse der
 // jeweiligen Welt (Fass, Krabbe, Glutbrocken, Kehrroboter).
 //
 // Die Dinge sollen auch im Augenwinkel lesbar sein: der Kreisel trägt Spiralen
@@ -7,12 +7,14 @@
 // und Funken. Teilchen werden je Ding über Zeitkonten getaktet, nicht pro Bild.
 
 import * as THREE from 'three';
-import { hazardLat, rightX, rightZ, type ThemeId, type Track } from '../game/track';
-import { THING_OIL, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
+import { DRILL_DIG_TICKS, DRILL_RISE_TICKS } from '../game/sim';
+import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_GLIDE, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, hazardLat, rightX, rightZ, type ThemeId, type Track } from '../game/track';
+import { THING_DRILL, THING_OIL, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { MeshBuilder, mixRgb, type RGB } from './build';
 import type { FxSink } from './fxApi';
+import { DRILL_GROW, DRILL_LEN, DRILL_SINK, getDrillGeo } from './kartModel';
 import { THEMES } from './themes';
-import { addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
+import { addSmoothNormals, INK, outlineMaterial, rgb, toonMaterial } from './toon';
 
 interface Visual {
   kind: number;
@@ -41,6 +43,15 @@ interface Visual {
   lx: number;
   ly: number;
   lz: number;
+  /** Bohrer: Stufe im letzten Bild, Bruchteil eines Ticks seit dem letzten Stand (für weiche Bewegung), Weg seit dem letzten Erdbrocken bzw. Riss. */
+  stage: number;
+  sub: number;
+  lastAge: number;
+  lump: number;
+  crack: number;
+  /** Bohrer: Einmal-Ereignisse – Abtauchen, Ring beim Durchbruch; Abschnitt im letzten Bild. */
+  done: number;
+  seg: number;
 }
 
 /** Bällchen der Rauchwolke: x, y, z, Radius (von unten nach oben). */
@@ -67,9 +78,347 @@ const SPARK_HOT = [0xffe04a, 0xfff3b0, 0xff8a2a] as const;
  */
 const THROW_DELAY = 0.2;
 const DROP_DELAY = 0.24;
+/** Bohrer: Drehzahl des Bohrkopfs (rad/s) beim Eindrehen (von … bis) und beim Durchbruch. */
+const DRILL_SPIN_DIG = [3, 46] as const;
+const DRILL_SPIN_RISE = 44;
+/** Bohrer: Farben der Erde (aufgeworfen, dunkel, Staub) und der Funken am Bohrkopf. */
+const EARTH = [0x9a6438, 0xb47a44, 0x7c4e2c, 0xa66e3e] as const;
+const EARTH_DARK = 0x4a2e1c;
+const EARTH_DUST = 0xc4a37c;
+/** Bohrer: so lange liegt der Erdwall bzw. ein Riss, bis er wieder verschwunden ist (Sekunden); die Zeit, in der er vergeht. */
+const LUMP_LIFE = 2.3;
+const LUMP_FADE = 0.7;
+const CRACK_LIFE = 3.2;
+const CRACK_FADE = 0.7;
+/** Wo die Strecke kein Erdreich hat (Lücke, Flug, Wasser, Schiene, Trommel, Schwebeband), zieht der Bohrer keine Spur. */
+const NO_EARTH = EDGE_GAP | EDGE_GLIDE | EDGE_RIVER | EDGE_RAIL | EDGE_DRUM | EDGE_TWIST | EDGE_BAND;
+
+/**
+ * Spuren des Bohrers – drei Vorräte fester Größe, je ein Zeichenaufruf (die Erdbrocken dazu ihre Kontur):
+ * aufgeworfene Erdbrocken (der Erdwall, der über die Fahrbahn wandert, und der Krater), Sternrisse mit Loch (wo er
+ * einsteigt und durchbricht) und lange Risse längs des Walls. Jeder Eintrag wächst kurz auf, bleibt liegen und vergeht
+ * am Ende wieder (Maßstab gegen 0).
+ */
+class DrillMarks {
+  readonly lumps: THREE.InstancedMesh;
+  readonly lumpLines: THREE.InstancedMesh | null;
+  readonly cracks: THREE.InstancedMesh;
+  readonly fissures: THREE.InstancedMesh;
+  private readonly lumpAt: Float32Array;
+  private readonly crackAt: Float32Array;
+  private readonly fissureAt: Float32Array;
+  /** Je Eintrag: x, y, z, Quaternion (4), Maßstab x, y, z, Geburt, Lebensdauer, Überschwinger. */
+  private static readonly W = 13;
+  private nextLump = 0;
+  private nextCrack = 0;
+  private nextFissure = 0;
+  private liveLumps = 0;
+  private liveCracks = 0;
+  private liveFissures = 0;
+  private readonly m = new THREE.Matrix4();
+  private readonly q = new THREE.Quaternion();
+  private readonly p = new THREE.Vector3();
+  private readonly sc = new THREE.Vector3();
+  private readonly color = new THREE.Color();
+  private readonly tex: THREE.CanvasTexture;
+  private readonly fissureTex: THREE.CanvasTexture;
+  private readonly geos: THREE.BufferGeometry[] = [];
+  private readonly mats: THREE.Material[] = [];
+
+  constructor(
+    private readonly track: Track,
+    outlines: boolean,
+    earthTint: number,
+    lumpCount = 420,
+    crackCount = 48,
+    fissureCount = 200,
+  ) {
+    const lumpGeo = addSmoothNormals(new THREE.IcosahedronGeometry(1, 0));
+    lumpGeo.translate(0, 0.15, 0);
+    const lumpMat = toonMaterial({ color: 0xffffff });
+    this.lumps = new THREE.InstancedMesh(lumpGeo, lumpMat, lumpCount);
+    this.lumps.name = 'Bohrer-Erdwall';
+    this.lumps.frustumCulled = false;
+    this.lumps.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const tint = new THREE.Color(earthTint);
+    for (let i = 0; i < lumpCount; i++) {
+      this.color.setHex(EARTH[i % EARTH.length]).lerp(tint, 0.22);
+      this.lumps.setColorAt(i, this.color);
+    }
+    this.lumpLines = null;
+    if (outlines) {
+      const line = outlineMaterial(0.05);
+      this.lumpLines = new THREE.InstancedMesh(lumpGeo, line, lumpCount);
+      this.lumpLines.name = 'outline';
+      this.lumpLines.frustumCulled = false;
+      // Dieselben Lagen wie die Brocken selbst.
+      this.lumpLines.instanceMatrix = this.lumps.instanceMatrix;
+    }
+    this.tex = crackTexture(true);
+    this.fissureTex = crackTexture(false);
+    const crackGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    // (Durchscheinend wie die Bremsspuren, nicht mit Alpha-Schwelle: flach von der Seite gesehen mitteln die feinen Linien
+    // in den kleinen Stufen der Textur unter jede Schwelle und verschwänden.)
+    const decal = (map: THREE.Texture, count: number, name: string): THREE.InstancedMesh => {
+      const mat = new THREE.MeshBasicMaterial({
+        map,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -10,
+      });
+      this.mats.push(mat);
+      const m = new THREE.InstancedMesh(crackGeo, mat, count);
+      m.name = name;
+      m.frustumCulled = false;
+      m.renderOrder = 1;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      return m;
+    };
+    this.cracks = decal(this.tex, crackCount, 'Bohrer-Krater');
+    this.fissures = decal(this.fissureTex, fissureCount, 'Bohrer-Risse');
+    this.geos.push(lumpGeo, crackGeo);
+    this.mats.push(lumpMat);
+    this.lumpAt = new Float32Array(lumpCount * DrillMarks.W);
+    this.crackAt = new Float32Array(crackCount * DrillMarks.W);
+    this.fissureAt = new Float32Array(fissureCount * DrillMarks.W);
+    this.clear();
+  }
+
+  /** Neigung der Fahrbahn an Abschnitt seg (Quer- und Längsneigung) als Drehung von „oben“ dorthin, dazu die Gierung yaw. */
+  private orient(seg: number, yaw: number): THREE.Quaternion {
+    const t = this.track;
+    const s = seg >= 0 && seg < t.total ? seg : 0;
+    const slope = (t.py[t.next[s]] - t.py[s]) / t.step;
+    const rx = rightX(t, s);
+    const rz = rightZ(t, s);
+    const bank = t.bank[s];
+    // oben = rechts × vorn (rechts mit Querneigung, vorn mit Steigung)
+    const fx = t.tx[s];
+    const fy = slope;
+    const fz = t.tz[s];
+    const ux = bank * fz - rz * fy;
+    const uy = rz * fx - rx * fz;
+    const uz = rx * fy - bank * fx;
+    this.p.set(ux, uy, uz).normalize();
+    if (this.p.y < 0) this.p.negate();
+    this.q.setFromUnitVectors(UP, this.p);
+    _yq.setFromAxisAngle(UP, yaw);
+    return this.q.multiply(_yq);
+  }
+
+  /** Ein Erdbrocken: Lage, Gierung, Maße (Breite, Höhe, Länge in Metern), Lebensdauer, Überschwinger beim Aufwerfen. */
+  lump(x: number, y: number, z: number, seg: number, yaw: number, w: number, h: number, l: number, now: number, life = LUMP_LIFE, pop = 0.35): void {
+    const i = this.nextLump;
+    this.nextLump = (i + 1) % (this.lumpAt.length / DrillMarks.W);
+    this.put(this.lumpAt, i, x, y, z, this.orient(seg, yaw), w * 0.5, h, l * 0.5, now, life, pop);
+    this.liveLumps = Math.max(this.liveLumps, 1);
+  }
+
+  /**
+   * Ein Riss in der Fahrbahn (flach, knapp darüber): Sternriss mit Loch (star) oder ein langer Riss quer zu yaw … längs.
+   * (Knapp über Fahrbahnfarbe und Schubfeldern, die ebenfalls etwas über der Fahrbahn liegen.)
+   */
+  crack(x: number, y: number, z: number, seg: number, yaw: number, w: number, l: number, now: number, life = CRACK_LIFE, star = true): void {
+    if (star) {
+      const i = this.nextCrack;
+      this.nextCrack = (i + 1) % (this.crackAt.length / DrillMarks.W);
+      this.put(this.crackAt, i, x, y + 0.08, z, this.orient(seg, yaw), w, 1, l, now, life, 0.15);
+      this.liveCracks = Math.max(this.liveCracks, 1);
+    } else {
+      const i = this.nextFissure;
+      this.nextFissure = (i + 1) % (this.fissureAt.length / DrillMarks.W);
+      this.put(this.fissureAt, i, x, y + 0.08, z, this.orient(seg, yaw), w, 1, l, now, life, 0.15);
+      this.liveFissures = Math.max(this.liveFissures, 1);
+    }
+  }
+
+  private put(a: Float32Array, i: number, x: number, y: number, z: number, q: THREE.Quaternion, sx: number, sy: number, sz: number, now: number, life: number, pop: number): void {
+    const o = i * DrillMarks.W;
+    a[o] = x;
+    a[o + 1] = y;
+    a[o + 2] = z;
+    a[o + 3] = q.x;
+    a[o + 4] = q.y;
+    a[o + 5] = q.z;
+    a[o + 6] = q.w;
+    a[o + 7] = sx;
+    a[o + 8] = sy;
+    a[o + 9] = sz;
+    a[o + 10] = now;
+    a[o + 11] = life;
+    a[o + 12] = pop;
+  }
+
+  /** Alle Einträge auf den Stand von now bringen (aufwerfen, liegen, vergehen). */
+  update(now: number): void {
+    this.liveLumps = this.step(this.lumps, this.lumpAt, now, this.liveLumps, LUMP_FADE, true);
+    this.liveCracks = this.step(this.cracks, this.crackAt, now, this.liveCracks, CRACK_FADE, false);
+    this.liveFissures = this.step(this.fissures, this.fissureAt, now, this.liveFissures, CRACK_FADE, false);
+    if (this.lumpLines) this.lumpLines.visible = this.lumps.visible;
+  }
+
+  private step(mesh: THREE.InstancedMesh, a: Float32Array, now: number, live: number, fade: number, grow: boolean): number {
+    if (live === 0) {
+      mesh.visible = false;
+      return 0;
+    }
+    const n = a.length / DrillMarks.W;
+    let alive = 0;
+    for (let i = 0; i < n; i++) {
+      const o = i * DrillMarks.W;
+      const life = a[o + 11];
+      let k = 0;
+      if (life > 0) {
+        const age = now - a[o + 10];
+        if (age >= life) a[o + 11] = 0;
+        else {
+          alive++;
+          // Aufwerfen mit Überschwinger, am Ende zusammensacken (Brocken) bzw. zuwachsen (Risse).
+          const inT = grow ? 0.09 : 0.12;
+          const u = Math.min(1, Math.max(0, age) / inT);
+          const pop = a[o + 12];
+          k = u < 1 ? u * (1 + pop * Math.sin(u * Math.PI)) : 1 + pop * 0.6 * Math.max(0, 1 - (age - inT) / 0.25) * Math.sin(((age - inT) / 0.25) * Math.PI);
+          const left = life - age;
+          if (left < fade) k *= left / fade;
+        }
+      }
+      this.p.set(a[o], a[o + 1], a[o + 2]);
+      this.q.set(a[o + 3], a[o + 4], a[o + 5], a[o + 6]);
+      // Brocken sinken beim Vergehen in den Boden zurück: die Höhe schrumpft schneller als die Breite.
+      this.sc.set(a[o + 7] * Math.sqrt(k), a[o + 8] * k, a[o + 9] * Math.sqrt(k));
+      if (k <= 0) this.sc.setScalar(0);
+      this.m.compose(this.p, this.q, this.sc);
+      mesh.setMatrixAt(i, this.m);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.visible = alive > 0;
+    return alive;
+  }
+
+  clear(): void {
+    this.lumpAt.fill(0);
+    this.crackAt.fill(0);
+    this.fissureAt.fill(0);
+    this.liveLumps = 1;
+    this.liveCracks = 1;
+    this.liveFissures = 1;
+    this.update(0);
+  }
+
+  dispose(): void {
+    for (const g of this.geos) g.dispose();
+    for (const m of this.mats) m.dispose();
+    this.tex.dispose();
+    this.fissureTex.dispose();
+    this.lumps.dispose();
+    this.cracks.dispose();
+    this.fissures.dispose();
+    this.lumpLines?.dispose();
+  }
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+const _yq = new THREE.Quaternion();
+
+/**
+ * Riss-Bild, außen durchsichtig. star: dunkles Loch in der Mitte, davon zackige Tuschesprünge mit Verästelungen; sonst
+ * ein langer Zickzack-Riss von oben nach unten (längs) mit kurzen Ästen. Unter jeder Tuschelinie liegt ein heller Rand
+ * (aufgebrochene Kante) – so sind die Risse auf dunklem Asphalt wie auf hellem Grund zu sehen.
+ */
+function crackTexture(star: boolean): THREE.CanvasTexture {
+  const n = 256;
+  const c = document.createElement('canvas');
+  c.width = n;
+  c.height = n;
+  const g = c.getContext('2d')!;
+  const ink = `#${INK.toString(16).padStart(6, '0')}`;
+  let seed = 7;
+  const rnd = (): number => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  // Erst alle Stücke sammeln, dann in zwei Durchgängen zeichnen: heller Rand, darüber die Tusche.
+  const lines: number[] = [];
+  const crackLine = (x: number, y: number, a: number, len: number, w: number, depth: number): void => {
+    let px = x;
+    let py = y;
+    const steps = 6;
+    for (let i = 0; i < steps; i++) {
+      const ang = a + (rnd() - 0.5) * 0.9;
+      const d = len / steps;
+      const nx = px + Math.cos(ang) * d;
+      const ny = py + Math.sin(ang) * d;
+      lines.push(px, py, nx, ny, Math.max(2, w * (1 - i / steps)));
+      if (depth > 0 && rnd() < 0.35) crackLine(nx, ny, ang + (rnd() < 0.5 ? -1 : 1) * (0.6 + rnd() * 0.5), len * 0.4, w * 0.6, depth - 1);
+      px = nx;
+      py = ny;
+    }
+  };
+  const cx = n / 2;
+  if (star) {
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 9) * Math.PI * 2 + rnd() * 0.4;
+      crackLine(cx + Math.cos(a) * 18, cx + Math.sin(a) * 18, a, 70 + rnd() * 34, 13, 2);
+    }
+  } else {
+    // Längs (Bildhöhe = Länge des Risses), von der Mitte nach beiden Seiten
+    crackLine(cx, cx, Math.PI / 2, 116, 18, 3);
+    crackLine(cx, cx, -Math.PI / 2, 116, 18, 3);
+  }
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  for (const [color, extra] of [
+    ['#e6dccb', 11],
+    [ink, 0],
+  ] as const) {
+    g.strokeStyle = color;
+    for (let i = 0; i < lines.length; i += 5) {
+      g.lineWidth = lines[i + 4] + extra;
+      g.beginPath();
+      g.moveTo(lines[i], lines[i + 1]);
+      g.lineTo(lines[i + 2], lines[i + 3]);
+      g.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  // Flach von der Seite gesehen (Verfolgerkamera) verschwämmen die Linien sonst in den kleinen Stufen der Textur
+  // (three.js begrenzt den Wert auf das, was das Gerät kann).
+  tex.anisotropy = 8;
+  if (!star) return tex;
+  // Loch: dunkle Erde mit hellem Rand und Tuschekante
+  g.beginPath();
+  for (let k = 0; k <= 14; k++) {
+    const a = (k / 14) * Math.PI * 2;
+    const r = 26 + rnd() * 9;
+    if (k === 0) g.moveTo(cx + Math.cos(a) * r, cx + Math.sin(a) * r);
+    else g.lineTo(cx + Math.cos(a) * r, cx + Math.sin(a) * r);
+  }
+  g.closePath();
+  g.fillStyle = '#3d281a';
+  g.fill();
+  g.strokeStyle = '#e6dccb';
+  g.lineWidth = 12;
+  g.stroke();
+  g.strokeStyle = ink;
+  g.lineWidth = 6;
+  g.stroke();
+  return tex;
+}
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** Herausschnellen mit Überschwinger: 0 → 1 (über 1 hinaus und zurück). */
+function easeOutBack(x: number): number {
+  const c = 1.9;
+  const u = x - 1;
+  return 1 + (c + 1) * u * u * u + c * u * u;
 }
 
 /** Aufploppen mit kleinem Überschwinger: 0 → 1. */
@@ -111,6 +460,10 @@ export class ThingVisuals {
   private readonly dust: number;
   /** Erst nach dem ersten Abgleich lösen neue Dinge Auftritts-Effekte aus. */
   private primed = false;
+  /** Bohrer: Erdwall und Risse; Farbe der Erde dieser Welt; Uhr der Spuren (Sekunden, wie time in update). */
+  private readonly marks: DrillMarks;
+  private readonly earth: number;
+  private now = 0;
 
   constructor(
     private readonly track: Track,
@@ -119,6 +472,10 @@ export class ThingVisuals {
     this.theme = track.def.theme;
     const d = mixRgb(rgb(0xe9e6f2), rgb(THEMES[this.theme].shoulder), 0.35);
     this.dust = new THREE.Color(d[0], d[1], d[2]).getHex();
+    this.earth = new THREE.Color(THEMES[this.theme].shoulder).getHex();
+    this.marks = new DrillMarks(track, outlines, this.earth);
+    this.group.add(this.marks.lumps, this.marks.cracks, this.marks.fissures);
+    if (this.marks.lumpLines) this.group.add(this.marks.lumpLines);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const put = (b: MeshBuilder, geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0, sx = 1, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0): void => {
@@ -541,6 +898,17 @@ export class ThingVisuals {
       body = this.mesh(this.topGeo, this.toon, 0.05);
       swirl = new THREE.Mesh(this.swirlGeo, this.swirlMat);
       mid.add(swirl);
+    } else if (th.kind === THING_DRILL) {
+      // Derselbe Bohrer, den die Figur in der Hand hatte – so groß, wie sie ihn eingesteckt hat.
+      const g = getDrillGeo();
+      const m = new THREE.Mesh(g.main, this.toon);
+      if (this.outlines && g.line) {
+        const ol = new THREE.Mesh(g.line, outlineMaterial());
+        ol.name = 'outline';
+        m.add(ol);
+      }
+      m.scale.setScalar(DRILL_GROW);
+      body = m;
     } else {
       body = new THREE.Group();
       balls = [];
@@ -571,6 +939,13 @@ export class ThingVisuals {
       lx: th.x,
       ly: th.y,
       lz: th.z,
+      stage: th.stage,
+      sub: 0,
+      lastAge: th.age,
+      lump: 0,
+      crack: 0,
+      done: 0,
+      seg: th.seg,
     };
   }
 
@@ -579,6 +954,7 @@ export class ThingVisuals {
   afterPlace: ((o: THREE.Object3D) => void) | null = null;
 
   update(things: SnapshotThing[], dt: number, time: number, fx: FxSink): void {
+    this.now = time;
     for (const v of this.live.values()) v.seen = false;
     for (const th of things) {
       const key = th.kind * 1000 + th.id;
@@ -590,7 +966,11 @@ export class ThingVisuals {
         // Beim ersten Abgleich (Szenenwechsel, Beitritt mitten im Rennen)
         // liegt alles schon da: kein Aufploppen, kein Platsch.
         if (!this.primed) v.age = 30;
-        else {
+        else if (th.kind === THING_DRILL) {
+          // Der Bohrer steckt schon, wenn er erscheint (die Figur hat ihn eben hineingerammt).
+          v.age = 0;
+          this.arrive(th, fx);
+        } else {
           v.age = -(th.kind === THING_TIRE || th.kind === THING_TOP ? THROW_DELAY : DROP_DELAY);
           v.obj.visible = false;
         }
@@ -608,6 +988,7 @@ export class ThingVisuals {
       else if (th.kind === THING_OIL) this.oil(v, th, dt, time, fx);
       else if (th.kind === THING_TOP) this.top(v, th, dt, time, fx);
       else if (th.kind === THING_SMOKE) this.smoke(v, th, dt, time, fx);
+      else if (th.kind === THING_DRILL) this.drill(v, th, dt, time, fx);
       this.afterPlace?.(v.obj);
     }
     this.primed = true;
@@ -617,6 +998,23 @@ export class ThingVisuals {
       this.group.remove(v.obj);
       this.live.delete(key);
     }
+    this.marks.update(time);
+  }
+
+  /**
+   * Bohrer kurz vor dem Durchbruch: Risse auf der Fahrbahn vor dem Kart, das er sucht – vorn bei (x, z) auf Abschnitt seg,
+   * Fahrtrichtung yaw, Stärke k (0 … 1). Wird pro Bild gerufen; neue Risse entstehen umso dichter, je näher er ist.
+   */
+  warnCracks(x: number, y: number, z: number, seg: number, yaw: number, k: number, dt: number, fx: FxSink): void {
+    if (this.track.edge[seg] & NO_EARTH) return;
+    if (Math.random() > dt * (6 + 22 * k)) return;
+    const a = yaw + (Math.random() - 0.5) * 1.2;
+    const side = (Math.random() - 0.5) * 3.2;
+    const cx = x + Math.cos(yaw) * side;
+    const cz = z - Math.sin(yaw) * side;
+    const size = 1.1 + 1.5 * k * Math.random();
+    this.marks.crack(cx, y, cz, seg, a, size * 0.8, size * (1.5 + Math.random()), this.now, 1.4, false);
+    fx.puff(cx, y + 0.15, cz, (Math.random() - 0.5) * 1.5, 1.4 + Math.random() * 2 * k, (Math.random() - 0.5) * 1.5, 0.45, 0.35 + 0.3 * k, EARTH[(Math.random() * 4) | 0], 0.8, 3);
   }
 
   /** Ist das Ding schon zu sehen – oder holt die Figur noch aus? (Für den Schatten.) */
@@ -625,9 +1023,16 @@ export class ThingVisuals {
     return !v || v.age >= 0;
   }
 
-  /** Auftritt: der Ölfleck landet mit Platsch, die Rauchwolke pafft los. */
+  /** Auftritt: der Ölfleck landet mit Platsch, die Rauchwolke pafft los, der Bohrer fährt mit Erdspritzern in den Boden. */
   private arrive(th: SnapshotThing, fx: FxSink): void {
-    if (th.kind === THING_OIL) {
+    if (th.kind === THING_DRILL) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + Math.random() * 0.4;
+        const sp = 2.5 + Math.random() * 3;
+        fx.puff(th.x + Math.sin(a) * 0.4, th.y + 0.15, th.z + Math.cos(a) * 0.4, Math.sin(a) * sp, 3 + Math.random() * 3, Math.cos(a) * sp, 0.5, 0.3 + Math.random() * 0.2, EARTH[i % 4], 0.3, 14);
+      }
+      this.marks.crack(th.x, th.y, th.z, th.seg, Math.random() * 6.3, 1.6, 1.6, this.now, 3.5);
+    } else if (th.kind === THING_OIL) {
       for (let i = 0; i < 9; i++) {
         const a = (i / 9) * Math.PI * 2 + Math.random() * 0.4;
         const s = 3.5 + Math.random() * 2.5;
@@ -641,8 +1046,40 @@ export class ThingVisuals {
     }
   }
 
-  /** Abschied an der letzten Stelle: Funken- und Staubstoß bzw. kleiner Platsch. */
+  /** Abschied an der letzten Stelle: Funken- und Staubstoß bzw. kleiner Platsch – beim Bohrer die Explosion samt Krater. */
   private farewell(v: Visual, fx: FxSink): void {
+    if (v.kind === THING_DRILL) {
+      if (v.stage <= 0) return;
+      const x = v.lx;
+      const y = v.ly;
+      const z = v.lz;
+      // Feuerball und Funken
+      for (let i = 0; i < 26; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const s = 6 + Math.random() * 10;
+        fx.spark(x, y + 1 + Math.random(), z, Math.sin(a) * s, 4 + Math.random() * 9, Math.cos(a) * s, 0.45 + Math.random() * 0.35, 0.9 + Math.random() * 0.8, SPARK_HOT[i % 3], 7);
+      }
+      // Erdbrocken fliegen hoch und fallen zurück
+      for (let i = 0; i < 22; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const s = 3 + Math.random() * 7;
+        fx.puff(x + Math.sin(a) * 0.6, y + 0.6, z + Math.cos(a) * 0.6, Math.sin(a) * s, 7 + Math.random() * 9, Math.cos(a) * s, 0.9 + Math.random() * 0.5, 0.35 + Math.random() * 0.4, i % 3 === 0 ? EARTH_DARK : EARTH[i % 4], 0, 22);
+      }
+      // Rauchpilz
+      for (let i = 0; i < 14; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * 1.6;
+        fx.puff(x + Math.sin(a) * r, y + 0.6 + Math.random() * 2.2, z + Math.cos(a) * r, Math.sin(a) * 2.4, 2.2 + Math.random() * 2.5, Math.cos(a) * 2.4, 1 + Math.random() * 0.6, 1.1 + Math.random() * 0.8, i % 2 === 0 ? 0x8d8597 : 0xc9c3d3, 1.8, -1.5);
+      }
+      // Krater: ein großer Riss und ein Ring aus aufgeworfener Erde
+      this.marks.crack(x, y, z, v.seg, Math.random() * 6.3, 4.6, 4.6, this.now, 4.5);
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2 + Math.random() * 0.3;
+        const r = 1.9 + Math.random() * 0.5;
+        this.marks.lump(x + Math.sin(a) * r, y - 0.05, z + Math.cos(a) * r, v.seg, a, 1 + Math.random() * 0.5, 0.45 + Math.random() * 0.25, 1.4, this.now, 3.6, 0.6);
+      }
+      return;
+    }
     if (v.kind === THING_TIRE || v.kind === THING_TOP) {
       const top = v.kind === THING_TOP;
       const cy = v.ly + (top ? 0.7 : 0.1);
@@ -762,6 +1199,177 @@ export class ThingVisuals {
         fx.puff(th.x + (Math.random() - 0.5) * 0.6, foot + 0.2, th.z + (Math.random() - 0.5) * 0.6, th.vx * 0.12 + (Math.random() - 0.5) * 2, 0.7 + Math.random() * 0.6, th.vz * 0.12 + (Math.random() - 0.5) * 2, 0.45, 0.5, this.dust, 1.0, -0.4);
       }
     }
+  }
+
+  /**
+   * Bohrer: steckt im Boden und dreht sich ein – erst langsam, dann immer schneller – und versinkt dabei (Erde spritzt, ein
+   * Erdring häuft sich um das Loch). Unter der Erde ist er selbst nicht zu sehen, nur seine Spur: ein Erdwall, der hinter
+   * ihm aufgeworfen wird und wieder zusammensackt, Risse daneben und Erde, die vorn hochspritzt. Vor seinem Ziel reißt der
+   * Boden sternförmig auf, und er bricht mit der Spitze voran heraus, rasend schnell drehend, bis er explodiert (farewell).
+   */
+  private drill(v: Visual, th: SnapshotThing, dt: number, time: number, fx: FxSink): void {
+    const t = this.track;
+    // Bruchteil eines Ticks seit dem letzten Stand – damit Eindrehen und Durchbruch zwischen zwei Ständen weich weiterlaufen.
+    if (th.age !== v.lastAge) {
+      v.lastAge = th.age;
+      v.sub = 0;
+    } else v.sub = Math.min(2, v.sub + dt * 60);
+    const age = th.age + v.sub;
+    const stage = th.stage > 0 ? th.stage + v.sub : 0;
+    const seg = th.seg < t.total ? th.seg : 0;
+    const o = v.obj;
+    const mid = v.mid;
+    const L = DRILL_LEN * DRILL_GROW;
+    v.seg = seg;
+    v.stage = th.stage;
+    if (stage <= 0 && age <= DRILL_DIG_TICKS + 1) {
+      // — Eindrehen —
+      const u = Math.min(1, age / DRILL_DIG_TICKS);
+      o.visible = true;
+      o.position.set(th.x, th.y, th.z);
+      // Erst dreht er sich fast an Ort und Stelle, dann frisst er sich immer schneller hinein.
+      const sink = (L + 0.45) * Math.pow(u, 2.3);
+      mid.position.y = L - DRILL_SINK - sink;
+      mid.rotation.set(0.08 * (1 - u) * Math.sin(time * 10), 0, 0.08 * (1 - u) * Math.cos(time * 10));
+      mid.scale.setScalar(1);
+      v.spin += dt * (DRILL_SPIN_DIG[0] + (DRILL_SPIN_DIG[1] - DRILL_SPIN_DIG[0]) * u * u);
+      v.body.rotation.set(0, v.spin, 0);
+      // Erde spritzt aus dem Loch, immer heftiger
+      v.acc += dt * (4 + 50 * u * u);
+      while (v.acc >= 1) {
+        v.acc -= 1;
+        const a = Math.random() * Math.PI * 2;
+        const sp = 1.5 + Math.random() * (2 + 4 * u);
+        fx.puff(th.x + Math.sin(a) * 0.35, th.y + 0.15, th.z + Math.cos(a) * 0.35, Math.sin(a) * sp, 2 + Math.random() * (2 + 5 * u), Math.cos(a) * sp, 0.45 + Math.random() * 0.3, 0.2 + Math.random() * 0.25, EARTH[(Math.random() * 4) | 0], 0.2, 16);
+      }
+      // Erdring um das Loch
+      if (u > 0.2) {
+        v.acc2 += dt * 8;
+        while (v.acc2 >= 1) {
+          v.acc2 -= 1;
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.62 + Math.random() * 0.3;
+          this.marks.lump(th.x + Math.sin(a) * r, th.y - 0.04, th.z + Math.cos(a) * r, seg, a, 0.38 + Math.random() * 0.25, 0.16 + Math.random() * 0.14, 0.5, this.now, 3.2, 0.5);
+        }
+      }
+      // Ganz versunken: ein letzter Erdstoß
+      if (u >= 1 && !(v.done & 1)) {
+        v.done |= 1;
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2;
+          fx.puff(th.x, th.y + 0.3, th.z, Math.sin(a) * 4, 4 + Math.random() * 3, Math.cos(a) * 4, 0.6, 0.45, EARTH[i % 4], 0.6, 12);
+        }
+      }
+      v.lx = th.x;
+      v.ly = th.y;
+      v.lz = th.z;
+      return;
+    }
+    if (stage <= 0) {
+      // — Unter der Erde: Erdwall, Risse, Erde spritzt vorn hoch —
+      o.visible = false;
+      const dx = th.x - v.lx;
+      const dz = th.z - v.lz;
+      const dist = Math.hypot(dx, dz);
+      const speed = Math.hypot(th.vx, th.vz);
+      const earth = (t.edge[seg] & NO_EARTH) === 0;
+      if (dist > 1e-3 && dist < 60 && earth) {
+        const yaw = Math.atan2(dx, dz);
+        const nx = dz / dist;
+        const nz = -dx / dist;
+        // Erdwall: Brocken dicht hintereinander (bei hohem Tempo weiter auseinander und länger gezogen), dazwischen je ein
+        // großer Haufen – frisch aufgeworfen schießen sie über ihre Größe hinaus (der Buckel über dem Kopf des Bohrers).
+        const sp = Math.max(0.6, speed / 120);
+        let d = sp - v.lump;
+        for (; d <= dist; d += sp) {
+          const f = Math.max(0, d / dist);
+          const j = (Math.random() - 0.5) * 0.35;
+          const heap = (v.dist++ & 3) === 0;
+          const w = heap ? 1.2 + Math.random() * 0.3 : 0.8 + Math.random() * 0.3;
+          const h = heap ? 0.5 + Math.random() * 0.15 : 0.32 + Math.random() * 0.16;
+          this.marks.lump(v.lx + dx * f + nx * j, v.ly + (th.y - v.ly) * f - 0.06, v.lz + dz * f + nz * j, seg, yaw + (Math.random() - 0.5) * 0.35, w, h, Math.max(1.1, sp * 1.8), this.now, LUMP_LIFE, 0.75);
+        }
+        v.lump = dist - (d - sp);
+        // Risse links und rechts des Walls
+        const csp = Math.max(2.2, speed / 40);
+        d = csp - v.crack;
+        for (; d <= dist; d += csp) {
+          const f = Math.max(0, d / dist);
+          const side = ((v.dist++ & 1) === 0 ? 1 : -1) * (0.8 + Math.random() * 0.6);
+          const w = 1.2 + Math.random() * 0.8;
+          this.marks.crack(v.lx + dx * f + nx * side, v.ly + (th.y - v.ly) * f, v.lz + dz * f + nz * side, seg, yaw + (Math.random() - 0.5) * 0.7, w * 0.8, w * (1.6 + Math.random() * 0.8), this.now, CRACK_LIFE, false);
+        }
+        v.crack = dist - (d - csp);
+        // Vorn spritzt Erde hoch (nach hinten weg)
+        v.acc += dt * 30;
+        while (v.acc >= 1) {
+          v.acc -= 1;
+          const a = Math.random() * Math.PI * 2;
+          const sp2 = 1 + Math.random() * 2.5;
+          fx.puff(th.x + Math.sin(a) * 0.4, th.y + 0.35, th.z + Math.cos(a) * 0.4, -dx / dist * Math.min(8, speed * 0.05) + Math.sin(a) * sp2, 3 + Math.random() * 4, -dz / dist * Math.min(8, speed * 0.05) + Math.cos(a) * sp2, 0.5 + Math.random() * 0.3, 0.25 + Math.random() * 0.25, EARTH[(Math.random() * 4) | 0], 0.3, 15);
+        }
+        v.acc2 += dt * 7;
+        while (v.acc2 >= 1) {
+          v.acc2 -= 1;
+          fx.puff(th.x, th.y + 0.3, th.z, (Math.random() - 0.5) * 2, 1 + Math.random(), (Math.random() - 0.5) * 2, 0.6, 0.45, EARTH_DUST, 0.9, -0.4);
+        }
+      } else if (dist >= 60 || !earth) {
+        // Sprung (auf die andere Seite einer Abzweigung) oder kein Erdreich: die Spur beginnt danach neu.
+        v.lump = 0;
+        v.crack = 0;
+      }
+      // (Hat er sich seit dem letzten Bild nicht bewegt – zwei Bilder im selben Takt –, zählt der Weg einfach weiter.)
+      v.lx = th.x;
+      v.ly = th.y;
+      v.lz = th.z;
+      return;
+    }
+    // — Durchbruch: der Boden reißt auf, die Spitze bricht heraus, er steigt rasend drehend hoch und schwillt an —
+    const u = Math.min(1, stage / DRILL_RISE_TICKS);
+    o.visible = true;
+    o.position.set(th.x, th.y, th.z);
+    if (!(v.done & 2)) {
+      v.done |= 2;
+      this.marks.crack(th.x, th.y, th.z, seg, Math.random() * 6.3, 3.8, 3.8, this.now, 4);
+      // Aufgeworfene Asphaltschollen rings um das Loch (niedrig – der Bohrer soll darüber zu sehen sein)
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2 + Math.random() * 0.3;
+        const r = 1.05 + Math.random() * 0.3;
+        this.marks.lump(th.x + Math.sin(a) * r, th.y - 0.05, th.z + Math.cos(a) * r, seg, a, 0.55 + Math.random() * 0.25, 0.2 + Math.random() * 0.12, 0.8, this.now, 3.4, 0.7);
+      }
+    }
+    // Er kommt ganz heraus (ein Stück größer als beim Einstecken – Comic-Übertreibung) und schwebt dann bebend über dem Loch.
+    const big = 1.25;
+    const e = u < 0.12 ? 0 : easeOutBack(Math.min(1, (u - 0.12) / 0.55));
+    const tip = -0.4 + (L * big + 0.75) * e;
+    const shake = 0.06 * Math.sin(time * 47) * Math.min(1, e);
+    mid.rotation.set(Math.PI + shake, 0, shake * 0.8);
+    mid.position.y = tip - L * big;
+    // Kurz vor der Explosion schwillt er im Takt an.
+    const swell = u > 0.62 ? 1 + 0.18 * ((u - 0.62) / 0.38) * (0.5 + 0.5 * Math.sin(time * 70)) : 1;
+    mid.scale.setScalar(big * swell);
+    v.spin += dt * DRILL_SPIN_RISE;
+    v.body.rotation.set(0, v.spin, 0);
+    // Erdfontäne (seitlich weg, damit der Bohrer zu sehen bleibt) und Funken, wo er durch den Asphalt reißt
+    v.acc += dt * (u < 0.5 ? 46 : 20);
+    while (v.acc >= 1) {
+      v.acc -= 1;
+      const a = Math.random() * Math.PI * 2;
+      const sp = 3 + Math.random() * 5;
+      fx.puff(th.x + Math.sin(a) * 0.6, th.y + 0.15, th.z + Math.cos(a) * 0.6, Math.sin(a) * sp, 4 + Math.random() * 6, Math.cos(a) * sp, 0.55 + Math.random() * 0.3, 0.18 + Math.random() * 0.22, Math.random() < 0.3 ? EARTH_DARK : EARTH[(Math.random() * 4) | 0], 0.1, 18);
+    }
+    if (tip > 0 && e < 0.85) {
+      v.acc2 += dt * 26;
+      while (v.acc2 >= 1) {
+        v.acc2 -= 1;
+        const a = Math.random() * Math.PI * 2;
+        const sp = 4 + Math.random() * 5;
+        fx.spark(th.x + Math.sin(a) * 0.3, th.y + 0.15, th.z + Math.cos(a) * 0.3, Math.sin(a) * sp, 2 + Math.random() * 4, Math.cos(a) * sp, 0.2 + Math.random() * 0.12, 0.18 + Math.random() * 0.1, SPARK_HOT[(Math.random() * 3) | 0]);
+      }
+    }
+    v.lx = th.x;
+    v.ly = th.y;
+    v.lz = th.z;
   }
 
   private smoke(v: Visual, th: SnapshotThing, dt: number, time: number, fx: FxSink): void {
@@ -890,6 +1498,7 @@ export class ThingVisuals {
     for (const v of this.live.values()) this.group.remove(v.obj);
     this.live.clear();
     this.primed = false;
+    this.marks.clear();
   }
 
   dispose(): void {
@@ -899,5 +1508,6 @@ export class ThingVisuals {
     this.oilMat.dispose();
     this.swirlMat.dispose();
     this.swirlHot.dispose();
+    this.marks.dispose();
   }
 }

@@ -2,14 +2,16 @@
 
 import {
   ITEM_BOOST,
+  ITEM_DRILL,
   ITEM_EMP,
+  ITEM_GLUE,
   ITEM_GOLD,
   ITEM_GUARD,
   ITEM_KITE,
   ITEM_OIL,
   ITEM_ROCKET,
+  ITEM_ROBOT,
   ITEM_SMOKE,
-  ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
@@ -82,10 +84,33 @@ export const ITEMS: Record<number, ItemInfo> = {
     // Goldene Flasche mit Korken, ein Stern auf dem Bauch (ausgespart), daneben ein Glitzern.
     icon: '<rect x="9.6" y="1.4" width="4.8" height="3.2" rx="1" fill="currentColor"/><path fill-rule="evenodd" d="M10.2 5.4h3.6v2.5c2.700 1 4.400 3.400 4.400 6.300v5.900a2.400 2.400 0 0 1-2.400 2.400H8.200a2.400 2.400 0 0 1-2.400-2.400v-5.900c0-2.900 1.700-5.300 4.400-6.300zM12 12.200l.79 2.110 2.250.100-1.760 1.410.6 2.170L12 16.750l-1.880 1.240.6-2.170-1.760-1.410 2.250-.1z" fill="currentColor"/><path d="M20 2.200l.6 1.500 1.500.6-1.500.6-.6 1.500-.6-1.500-1.500-.6 1.500-.6z" fill="currentColor"/>',
   },
-  [ITEM_SPRING]: {
-    name: 'Sprungfeder',
-    hint: 'Hüpfer über alles hinweg',
-    icon: `<path d="M5.500 3h13M5.500 21h13M7 18l10-3.700L7 10.600l10-3.700" ${STROKE}/>`,
+  [ITEM_ROBOT]: {
+    name: 'Roboter',
+    hint: 'Verwandeln, rennen, Satz nach vorn',
+    // Roboter mit Antenne und Augen (ausgespart), Armen und Rädern als Füßen.
+    icon:
+      '<circle cx="12" cy="2.1" r="1.5" fill="currentColor"/><rect x="11.2" y="2.6" width="1.6" height="2.4" fill="currentColor"/>' +
+      '<path fill-rule="evenodd" d="M9 4.4h6a1.700 1.700 0 0 1 1.700 1.700v3.100A1.700 1.700 0 0 1 15 10.900H9a1.700 1.700 0 0 1-1.700-1.700V6.100A1.700 1.700 0 0 1 9 4.400zm1.300 2.200a1.200 1.200 0 1 0 0 2.400 1.200 1.200 0 0 0 0-2.400zm3.400 0a1.200 1.200 0 1 0 0 2.400 1.200 1.200 0 0 0 0-2.400z" fill="currentColor"/>' +
+      '<rect x="6.600" y="11.700" width="10.800" height="5.400" rx="1.200" fill="currentColor"/>' +
+      '<rect x="2.800" y="11.900" width="2.800" height="5.400" rx="1.400" fill="currentColor"/><rect x="18.400" y="11.900" width="2.800" height="5.400" rx="1.400" fill="currentColor"/>' +
+      '<rect x="8.500" y="16.800" width="2.200" height="2.200" fill="currentColor"/><rect x="13.300" y="16.800" width="2.200" height="2.200" fill="currentColor"/>' +
+      '<circle cx="9.600" cy="20.500" r="1.900" fill="none" stroke="currentColor" stroke-width="1.700"/><circle cx="14.400" cy="20.500" r="1.900" fill="none" stroke="currentColor" stroke-width="1.700"/>',
+  },
+  [ITEM_GLUE]: {
+    name: 'Kleber',
+    hint: 'Klebt dem hinter dir die Sicht zu',
+    // Klebepistole (Griff, Abzug, Düse), vorn tropft ein Klecks.
+    icon:
+      '<path d="M8.200 4.400h11.400a2.100 2.100 0 0 1 2.100 2.100v3a2.100 2.100 0 0 1-2.100 2.100h-2.200l1.100 8a1.300 1.300 0 0 1-1.300 1.500h-2.600a1.300 1.300 0 0 1-1.300-1.100l-1.300-8.400H8.200z" fill="currentColor"/>' +
+      '<path d="M8.400 5.800 3.200 7.300v1.900l5.200 1.500z" fill="currentColor"/>' +
+      '<path d="M11.400 12.600c.2 1.700.9 2.800 2.100 3.400" fill="none" stroke="currentColor" stroke-width="1.700" stroke-linecap="round"/>' +
+      '<path d="M3.700 11.200c1.500 2.100 2.700 3.500 2.700 5a2.700 2.700 0 0 1-5.400 0c0-1.500 1.200-2.900 2.700-5z" fill="currentColor"/>',
+  },
+  [ITEM_DRILL]: {
+    name: 'Bohrer',
+    hint: 'Bohrt sich zum Ersten',
+    // Griff, Motorgehäuse mit ausgespartem Band, darunter der Bohrkopf als Kegel mit schrägen Spiralfugen.
+    icon: '<rect x="6" y="1.4" width="12" height="2.8" rx="1.4" fill="currentColor"/><rect x="10.6" y="3.6" width="2.8" height="2.4" fill="currentColor"/><path fill-rule="evenodd" d="M8.5 5.5h7a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2zM8.6 8.1h6.8v1.3H8.6z" fill="currentColor"/><rect x="9.6" y="11" width="4.8" height="1.8" fill="currentColor"/><path d="M7.5 12.5H16.5L15.72 14.4 8.77 15.6zM9.34 17 15.15 15.8 14.21 18.1 10.28 19.3zM10.85 20.7 13.64 19.5 12 23.5z" fill="currentColor"/>',
   },
 };
 

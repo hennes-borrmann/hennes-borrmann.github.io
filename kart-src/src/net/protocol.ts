@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 27;
+export const PROTOCOL_VERSION = 28;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -52,6 +52,8 @@ export type FxKind =
   | 'block'
   /** Vom Kurzschluss erwischt. */
   | 'stall'
+  /** Vom Kleber getroffen. */
+  | 'glue'
   | 'land'
   | 'fall'
   | 'lap'
@@ -245,14 +247,15 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; ti
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
 //        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 67 Byte]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 72 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)
 //   ack   = letzte vom Host verarbeitete Eingabe-Nummer dieses Spielers
 // Ding:  [u8 id][u8 art][u8 restzeit in 1/4 s][f32 x][f32 y][f32 z][f32 vx][f32 vz][i8 ziel]
+//        [u16 alter in ticks][u16 abschnitt][u8 stufe]
 //   "Dinge" sind alles, was außer Karts auf der Strecke unterwegs ist:
-//   Rollreifen, Ölflecken, Brummkreisel, Rauchwolken.
+//   Rollreifen, Ölflecken, Brummkreisel, Rauchwolken, Bohrer.
 
 export const RACE_COUNTDOWN = 0;
 export const RACE_RUNNING = 1;
@@ -262,11 +265,12 @@ export const THING_TIRE = 1;
 export const THING_OIL = 2;
 export const THING_TOP = 3;
 export const THING_SMOKE = 4;
+export const THING_DRILL = 5;
 
-const STATE_SIZE = 67;
+const STATE_SIZE = 72;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
-const SNAP_THING_SIZE = 24;
+const SNAP_THING_SIZE = 29;
 
 export interface SnapshotKart {
   slot: number;
@@ -292,8 +296,14 @@ export interface SnapshotThing {
   z: number;
   vx: number;
   vz: number;
-  /** Brummkreisel: Platz des Karts, das er sucht; sonst -1. */
+  /** Brummkreisel und Bohrer: Platz des Karts, das sie suchen; sonst -1. */
   target: number;
+  /** Ticks seit dem Erscheinen (Bohrer: seit dem Einstecken). */
+  age: number;
+  /** Abschnitt der Strecke, auf dem das Ding ist. */
+  seg: number;
+  /** Stufe im Leben des Dings, je Art (Bohrer: Ticks seit dem Durchbruch nach oben, 0 = noch im bzw. unter dem Boden). */
+  stage: number;
 }
 
 export interface Snapshot {
@@ -345,6 +355,11 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setFloat32(o + 60, s.aimZ);
   v.setUint8(o + 64, s.wing);
   v.setUint16(o + 65, s.gold);
+  v.setUint8(o + 67, s.robot);
+  v.setUint8(o + 68, s.glue);
+  v.setUint8(o + 69, s.glueShot);
+  v.setInt8(o + 70, s.glueAim);
+  v.setUint8(o + 71, s.plant);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -383,6 +398,11 @@ function readState(v: DataView, o: number): KartState {
     aimZ: v.getFloat32(o + 60),
     wing: v.getUint8(o + 64),
     gold: v.getUint16(o + 65),
+    robot: v.getUint8(o + 67),
+    glue: v.getUint8(o + 68),
+    glueShot: v.getUint8(o + 69),
+    glueAim: v.getInt8(o + 70),
+    plant: v.getUint8(o + 71),
   };
 }
 
@@ -424,6 +444,9 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
     v.setFloat32(o + 15, t.vx);
     v.setFloat32(o + 19, t.vz);
     v.setInt8(o + 23, t.target);
+    v.setUint16(o + 24, Math.max(0, Math.min(65535, t.age)));
+    v.setUint16(o + 26, t.seg);
+    v.setUint8(o + 28, Math.max(0, Math.min(255, t.stage)));
     o += SNAP_THING_SIZE;
   }
   return buf;
@@ -473,6 +496,9 @@ export function decodeSnapshot(view: DataView): Snapshot | null {
       vx: view.getFloat32(o + 15),
       vz: view.getFloat32(o + 19),
       target: view.getInt8(o + 23),
+      age: view.getUint16(o + 24),
+      seg: view.getUint16(o + 26),
+      stage: view.getUint8(o + 28),
     });
     o += SNAP_THING_SIZE;
   }

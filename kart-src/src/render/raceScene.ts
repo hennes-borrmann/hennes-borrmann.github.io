@@ -18,15 +18,23 @@ import {
   ITEM_OIL,
   ITEM_ROCKET,
   ITEM_SMOKE,
-  ITEM_SPRING,
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
+  DRILL_DIG_TICKS,
+  DRILL_FORE,
+  DRILL_PLANT_TICKS,
+  DRILL_SIDE,
+  DRILL_RISE_TICKS,
+  DRILL_WARN_TICKS,
   GOLD_ALL,
   GOLD_DRINK_TICKS,
   GOLD_SCALE,
   GOLD_TICKS,
   GOLD_WARN,
+  GLUE_FIRE,
+  GLUE_HIT,
+  ROBOT_LEAP_AT,
   goldOn,
   PAD_TICKS,
   SPIN_TICKS,
@@ -81,11 +89,12 @@ import { FALL } from './life/baumLand';
 import { DAUER, LAEUTEN, TURM } from './life/daecherLand';
 import { RAKETE } from '../game/tracks/rampe';
 import type { RaceView, RenderEntity } from '../game/view';
-import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
+import { RACE_COUNTDOWN, RACE_RESULTS, THING_DRILL, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
 import { BlobShadows, Bolts, ComicPops, LightPools, Particles, SkidMarks, SpeedLines } from './effects';
 import type { FxSink } from './fxApi';
 import { KartVisual, type KartDetail, type KartPose } from './kartModel';
+import { GlueShots } from './glueShots';
 import { ThingVisuals } from './things';
 import { setOutlinesVisible } from './toon';
 import { World } from './world';
@@ -122,12 +131,19 @@ export interface SceneEvent {
     | 'use-guard'
     | 'use-emp'
     | 'use-smoke'
-    | 'use-spring'
     | 'use-kite'
     /** Rakete: Verwandlung beginnt; sie hebt ab; eine fremde stürzt auf das eigene Kart herab (nur eigenes Kart); Einschlag. */
     | 'use-rocket'
     /** Gleiter: Absprung (die Flügel gehen dann mit 'wings' auf). */
     | 'use-wing'
+    /** Roboter: das Kart verwandelt sich (Servos, Einrasten) / ein Fuß setzt auf / Satz nach vorn, im Sprung zurück. */
+    | 'use-robot'
+    | 'robot-step'
+    | 'robot-jump'
+    /** Kleber: die Pistole klappt aus / der Klumpen verlässt sie / er klatscht auf (Fahrer oder Fahrbahn). */
+    | 'use-glue'
+    | 'glue-shot'
+    | 'glue-hit'
     /**
      * Get Gold: Austrinken beginnt (Gluckern) / ausgetrunken, das Kart wird gold und groß / es ist abgelaufen / ein Gold-Kart
      * haut ein anderes um (am Getroffenen gemeldet) / ein Item prallt an einem Gold-Kart ab.
@@ -140,6 +156,16 @@ export interface SceneEvent {
     | 'rocket-launch'
     | 'rocket-incoming'
     | 'rocket-hit'
+    /**
+     * Bohrer: die Figur steckt ihn in den Boden (Ausholen, Hineinrammen) / ein Stoß Bohrgeräusch (wiederholt, ortsfest; die
+     * Tonhöhe steigt mit dem Tempo, siehe pitch) / es grollt unter dem eigenen Kart, er kommt gleich (nur das Ziel) / er
+     * bricht durch die Fahrbahn / er explodiert.
+     */
+    | 'use-drill'
+    | 'drill'
+    | 'drill-rumble'
+    | 'drill-burst'
+    | 'drill-blast'
     | 'finish'
     /** Aus dem Windschatten ausgeschert: es zieht. */
     | 'draft'
@@ -268,6 +294,8 @@ export interface SceneEvent {
   pan: number;
   /** 0..1 nach Entfernung */
   gain: number;
+  /** Tonhöhe als Faktor (1 = wie im Rezept) – nur wo das Geräusch sie nutzt (Bohrer). */
+  pitch?: number;
 }
 
 /** Was der Ton pro Kart wissen muss. */
@@ -359,6 +387,20 @@ interface KartView {
   inCastle: boolean;
   /** Get Gold: Restzeit im letzten Bild (Ticks, wie KartState.gold). */
   gold: number;
+  /** Roboter: Ticks seit dem Auslösen im letzten Bild, dieselbe Zeit weich in Sekunden, zuletzt gesehene Schrittzahl. */
+  robot: number;
+  robotT: number;
+  robotSteps: number;
+  /** Kleber: Restzeit im letzten Bild (Ticks); Pistole: Zeit seit dem Auslösen (weich, Sekunden); der Schuss ist raus / angekommen. */
+  glue: number;
+  gunT: number;
+  shotOut: boolean;
+  shotDone: boolean;
+  /** Kleber: wo der Klumpen die Pistole verlassen hat und wo er ohne Ziel aufklatscht (Welt). */
+  shotFrom: THREE.Vector3;
+  shotMiss: THREE.Vector3;
+  /** Bohrer: Einstecken im letzten Bild (Ticks, wie KartState.plant). */
+  plant: number;
   roulette: number;
   item: number;
   flags: number;
@@ -386,6 +428,18 @@ const GOLD_SPARKS = [0xffd34a, 0xffe98a, 0xffb31f, 0xfff0b0];
 
 /** Farbe der Staubfahne je Untergrund (0 = fester Boden, kein Staub); Reihenfolge wie SURFACES. */
 const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gravel: 0xb5aea4, grass: 0x8cc463, snow: 0xffffff, regolith: 0xc9c6d2 } as Record<string, number>)[s.id] ?? 0);
+
+/**
+ * Ticks aus dem Spielstand (0 = aus) → weich laufende Sekunden für die Darstellung: Fremde Karts melden ihren Stand nur
+ * stoßweise; dazwischen läuft die Zeit mit dem Bild weiter und wird sacht nachgezogen. Große Sprünge werden übernommen.
+ */
+function followTicks(cur: number, ticks: number, dt: number): number {
+  if (ticks <= 0) return 0;
+  const want = ticks / 60;
+  if (cur <= 0 || Math.abs(cur - want) > 0.15) return want;
+  const next = cur + dt;
+  return next + (want - next) * Math.min(1, dt * 8);
+}
 
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= 2 * Math.PI;
@@ -568,6 +622,8 @@ export class RaceScene {
   threat = 0;
   /** Eine fremde Rakete hat das eigene Kart als Ziel: 0 = keine, sonst wie weit sie ist (bis 1 = Einschlag). */
   rocket = 0;
+  /** Ein fremder Bohrer hat das eigene Kart als Ziel: 0 = keiner, sonst 0,01 … 1 (1 = er bricht gleich durch). */
+  drill = 0;
   onEvent: ((e: SceneEvent) => void) | null = null;
   /** buildMs = so lange hat der Aufbau der Welt zuletzt gedauert. */
   readonly stats = { fps: 60, calls: 0, triangles: 0, level: 1, scale: 1, ratio: 1, buildMs: 0 };
@@ -639,6 +695,8 @@ export class RaceScene {
   /** Get Gold: die Karts, die in diesem Bild gold sind; welche Dinge im letzten Bild wo waren (abgeprallt?). */
   private readonly goldList: RenderEntity[] = [];
   private readonly thingsWere = new Map<number, { x: number; y: number; z: number }>();
+  /** Bohrer, die im letzten Bild da waren (Nummer → Stand, Pause bis zum nächsten Bohrgeräusch, schon gegrollt?). */
+  private readonly drills = new Map<number, { x: number; y: number; z: number; stage: number; target: number; wait: number; rumbled: boolean; seen: boolean }>();
   private localSlot = -1;
   private readonly empHit: KartView[] = [];
   /** Teilchen für Bausteine, die das Teilchensystem nicht kennen (Items, Hindernisse). */
@@ -698,6 +756,16 @@ export class RaceScene {
   private readonly q1 = new THREE.Quaternion();
   private readonly e1 = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly flat = new THREE.Quaternion();
+  private readonly m1 = new THREE.Matrix4();
+  /** Kleber: Ziel der Pistole im Raum des schießenden Karts (wird je Bild neu gesetzt). */
+  private readonly gunAim = new THREE.Vector3();
+  private readonly glueP = new THREE.Vector3();
+  private readonly glueD = new THREE.Vector3();
+  /** Kleber: Klumpen im Flug und Kleckse auf der Fahrbahn. */
+  private glueShots: GlueShots | null = null;
+  /** Kleber auf dem eigenen Bildschirm: Restzeit in Sekunden und wie oft es das eigene Kart schon erwischt hat (neue Kleckse). */
+  glue = 0;
+  glueHits = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -794,7 +862,8 @@ export class RaceScene {
     this.world = new World(TRACK, lv.world);
     this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
-    this.scene.add(this.world.group, this.things.group);
+    this.glueShots = new GlueShots(this.level > 0);
+    this.scene.add(this.world.group, this.things.group, this.glueShots.group);
     this.mechanics = buildMechanics(TRACK, this.level > 0, this.world);
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
@@ -842,6 +911,11 @@ export class RaceScene {
       this.things.dispose();
       this.things = null;
     }
+    if (this.glueShots) {
+      this.scene.remove(this.glueShots.group);
+      this.glueShots.dispose();
+      this.glueShots = null;
+    }
     for (const m of this.mechanics) {
       this.scene.remove(m.group);
       m.dispose();
@@ -862,11 +936,15 @@ export class RaceScene {
     this.hitstop = 0;
     this.smoke = 0;
     this.rocket = 0;
+    this.drill = 0;
+    this.drills.clear();
     this.skids.clear();
     this.puffs.clear();
     this.sparks.clear();
     this.pops.clear();
     this.things?.clear();
+    this.glueShots?.clear();
+    this.glue = 0;
     this.bolts.clear();
     this.threat = 0;
     for (const k of this.karts.values()) k.fresh = true;
@@ -905,6 +983,7 @@ export class RaceScene {
     for (const k of this.karts.values()) k.visual.setDetail(lv.kart);
     this.needsCompile = true;
     if (this.things) setOutlinesVisible(this.things.group, this.level > 0);
+    if (this.glueShots) setOutlinesVisible(this.glueShots.group, this.level > 0);
     // Fällt die Qualität mitten im Rennen, verlieren auch Verkehr und Lava ihre Konturen.
     for (const m of this.mechanics) setOutlinesVisible(m.group, this.level > 0);
     this.skids.mesh.visible = lv.skid;
@@ -1012,6 +1091,16 @@ export class RaceScene {
       sizeK: 1,
       inCastle: false,
       gold: 0,
+      robot: 0,
+      robotT: 0,
+      robotSteps: visual.robotSteps,
+      glue: 0,
+      gunT: 0,
+      shotOut: false,
+      shotDone: false,
+      shotFrom: new THREE.Vector3(),
+      shotMiss: new THREE.Vector3(),
+      plant: 0,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1462,6 +1551,95 @@ export class RaceScene {
     this.rocket = warn;
   }
 
+  /**
+   * Bohrer: Bohrgeräusch (immer dichter und höher, je schneller er ist), Durchbruch und Explosion („KAWUMM!“, Wackeln in der
+   * Nähe) – und die Warnung für sein Ziel: Hinweis während der ganzen Fahrt; in der letzten Sekunde vor dem Durchbruch grollt
+   * es, die Kamera bebt, und vor dem Kart reißt die Fahrbahn auf (auf allen Bildschirmen, damit jeder sieht, wen es trifft).
+   */
+  private updateDrills(things: SnapshotThing[], entities: RenderEntity[], me: RenderEntity | null, dt: number): void {
+    let warn = 0;
+    for (const d of this.drills.values()) d.seen = false;
+    for (const th of things) {
+      if (th.kind !== THING_DRILL) continue;
+      let d = this.drills.get(th.id);
+      if (!d) {
+        d = { x: th.x, y: th.y, z: th.z, stage: th.stage, target: th.target, wait: 0, rumbled: false, seen: true };
+        this.drills.set(th.id, d);
+      }
+      d.seen = true;
+      if (th.stage > 0 && d.stage === 0) {
+        // (Das Ziel hört es aus nächster Nähe – voll, ohne Richtung.)
+        if (me && th.target === me.slot) this.onEvent?.({ kind: 'drill-burst', slot: me.slot, local: true, pan: 0, gain: 1 });
+        else this.emitAt('drill-burst', th.x, th.y, th.z, 110);
+        this.pops.show('KRRRK!', th.x, th.y + 3.2, th.z, 'warm', 3.6);
+      }
+      d.x = th.x;
+      d.y = th.y;
+      d.z = th.z;
+      d.stage = th.stage;
+      d.target = th.target;
+      // Bohrgeräusch: beim Eindrehen immer schneller, unter der Erde mit dem Tempo, beim Durchbruch kreischend.
+      const speed = Math.hypot(th.vx, th.vz);
+      const dig = Math.min(1, th.age / DRILL_DIG_TICKS);
+      const pitch = th.stage > 0 ? 2.3 : th.age <= DRILL_DIG_TICKS ? 0.5 + 0.55 * dig * dig : 0.75 + Math.min(1.45, speed / 150);
+      const every = th.stage > 0 ? 0.06 : th.age <= DRILL_DIG_TICKS ? 0.2 - 0.1 * dig : Math.max(0.065, 0.14 - speed * 0.0004);
+      d.wait -= dt;
+      if (d.wait <= 0) {
+        d.wait = every;
+        this.emitDrill(th.x, th.y, th.z, pitch);
+      }
+      // Warnung für das Ziel
+      const left = th.ttl * 60 - DRILL_RISE_TICKS;
+      const target = th.target >= 0 ? entities.find((e) => e.slot === th.target) : undefined;
+      if (me && !me.finished && th.target === me.slot) warn = Math.max(warn, th.stage > 0 ? 1 : left <= DRILL_WARN_TICKS ? 0.5 + 0.5 * (1 - Math.max(0, left) / DRILL_WARN_TICKS) : 0.01);
+      if (target && th.stage === 0 && th.age > DRILL_DIG_TICKS && left <= DRILL_WARN_TICKS) {
+        const k = 1 - Math.max(0, left) / DRILL_WARN_TICKS;
+        // Risse vor dem Kart: auf seiner Spur die Strecke entlang, dort, wo es in knapp einer halben Sekunde ist
+        const t = this.track;
+        const ahead = 4 + Math.hypot(target.vx, target.vz) * 0.4;
+        projectOnTrack(t, target.x, target.z, target.seg < t.total ? target.seg : 0);
+        const kb = t.branchOf[proj.seg];
+        const lat = Math.max(-t.rh[proj.seg], Math.min(t.rh[proj.seg], proj.lat));
+        const seg = walk(t, proj.seg, Math.round(ahead / t.step), kb >= 0 ? 1 << kb : 0);
+        this.things?.warnCracks(t.px[seg] + rightX(t, seg) * lat, t.py[seg] + lat * t.bank[seg], t.pz[seg] + rightZ(t, seg) * lat, seg, Math.atan2(t.tx[seg], t.tz[seg]), k, dt, this.fx);
+        if (target.slot === this.localSlot) {
+          this.shake = Math.max(this.shake, 0.12 + 0.25 * k);
+          if (!d.rumbled) {
+            d.rumbled = true;
+            this.onEvent?.({ kind: 'drill-rumble', slot: target.slot, local: true, pan: 0, gain: 1 });
+          }
+        }
+      }
+    }
+    for (const [id, d] of this.drills) {
+      if (d.seen) continue;
+      this.drills.delete(id);
+      if (d.stage <= 0) continue;
+      // Explodiert
+      this.pops.show('KAWUMM!', d.x, d.y + 3.4, d.z, 'hot', 5.4);
+      if (me && d.target === me.slot) this.onEvent?.({ kind: 'drill-blast', slot: me.slot, local: true, pan: 0, gain: 1 });
+      else this.emitAt('drill-blast', d.x, d.y, d.z, 140);
+      if (me) {
+        const dist = Math.hypot(me.x - d.x, me.z - d.z);
+        if (dist < 40) this.shake = Math.max(this.shake, 0.9 * (1 - dist / 40));
+        if (d.target === me.slot && dist < 12) this.hitstop = Math.max(this.hitstop, 0.08);
+      }
+    }
+    this.drill = warn;
+  }
+
+  /** Ein Stoß Bohrgeräusch an einem Ort (Tonhöhe als Faktor). */
+  private emitDrill(x: number, y: number, z: number, pitch: number): void {
+    if (!this.onEvent) return;
+    this.v1.set(x, y, z).sub(this.camera.position);
+    const dist = this.v1.length();
+    const gain = Math.max(0, 1 - dist / 90);
+    if (gain <= 0.02) return;
+    this.v2.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const pan = dist > 0.5 ? Math.max(-1, Math.min(1, this.v1.dot(this.v2) / dist)) : 0;
+    this.onEvent({ kind: 'drill', slot: -1, local: false, pan, gain, pitch });
+  }
+
   /** Nächster verdrehter Abschnitt zu (x, z) – oder −1, wenn der Punkt nicht bei einem verdrehten Stück liegt. */
   private nearestTwistSeg(x: number, z: number): number {
     const t = this.track;
@@ -1562,6 +1740,102 @@ export class RaceScene {
       const s = speed * (0.4 + Math.random() * 0.6);
       pool.emit(x, y, z, Math.cos(a) * s, up * (0.3 + Math.random()), Math.sin(a) * s, life * (0.6 + Math.random() * 0.6), size * (0.7 + Math.random() * 0.6), this.color, glow ? -size : size * 1.2, glow ? 9 : 4, 1.5);
     }
+  }
+
+  /**
+   * Kleber: Der Klumpen verlässt die Pistole (Zeitpunkt GLUE_FIRE), fliegt im Bogen und kommt bei GLUE_HIT an – im Gesicht
+   * des Ziels (so, wie es auf diesem Bildschirm gerade steht) oder ohne Ziel hinter dem Schützen auf der Fahrbahn.
+   * Ob er klebt, sagt der Spielstand des Getroffenen (Stoßfänger und Get Gold halten ihn ab – dort klatscht er ab).
+   */
+  private glueFlights(entities: RenderEntity[], me: RenderEntity | null, dt: number): void {
+    const shots = this.glueShots;
+    if (!shots) return;
+    const fire = GLUE_FIRE / 60;
+    const hit = GLUE_HIT / 60;
+    for (const e of entities) {
+      const k = this.karts.get(e.slot);
+      if (!k) continue;
+      if (e.glueShot === 0 || k.gunT < fire) {
+        k.shotOut = false;
+        k.shotDone = false;
+        continue;
+      }
+      const local = e.slot === this.localSlot;
+      const root = k.visual.root;
+      const target = e.glueAim >= 0 ? entities.find((x) => x.slot === e.glueAim) : undefined;
+      const tv = target ? this.karts.get(target.slot) : undefined;
+      if (!k.shotOut) {
+        // Abschuss: aus der Mündung, mit einem Spritzer; ohne Ziel liegt der Aufschlag gut 13 m hinter dem Schützen.
+        k.shotOut = true;
+        root.updateMatrixWorld();
+        root.localToWorld(k.shotFrom.copy(k.visual.anchors.gunMuzzle));
+        this.burst(k.shotFrom.x, k.shotFrom.y, k.shotFrom.z, 8, 4, 0xfff1c2, false, 0.35, 0.35, 2);
+        this.emit('glue-shot', k, local);
+        const t = this.track;
+        const bx = e.x - Math.sin(e.heading) * 13;
+        const bz = e.z - Math.cos(e.heading) * 13;
+        projectOnTrack(t, bx, bz, e.seg);
+        const g = groundNow(t, proj.seg, proj.along, proj.lat, this.mechTime);
+        k.shotMiss.set(bx, g === NO_GROUND ? e.y - 1 : g, bz);
+      }
+      if (k.shotDone) continue;
+      // Ziel: das Gesicht des Getroffenen (etwas vor der Kartmitte, auf Kopfhöhe) – oder der Aufschlag auf der Fahrbahn.
+      const to = this.glueD;
+      if (tv && tv.seen) {
+        const r = tv.visual.root;
+        to.set(Math.sin(r.rotation.y) * 0.25, 1.15 * r.scale.y, Math.cos(r.rotation.y) * 0.25).add(r.position);
+      } else to.copy(k.shotMiss);
+      const u = Math.min(1, (k.gunT - fire) / (hit - fire));
+      const from = k.shotFrom;
+      const dist = from.distanceTo(to);
+      const arc = (0.7 + dist * 0.06) * 4 * u * (1 - u);
+      const p = this.glueP.lerpVectors(from, to, u);
+      p.y += arc;
+      if (u < 1) {
+        // Flugrichtung: Verbindungslinie plus Steigung des Bogens
+        this.v2.subVectors(to, from);
+        this.v2.y += (0.7 + dist * 0.06) * 4 * (1 - 2 * u);
+        shots.fly(e.slot, p, this.v2, u);
+        continue;
+      }
+      // Angekommen
+      k.shotDone = true;
+      if (target && tv && tv.seen) {
+        const tLocal = target.slot === this.localSlot;
+        if (target.gold > 0 || target.guard > 0 || target.tow > 0 || target.rocket > 0) {
+          // Abgeprallt: ein paar Spritzer, den Rest erzählen „PLING!“ bzw. „KLONK!“
+          this.burst(to.x, to.y, to.z, 10, 6, 0xfff1c2, false, 0.4, 0.4, 3);
+        } else {
+          // (Das Wort steht dort, wo der Getroffene gleich ist – sonst führe die Kamera hinter ihm hindurch.)
+          this.pops.show('PLATSCH!', to.x + target.vx * 0.55, to.y + 1.7, to.z + target.vz * 0.55, 'white', tLocal ? 3.4 : 3.8);
+          this.burst(to.x, to.y, to.z, 12, 5, 0xfff1c2, false, 0.32, 0.45, 2.5);
+          tv.visual.squash(0.7);
+          this.emit('glue-hit', tv, tLocal);
+          if (tLocal) this.shake = Math.max(this.shake, 0.25);
+        }
+      } else {
+        this.splatOnRoad(to, e.seg);
+        this.pops.show('PLATSCH!', to.x, to.y + 1.4, to.z, 'white', 2.8);
+        this.burst(to.x, to.y + 0.2, to.z, 12, 5, 0xfff1c2, false, 0.45, 0.5, 2);
+        this.emitAt('glue-hit', to.x, to.y, to.z, 60);
+      }
+    }
+    // (Wer gerade getroffen ist, sieht Kleber auf dem Bildschirm – siehe glue.)
+    this.glue = me && me.respawn === 0 ? me.glue / 60 : 0;
+    shots.update(dt);
+  }
+
+  /** Kleber ohne Ziel: Klecks auf die Fahrbahn, nach ihrer Neigung gelegt (hint: Abschnitt in der Nähe). */
+  private splatOnRoad(p: THREE.Vector3, hint: number): void {
+    const t = this.track;
+    projectOnTrack(t, p.x, p.z, hint < t.total ? hint : 0);
+    const seg = proj.seg;
+    const slope = (t.py[t.next[seg]] - t.py[t.prev[seg]]) / (2 * t.step);
+    const gx = slope * t.tx[seg] + t.bank[seg] * rightX(t, seg);
+    const gz = slope * t.tz[seg] + t.bank[seg] * rightZ(t, seg);
+    this.v2.set(-gx, 1, -gz).normalize();
+    this.q1.setFromUnitVectors(Y_UP, this.v2);
+    this.glueShots?.splat(p, this.q1, 1.3);
   }
 
   /**
@@ -1877,6 +2151,20 @@ export class RaceScene {
         k.visual.squash(0.6);
         this.emit('gold-end', k, local);
       }
+      // Bohrer: die Figur holt ihn hervor und steckt ihn ein; im Moment, in dem er steckt, spritzt Erde.
+      if (e.plant > 0 && k.plant === 0) this.emit('use-drill', k, local);
+      if (e.plant === 0 && k.plant > 0) {
+        const c = Math.cos(e.heading);
+        const sn = Math.sin(e.heading);
+        // (rechts neben dem Kart, wo der Host ihn absetzt)
+        const px = e.x - c * DRILL_SIDE + sn * DRILL_FORE;
+        const pz = e.z + sn * DRILL_SIDE + c * DRILL_FORE;
+        const p = this.fxAt(px, e.y + 1.2, pz);
+        this.pops.show('RATSCH!', p.x, p.y + 1.6, p.z, 'warm', 3.2);
+        this.burst(px, e.y + 0.2, pz, 10, 5, 0x8a5a34, false, 0.35, 0.5, 5);
+        k.visual.squash(0.55);
+        if (local) this.shake = Math.max(this.shake, 0.22);
+      }
       // Rakete: Verwandlung, Abheben, Landung
       if (e.rocket > 0 && k.rocket === 0) {
         this.pop('VERWANDLUNG!', e, 'cool', 3.6);
@@ -1907,6 +2195,31 @@ export class RaceScene {
           this.shake = Math.max(this.shake, 0.8);
         }
       }
+      // Roboter: Verwandlung beginnt (Klacken an den Gelenken), Satz nach vorn (Staub vom Absprung)
+      if (e.robot > 0 && k.robot === 0) {
+        this.popAhead('ROBO-MODUS!', e, 'cool', 3.6);
+        this.burst(e.x, e.y + 0.5, e.z, 8, 4, 0xffe9a8, true, 0.16, 0.3, 3);
+        k.visual.squash(0.6);
+        this.emit('use-robot', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.12);
+      }
+      if (e.robot > 0 && k.robot > 0) {
+        // Einrasten der Teile: kurze Funken an Knien und Schultern (Zeitpunkte wie in kartModel.ts)
+        for (const at of [0.2, 0.32, 0.42]) {
+          const tick = Math.round(at * 60);
+          if (k.robot < tick && e.robot >= tick) this.burst(e.x, e.y + 0.9 + at, e.z, 5, 3, 0xffe9a8, true, 0.14, 0.2, 2);
+        }
+      }
+      if (e.robot >= ROBOT_LEAP_AT && k.robot < ROBOT_LEAP_AT && k.robot > 0) {
+        this.popAhead('HOPP!', e, 'warm', 3.8);
+        this.burst(e.x, e.y + 0.15, e.z, 12, 6, 0xd9cfc0, false, 0.5, 0.4, 1.2);
+        k.visual.squash(-0.7);
+        this.emit('robot-jump', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.22);
+      }
+      // Kleber: die Pistole klappt aus; das eigene Kart ist getroffen (neue Kleckse auf dem Bildschirm)
+      if (e.glueShot > 0 && k.gunT === 0) this.emit('use-glue', k, local);
+      if (local && e.glue > k.glue + 3) this.glueHits++;
       if (e.spin > 0 && k.spin === 0) {
         // Von einem Gold-Kart umgehauen? (Es steht direkt daneben.)
         const rammer = this.goldNear(e, 4.2);
@@ -2020,11 +2333,8 @@ export class RaceScene {
           k.visual.squash(-1);
           this.emit('use-wing', k, local);
           if (local) this.shake = Math.max(this.shake, 0.18);
-        } else if (k.item === ITEM_SPRING) {
-          this.pop('BOING!', e, 'cool', 3.2);
-          k.visual.squash(-1);
-          this.emit('use-spring', k, local);
         }
+        // (Roboter und Kleber: Wirkung und Ton kommen mit dem Spielstand – Verwandlung bzw. Pistole, siehe oben.)
       }
       if (e.flags & FLAG_WALL && !(k.flags & FLAG_WALL) && k.wallCooldown <= 0 && Math.hypot(e.vx, e.vz) > 9) {
         k.wallCooldown = 0.5;
@@ -2072,6 +2382,9 @@ export class RaceScene {
     k.spin = e.spin;
     k.rocket = e.rocket;
     k.gold = e.gold;
+    k.robot = e.robot;
+    k.glue = e.glue;
+    k.plant = e.plant;
     k.boost = e.boost;
     k.stall = e.stall;
     k.guard = e.guard;
@@ -2109,6 +2422,7 @@ export class RaceScene {
       this.raceId = race.raceId;
       this.skids.clear();
       this.pops.clear();
+      this.drills.clear();
       this.camReady = false;
       for (const k of this.karts.values()) k.fresh = true;
     }
@@ -2215,6 +2529,8 @@ export class RaceScene {
       pose.emote = e.finished ? (e.place <= 1 || (entities.length > 2 && e.place <= 2) ? 'win' : 'lose') : 'none';
       // Get Gold: Austrinken (Fortschritt), gold, kurz vor dem Ende blinkend.
       pose.drink = e.gold > GOLD_TICKS ? (GOLD_ALL - e.gold + 1) / (GOLD_DRINK_TICKS + 1) : 0;
+      // Bohrer: Einstecken (Fortschritt; bei 0 steckt er im Boden).
+      pose.plant = e.plant > 0 ? (DRILL_PLANT_TICKS - e.plant + 1) / (DRILL_PLANT_TICKS + 1) : 0;
       pose.gold = goldOn(e);
       pose.goldBlink = goldOn(e) && e.gold < GOLD_WARN;
 
@@ -2281,7 +2597,30 @@ export class RaceScene {
       // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist – nur nicht, solange es platt ist:
       // die Flunder soll man sehen.
       root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
+      // Roboter und Klebepistole: Zeit seit dem Auslösen (weich – fremde Karts melden sie nur stoßweise); die Pistole zielt
+      // auf das gezeigte Ziel (im Raum dieses Karts). Kleckse auf Gesicht und Haube, solange der Kleber klebt.
+      k.robotT = followTicks(k.robotT, e.robot, dt);
+      pose.robot = k.robotT;
+      k.gunT = followTicks(k.gunT, e.glueShot, dt);
+      pose.glueGun = k.gunT;
+      pose.glue = e.glue / 60;
+      pose.glueAim = null;
+      const aimed = e.glueShot > 0 && e.glueAim >= 0 ? this.karts.get(e.glueAim) : undefined;
+      // (Das Ziel steht dort, wo es zuletzt gezeigt wurde – auch wenn es in diesem Bild erst nach dem Schützen drankommt.)
+      if (aimed && !aimed.fresh) {
+        root.updateMatrix();
+        pose.glueAim = this.gunAim.copy(aimed.visual.root.position).setY(aimed.visual.root.position.y + 1).applyMatrix4(this.m1.copy(root.matrix).invert());
+      }
       k.visual.update(dt, pose);
+      // Roboter: jeder aufgesetzte Fuß wirbelt Staub auf und stampft.
+      if (k.visual.robotSteps !== k.robotSteps) {
+        k.robotSteps = k.visual.robotSteps;
+        root.updateMatrixWorld();
+        const f = root.localToWorld(this.v1.copy(k.visual.robotFoot));
+        this.burst(f.x, f.y + 0.1, f.z, 6, 3, 0xd9cfc0, false, 0.32, 0.3, 0.8);
+        this.emit('robot-step', k, local);
+        if (local) this.shake = Math.max(this.shake, 0.06);
+      }
 
       if (ground !== NO_GROUND && e.respawn === 0 && !flying && twistK) {
         // An der Fassade liegt der Schatten mit an der Wand: den Bodenpunkt und die Neigung mitdrehen.
@@ -2299,7 +2638,8 @@ export class RaceScene {
       }
 
       // (Wer schwebt, zieht weder Reifenspuren noch Staub.)
-      this.trail(k, e, speed, air || twistK || k.hoverK > 0.5, pose.driftStage, dt);
+      // (Als Roboter rennt es auf den Füßen – keine Reifenspuren.)
+      this.trail(k, e, speed, air || twistK || k.hoverK > 0.5 || k.robotT > 0, pose.driftStage, dt);
 
       if (local) {
         me = e;
@@ -2348,6 +2688,7 @@ export class RaceScene {
     } else if (this.twistSegs.length === 0) this.things.afterPlace = null;
     this.things.update(things, dt, this.time, this.fx);
     this.goldDeflect(things);
+    this.glueFlights(entities, me, dt);
     this.things.updateHazards(race.hostTick, this.time);
     for (const m of this.mechanics) {
       m.update(race.time, this.time, dt, this.camera.position, this.fx);
@@ -2374,6 +2715,7 @@ export class RaceScene {
     this.smoke += (Math.max(0, smoke) - this.smoke) * Math.min(1, dt * 8);
     this.threat = Math.max(0, threat);
     this.updateRockets(entities, me);
+    this.updateDrills(things, entities, me, dt);
     this.bolts.update(dt);
 
     this.puffs.update(dt);
@@ -2397,7 +2739,9 @@ export class RaceScene {
       // Schutzring, Tempostriche). Sonst ruckelt es beim ersten Schub oder Treffer.
       this.needsCompile = false;
       this.phase = 'beim Übersetzen der Grafikprogramme';
+      this.glueShots?.park();
       this.renderer.compile(this.scene, this.camera);
+      this.glueShots?.unpark();
     }
     this.phase = 'beim Zeichnen';
     this.renderer.render(this.scene, this.camera);
@@ -2967,10 +3311,19 @@ export class RaceScene {
   }
 
   /** Für Tests: wie ein Kart gerade gezeigt wird – Maßstab und wie gold (0 … 1). */
-  kartLook(slot: number): { scale: number; gold: number; visible: boolean } | null {
+  kartLook(slot: number): { scale: number; gold: number; visible: boolean; robot: number; steps: number; gun: number; glue: number } | null {
     const k = this.karts.get(slot);
     if (!k) return null;
-    return { scale: k.visual.root.scale.y, gold: k.visual.goldLook, visible: k.visual.root.visible };
+    return {
+      scale: k.visual.root.scale.y,
+      gold: k.visual.goldLook,
+      visible: k.visual.root.visible,
+      // Roboter: wie weit verwandelt (0 … 1) und gezählte Schritte; Kleber: Pistole ausgeklappt (0 … 1), Kleckse (0 … 1)
+      robot: k.visual.robotLook,
+      steps: k.visual.robotSteps,
+      gun: k.visual.gunLook,
+      glue: k.visual.glueLook,
+    };
   }
 
   kartAudio(out: KartAudio[]): KartAudio[] {

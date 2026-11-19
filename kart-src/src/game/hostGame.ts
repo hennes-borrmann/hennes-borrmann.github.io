@@ -12,6 +12,7 @@ import {
   RACE_COUNTDOWN,
   RACE_RESULTS,
   RACE_RUNNING,
+  THING_DRILL,
   THING_OIL,
   THING_SMOKE,
   THING_TIRE,
@@ -53,15 +54,26 @@ import {
   ITEM_SMOKE,
   ITEM_KITE,
   ITEM_ROCKET,
-  ITEM_SPRING,
+  ITEM_ROBOT,
   ITEM_WING,
   ITEM_GOLD,
+  ITEM_GLUE,
+  GLUE_HIT,
+  GLUE_RANGE,
+  glueKart,
+  ITEM_DRILL,
   ITEM_TIRE,
   ITEM_TOP,
   CHARACTERS,
+  DRILL_ARRIVE_MAX,
+  DRILL_DIG_TICKS,
+  DRILL_FORE,
+  DRILL_RISE_TICKS,
+  DRILL_SIDE,
   GOLD_SCALE,
   GOLD_TICKS,
   goldOn,
+  FLAG_AIR,
   KART_RADIUS,
   MAX_PLAYERS,
   NEUTRAL,
@@ -81,8 +93,10 @@ import {
 } from './sim';
 import {
   EDGE_GAP,
+  EDGE_GLIDE,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
+  EDGE_RAMP,
   NO_GROUND,
   TRACK,
   centerHeight,
@@ -144,6 +158,25 @@ const ROCKET_WEIGHT = 10;
 const GOLD_WEIGHT_LAST = 11;
 /** Get Gold: ein Gold-Kart wirft andere so kräftig zur Seite (m/s, zusätzlich zum Stoß). */
 const GOLD_SHOVE = 5;
+/** Bohrer: Gewicht in der Auslosung des Letzten; davor weniger, je weiter vorn (siehe pickItem) – der Erste bekommt ihn nie. */
+const DRILL_WEIGHT_LAST = 12;
+/**
+ * Bohrer: Zeit unter der Erde bis zum Auftauchen (Sekunden) – Grundzeit plus ein Anteil, der mit der Wurzel aus dem
+ * Abstand zum Ziel wächst (bezogen auf DRILL_SPAN_AT Meter). Höchstens bis DRILL_ARRIVE_MAX nach dem Einstecken.
+ */
+const DRILL_TRAVEL_BASE = 1.8;
+const DRILL_TRAVEL_SPAN = 6;
+const DRILL_SPAN_AT = 1500;
+/** Bohrer: Anfangstempo unter der Erde und Obergrenze (m/s). */
+const DRILL_CRAWL = 3;
+const DRILL_V_CAP = 900;
+/** Bohrer: so weit vor dem Ziel bricht er durch (Meter) – dazu kommt der Weg, den das Ziel während des Durchbruchs fährt. */
+const DRILL_LEAD = 2.5;
+/** Bohrer: Treffer, wenn das Ziel bei der Explosion so nah ist (Meter, waagerecht); ist es so nah dran, explodiert er sofort. */
+const DRILL_HIT_RANGE = 9;
+const DRILL_TOUCH = 3;
+/** Bohrer: ohne Ziel bricht er so weit voraus durch (Meter). */
+const DRILL_NO_TARGET = 120;
 /** Rakete: so weit vor dem Ziel setzt sie auf (Meter) – man taucht knapp vor ihm aus dem Rauch auf. */
 const ROCKET_LAND_AHEAD = 4;
 /** Rakete: ohne Ziel landet sie so weit voraus (Meter). */
@@ -190,10 +223,18 @@ interface Thing extends SnapshotThing {
   bounces: number;
   /** Ticks ohne Boden unter sich (Rollreifen). */
   floating: number;
-  /** Brummkreisel: Meter hinter der Startlinie, seitliche Lage, Ziel-Platz (-1 = keins). */
+  /** Brummkreisel und Bohrer: Meter seit dem Punkt des Abschnitts seg, seitliche Lage, Ziel-Platz (-1 = keins). */
   pos: number;
   lat: number;
   target: number;
+  /** Bohrer: Rennfortschritt (Abschnitte, im Maß der Karts – in die Runde seines Ziels gebracht). */
+  prog: number;
+  /** Bohrer: Tempo unter der Erde längs der Strecke (m/s, negativ = rückwärts). */
+  speed: number;
+  /** Bohrer: zu welchem Alter (Ticks seit dem Einstecken) er vor dem Ziel auftaucht (0 = noch nicht geplant). */
+  arrive: number;
+  /** Bohrer ohne Ziel: Rennfortschritt, an dem er durchbricht (NaN = noch nicht festgelegt). */
+  goal: number;
 }
 
 export interface HostGameOptions {
@@ -219,7 +260,7 @@ export class HostGame implements GameView {
   private thingList: Thing[] = [];
   /** Gewählte Figur je Platz; fehlt ein Eintrag (KI), gilt die Standardfigur des Platzes. */
   private chars: number[] = [];
-  private readonly botCtx: BotContext = { tick: 0, time: 0, place: 1, smoke: false };
+  private readonly botCtx: BotContext = { tick: 0, time: 0, place: 1, smoke: false, leaderSafe: false };
   private nextId = 1;
   private firstFinishTick = -1;
   private resultsAtTick = -1;
@@ -368,6 +409,9 @@ export class HostGame implements GameView {
         this.botCtx.time = raceTime;
         this.botCtx.place = k.place;
         this.botCtx.smoke = this.inSmoke(k.state);
+        // (Der Bohrer prallt am Führenden ab, solange der einen Stoßfänger hat oder gold ist.)
+        const lead = this.drillTarget(k.slot);
+        this.botCtx.leaderSafe = !!lead && (lead.state.guard > 0 || lead.state.gold > 0);
         this.env.speedFactor = k.brain.skill * band * (this.botCtx.smoke ? 0.85 : 1);
         copyState(k.prev, k.state);
         const cmd = botCmd(k.state, k.brain, others, canDrive, this.botCtx);
@@ -630,7 +674,10 @@ export class HostGame implements GameView {
     const progressBefore = k.progress;
     const flying = k.state.rocket > 0;
     const drinking = k.state.gold > GOLD_TICKS;
+    const planting = k.state.plant > 0;
     const ev = stepKart(k.state, cmd, this.env);
+    // Eingesteckt: der Bohrer sitzt jetzt neben dem Kart im Boden.
+    if (planting && k.state.plant === 0) this.spawnDrill(k);
     // Ausgetrunken: jetzt ist das Kart gold.
     if (drinking && k.state.gold === GOLD_TICKS) this.fx(k, 'boost');
     k.ptick++;
@@ -643,6 +690,9 @@ export class HostGame implements GameView {
     if (ev & EV_USE_TOP) this.spawnTop(k);
     if (ev & EV_USE_EMP) this.shortCircuit(k);
     if (ev & EV_USE_ROCKET) this.aimRocket(k, true);
+    // Kleber: Pistole draußen – Ziel wählen; der Klumpen kommt an.
+    if (k.state.glueShot === 1) this.aimGlue(k);
+    if (k.state.glueShot === GLUE_HIT) this.glueHit(k);
     if (ev & EV_USE_KITE) this.fx(k, 'boost');
     if (ev & (EV_USE_BOOST | EV_TURBO | EV_PAD | EV_DRAFT)) this.fx(k, 'boost');
     // Treffer durch die Strecke selbst (Verkehr, Geysir, Lavabombe) sagt der Bildschirm eines
@@ -674,12 +724,17 @@ export class HostGame implements GameView {
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Sprungfeder, Abschleppdrache, Rakete, Gleiter, Get Gold
-    // (Den Gleiter bekommt jeder; vorn etwas seltener. Get Gold auch – vorn selten, hinten etwa jede zehnte Kiste.)
-    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5];
-    else if (place === 1) table = [14, 8, 25, 0, 23, 0, 19, 8, 0, 0, 7, 3];
-    else if (place === count) table = [18, 11, 0, 22, 6, 14, 0, 8, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST];
-    else table = [16, 18, 10, 15, 10, 6, 9, 9, 0, 0, 12, 7];
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Roboter, Abschleppdrache, Rakete, Gleiter, Get Gold, Bohrer, Kleber
+    // (Den Gleiter bekommt jeder; vorn etwas seltener. Get Gold auch – vorn selten, hinten etwa jede zehnte Kiste.
+    // Den Bohrer nie auf Platz 1; dahinter mit (Platzanteil)^1,5 steigend bis DRILL_WEIGHT_LAST auf dem letzten Platz –
+    // bei vier Fahrern auf Platz 2 in knapp 2 %, auf Platz 3 in gut 5 %, hinten in jeder neunten Kiste. Den Kleber
+    // – Abwehr wie Öl, er trifft den Nächsten dahinter – eher vorn und in der Mitte, hinten selten, allein gar nicht.)
+    const drill = count > 1 && place > 1 ? DRILL_WEIGHT_LAST * Math.pow((place - 1) / (count - 1), 1.5) : 0;
+    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5, 0, 0];
+    else if (place === 1) table = [14, 8, 21, 0, 21, 0, 17, 8, 0, 0, 7, 3, 0, 10];
+    // (Hinten machen Zisch, Rollreifen, Brummkreisel, Kurzschluss und Roboter dem Bohrer Platz.)
+    else if (place === count) table = [15, 9, 0, 19, 6, 12, 0, 6, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST, drill, 2];
+    else table = [16, 16, 8, 15, 10, 6, 8, 9, 0, 0, 12, 7, drill, 8];
     // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
     // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
     if (count > 1 && behind > KITE_MIN_GAP) {
@@ -687,7 +742,7 @@ export class HostGame implements GameView {
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
     // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede elfte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_SPRING, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD];
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_ROBOT, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD, ITEM_DRILL, ITEM_GLUE];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;
@@ -733,6 +788,12 @@ export class HostGame implements GameView {
       pos: 0,
       lat: 0,
       target: -1,
+      age: 0,
+      stage: 0,
+      prog: 0,
+      speed: 0,
+      arrive: 0,
+      goal: Number.NaN,
     };
     this.thingList.push(thing);
     return thing;
@@ -773,6 +834,251 @@ export class HostGame implements GameView {
     top.lat = proj.lat;
     top.safe = 30;
     for (const o of this.karts.values()) if (o.place === k.place - 1 && !o.finished) top.target = o.slot;
+  }
+
+  /** Bohrer: wen er sucht – den Führenden, der noch fährt, aber nie seinen Werfer (liegt der vorn, den Zweiten). */
+  private drillTarget(owner: number): HostKart | null {
+    let best: HostKart | null = null;
+    for (const o of this.karts.values()) {
+      if (o.slot === owner || o.finished) continue;
+      if (!best || o.place < best.place) best = o;
+    }
+    return best;
+  }
+
+  /**
+   * Bohrer: eingesteckt – er sitzt rechts neben dem Kart (etwas vor der Mitte) im Boden, auf der Fahrbahn bzw. dem
+   * Seitenstreifen. Ist dort kein Boden (Lücke, Kante ohne Bande), steckt er ein Stück weiter vorn in der Mitte.
+   */
+  private spawnDrill(k: HostKart): void {
+    const t = TRACK;
+    const s = k.state;
+    const fx = Math.sin(s.heading);
+    const fz = Math.cos(s.heading);
+    // Rechts von der Fahrtrichtung ist (−fz, fx).
+    const x = s.x - fz * DRILL_SIDE + fx * DRILL_FORE;
+    const z = s.z + fx * DRILL_SIDE + fz * DRILL_FORE;
+    projectOnTrack(t, x, z, s.seg);
+    let seg = proj.seg;
+    let along = proj.along;
+    const room = Math.max(0, t.wh[seg] - 0.6);
+    let lat = Math.max(-room, Math.min(room, proj.lat));
+    const time = this.tick - this.goTick;
+    let g = groundNow(t, seg, along, lat, time);
+    if (g === NO_GROUND) {
+      for (let i = 0; i < 400 && (t.respawn[seg] !== seg || (t.edge[seg] & EDGE_GAP) !== 0); i++) seg = t.next[seg];
+      along = 0;
+      lat = Math.max(-t.rh[seg] + 1, Math.min(t.rh[seg] - 1, lat));
+      g = centerHeight(t, seg, 0) + lat * t.bank[seg];
+    }
+    // Der Bohrer zählt in Abschnitten ab dem Punkt seg nach vorn.
+    if (along < 0) {
+      seg = t.prev[seg];
+      along += t.step;
+    }
+    const th = this.addThing(THING_DRILL, k, 0, g, 0, DRILL_ARRIVE_MAX + DRILL_RISE_TICKS + 60);
+    th.seg = seg;
+    th.pos = Math.min(along, t.step * 0.999);
+    th.lat = lat;
+    th.x = t.px[seg] + t.tx[seg] * th.pos + rightX(t, seg) * lat;
+    th.z = t.pz[seg] + t.tz[seg] * th.pos + rightZ(t, seg) * lat;
+    th.prog = k.progress + progDelta(t, s.seg, seg);
+    const target = this.drillTarget(k.slot);
+    th.target = target ? target.slot : -1;
+  }
+
+  /** Bohrer unter der Erde: Lage aus Abschnitt, Weg im Abschnitt und seitlicher Lage (y = Höhe der Fahrbahn darüber). */
+  private placeDrill(th: Thing): void {
+    const t = TRACK;
+    const seg = th.seg;
+    th.x = t.px[seg] + t.tx[seg] * th.pos + rightX(t, seg) * th.lat;
+    th.z = t.pz[seg] + t.tz[seg] * th.pos + rightZ(t, seg) * th.lat;
+    th.y = centerHeight(t, seg, th.pos) + th.lat * t.bank[seg];
+  }
+
+  /**
+   * Bohrer, ein Schritt. Erst dreht er sich DRILL_DIG_TICKS lang an der Stelle ein. Dann fährt er unter der Erde die
+   * Strecke entlang zu einem Punkt knapp vor seinem Ziel (dem Führenden, nie dem Werfer) – auf dem kürzeren Weg im Kreis
+   * der Strecke, an Gabelungen dort entlang, wo das Ziel fährt. Beim Losfahren legt er fest, wann er dort auftaucht
+   * (je weiter, desto später, spätestens DRILL_ARRIVE_MAX nach dem Einstecken), und diese Zeit hält er in jedem Fall:
+   * Er wird gleichmäßig schneller und plant dafür in jedem Schritt neu (das Ziel fährt im Plan mit seinem jetzigen Tempo
+   * weiter – ändert es das Tempo oder wechselt die Führung, ändert sich der Plan). Ist die Zeit um, bricht er dort durch,
+   * wo das Ziel gerade ist (ein Stück davor), und explodiert DRILL_RISE_TICKS später – oder schon früher, sobald das Ziel
+   * ihn erreicht. Getroffen wird wie vom Brummkreisel. Gibt true zurück, wenn er explodiert ist.
+   */
+  private stepDrill(th: Thing): boolean {
+    const t = TRACK;
+    if (th.stage > 0) {
+      // Durchbruch: er steht und bohrt sich hoch.
+      th.stage++;
+      th.life = Math.max(1, DRILL_RISE_TICKS - th.stage + 1);
+      const target = th.target >= 0 ? this.karts.get(th.target) : undefined;
+      const o = target && !target.finished ? target.state : null;
+      const near = o ? Math.hypot(o.x - th.x, o.z - th.z) : Infinity;
+      const level = o ? Math.abs(o.y - th.y) < 4 : false;
+      if (th.stage > DRILL_RISE_TICKS || (th.stage > 12 && near < DRILL_TOUCH && level)) {
+        if (target && o && near <= DRILL_HIT_RANGE && level) this.applyHit(target);
+        return true;
+      }
+      return false;
+    }
+    const target = this.drillTarget(th.owner);
+    th.target = target ? target.slot : -1;
+    if (th.age <= DRILL_DIG_TICKS) {
+      // Eindrehen an der Stelle.
+      th.vx = 0;
+      th.vz = 0;
+      return false;
+    }
+    // Ziel: ein Punkt knapp vor dem Führenden (in Abschnitten des Rennfortschritts) und dessen Tempo längs der Strecke.
+    let vt = 0;
+    let aim: number;
+    let route = 0;
+    if (target) {
+      const o = target.state;
+      const os = o.seg < t.total ? o.seg : 0;
+      // (Beim Zurücksetzen und als Rakete fährt es nicht.)
+      if (o.respawn === 0 && o.rocket === 0) vt = Math.max(0, o.vx * t.tx[os] + o.vz * t.tz[os]);
+      aim = target.progress + (DRILL_LEAD + (vt * DRILL_RISE_TICKS) / 60) / t.step;
+      const kb = t.branchOf[os];
+      if (kb >= 0) route = 1 << kb;
+    } else {
+      // Niemand mehr da: ein Stück voraus durchbrechen (einmal festgelegt).
+      if (th.goal !== th.goal) th.goal = th.prog + DRILL_NO_TARGET / t.step;
+      aim = th.goal;
+    }
+    // In die Runde des Ziels bringen: kürzester Weg im Kreis der Strecke (−n/2 … n/2).
+    const n = t.n;
+    let here = th.prog + th.pos / t.step;
+    const laps = Math.floor((aim - here + n / 2) / n);
+    if (laps !== 0) {
+      th.prog += laps * n;
+      here += laps * n;
+      if (!target) th.goal += laps * n;
+    }
+    // u: Lage relativ zum Zielpunkt (Meter, negativ = dahinter).
+    const u = (here - aim) * t.step;
+    if (th.arrive === 0) {
+      // Losfahren: Ankunftszeit festlegen.
+      const travel = DRILL_TRAVEL_BASE + DRILL_TRAVEL_SPAN * Math.sqrt(Math.min(1.5, Math.abs(u) / DRILL_SPAN_AT));
+      th.arrive = Math.min(DRILL_ARRIVE_MAX, th.age + Math.round(travel * 60));
+      th.speed = DRILL_CRAWL;
+    }
+    const remain = th.arrive - th.age;
+    let w = th.speed - vt;
+    if (remain <= 0) {
+      // Zeit um. Hat das Ziel gerade keinen Boden unter sich (Sprung, Gleitflug, Absturz, Rakete) oder springt es gleich
+      // ab (Schanze, Lücke, Flugstrecke direkt voraus), fährt er unter ihm mit, bis es wieder Boden hat – längstens bis
+      // DRILL_ARRIVE_MAX. Sonst: Durchbruch.
+      const o = target ? target.state : null;
+      const away = !!o && (o.respawn > 0 || o.rocket > 0 || (o.flags & FLAG_AIR) !== 0 || this.takeoffAhead(o, vt));
+      if (!away || th.age >= DRILL_ARRIVE_MAX) {
+        this.surfaceDrill(th, target ?? null, vt);
+        return false;
+      }
+      w = -u * 4;
+    } else {
+      // w: Tempo gegenüber dem Zielpunkt. Plan: gleichmäßig beschleunigen, so dass er zur festgelegten Zeit dort ist –
+      // aus dem jetzigen Stand neu gerechnet; in den letzten Schritten genau hin.
+      const r = remain / 60;
+      if (remain > 3) w += (2 * (-u - w * r)) / (r * r) / 60;
+      else w = -u / r;
+    }
+    let v = Math.max(-DRILL_V_CAP, Math.min(DRILL_V_CAP, vt + w));
+    th.speed = v;
+    // Längs der Strecke weiter (rückwärts über die Vorgänger).
+    th.pos += v / 60;
+    while (th.pos >= t.step) {
+      th.pos -= t.step;
+      const from = th.seg;
+      th.seg = walk(t, from, 1, route);
+      th.prog += progDelta(t, from, th.seg);
+    }
+    while (th.pos < 0) {
+      th.pos += t.step;
+      const from = th.seg;
+      th.seg = t.prev[from];
+      th.prog += progDelta(t, from, th.seg);
+    }
+    // Seitlich: in der Mitte; nah am Ziel auf dessen Spur, damit er unter ihm hindurchzieht.
+    let wantLat = 0;
+    let rate = 3;
+    if (target && Math.abs(u) < 90) {
+      projectOnTrack(t, target.state.x, target.state.z, target.state.seg);
+      const room = Math.max(0, t.rh[th.seg] - 1);
+      wantLat = Math.max(-room, Math.min(room, proj.lat));
+      rate = 10;
+    }
+    const dl = Math.max(-rate / 60, Math.min(rate / 60, wantLat - th.lat));
+    th.lat += dl;
+    const fromX = th.x;
+    const fromZ = th.z;
+    this.placeDrill(th);
+    v = Math.hypot(th.x - fromX, th.z - fromZ) * 60;
+    // Geschwindigkeit für die Darstellung (und das Weiterrechnen zwischen zwei Ständen beim Mitspieler)
+    th.vx = (th.x - fromX) * 60;
+    th.vz = (th.z - fromZ) * 60;
+    // Ein Sprung (auf die andere Seite einer Abzweigung) ist keine Fahrt.
+    if (v > DRILL_V_CAP * 1.5) {
+      th.vx = 0;
+      th.vz = 0;
+    }
+    th.life = Math.max(1, remain) + DRILL_RISE_TICKS;
+    return false;
+  }
+
+  /** Bohrer: Springt dieses Kart gleich ab – liegt bis kurz hinter dem Punkt, an dem er durchbräche, eine Schanze, Lücke oder Flugstrecke? */
+  private takeoffAhead(o: KartState, vt: number): boolean {
+    const t = TRACK;
+    projectOnTrack(t, o.x, o.z, o.seg);
+    const kb = t.branchOf[proj.seg];
+    const route = kb >= 0 ? 1 << kb : 0;
+    const n = Math.ceil((DRILL_LEAD + (vt * DRILL_RISE_TICKS) / 60 + 8) / t.step);
+    let seg = proj.seg;
+    for (let i = 0; i < n; i++) {
+      if (t.edge[seg] & (EDGE_RAMP | EDGE_GAP | EDGE_GLIDE)) return true;
+      seg = walk(t, seg, 1, route);
+    }
+    return false;
+  }
+
+  /**
+   * Bohrer: die Zeit ist um – Durchbruch direkt vor dem Ziel (auf dessen Spur und Weg), dort, wo gerade Boden ist (sonst
+   * das nächste Stück davor, das trägt).
+   */
+  private surfaceDrill(th: Thing, target: HostKart | null, vt: number): void {
+    const t = TRACK;
+    let seg = th.seg;
+    let lat = th.lat;
+    let route = 0;
+    if (target) {
+      const o = target.state;
+      projectOnTrack(t, o.x, o.z, o.seg);
+      const kb = t.branchOf[proj.seg];
+      lat = proj.lat;
+      route = kb >= 0 ? 1 << kb : 0;
+      seg = walk(t, proj.seg, Math.round((DRILL_LEAD + (vt * DRILL_RISE_TICKS) / 60) / t.step), route);
+    }
+    const time = this.tick - this.goTick;
+    const room = (k: number): number => Math.max(0, t.rh[k] - 1);
+    const latAt = (k: number): number => Math.max(-room(k), Math.min(room(k), lat));
+    let g = groundNow(t, seg, 0, latAt(seg), time);
+    for (let i = 0; i < 80 && g === NO_GROUND; i++) {
+      seg = walk(t, seg, 1, route);
+      g = groundNow(t, seg, 0, latAt(seg), time);
+    }
+    // (Nirgends Boden in der Nähe: dort, wo man nach einem Sturz wieder aufgesetzt würde.)
+    if (g === NO_GROUND) for (let i = 0; i < 400 && (t.respawn[seg] !== seg || (t.edge[seg] & EDGE_GAP) !== 0); i++) seg = t.next[seg];
+    th.seg = seg;
+    th.pos = 0;
+    th.lat = latAt(seg);
+    this.placeDrill(th);
+    if (g !== NO_GROUND) th.y = g;
+    th.vx = 0;
+    th.vz = 0;
+    th.speed = 0;
+    th.stage = 1;
+    th.life = DRILL_RISE_TICKS;
   }
 
   /** Kurzschluss: trifft alle, die vor dem Auslöser liegen (als Führender: alle anderen). */
@@ -849,6 +1155,35 @@ export class HostGame implements GameView {
     if (Math.hypot(o.x - s.x, o.z - s.z) <= ROCKET_HIT_RANGE && Math.abs(o.y - s.y) < 5) this.applyHit(target);
   }
 
+  /**
+   * Kleber: Ziel ist der Fahrer direkt hinter dem Schützen – der Nächste dahinter auf der Strecke, höchstens GLUE_RANGE Meter
+   * zurück. Ist dort niemand (oder ist der Nächste weiter weg), fliegt der Klumpen ins Leere und klatscht auf die Fahrbahn.
+   */
+  private aimGlue(k: HostKart): void {
+    let target: HostKart | null = null;
+    let gap = Infinity;
+    for (const o of this.karts.values()) {
+      if (o === k || o.finished) continue;
+      const d = (k.progress - o.progress) * TRACK.step;
+      if (d > 0 && d < gap) {
+        gap = d;
+        target = o;
+      }
+    }
+    k.state.glueAim = target && gap <= GLUE_RANGE && target.state.respawn === 0 ? target.slot : -1;
+  }
+
+  /** Kleber: Der Klumpen kommt an. (Wer inzwischen abgestürzt und woanders aufgesetzt ist, entkommt.) */
+  private glueHit(k: HostKart): void {
+    const target = k.state.glueAim >= 0 ? this.karts.get(k.state.glueAim) : undefined;
+    if (!target || target.finished) return;
+    const o = target.state;
+    if (Math.hypot(o.x - k.state.x, o.z - k.state.z) > GLUE_RANGE * 2 || Math.abs(o.y - k.state.y) > 8) return;
+    const r = glueKart(o);
+    if (r === HIT_BLOCKED) this.fx(target, 'block');
+    else if (r !== HIT_NONE) this.fx(target, 'glue');
+  }
+
   private applyHit(k: HostKart): void {
     const r = hitKart(k.state);
     if (r === HIT_BLOCKED) this.fx(k, 'block');
@@ -914,6 +1249,14 @@ export class HostGame implements GameView {
     for (let i = this.thingList.length - 1; i >= 0; i--) {
       const th = this.thingList[i];
       if (th.safe > 0) th.safe--;
+      th.age++;
+      if (th.kind === THING_DRILL) {
+        // Der Bohrer führt seine Restzeit selbst (bis zur Explosion) und trifft nur sein Ziel.
+        const gone = this.stepDrill(th);
+        th.ttl = th.life / 60;
+        if (gone) this.thingList.splice(i, 1);
+        continue;
+      }
       let gone = --th.life <= 0;
       th.ttl = th.life / 60;
       let radius = 0;

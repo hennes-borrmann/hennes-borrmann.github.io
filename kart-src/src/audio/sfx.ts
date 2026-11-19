@@ -17,6 +17,8 @@ const MIN_GAP: Partial<Record<SfxName, number>> = {
   'drift-start': 0.2,
   boost: 0.12,
   warn: 0.22,
+  // (Bohrgeräusch: mehrere Bohrer und dichte Folge – nur doppelte Aufrufe im selben Augenblick zusammenfassen.)
+  drill: 0.03,
 };
 const DEFAULT_GAP = 0.04;
 
@@ -173,7 +175,12 @@ const LEVEL: Record<SfxName, number> = {
   'use-guard': 3.6,
   'use-emp': 3.4,
   'use-smoke': 2.2,
-  'use-spring': 3.8,
+  'use-robot': 3.2,
+  'robot-step': 3.4,
+  'robot-jump': 3.4,
+  'use-glue': 3.2,
+  'glue-shot': 3.4,
+  'glue-hit': 3.4,
   'use-kite': 4.5,
   'use-rocket': 3.2,
   'rocket-launch': 3.6,
@@ -186,6 +193,13 @@ const LEVEL: Record<SfxName, number> = {
   'gold-ping': 2.4,
   'rocket-incoming': 2.6,
   'rocket-hit': 3.4,
+  // Bohrer: Einstecken wie die anderen Items, das Bohren als leises Bett, Grollen wie fernes Donnergrollen (nur beim Ziel,
+  // aber es soll unter Motor und Musik durchkommen), Durchbruch und Explosion so kräftig wie der Einschlag der Rakete.
+  'use-drill': 3.2,
+  drill: 1.5,
+  'drill-rumble': 2.4,
+  'drill-burst': 3,
+  'drill-blast': 3.5,
   warn: 2.2,
   hit: 3.8,
   'guard-block': 4.4,
@@ -218,7 +232,7 @@ const LEVEL: Record<SfxName, number> = {
   blubb: 1.2,
   // Eis und Mond (Runde 89), gemessen als Momentanlautheit (lautestes 400-ms-Fenster,
   // vor dem Mischpult): Lawine ≈ −12 LUFS (Geysir −11), Eiszapfen ≈ −16 (klein, aber
-  // hell), Sprungplatte ≈ −13 (Sprungfeder −13, Schub −15), Meteorit ≈ −11 (Bombe −11);
+  // hell), Sprungplatte ≈ −13 (Schub −15), Meteorit ≈ −11 (Bombe −11);
   // die Schnee-Folge ≈ −22 LUFS (Wasser-Folge −27: der Schnee ist dumpf und liegt unter
   // der zugleich laufenden Lawine, er muss sich gegen sie behaupten).
   avalanche: 2.7,
@@ -542,7 +556,10 @@ export class SfxPlayer {
     return this.busyUntil.filter((t) => t > now).length;
   }
 
-  play(name: SfxName, pan = 0, gain = 1): void {
+  /** Tonhöhe des laufenden Aufrufs als Faktor (nur für Rezepte, die sie nutzen – der Bohrer). */
+  private pitch = 1;
+
+  play(name: SfxName, pan = 0, gain = 1, pitch = 1): void {
     if (!this.mx.canPlay()) return;
     const now = this.mx.ctx.currentTime;
     const gap = MIN_GAP[name] ?? DEFAULT_GAP;
@@ -552,6 +569,7 @@ export class SfxPlayer {
     if (this.busyUntil.length >= MAX_VOICES) return;
     this.last.set(name, now);
     const v = new Voice(this.mx, clamp(gain, 0, 1) * LEVEL[name], clamp(pan, -1, 1));
+    this.pitch = clamp(pitch, 0.25, 4);
     this.build(name, v);
     const until = now + v.length;
     this.busyUntil.push(until);
@@ -653,8 +671,64 @@ export class SfxPlayer {
       case 'use-smoke':
         v.noise(4200, 900, 0.65, 0.26, { type: 'highpass', attack: 0.04 }).tone('sine', 130, 60, 0.16, 0.3).noise(400, 200, 0.2, 0.2, { type: 'lowpass', brown: true });
         break;
-      case 'use-spring':
-        v.tone('sine', 190, 760, 0.42, 0.34, { hold: 0, vibHz: 21, vibDepth: 0.16 }).tone('triangle', 380, 1500, 0.3, 0.1, { vibHz: 21, vibDepth: 0.16 }).noise(800, 2400, 0.06, 0.12, { q: 2 });
+      case 'use-robot': {
+        // Verwandlung (0,5 s wie im Spiel): ein Hydraulikzischen, zwei Servos surren hoch (Karosserie hebt sich, Beine fahren
+        // aus), vier Teile rasten ein – jedes ein trockenes Klacken mit tiefem Schlag –, zuletzt ein satter Schlag und ein
+        // kleiner Roboterpiep „bi-bup“.
+        v.noise(5200, 2600, 0.12, 0.1, { type: 'highpass', attack: 0.01 })
+          .tone('sawtooth', 240, 640, 0.24, 0.07, { attack: 0.02, vibHz: 38, vibDepth: 0.01 })
+          .tone('sawtooth', 320, 860, 0.22, 0.05, { attack: 0.02, at: 0.12, vibHz: 41, vibDepth: 0.01 })
+          .tone('triangle', 480, 1280, 0.22, 0.04, { attack: 0.02, at: 0.12 });
+        const clacks = [0.13, 0.21, 0.31, 0.41];
+        for (let i = 0; i < clacks.length; i++) {
+          const at = clacks[i];
+          const f = 2300 + (i % 2) * 700;
+          v.noise(f, f * 0.65, 0.04, 0.2, { q: 3, at, attack: 0.002 }).tone('square', 170 - i * 14, 85, 0.05, 0.1, { at });
+        }
+        v.tone('sine', 120, 52, 0.14, 0.4, { at: 0.47 })
+          .noise(900, 300, 0.08, 0.18, { type: 'lowpass', brown: true, at: 0.47 })
+          .notes('pulse12', [[84, 0.53, 0.05], [91, 0.59, 0.07]], 0.12);
+        break;
+      }
+      case 'robot-step':
+        // Ein Fuß setzt auf: dumpfer Schlag mit braunem Rauschen, darüber ein kurzes Blechklappern.
+        v.tone('sine', 115, 52, 0.11, 0.42)
+          .noise(520, 160, 0.08, 0.3, { type: 'lowpass', brown: true, attack: 0.002 })
+          .noise(2700, 1900, 0.03, 0.12, { q: 4, attack: 0.002 })
+          .tone('square', 190, 120, 0.04, 0.06);
+        break;
+      case 'robot-jump': {
+        // Absprung: Hydraulik stößt („Pschh“) mit tiefem Schlag und einem Ton, der hinaufschnellt; im Sprung laufen die Servos
+        // rückwärts (fallend), zwei Teile rasten ein, zuletzt ein satter Schlag – er ist wieder ein Kart.
+        v.noise(800, 3200, 0.2, 0.26, { q: 0.9, attack: 0.01 })
+          .tone('sine', 150, 55, 0.16, 0.5)
+          .tone('triangle', 300, 980, 0.2, 0.12, { attack: 0.01 })
+          .tone('sawtooth', 820, 260, 0.26, 0.06, { attack: 0.03, at: 0.2, vibHz: 40, vibDepth: 0.01 });
+        for (const [i, at] of [0.42, 0.5].entries()) v.noise(2500 + i * 600, 1700, 0.04, 0.18, { q: 3, at, attack: 0.002 }).tone('square', 150, 80, 0.05, 0.09, { at });
+        v.tone('sine', 110, 48, 0.12, 0.34, { at: 0.58 }).noise(800, 260, 0.07, 0.14, { type: 'lowpass', brown: true, at: 0.58 });
+        break;
+      }
+      case 'use-glue':
+        // Die Klebepistole klappt aus: ein kurzes Servo, das Scharnier rastet ein, die Kartusche schmatzt (Kleber wird nachgedrückt).
+        v.tone('sawtooth', 360, 640, 0.15, 0.06, { attack: 0.02, vibHz: 36, vibDepth: 0.01 })
+          .noise(2800, 2000, 0.035, 0.2, { q: 3, at: 0.17, attack: 0.002 })
+          .tone('square', 160, 90, 0.05, 0.1, { at: 0.17 })
+          .noise(700, 280, 0.12, 0.18, { q: 3, at: 0.3, attack: 0.02 })
+          .tone('sine', 240, 150, 0.1, 0.16, { at: 0.3 });
+        break;
+      case 'glue-shot':
+        // Der Klumpen verlässt die Düse: ein nasses „Pflopp“ – tiefer, fallender Ploppton, ein schmatzendes Rauschen, ein Blubb.
+        v.tone('sine', 320, 85, 0.14, 0.5, { attack: 0.003 })
+          .noise(1600, 260, 0.18, 0.26, { type: 'lowpass', q: 2.5 })
+          .tone('sine', 480, 900, 0.06, 0.12, { at: 0.06, vibHz: 24, vibDepth: 0.05 });
+        break;
+      case 'glue-hit':
+        // Er klatscht auf: „Platsch“ (Rauschen, das schnell dumpf wird, dazu ein tiefer Schlag), dann zwei Tropfen.
+        v.noise(2200, 160, 0.3, 0.42, { type: 'lowpass', q: 1.6, attack: 0.003 })
+          .tone('sine', 190, 48, 0.2, 0.36)
+          .noise(1300, 900, 0.04, 0.16, { q: 2.5, at: 0.03 })
+          .tone('sine', 640, 1050, 0.05, 0.12, { at: 0.2 })
+          .tone('sine', 560, 920, 0.05, 0.09, { at: 0.31 });
         break;
 
       case 'use-kite':
@@ -767,6 +841,70 @@ export class SfxPlayer {
         break;
       case 'warn':
         v.tone('pulse25', 1320, 1318, 0.07, 0.2).tone('pulse25', 1760, 1756, 0.09, 0.2, { at: 0.09 });
+        break;
+
+      // --- Bohrer ---
+      case 'use-drill':
+        // Hochnehmen: ein Klacken, dann ein Schwupp, der aufsteigt (der Bohrer wächst in der Hand); ausholen (Luftzug);
+        // „Ratsch“ in die Erde: dumpfer Stoß, knirschende Erde, Kiesel, ein heller Metallton; dann springt der Motor
+        // an – zweimal Knattern, das in ein Surren übergeht.
+        v.tone('triangle', 920, 760, 0.05, 0.16, { attack: 0.002 })
+          .tone('sine', 190, 560, 0.3, 0.14, { at: 0.03, attack: 0.05 })
+          .noise(500, 1900, 0.28, 0.1, { q: 1.4, at: 0.03, attack: 0.08 })
+          .noise(800, 2800, 0.18, 0.13, { q: 1.1, at: 0.36, attack: 0.1 })
+          .tone('sine', 130, 42, 0.24, 0.5, { at: 0.55 })
+          .noise(1100, 180, 0.3, 0.42, { type: 'lowpass', brown: true, at: 0.55, attack: 0.003 })
+          .noise(2600, 1800, 0.035, 0.12, { q: 2, at: 0.56 })
+          .noise(3100, 2200, 0.03, 0.1, { q: 2, at: 0.6 })
+          .noise(2300, 1600, 0.03, 0.08, { q: 2, at: 0.64 })
+          .tone('triangle', 1480, 1470, 0.08, 0.07, { at: 0.555 })
+          .tone('sawtooth', 62, 74, 0.06, 0.16, { at: 0.66 })
+          .tone('sawtooth', 70, 84, 0.06, 0.16, { at: 0.73 })
+          .tone('sawtooth', 90, 150, 0.16, 0.12, { at: 0.79, attack: 0.03 });
+        break;
+      case 'drill': {
+        // Mahlen: Sägezahn mit schnellem Rattern (Tremolo), eine Oktave darüber ein heller Puls, darunter knirschende Erde.
+        // Die Stöße überlappen sich (weicher Anfang) – aus der Folge wird ein Dauerton, der mit dem Tempo steigt.
+        const p = this.pitch;
+        v.tone('sawtooth', 150 * p, 162 * p, 0.2, 0.12, { attack: 0.04, sustain: 0.5, tremHz: 26 + 22 * p })
+          .tone('pulse25', 300 * p, 318 * p, 0.18, 0.045, { attack: 0.04, sustain: 0.4 })
+          .noise(520 * p, 440 * p, 0.2, 0.14, { q: 2.2, attack: 0.04 })
+          .noise(260, 160, 0.2, 0.12, { type: 'lowpass', brown: true, attack: 0.04 });
+        break;
+      }
+      case 'drill-rumble':
+        // Grollen: tiefes Beben, das anschwillt (zittert im Takt), darunter ein Sub-Ton; zwischendurch reißt der Asphalt.
+        v.noise(170, 90, 1.3, 0.5, { type: 'lowpass', brown: true, attack: 0.45 })
+          .tone('sine', 52, 40, 1.25, 0.42, { attack: 0.5, tremHz: 11 })
+          .tone('triangle', 78, 66, 1.1, 0.12, { attack: 0.4, at: 0.1, tremHz: 7 })
+          .noise(1900, 1200, 0.05, 0.16, { q: 1.6, at: 0.52, attack: 0.002 })
+          .noise(2400, 1500, 0.04, 0.14, { q: 1.6, at: 0.83, attack: 0.002 })
+          .noise(1700, 1000, 0.06, 0.18, { q: 1.6, at: 1.06, attack: 0.002 });
+        break;
+      case 'drill-burst':
+        // Durchbruch: harter Krach, Geröll, das wegspritzt, und ein Kreischen, das mit dem Bohrer nach oben fährt.
+        v.noise(4200, 1400, 0.07, 0.42, { type: 'highpass', attack: 0.002 })
+          .noise(1300, 260, 0.42, 0.42, { type: 'lowpass', brown: true, attack: 0.004 })
+          .tone('sine', 150, 55, 0.22, 0.4)
+          .tone('sawtooth', 320, 1100, 0.45, 0.1, { attack: 0.05 })
+          .tone('pulse25', 640, 2100, 0.4, 0.04, { attack: 0.06 })
+          .noise(2500, 1600, 0.03, 0.12, { q: 2, at: 0.12 })
+          .noise(2000, 1300, 0.03, 0.1, { q: 2, at: 0.2 });
+        break;
+      case 'drill-blast':
+        // Explosion: harter Knall, tiefer Stoß, langes Grollen; dann prasseln Erdklumpen herab, ein Blechteil klingelt.
+        v.noise(3000, 380, 0.13, 0.52, { q: 0.8 })
+          .tone('sine', 110, 26, 0.8, 0.64)
+          .tone('square', 64, 32, 0.24, 0.16)
+          .noise(1000, 70, 1.2, 0.56, { type: 'lowpass', brown: true, attack: 0.004 })
+          .noise(6000, 2500, 0.28, 0.08, { type: 'highpass', at: 0.02 })
+          .noise(900, 500, 0.06, 0.16, { type: 'lowpass', at: 0.42, attack: 0.003 })
+          .noise(1100, 600, 0.05, 0.13, { type: 'lowpass', at: 0.58, attack: 0.003 })
+          .noise(800, 450, 0.06, 0.12, { type: 'lowpass', at: 0.71, attack: 0.003 })
+          .noise(1000, 550, 0.05, 0.1, { type: 'lowpass', at: 0.9, attack: 0.003 })
+          .noise(850, 500, 0.05, 0.08, { type: 'lowpass', at: 1.08, attack: 0.003 })
+          .tone('triangle', 1760, 1750, 0.3, 0.06, { at: 0.47 })
+          .tone('sine', 2640, 2630, 0.2, 0.03, { at: 0.47 });
         break;
 
       // --- Treffer und Stöße ---
@@ -916,7 +1054,7 @@ export class SfxPlayer {
       }
       case 'blubb':
         // Vom Schlot gehoben: ein komisches, rundes „Blubb". Erst flattert ein tiefer Ansatz
-        // („Bl…", Tremolo 32 Hz statt Vibrato wie bei der Sprungfeder), dann steigt ein
+        // („Bl…", Tremolo 32 Hz statt Vibrato), dann steigt ein
         // runder Grundton von 200 auf 640 Hz – mit leisem Dreieck eine Oktave höher als
         // Bauch, ohne Vibrato und ohne Rauschfahrt wie beim Aufwind; darunter hebt braunes
         // Rauschen mit. Am Ende ploppt die Blase (kurzer Zirper) und zwei Bläschen perlen nach.
@@ -1020,7 +1158,7 @@ export class SfxPlayer {
         // (hohes Rauschen, das schnell einsetzt und sinkt: „Pssch"). Dann steigt ein runder
         // Ton in gut einer Sekunde zwei Oktaven hinauf, langsam schwebend (5 Hz Vibrato) und
         // mit einer leiseren, leicht verstimmten Quinte darüber – schwerelos. Abgrenzung:
-        // 'use-spring' ist ein kurzes „Boing" mit 21-Hz-Vibrato (0,4 s), 'boost' ein nach oben
+        // 'robot-jump' ist ein Hydraulikstoß mit rückwärts laufenden Servos (0,7 s), 'boost' ein nach oben
         // fahrendes Rauschband mit Sägezahn (0,4 s), 'blubb' ein flatterndes, rundes Blubb
         // (0,45 s); hier tragen der tiefe Schlag, das Zischen und der lange, langsame Aufstieg.
         v.tone('sine', 130, 44, 0.24, 0.5)
@@ -1276,7 +1414,7 @@ export class SfxPlayer {
       // zuerst der dicke Sägezahn weg und der Sinus läuft am höchsten hinauf: der Ton wird dünn;
       // beim Wachsen kommt der Sägezahn erst nach und nach dazu: der Ton wird breit. Abgrenzung:
       // 'ring' zieht in einen hellen Glockenzweiklang mit Schubrauschen, 'fall' fällt lange
-      // und leise, 'use-spring' ist ein Boing mit 21-Hz-Vibrato.
+      // und leise, 'robot-jump' ist ein Hydraulikstoß mit Servos.
       case 'shrink':
         // Hinauf in 0,34 s (240 → 1500 Hz, der Sinus bis 2,9 kHz), das Zip saust mit hinauf
         // (1,8 → 7,5 kHz), dann ein winziges, hohes „Pling“ (E7 mit leiser Oktave), 0,45 s.

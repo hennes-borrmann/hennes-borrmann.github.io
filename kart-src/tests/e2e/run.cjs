@@ -1018,17 +1018,83 @@ async function main() {
     const kiteCut = await kart(h6.page, 'authoritative(0)');
     check('Die Bremse kappt den Drachen', kiteCut.tow === 0 && kiteCut.respawn === 0, `noch ${kiteCut.tow} Ticks`);
 
-    // Sprungfeder
+    // Roboter: Anna verwandelt sich (am Boden), rennt, springt ab und landet wieder als Kart – Ben sieht die Verwandlung.
+    // Jede Seite schreibt selbst mit (ohne Grafikkarte dauert jede Abfrage von außen lange).
+    const recordRobot = () => {
+      window.__robot = { ticks: 0, legs: 0, steps: 0, air: false, done: false };
+      window.__robotTimer = setInterval(() => {
+        const e = window.__kart.entities().find((x) => x.slot === 0);
+        const look = window.__kart.look(0);
+        const r = window.__robot;
+        if (!e || !look) return;
+        r.ticks = Math.max(r.ticks, e.robot);
+        r.legs = Math.max(r.legs, look.robot);
+        r.steps = Math.max(r.steps, look.steps);
+        if (e.robot > 54 && e.flags & 8) r.air = true;
+        if (r.ticks > 0 && e.robot === 0) r.done = true;
+      }, 16);
+    };
     await kart(h6.page, 'place(0, 20, 0)');
-    await sleep(200);
+    await kart(h6.page, 'place(1, 200, -2)');
+    await sleep(300);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordRobot)));
+    const robotAt = await kart(h6.page, 'race().time');
     await useItem(8);
-    let hop = 0;
-    for (let i = 0; i < 12; i++) {
-      await sleep(50);
-      const a = await kart(h6.page, 'authoritative(0)');
-      if (a.flags & 8) hop++;
-    }
-    check('Sprungfeder: das Kart hüpft', hop >= 2, `${hop} Messungen in der Luft`);
+    const robotStart = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 150, robotAt, { timeout: 60000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 150, robotAt, { timeout: 60000 }).catch(() => {});
+    const [robotH, robotC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__robotTimer);
+      return window.__robot;
+    })));
+    const robotEnd = await kart(h6.page, 'authoritative(0)');
+    check('Roboter: Anna verwandelt sich, rennt und springt – auf beiden Bildschirmen zu sehen', robotStart.item === 0 && [robotH, robotC].every((r) => r.ticks > 54 && r.legs > 0.9 && r.air), `Host ${robotH.ticks} Ticks / Beine ${robotH.legs.toFixed(2)} / ${robotH.steps} Schritte, Ben ${robotC.ticks} Ticks / Beine ${robotC.legs.toFixed(2)} / ${robotC.steps} Schritte`);
+    check('Roboter: danach wieder ein Kart, ohne Absturz', robotH.done && robotEnd.robot === 0 && robotEnd.respawn === 0, `Roboter ${robotEnd.robot}, Abschnitt ${robotEnd.seg}`);
+
+    // Kleber: Anna (vorn) schießt auf Ben direkt hinter ihr. Ben bekommt Kleber auf den Bildschirm (vier Sekunden), Anna nicht;
+    // Ben sieht Annas Pistole ausklappen.
+    const recordGlue = () => {
+      window.__glue = { gun: 0, me: 0, veil: false, svg: false, shown: 0, other: 0 };
+      window.__glueTimer = setInterval(() => {
+        const k = window.__kart;
+        const g = window.__glue;
+        const look = k.look(0);
+        if (look) g.gun = Math.max(g.gun, look.gun);
+        const sc = k.scene();
+        if (sc) g.shown = Math.max(g.shown, sc.glue);
+        const veil = document.getElementById('glue-veil');
+        if (veil && !veil.hidden) {
+          g.veil = true;
+          if (veil.querySelector('svg path')) g.svg = true;
+        }
+        const own = k.predicted ? k.predicted() : null;
+        if (own) g.me = Math.max(g.me, own.glue);
+        const anna = k.entities().find((x) => x.slot === 0);
+        if (anna) g.other = Math.max(g.other, anna.glue);
+      }, 16);
+    };
+    // (Die beiden KI-Karts weit zurück – sonst fährt womöglich eine zwischen Anna und Ben, und der Kleber trifft zu Recht sie.)
+    await kart(h6.page, 'place(2, 40, -2)');
+    await kart(h6.page, 'place(3, 60, 2)');
+    await kart(h6.page, 'place(0, 330, 0)');
+    await kart(h6.page, 'place(1, 318, 0)');
+    await sleep(400);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordGlue)));
+    const glueAt = await kart(h6.page, 'race().time');
+    await useItem(14);
+    const aimedGlue = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 90, glueAt, { timeout: 60000 }).catch(() => {});
+    const glueB = await kart(h6.page, 'authoritative(1)');
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 90, glueAt, { timeout: 60000 }).catch(() => {});
+    const [glueH, glueC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__glueTimer);
+      return window.__glue;
+    })));
+    check('Kleber: Annas Pistole zielt auf Ben (direkt dahinter) und klappt auf beiden Bildschirmen aus', aimedGlue.glueShot > 0 && aimedGlue.glueAim === 1 && glueH.gun > 0.9 && glueC.gun > 0.9, `Ziel ${aimedGlue.glueAim}, Pistole Host ${glueH.gun.toFixed(2)} / Ben ${glueC.gun.toFixed(2)}`);
+    check('Kleber: Ben ist getroffen – Kleckse auf seinem Bildschirm, nicht auf Annas', glueB.glue > 150 && glueC.me > 200 && glueC.veil && glueC.svg && glueC.shown > 3 && !glueH.veil && glueH.shown === 0, `Host ${glueB.glue} Ticks, Bens Vorhersage ${glueC.me}, Bens Bildschirm ${glueC.shown.toFixed(2)} s`);
+    await sleep(4500);
+    const glueGone = await c6.page.evaluate(() => ({ hidden: document.getElementById('glue-veil').hidden, glue: window.__kart.scene().glue }));
+    check('Kleber: nach gut vier Sekunden ist Bens Sicht wieder frei', glueGone.hidden && glueGone.glue === 0, `Schleier ${glueGone.hidden ? 'weg' : 'noch da'}`);
 
     // Rakete: Anna (Letzte) verwandelt sich, fliegt in hohem Bogen über die Karte und schlägt bei Ben (einen Platz weiter
     // vorn) ein. Ben schleudert so lange wie nach einem Kreisel, Anna taucht vor ihm auf; Ben wird vorher gewarnt.
@@ -1175,6 +1241,76 @@ async function main() {
     check('Get Gold: Anna haut Ben um (Treffer beim Host und in Bens Vorhersage), sie selbst schleudert nicht', goldH.spin1 > 40 && goldC.spin1 > 0 && goldH.ramDist > 0 && goldH.ramDist < 9 && goldH.spin0 === 0 && goldC.spin0 === 0, `Ben ${goldH.spin1} / ${goldC.spin1} Ticks, Abstand beim Nachsehen ${goldH.ramDist.toFixed(1)} m`);
     check('Get Gold: Anna ist unverwundbar (ein Treffer prallt ab)', beforeHit.gold > 0 && beforeHit.gold <= 420 && afterHit.spin === 0 && afterHit.shield === beforeHit.shield, `Gold noch ${beforeHit.gold} Ticks`);
     check('Get Gold: danach ist Anna wieder normal – auf beiden Bildschirmen', goldEnd.gold === 0 && lookEnd.every((l) => l && l.scale < 1.05 && l.gold === 0), JSON.stringify(lookEnd));
+
+    // Bohrer: Anna steckt ihn ein, er wühlt sich unter der Fahrbahn zu Ben (dem Führenden), bricht direkt vor ihm durch und
+    // explodiert – Ben schleudert, Anna nicht. Beide Bildschirme zeigen das Einstecken, den Bohrer (Alter, Durchbruch) und
+    // die Explosion; nur Ben wird gewarnt. Jede Seite schreibt selbst mit (Rennzeit in Ticks).
+    const recordDrill = () => {
+      window.__drill = { plant: 0, seen: 0, firstAt: null, maxAge: 0, stage: 0, surfacedAt: null, goneAt: null, targets: [], banner: false, spin0: 0, spin1: 0, boomDist: -1 };
+      const el = document.getElementById('race-banner');
+      window.__drillTimer = setInterval(() => {
+        const k = window.__kart;
+        const g = window.__drill;
+        const now = k.race().time;
+        if (!el.hidden && el.textContent.includes('Bohrer')) g.banner = true;
+        const list = k.entities();
+        const a = list.find((x) => x.slot === 0);
+        if (a) {
+          g.plant = Math.max(g.plant, a.plant);
+          g.spin0 = Math.max(g.spin0, a.spin);
+        }
+        // Ben: beim Host die Rechnung, bei Ben die eigene Vorhersage (der Treffer kommt mit dem Stand des Hosts)
+        const b = k.authoritative(1) || k.predicted() || list.find((x) => x.slot === 1);
+        if (b) g.spin1 = Math.max(g.spin1, b.spin);
+        const d = k.things().find((t) => t.kind === 5);
+        if (d) {
+          g.seen++;
+          if (g.firstAt === null) g.firstAt = now - d.age;
+          g.maxAge = Math.max(g.maxAge, d.age);
+          if (d.stage > 0 && g.surfacedAt === null) g.surfacedAt = now - d.stage;
+          g.stage = Math.max(g.stage, d.stage);
+          if (!g.targets.includes(d.target)) g.targets.push(d.target);
+          g.last = { x: d.x, z: d.z };
+        } else if (g.seen > 0 && g.goneAt === null) {
+          g.goneAt = now;
+          if (b && g.last) g.boomDist = Math.hypot(b.x - g.last.x, b.z - g.last.z);
+        }
+      }, 16);
+    };
+    await sleep(1500);
+    await h6.page.evaluate(() => {
+      window.__noItemsDrill = setInterval(() => {
+        for (const slot of [2, 3]) window.__kart.giveItem(slot, 0);
+      }, 50);
+    });
+    await kart(h6.page, 'place(2, 40, -2)');
+    await kart(h6.page, 'place(3, 60, 2)');
+    await kart(h6.page, 'place(0, 120, 0)');
+    await kart(h6.page, 'place(1, 260, 0)');
+    await sleep(500);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordDrill)));
+    const drillAt = await kart(h6.page, 'race().time');
+    await useItem(13);
+    // (Unter Last kommt der Tastendruck erst ein paar Schritte später an.)
+    await h6.page.waitForFunction(() => window.__kart.authoritative(0).plant > 0, null, { timeout: 5000 }).catch(() => {});
+    const planting = await kart(h6.page, 'authoritative(0)');
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 720, drillAt, { timeout: 120000 }).catch(() => {});
+    await c6.page.waitForFunction((t) => window.__kart.race().time > t + 720, drillAt, { timeout: 120000 }).catch(() => {});
+    const [drillH, drillC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__drillTimer);
+      return window.__drill;
+    })));
+    await h6.page.evaluate(() => clearInterval(window.__noItemsDrill));
+    const benAfter = await kart(h6.page, 'authoritative(1)');
+    const fmt = (g) => `Einstecken ${g.plant}, Bohrer ${g.seen}× gesehen (bis Alter ${g.maxAge}), durch nach ${g.surfacedAt === null ? '–' : ((g.surfacedAt - g.firstAt) / 60).toFixed(2)} s, Explosion nach ${g.goneAt === null ? '–' : ((g.goneAt - g.firstAt) / 60).toFixed(2)} s`;
+    check('Bohrer: Anna steckt ihn ein (Item weg, Einstecken läuft) – auf beiden Bildschirmen zu sehen', planting.item === 0 && planting.plant > 0 && [drillH, drillC].every((g) => g.plant > 20), `Host ${drillH.plant}, Ben ${drillC.plant} Ticks`);
+    // (Der Durchbruch dauert nur 0,45 s – eine Seite, die unter Last selten nachsieht, kann ihn verpassen; dann zählt, dass
+    // der Bohrer danach weg ist. Mindestens eine Seite muss ihn gesehen haben.)
+    check('Bohrer: er steckt, dreht sich ein, wühlt sich zu Ben und bricht durch – auf beiden Bildschirmen', [drillH, drillC].every((g) => g.seen > 5 && g.maxAge > 120 && g.goneAt !== null) && (drillH.stage > 0 || drillC.stage > 0), `Host: ${fmt(drillH)}, Stufe ${drillH.stage}; Ben: ${fmt(drillC)}, Stufe ${drillC.stage}`);
+    check('Bohrer: höchstens 10 s vom Einstecken bis zur Explosion, gleich auf beiden Bildschirmen', [drillH, drillC].every((g) => g.goneAt - g.firstAt <= 600) && Math.abs(drillH.goneAt - drillC.goneAt) < 40, `Host ${((drillH.goneAt - drillH.firstAt) / 60).toFixed(2)} s, Ben ${((drillC.goneAt - drillC.firstAt) / 60).toFixed(2)} s`);
+    check('Bohrer: sucht Ben (den Führenden), nie Anna', [drillH, drillC].every((g) => g.targets.length === 1 && g.targets[0] === 1), `Host ${JSON.stringify(drillH.targets)}, Ben ${JSON.stringify(drillC.targets)}`);
+    check('Bohrer: Ben schleudert (beim Host und in seiner Vorhersage), Anna nicht', drillH.spin1 > 40 && drillC.spin1 > 0 && drillH.spin0 === 0 && drillC.spin0 === 0 && benAfter.respawn === 0, `Ben ${drillH.spin1} / ${drillC.spin1} Ticks, Abstand bei der Explosion ${drillH.boomDist.toFixed(1)} m`);
+    check('Bohrer: Ben wird gewarnt, Anna nicht', drillC.banner && !drillH.banner);
 
     for (const s of [h6, c6]) await s.page.setViewportSize({ width: 1180, height: 820 });
     await sleep(800);
