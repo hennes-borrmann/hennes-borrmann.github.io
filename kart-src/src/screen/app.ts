@@ -976,10 +976,11 @@ export class App {
         const t = now / 1000;
         view.entities(alpha, t, dt, this.ents);
         const race = view.race(t);
-        this.scene.frame(this.ents, view.localSlot, dt, race, view.things(t));
+        const things = view.things(t);
+        this.scene.frame(this.ents, view.localSlot, dt, race, things);
         this.updateRaceUi(race, now);
         this.sound.update(dt, race.phase === RACE_RESULTS ? null : this.scene.kartAudio(this.kartAudio));
-        if (++this.mapTick % 3 === 0) this.ui.drawMinimap(TRACK, this.ents, view.localSlot);
+        if (++this.mapTick % 3 === 0) this.ui.drawMinimap(TRACK, this.ents, view.localSlot, things);
       }
     }
 
@@ -1141,6 +1142,7 @@ export class App {
     const threat = race.phase === RACE_RUNNING ? (this.scene?.threat ?? 0) : 0;
     this.sound.warn(threat, nowMs);
     const rocket = race.phase === RACE_RUNNING ? (this.scene?.rocket ?? 0) : 0;
+    const drill = race.phase === RACE_RUNNING ? (this.scene?.drill ?? 0) : 0;
 
     // Falsch herum? Erst nach einem Moment melden, damit ein Dreher nicht gleich Alarm schlägt.
     let wrongWay = false;
@@ -1197,8 +1199,22 @@ export class App {
         me: st.slot === view.localSlot,
         done: st.finished,
       })),
-      banner: wrongWay ? 'Falsch herum!' : rocket > 0 ? 'Rakete im Anflug!' : threat > 0 ? 'Kreisel im Anflug!' : trackNote ? trackNote : nowMs < this.finalLapUntil ? 'Letzte Runde!' : null,
-      bannerTone: wrongWay || rocket > 0 || threat > 0 || (trackNote !== null && trackNoteBad) ? 'bad' : 'info',
+      banner: wrongWay
+        ? 'Falsch herum!'
+        : rocket > 0
+          ? 'Rakete im Anflug!'
+          : drill >= 0.5
+            ? 'Achtung, Bohrer unter dir!'
+            : drill > 0
+              ? 'Bohrer im Anmarsch!'
+              : threat > 0
+                ? 'Kreisel im Anflug!'
+                : trackNote
+                  ? trackNote
+                  : nowMs < this.finalLapUntil
+                    ? 'Letzte Runde!'
+                    : null,
+      bannerTone: wrongWay || rocket > 0 || drill > 0 || threat > 0 || (trackNote !== null && trackNoteBad) ? 'bad' : 'info',
       fps: this.showFps && this.scene ? this.scene.stats.fps : null,
       smoke: this.scene?.smoke ?? 0,
     });

@@ -19,6 +19,7 @@
 // „Links“ ist +x, „rechts“ −x.
 
 import * as THREE from 'three';
+import { DRILL_FORE, DRILL_SIDE } from '../game/sim';
 import { INK, outlineMaterial, rgb, toonMaterial, withSkinnedOutline } from './toon';
 
 export interface KartPose {
@@ -65,6 +66,8 @@ export interface KartPose {
   gold?: boolean;
   /** Get Gold läuft gleich ab: die Goldfarbe blinkt. */
   goldBlink?: boolean;
+  /** Bohrer: Fortschritt des Einsteckens 0..1 (0 = es wird gerade keiner eingesteckt; bei 1 steckt er im Boden). */
+  plant?: number;
 }
 
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
@@ -3033,7 +3036,8 @@ const I_SPRING = 8;
 const I_KITE = 9;
 const I_ROCKET = 10;
 const I_GOLD = 12;
-const I_COUNT = 13;
+const I_DRILL = 13;
+const I_COUNT = 14;
 
 // Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
 const I_RED = 0xff5a4e;
@@ -3041,7 +3045,7 @@ const I_YEL = 0xffd23f;
 const I_TURQ = 0x1fc8b6;
 const I_INK = 0x2d2a36;
 
-interface ItemGeo {
+export interface ItemGeo {
   main: THREE.BufferGeometry;
   line: THREE.BufferGeometry | null;
 }
@@ -3437,6 +3441,122 @@ function buildGoldBottle(b: Builder): void {
   b.put(box(0.02, 0.05, 0.01), { bone: 0, color: 0xfffbe6, pos: [0.09, 0.005, -0.12], rot: [-0.3, 0, -0.5], outline: 0 });
 }
 
+/**
+ * Bohrer: Griff oben (dort sitzt die Faust), darunter das rote Motorgehäuse mit gelbem Band, Lüftungsschlitzen und
+ * Auspuffstummel, dann das Bohrfutter und der stählerne Bohrkopf – ein Kegel mit dunklen Spiralstreifen und einer
+ * aufgesetzten Bohrwendel, damit man das Drehen sieht. Die Spitze zeigt nach unten (−y), DRILL_LEN unter dem Griff.
+ * (Drehkörper laufen von unten nach oben.)
+ */
+function buildDrill(b: Builder): void {
+  const STEEL_L = 0xd3dbe6;
+  const STEEL_D = 0x737d91;
+  // Griff quer (entlang z) mit roten Enden, obenauf ein gelber Knauf
+  b.put(cyl(0.032, 0.032, 0.16, b.s(8)), { bone: 0, color: I_INK, rot: [HALF_PI, 0, 0], outline: 0.6 });
+  for (const z of [-0.09, 0.09]) b.put(sphere(0.042, 0.042, 0.032, b.s(8), 5), { bone: 0, color: I_RED, pos: [0, 0, z], outline: 0.6 });
+  b.put(sphere(0.046, 0.034, 0.046, b.s(10), 6), { bone: 0, color: I_YEL, pos: [0, 0.045, 0], outline: 0.6 });
+  // Bügel vom Griff zum Gehäuse
+  for (const z of [-0.07, 0.07]) b.put(box(0.032, 0.05, 0.024), { bone: 0, color: I_INK, pos: [0, -0.03, z], outline: 0.5 });
+  // Motorgehäuse
+  b.put(
+    lathe(
+      [
+        [0, -0.232, STEEL],
+        [0.064, -0.232],
+        [0.064, -0.218, I_RED, true],
+        [0.112, -0.192],
+        [0.118, -0.14, I_YEL, true],
+        [0.118, -0.104, I_RED, true],
+        [0.112, -0.072],
+        [0.084, -0.05],
+        [0, -0.044],
+      ],
+      b.s4(16),
+    ),
+    { bone: 0 },
+  );
+  // Lüftungsschlitze vorn und hinten, Auspuffstummel außen
+  for (const sd of [1, -1]) for (let k = 0; k < 3; k++) b.put(box(0.014, 0.05, 0.014), { bone: 0, color: I_INK, pos: [-0.03 + k * 0.03, -0.17, sd * 0.114], outline: 0 });
+  b.put(cyl(0.018, 0.022, 0.07, b.s(6)), { bone: 0, color: STEEL, pos: [-0.13, -0.16, 0], rot: [0, 0, HALF_PI + 0.5], outline: 0.5 });
+  // Bohrfutter
+  b.put(
+    lathe(
+      [
+        [0.046, -0.272, STEEL],
+        [0.056, -0.26],
+        [0.06, -0.246, CHROME],
+        [0.064, -0.232],
+      ],
+      b.s4(12),
+    ),
+    { bone: 0 },
+  );
+  // Bohrkopf: Kegel mit Spiralstreifen (Farbe je Band und Spalte versetzt – die Streifen laufen schräg herum)
+  const TOP = -0.27;
+  const TIP = -DRILL_LEN;
+  const R = 0.084;
+  const BANDS = 8;
+  const prof: LP[] = [];
+  for (let i = 0; i <= BANDS; i++) {
+    const u = i / BANDS;
+    prof.push([R * u * (1 + 0.12 * u * (1 - u)), TIP + u * (TOP - TIP), i === 0 ? STEEL_L : undefined]);
+  }
+  prof.push([0, TOP]);
+  const segs = b.s4(16);
+  b.put(
+    lathe(prof, segs, (band, j) => (band < BANDS && ((((j - band * 2) % 8) + 8) % 8) < 3 ? STEEL_D : undefined)),
+    { bone: 0 },
+  );
+  // Bohrwendel: ein Wulst, der sich zweieinhalbmal um den Kegel windet und zur Spitze hin dünner wird
+  const helix: V3[] = [];
+  const N = 32;
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    const y = TOP - 0.008 - u * (TOP - TIP - 0.04);
+    const r = R * ((y - TIP) / (TOP - TIP)) + 0.007;
+    const a = u * 2.5 * TAU;
+    helix.push([Math.cos(a) * r, y, Math.sin(a) * r]);
+  }
+  b.put(
+    sweep(helix, (u) => 0.019 * (1 - u * 0.7), b.s(6, 4)),
+    { bone: 0, color: STEEL_L, outline: 0.45 },
+  );
+}
+
+/** Bohrer: Länge vom Griff bis zur Spitze (Maßstab 1) – und so groß wird er beim Einstecken (siehe things.ts). */
+export const DRILL_LEN = 0.56;
+export const DRILL_GROW = 2.2;
+/** Bohrer: so tief steckt die Spitze im Boden, wenn die Figur ihn losgelassen hat (Meter). */
+export const DRILL_SINK = 0.35;
+/** Bohrer: Stelle rechts neben dem Kart (x nach links positiv), an der er in den Boden kommt – wie im Spiel (sim.ts). */
+const PLANT_X = -DRILL_SIDE;
+const PLANT_Z = DRILL_FORE;
+/**
+ * Bohrer, Einstecken: Schlüsselbilder über den Fortschritt – Griff im Raum des Karts (x links, y hoch, z vor; Meter),
+ * Neigung der Spitze nach außen (rad), Maßstab. Hochnehmen (er wächst dabei), über die Bande hinaus nach rechts
+ * schwenken, senkrecht hoch ausholen, kurz halten – und mit einem Ruck in den Boden rammen (dabei wächst er noch ein
+ * Stück). Die Spitze bleibt bis dahin immer gut über dem Boden.
+ */
+// prettier-ignore
+const PLANT_KEYS: readonly number[] = [
+  0, -0.56, 1.05, -0.2, 0.15, 1,
+  0.22, -0.62, 1.45, 0, 0.55, 1.6,
+  0.5, -0.95, 1.64, 0.22, 0.25, 1.8,
+  0.74, -1.05, 1.76, 0.3, 0.06, 1.8,
+  0.8, -1.07, 1.78, 0.32, 0.04, 1.85,
+  0.93, PLANT_X, DRILL_LEN * DRILL_GROW - DRILL_SINK, PLANT_Z, 0, DRILL_GROW,
+  1, PLANT_X, DRILL_LEN * DRILL_GROW - DRILL_SINK - 0.02, PLANT_Z, 0, DRILL_GROW,
+];
+const PLANT_KEY = 6;
+/** Bohrer: das Schlüsselbild, ab dem er in den Boden gerammt wird (immer schneller, kein Abbremsen vor dem Boden). */
+const PLANT_RAM = 4;
+
+let drillShared: ItemGeo | null = null;
+
+/** Netz des Bohrers (wie in der Hand) – für den Bohrer, der in der Welt steckt und hochbricht (things.ts). */
+export function getDrillGeo(): ItemGeo {
+  return (drillShared ??= getItemGeos()[I_DRILL]);
+}
+
 // ───────────────────────────── Rakete (Verwandlung) ─────────────────────────────
 //
 // Das Kart klappt die Räder ein, stellt sich auf und wird Stück für Stück mit einer
@@ -3642,7 +3762,7 @@ let itemGeos: ItemGeo[] | null = null;
 /** Alle Gegenstände – einmal gebaut, von allen Karts geteilt. Index = Item. */
 function getItemGeos(): ItemGeo[] {
   if (itemGeos) return itemGeos;
-  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket, buildGlider, buildGoldBottle];
+  const fns = [buildBottle, buildTire, buildOilCan, buildTop, buildShield, buildPlug, buildSmokeCan, buildSpring, buildKiteFolded, buildRocket, buildGlider, buildGoldBottle, buildDrill];
   const out: ItemGeo[] = [];
   for (let i = 0; i < I_COUNT; i++) {
     const b = new Builder(ONE_BONE, 2, true);
@@ -3915,6 +4035,8 @@ const GESTURES: (Gesture | null)[] = [
   },
   // Get Gold: keine Geste – das Austrinken folgt dem Spielstand (pose.drink, siehe planItem und drinkHands).
   null,
+  // Bohrer: ebenso – das Einstecken folgt dem Spielstand (pose.plant, siehe planItem und plantHands).
+  null,
 ];
 
 // ───────────────────────────── Get Gold ─────────────────────────────
@@ -3992,6 +4114,11 @@ const _dv = new THREE.Vector3();
 const _dg = new THREE.Vector3();
 const _dc = new THREE.Vector3();
 const _dx = new THREE.Vector3();
+const _pm = new THREE.Matrix4();
+const _pp = new THREE.Vector3();
+const _pq = new THREE.Quaternion();
+const _ps = new THREE.Vector3();
+const _pk = new Float32Array(PLANT_KEY);
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -4169,6 +4296,16 @@ export class KartVisual {
   private readonly gripP = new THREE.Vector3();
   private readonly gripU = new THREE.Vector3(0, 1, 0);
   private readonly handTL = new THREE.Vector3();
+
+  // Bohrer: Einstecken laut Spielstand (0..1, 0 = nicht), Gewicht der Haltung (geglättet), Griff und Ausrichtung des
+  // Bohrers im Raum der Karosserie, sein Maßstab, die Drehung des Bohrkopfs; im letzten Bild wurde noch eingesteckt.
+  private fPlant = 0;
+  private plantW = 0;
+  private readonly plantP = new THREE.Vector3();
+  private readonly plantQ = new THREE.Quaternion();
+  private plantS = 1;
+  private plantSpin = 0;
+  private plantWas = false;
   // Gold: Ziel, Anteil (0..1, linear in der Zeit), zuletzt gezeigter Stand der Farben, Farben (Original, Gold) und
   // Abstand jeder Ecke vom Mund (0..1, für die Ausbreitung) sowie ihre Lage längs des Glanzstreifens.
   private fGold = false;
@@ -4338,8 +4475,8 @@ export class KartVisual {
    * welcher Gegenstand fliegt, kommt deshalb von hier.
    */
   useItem(item: number): void {
-    // (Get Gold hat keine Geste: das Austrinken kommt aus dem Spielstand.)
-    if (!(item >= 1 && item < I_COUNT) || item === I_GOLD) return;
+    // (Get Gold und der Bohrer haben keine Geste: Austrinken und Einstecken kommen aus dem Spielstand.)
+    if (!(item >= 1 && item < I_COUNT) || item === I_GOLD || item === I_DRILL) return;
     this.gItem = Math.floor(item);
     this.gT = 0;
     this.gDone = false;
@@ -4712,6 +4849,8 @@ export class KartVisual {
     this.fHover = hv === hv ? clamp(hv, 0, 1) : 0;
     const dk = pose.drink ?? 0;
     this.fDrink = dk === dk ? clamp(dk, 0, 1) : 0;
+    const pl = pose.plant ?? 0;
+    this.fPlant = pl === pl ? clamp(pl, 0, 1) : 0;
     this.fGold = pose.gold === true;
     this.fGoldBlink = pose.goldBlink === true;
 
@@ -5065,6 +5204,7 @@ export class KartVisual {
       .set(-(sp.shoulder[0] + this.hOut), sp.shoulder[1] + this.hUp * reach, sp.shoulder[2] + this.hFwd * reach)
       .applyMatrix4(torso.matrix);
     if (this.drinkW > 0.001 || this.fDrink > 0) this.drinkHands();
+    if (this.plantW > 0.001 || this.fPlant > 0) this.plantHands();
     this.solveArm(1);
     this.solveArm(-1);
     this.handP.copy(bn[B.handR].position);
@@ -5121,6 +5261,47 @@ export class KartVisual {
     _dc.copy(this.gripP).addScaledVector(_dx, -gw);
     this.handT.lerp(_dc, w);
     this.handTL.copy(this.gripP).addScaledVector(_dx, gw);
+  }
+
+  /**
+   * Bohrer: Wo der Griff beim Einstecken gerade ist (Schlüsselbilder PLANT_KEYS im Raum des Karts, umgerechnet in den der
+   * Karosserie – Drift, Schleudern und Federn eingerechnet) und wie der Bohrer dort steht; die rechte Hand greift zu.
+   */
+  private plantHands(): void {
+    const bn = this.bones;
+    const p = this.fPlant;
+    const dt = this.fDt;
+    if (p > 0) {
+      const keys = PLANT_KEYS;
+      const n = keys.length / PLANT_KEY;
+      let i = 0;
+      while (i < n - 2 && keys[(i + 1) * PLANT_KEY] <= p) i++;
+      const a = i * PLANT_KEY;
+      const b = a + PLANT_KEY;
+      let f = clamp((p - keys[a]) / Math.max(keys[b] - keys[a], 1e-6), 0, 1);
+      // Hineinrammen: immer schneller (kein Abbremsen vor dem Boden).
+      f = i === PLANT_RAM ? f * f * f : smooth01(f);
+      for (let k = 1; k < PLANT_KEY; k++) _pk[k] = keys[a + k] + (keys[b + k] - keys[a + k]) * f;
+      // Steckt er, zittert er unter dem anlaufenden Motor.
+      const buzz = p > 0.93 ? 0.012 * Math.sin(this.time * 83) : 0;
+      _pp.set(_pk[1] + buzz, _pk[2], _pk[3] + buzz * 0.7);
+      _pq.setFromAxisAngle(_iw.set(0, 0, 1), -_pk[4]);
+      this.plantS = _pk[5];
+      // Der Motor läuft an: erst kurz vor dem Ende dreht sich der Bohrkopf.
+      this.plantSpin = (this.plantSpin + dt * 14 * smooth01((p - 0.86) / 0.14)) % TAU;
+      _iq.setFromAxisAngle(_iw.set(0, 1, 0), this.plantSpin);
+      _pq.multiply(_iq);
+      // Vom Raum des Karts in den der Karosserie
+      bn[B.chassis].updateMatrix();
+      bn[B.drift].updateMatrix();
+      bn[B.spin].updateMatrix();
+      _pm.copy(bn[B.spin].matrix).multiply(bn[B.drift].matrix).multiply(bn[B.chassis].matrix).invert();
+      this.plantP.copy(_pp).applyMatrix4(_pm);
+      _pm.decompose(_dv, this.plantQ, _ps);
+      this.plantQ.multiply(_pq);
+    }
+    // Die Faust sitzt am Griff.
+    this.handT.lerp(this.plantP, this.plantW);
   }
 
   /** Figur-eigenes Zubehör: Motor und Kiefer, Schal, Schnauzbart, Schwanz und Antennen. */
@@ -5345,6 +5526,20 @@ export class KartVisual {
         fwd = HOLD[2];
       }
     }
+    // Bohrer: Einstecken. Die rechte Hand folgt dem Griff (plantHands); hier Oberkörper und Kopf: zum Bohrer hochschauen,
+    // sich nach rechts über die Bande lehnen, beim Hineinrammen nachdrücken und hinunterschauen.
+    const pp = this.fPlant;
+    if (pp > 0) {
+      const lean = smooth01(pp / 0.45);
+      const ram = smooth01((pp - 0.8) / 0.12);
+      tx = 0.05 * lean - 0.08 * smooth01((pp - 0.5) / 0.25) * (1 - ram) + 0.26 * ram;
+      ty = -0.12 * lean;
+      tz = 0.42 * lean + 0.14 * ram;
+      hx = -0.32 * smooth01(pp / 0.24) * (1 - ram) + 0.34 * ram;
+      want = 1;
+      rate = 30;
+    }
+    this.plantW = damp(this.plantW, pp > 0 ? 1 : 0, pp > 0 ? 18 : 14, dt);
     this.drinkW = damp(this.drinkW, dp > 0 && dp < DRINK_THROW - 0.04 ? 1 : 0, dp > 0 ? 22 : 12, dt);
     if (dp <= 0) this.drinkThrown = false;
     this.hOut = damp(this.hOut, out, rate, dt);
@@ -5354,7 +5549,7 @@ export class KartVisual {
     this.gTy = damp(this.gTy, ty, rate * 0.6, dt);
     this.gTz = damp(this.gTz, tz, rate * 0.6, dt);
     this.gHx = damp(this.gHx, hx, rate * 0.6, dt);
-    this.holdW = damp(this.holdW, want, g ? 30 : 9, dt);
+    this.holdW = damp(this.holdW, want, g || pp > 0 ? 30 : 9, dt);
   }
 
   /** Der Gegenstand verlässt die Hand: Flug starten – beim Drachen steigt stattdessen der große auf. */
@@ -5419,11 +5614,19 @@ export class KartVisual {
         this.gFly = 0;
       }
     }
+    // Bohrer: eingesteckt – er steckt jetzt im Boden (things.ts), die Hand ist auf der Stelle leer.
+    if (this.plantWas && this.fPlant <= 0 && this.propItem === I_DRILL) {
+      this.propS = 0;
+      this.propV = 0;
+    }
+    this.plantWas = this.fPlant > 0;
     if (this.gFly < 0) {
       let want = this.fTow || this.kiteT >= 0 ? 0 : this.fHeld;
       if (g && !this.gDone) want = this.gItem;
-      // Beim Austrinken hält die Figur die Goldflasche – auch wenn sie inzwischen schon ein neues Item hat.
+      // Beim Austrinken hält die Figur die Goldflasche – auch wenn sie inzwischen schon ein neues Item hat; beim Einstecken
+      // ebenso den Bohrer.
       if (this.fDrink > 0 && !this.drinkThrown) want = I_GOLD;
+      if (this.fPlant > 0) want = I_DRILL;
       if (want !== this.propItem) {
         if (this.propItem !== 0 && this.propS > 0.02) {
           // erst schnell verschwinden, dann tauschen
@@ -5498,6 +5701,14 @@ export class KartVisual {
         _iq.premultiply(bn[B.torso].quaternion);
         prop.quaternion.slerp(_iq, w);
       }
+    }
+    if (item === I_DRILL && this.fPlant > 0 && this.plantW > 0.001) {
+      // Beim Einstecken: am Griff in der Faust, mit eigener Neigung, und er wächst auf DRILL_GROW. (Ein zweiter Bohrer in der
+      // Hand danach sitzt wieder ganz normal.)
+      const w = this.plantW;
+      prop.position.lerp(this.plantP, w);
+      prop.quaternion.slerp(this.plantQ, w);
+      s *= 1 + (this.plantS - 1) * w;
     }
     prop.scale.set(s, s * sy, s);
     prop.visible = item > 0 && s > 0.01;
@@ -5808,7 +6019,7 @@ export class KartVisual {
       _hd.lerp(_t, sw);
     }
     // … oder (nur rechts) beim Item. Hochgerissene Arme haben Vorrang, außer während einer Geste.
-    if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 || this.fDrink > 0 ? 1 : 1 - up));
+    if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 || this.fDrink > 0 || this.fPlant > 0 ? 1 : 1 - up));
     // … oder (links) mit an der Goldflasche.
     if (side > 0 && this.drinkW > 0.001) _hd.lerp(this.handTL, this.drinkW);
     _u.subVectors(_hd, _sh);

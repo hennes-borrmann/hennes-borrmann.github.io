@@ -19,6 +19,7 @@ import {
   FLAG_AIR,
   FLAG_GLIDE,
   ITEM_BOOST,
+  ITEM_DRILL,
   ITEM_EMP,
   ITEM_GOLD,
   ITEM_GUARD,
@@ -127,6 +128,8 @@ export interface BotContext {
   place: number;
   /** Fährt gerade durch eine Rauchwolke. */
   smoke: boolean;
+  /** Bohrer: Der Führende (ohne dieses Kart) ist gerade geschützt – Stoßfänger oder Get Gold. */
+  leaderSafe?: boolean;
 }
 
 const SKILL = [0.95, 0.91, 0.93, 0.89];
@@ -1008,6 +1011,11 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       case ITEM_ROCKET:
         // Trifft alle anderen, egal wo – kein Grund zu warten.
         press = b.holding > 40;
+        break;
+      case ITEM_DRILL:
+        // Nie als Führender (dann träfe er nur den Zweiten – lieber aufheben, bis man überholt wird). Sonst bald – außer der
+        // Führende ist gerade geschützt (Stoßfänger, Get Gold): dann warten, bis es vorbei ist oder die Geduld reißt.
+        press = ctx.place > 1 && s.plant === 0 && b.holding > 45 && (!ctx.leaderSafe || late);
         break;
       case ITEM_GOLD: {
         // Hinten sofort; sonst, wenn ein Gegner nah ist (umfahren), vor einer Kurve mit Bande (über den Rand abkürzen) oder

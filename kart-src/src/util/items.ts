@@ -2,6 +2,7 @@
 
 import {
   ITEM_BOOST,
+  ITEM_DRILL,
   ITEM_EMP,
   ITEM_GOLD,
   ITEM_GUARD,
@@ -81,6 +82,12 @@ export const ITEMS: Record<number, ItemInfo> = {
     hint: 'Gold, groß, unverwundbar',
     // Goldene Flasche mit Korken, ein Stern auf dem Bauch (ausgespart), daneben ein Glitzern.
     icon: '<rect x="9.6" y="1.4" width="4.8" height="3.2" rx="1" fill="currentColor"/><path fill-rule="evenodd" d="M10.2 5.4h3.6v2.5c2.700 1 4.400 3.400 4.400 6.300v5.900a2.400 2.400 0 0 1-2.400 2.400H8.200a2.400 2.400 0 0 1-2.400-2.400v-5.900c0-2.900 1.700-5.300 4.400-6.300zM12 12.200l.79 2.110 2.250.100-1.760 1.410.6 2.170L12 16.750l-1.880 1.240.6-2.170-1.760-1.410 2.250-.1z" fill="currentColor"/><path d="M20 2.200l.6 1.500 1.500.6-1.500.6-.6 1.500-.6-1.500-1.500-.6 1.500-.6z" fill="currentColor"/>',
+  },
+  [ITEM_DRILL]: {
+    name: 'Bohrer',
+    hint: 'Bohrt sich zum Ersten',
+    // Griff, Motorgehäuse mit ausgespartem Band, darunter der Bohrkopf als Kegel mit schrägen Spiralfugen.
+    icon: '<rect x="6" y="1.4" width="12" height="2.8" rx="1.4" fill="currentColor"/><rect x="10.6" y="3.6" width="2.8" height="2.4" fill="currentColor"/><path fill-rule="evenodd" d="M8.5 5.5h7a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2zM8.6 8.1h6.8v1.3H8.6z" fill="currentColor"/><rect x="9.6" y="11" width="4.8" height="1.8" fill="currentColor"/><path d="M7.5 12.5H16.5L15.72 14.4 8.77 15.6zM9.34 17 15.15 15.8 14.21 18.1 10.28 19.3zM10.85 20.7 13.64 19.5 12 23.5z" fill="currentColor"/>',
   },
   [ITEM_SPRING]: {
     name: 'Sprungfeder',

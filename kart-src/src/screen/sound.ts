@@ -19,7 +19,7 @@ export interface AudioEngine {
   stopMusic(fadeSec?: number): void;
   setFinalLap(on: boolean): void;
   duck(amount: number, seconds: number): void;
-  sfx(name: string, opts?: { pan?: number; gain?: number }): void;
+  sfx(name: string, opts?: { pan?: number; gain?: number; pitch?: number }): void;
   /** Unter Wasser klingt alles dumpf (Motor, Geräusche, Musik); k = 0 an der Luft … 1 abgetaucht. */
   setUnderwater?(k: number): void;
   update(dtSec: number, karts: KartAudio[]): void;
@@ -55,6 +55,11 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'gold-ping',
   'rocket-launch',
   'rocket-hit',
+  // Bohrer: man hört andere ihn einstecken, ihn bohren (ortsfest, mit seiner Tonhöhe), durchbrechen und explodieren
+  'use-drill',
+  'drill',
+  'drill-burst',
+  'drill-blast',
   // Was die Strecke selbst von sich gibt
   'geyser',
   'bomb',
@@ -156,8 +161,8 @@ export class Sound {
     // Abgetaucht klingt die Welt dumpf – bis das eigene Kart wieder auftaucht.
     if (e.local && e.kind === 'dive') this.engine.setUnderwater?.(1);
     else if (e.local && (e.kind === 'surface' || e.kind === 'respawn' || e.kind === 'finish')) this.engine.setUnderwater?.(0);
-    if (e.local) this.engine.sfx(e.kind);
-    else if (HEARD_FROM_OTHERS.has(e.kind)) this.engine.sfx(e.kind, { pan: e.pan, gain: e.gain * 0.55 });
+    if (e.local) this.engine.sfx(e.kind, { pitch: e.pitch });
+    else if (HEARD_FROM_OTHERS.has(e.kind)) this.engine.sfx(e.kind, { pan: e.pan, gain: e.gain * 0.55, pitch: e.pitch });
   }
 
   /** Was nur der Host weiß und per Nachricht kommt: Rundenwechsel. */

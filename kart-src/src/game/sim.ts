@@ -192,7 +192,13 @@ export const ITEM_WING = 11;
  * schneller, unverwundbar, ohne Bremse neben der Fahrbahn, und wen es berührt, den haut es um. Hinten häufiger.
  */
 export const ITEM_GOLD = 12;
-export const ITEM_COUNT = 13;
+/**
+ * "Bohrer": die Figur steckt ihn neben dem Kart in den Boden; er dreht sich ein, wühlt sich unter der Fahrbahn immer
+ * schneller zum Führenden, bricht direkt vor ihm aus dem Boden und explodiert (Treffer wie vom Brummkreisel). Nie für
+ * den Ersten, je weiter hinten desto häufiger.
+ */
+export const ITEM_DRILL = 13;
+export const ITEM_COUNT = 14;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -291,6 +297,11 @@ export interface KartState {
    * von GOLD_TICKS bis 1 ist das Kart gold. Unverwundbar ist es vom ersten Schluck an.
    */
   gold: number;
+  /**
+   * Bohrer: verbleibende Ticks des Einsteckens (0 = keins, sonst bis DRILL_PLANT_TICKS). Springt der Zähler von 1 auf 0,
+   * steckt der Bohrer neben dem Kart im Boden – der Host setzt ihn dort ab.
+   */
+  plant: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -415,6 +426,21 @@ export const GOLD_VMAX = 1.11;
 const GOLD_ACCEL = 1.15;
 export const GOLD_SCALE = 1.4;
 const GOLD_GRIP = 1;
+/**
+ * Bohrer: so lange steckt die Figur ihn in den Boden (0,6 s – das Kart fährt dabei weiter). Danach dreht er sich an der
+ * Stelle ein (erst langsam, dann immer schneller, DRILL_DIG_TICKS), fährt unter der Erde immer schneller los und taucht
+ * spätestens DRILL_ARRIVE_MAX Ticks nach dem Einstecken vor dem Führenden auf (9,2 s). Dann bricht er DRILL_RISE_TICKS
+ * lang aus dem Boden und explodiert – spätestens 9,65 s nach dem Einstecken. So lange vor dem Durchbruch warnt der
+ * Bildschirm des Ziels (Grollen, Risse vor ihm, Hinweis): DRILL_WARN_TICKS.
+ */
+export const DRILL_PLANT_TICKS = 36;
+export const DRILL_DIG_TICKS = 60;
+export const DRILL_ARRIVE_MAX = 552;
+export const DRILL_RISE_TICKS = 27;
+export const DRILL_WARN_TICKS = 66;
+/** Bohrer: so weit rechts neben und vor der Mitte des Karts steckt die Figur ihn in den Boden (Meter). */
+export const DRILL_SIDE = 1.1;
+export const DRILL_FORE = 0.35;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
@@ -564,6 +590,7 @@ export function newState(): KartState {
     aimSlot: -1,
     wing: 0,
     gold: 0,
+    plant: 0,
   };
 }
 
@@ -601,6 +628,7 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.aimSlot = src.aimSlot;
   dst.wing = src.wing;
   dst.gold = src.gold;
+  dst.plant = src.plant;
   return dst;
 }
 
@@ -1244,6 +1272,8 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.guard > 0) s.guard--;
   if (s.stall > 0) s.stall--;
   if (s.flat > 0) s.flat--;
+  // Bohrer: wird gerade eingesteckt (der Host setzt ihn ab, sobald der Zähler auf 0 springt).
+  if (s.plant > 0) s.plant--;
   // Get Gold: ausgetrunken – eine Größe aus dem Ring endet hier (Gold hat Vorrang; solange es läuft, wirkt kein Ring).
   if (s.gold > 0) {
     s.gold--;
@@ -2268,6 +2298,11 @@ function useItem(s: KartState, air: boolean, noSpring = false): number {
       s.boost = 0;
       s.stall = 0;
       ev |= EV_USE_KITE;
+      break;
+    case ITEM_DRILL:
+      // Einstecken beginnt (das Kart fährt weiter). Ein zweiter Bohrer bleibt aufgehoben, bis der erste im Boden steckt.
+      if (s.plant > 0) used = false;
+      else s.plant = DRILL_PLANT_TICKS;
       break;
     default:
       used = false;

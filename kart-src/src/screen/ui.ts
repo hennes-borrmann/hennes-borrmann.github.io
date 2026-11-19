@@ -2,7 +2,7 @@
 // Rennen sowie Meldungen. Reine Anzeige – die Logik sitzt in app.ts.
 
 import { BOT_NAMES } from '../game/ai';
-import type { CupDraw, LobbyPlayer } from '../net/protocol';
+import type { CupDraw, LobbyPlayer, SnapshotThing } from '../net/protocol';
 import { CHARACTERS, ITEM_NONE, MAX_PLAYERS } from '../game/sim';
 import { CODE_ALPHABET, ROOM_CODE_LENGTH, isValidCode, normalizeCode } from '../net/codes';
 import { $, h, ms } from '../util/dom';
@@ -10,7 +10,7 @@ import { getTrack, type Track } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import { portraitUrl } from '../render/portraits';
 import { ITEMS, ROLLING_ICON, itemSvg } from '../util/items';
-import { Minimap, trackPath } from './minimap';
+import { Minimap, trackPath, type MapKart } from './minimap';
 import { PLAYER_COLOR_NAMES, playerColor } from '../util/players';
 import { qrSvg } from '../util/qr';
 
@@ -754,9 +754,9 @@ export class ScreenUi {
   }
 
   /** Minikarte neu zeichnen (läuft nicht jedes Bild – die App drosselt). */
-  drawMinimap(track: Track, karts: { x: number; z: number; slot: number }[], localSlot: number): void {
+  drawMinimap(track: Track, karts: MapKart[], localSlot: number, things: SnapshotThing[] = []): void {
     this.minimap.setTrack(track);
-    this.minimap.draw(karts, localSlot);
+    this.minimap.draw(karts, localSlot, things);
   }
 
   setCameraLabel(top: boolean): void {

@@ -6,6 +6,7 @@ import { BTN_GAS, BTN_ITEM, DT, ITEM_OIL, gridState, newState, stepKart, type Cm
 import {
   CTRL_INPUT_SIZE,
   RACE_RUNNING,
+  THING_DRILL,
   decodeCmds,
   decodeSnapshot,
   encodeCmds,
@@ -84,6 +85,8 @@ describe('Protokoll', () => {
     s.size = -873;
     // Get Gold: Restzeit samt Austrinken (bis 468 Ticks) – 16 Bit
     s.gold = 461;
+    // Bohrer: Einstecken läuft noch (bis 36 Ticks)
+    s.plant = 23;
     const snap = decodeSnapshot(
       new DataView(
         encodeSnapshot({
@@ -96,8 +99,10 @@ describe('Protokoll', () => {
           track: 2,
           karts: [{ slot: 2, bot: true, ptick: 5, ack: 7, state: s, lap: 2, place: 3, finished: true, finishTicks: 4321 }],
           things: [
-            { id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 },
-            { id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 },
+            { id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1, age: 12, seg: 801, stage: 0 },
+            { id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3, age: 2400, seg: 17, stage: 0 },
+            // Bohrer: Alter bis gut 600 Ticks, Abschnitt bis gut 3000, Stufe bis 27
+            { id: 250, kind: THING_DRILL, ttl: 0.5, x: -40, y: 2, z: 300, vx: 180, vz: -60, target: 2, age: 589, seg: 2999, stage: 27 },
           ],
         }),
       ),
@@ -119,9 +124,11 @@ describe('Protokoll', () => {
     expect([k.state.draft, k.state.flat]).toEqual([185, 130]);
     expect(k.state.size).toBe(-873);
     expect(k.state.gold).toBe(461);
+    expect(k.state.plant).toBe(23);
     expect([k.state.y, k.state.vy, k.state.guard, k.state.stall, k.state.respawn]).toEqual([Math.fround(s.y), 4.5, 700, 99, 12]);
-    expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1 });
-    expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3 });
+    expect(snap.things[0]).toEqual({ id: 9, kind: 1, ttl: 2.5, x: 1.5, y: 3.25, z: -2.5, vx: 40, vz: 0, target: -1, age: 12, seg: 801, stage: 0 });
+    expect(snap.things[1]).toEqual({ id: 4, kind: 2, ttl: 40, x: 7, y: 0, z: 8, vx: 0, vz: 0, target: 3, age: 2400, seg: 17, stage: 0 });
+    expect(snap.things[2]).toEqual({ id: 250, kind: THING_DRILL, ttl: 0.5, x: -40, y: 2, z: 300, vx: 180, vz: -60, target: 2, age: 589, seg: 2999, stage: 27 });
   });
 
   it('16-Bit-Zähler erkennt "neuer" auch über den Überlauf', () => {
