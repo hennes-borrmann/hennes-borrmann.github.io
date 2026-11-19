@@ -33,6 +33,7 @@ import { APRON, rampeLand, type RampeLand } from './life/rampeLand';
 import { PLATZ } from '../game/tracks/rampe';
 import { inLake, landCut, landHeight } from './life/talsperreLand';
 import { pondTest } from './life/baumLand';
+import { landCut as daecherCut, landHeight as daecherLand } from './life/daecherLand';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
@@ -82,7 +83,7 @@ interface SurfaceLook {
   kerbB?: RGB;
   /** Seitenstreifen; null = wie das Thema der Welt. */
   shoulder: RGB | null;
-  detail: 'none' | 'planks' | 'ruts' | 'plates' | 'cracks' | 'cobble';
+  detail: 'none' | 'planks' | 'ruts' | 'plates' | 'cracks' | 'cobble' | 'tiles';
   /** Begrenzung: gestreifte Bande, Mauer, Felswall, Holzzaun, Seil an Pfosten, Leitplanke. */
   barrier: 'block' | 'stone' | 'rock' | 'fence' | 'rope' | 'rail';
   wallA?: RGB;
@@ -252,8 +253,10 @@ export class World {
     this.boxScale = new Float32Array(t.boxes.length).fill(1);
     const dam = t.def.theme === 'talsperre';
     this.rampe = t.def.theme === 'rampe' ? rampeLand(t) : null;
-    this.land = dam ? (x, z) => landHeight(x, z, t.sea) : null;
-    this.landCut = dam ? (x, z) => landCut(x, z) : null;
+    // (Dächerjagd: der Hang der Altstadt, Kanal und Hafenbecken – life/daecherLand.ts.)
+    const daecher = t.def.theme === 'daecher';
+    this.land = dam ? (x, z) => landHeight(x, z, t.sea) : daecher ? daecherLand(t) : null;
+    this.landCut = dam ? (x, z) => landCut(x, z) : daecher ? daecherCut(t, this.terrainCell) : null;
     // (Baumkronenpfad: der Waldteich, durch den die Strecke taucht – life/baumLand.ts.)
     this.lake = dam ? (x, z) => inLake(x, z, 6) : t.def.theme === 'baum' ? pondTest(t) : null;
 
@@ -268,6 +271,9 @@ export class World {
       maxZ = Math.max(maxZ, t.pz[i]);
       // Kristallmine: Was unter Tage liegt, formt das Gelände nicht – es liegt darüber (Stollen und Höhlen zeichnet die Kulisse).
       if (t.def.theme === 'kristall' && t.py[i] < UNTER_TAGE) continue;
+      // (Dächerjagd: Die Tauchstrecke liegt im Kanal und im Hafenbecken – deren Grund schneidet landCut ins Gelände, die
+      // Kaimauern zeichnet mechanics/altstadt.ts. Sie zöge das Gelände sonst weit um sich herum zu sich hinunter.)
+      if (daecher && t.deep[i]) continue;
       if ((t.edge[i] & EDGE_DECK) === 0) {
         // (In der Gebirgslandschaft liegen Tunnel im Berg: Sie ziehen das Gelände nicht zu sich herunter.)
         if (!(dam && (t.edge[i] & EDGE_TUNNEL) !== 0)) this.nonDeck.push(i);
@@ -460,6 +466,8 @@ export class World {
         case 'metal':
           return { a: col(0x8792a0), b: col(0x77828f), c: col(0x4d5560), band: 3, plain: false, lines: true, line: col(0xffd23f), kerbs: false, shoulder: col(0x5c6570), detail: 'plates', barrier: 'rail', wallA: col(0x3a4049), wallB: col(0xc9d2dc) };
         case 'cobble':
+          // (Dächerjagd: warmes, helles Kopfsteinpflaster der Altstadt mit Rinnstein, Mauern aus Sandstein.)
+          if (t.def.theme === 'daecher') return { a: col(0xb0a28e), b: col(0xa29482), c: col(0x7e7262), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x8e8272), detail: 'cobble', barrier: 'stone', wallA: col(0xd2c2a2), wallB: col(0xb8a688) };
           return { a: col(0x9a9186), b: col(0x857d73), c: col(0x6f685f), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0x7a7268), detail: 'cobble', barrier: 'stone', wallA: col(0xa59c90), wallB: col(0x8d857a) };
         case 'neon':
           return { a: rgb(0x23263f), b: rgb(0x1c1f36), c: rgb(0x4ef0ff), band: 4, plain: true, lines: true, line: rgb(0x4ef0ff), center: rgb(0xff5ad1), kerbs: true, kerbA: rgb(0xff5ad1), kerbB: rgb(0x23263f), shoulder: rgb(0x15172b), detail: 'none', barrier: 'rail', wallA: rgb(0x2d3050), wallB: rgb(0x8f97b8), glow: rgb(0xff5ad1), glowB: rgb(0x4ef0ff) };
@@ -490,6 +498,12 @@ export class World {
         case 'bark':
           // Rinde (Baumkronenpfad: der Ast ohne Geländer): dunkle, längs gefurchte Borke mit helleren Graten, keine Markierung
           return { a: col(0x6e4a30), b: col(0x664429), c: col(0x8f6a48), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0x5a3a24), detail: 'ruts', barrier: 'rope', wallA: wood[1], wallB: col(0xf2e6c8) };
+        case 'tiles':
+          // Dachziegel (Dächerjagd): rote Biberschwänze in Reihen, ohne Markierung; als Brüstung ein niedriges Schneefanggitter
+          return { a: col(0xcc5e3c), b: col(0xbe5236), c: col(0x7e3020), band: 1, plain: false, lines: false, kerbs: false, shoulder: col(0xa8462e), detail: 'tiles', barrier: 'rail', wallA: col(0x3e3436), wallB: col(0x6a5a58) };
+        case 'straw':
+          // Stroh und Sägespäne (Dächerjagd: die Markthalle): goldgelb, unruhig, Stände aus Brettern als Begrenzung
+          return { a: col(0xe2c070), b: col(0xd6b060), c: col(0xb08a40), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xc8a458), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'marble':
           // Tempelplatten: heller Sandstein mit Fugen, Brüstung aus Quadern
           return { a: col(0xe6d6ac), b: col(0xd9c798), c: col(0xa9966a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xbcaa80), detail: 'plates', barrier: 'stone', wallA: col(0xdccb9e), wallB: col(0xc4b286) };
@@ -623,7 +637,9 @@ export class World {
 
       // Fahrbahn in zwei leicht verschiedenen Tönen – das Wechselmuster macht Tempo sichtbar.
       const tone = Math.floor(i / look.band) % 2 === 0;
-      const road = ramp ? (i % 2 === 0 ? cWarn : cInk) : tone ? look.a : look.b;
+      // (Dächerjagd: Dachrampen sind Holzbohlen, die Kante der Treppengasse eine Stufe – Warnstreifen nur am letzten Stück.)
+      const lip = ramp && (t.def.theme !== 'daecher' || (t.edge[j] & EDGE_RAMP) === 0);
+      const road = lip ? (i % 2 === 0 ? cWarn : cInk) : tone ? look.a : look.b;
       const surface = deck && !ramp && look.plain ? mixRgb(road, cDeck, 0.35) : road;
       // Zur freien Seite hin beschnitten (siehe cutRoad, cutSh)
       const fs = freeL ? -1 : freeR ? 1 : 0;
@@ -635,7 +651,11 @@ export class World {
         if (clipped) topCut(solid, i, l0, l1, lower, c, fs, roadI, roadJ);
         else topH(solid, i, f0, f1, l0, l1, lower, c);
       };
-      if (look.detail === 'cobble' && !ramp) {
+      if (look.detail === 'tiles' && !ramp) {
+        // Dachziegel: zwei Reihen je Abschnitt, die untere Kante jeder Reihe dunkel (der Schatten der Ziegel darüber)
+        topH(solid, i, f0, Math.min(f1, 0.5), -rh, rh, lower, look.a);
+        if (f1 > 0.5) topH(solid, i, Math.max(f0, 0.5), f1, -rh, rh, lower, look.b);
+      } else if (look.detail === 'cobble' && !ramp) {
         // Pflaster: vier Bahnen im Schachbrett
         for (let c = 0; c < 4; c++) lane(-rh + (c * rh) / 2, -rh + ((c + 1) * rh) / 2, (i + c) % 2 === 0 ? look.a : look.b);
       } else lane(-rh, rh, surface);
@@ -656,6 +676,10 @@ export class World {
       if (!ramp && lower === 0 && f0 === 0 && f1 === 1 && !holed) {
         const d = look.detail;
         if (d === 'planks') top(solid, i, 0, 0.14, -rh, rh, 0.012, look.c);
+        else if (d === 'tiles') {
+          top(solid, i, 0, 0.07, -rh, rh, 0.012, look.c);
+          top(solid, i, 0.5, 0.57, -rh, rh, 0.012, look.c);
+        }
         else if (d === 'ruts') {
           top(solid, i, 0, 1, -2.3, -1.3, 0.012, look.c);
           top(solid, i, 0, 1, 1.3, 2.3, 0.012, look.c);
@@ -858,7 +882,8 @@ export class World {
       // (Talsperre: Mauerkrone, Wehrkrone und Schwebeband tragen sich selbst – die Mauer und ihre Halter zeichnet mechanics/dam.ts.)
       // (Baumkronenpfad: Stege, Rampe und Kronenpfad tragen Stämme, Äste und Holzböcke – die zeichnet mechanics/canopy.ts.)
       // (Startrampe: Die Wendel hängt am Turm, Brücke und Ring tragen Pylone – das zeichnet mechanics/rampe.ts.)
-      const selfBorne = (t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band)) || t.def.theme === 'baum' || t.def.theme === 'rampe';
+      // (Dächerjagd: Dächer, Kirchendach und Brücken tragen Häuser, Kirche und Bögen – die zeichnet mechanics/altstadt.ts.)
+      const selfBorne = (t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band)) || t.def.theme === 'baum' || t.def.theme === 'daecher' || t.def.theme === 'rampe';
       if (deck && !gapI && !gapJ && i % 14 === 7 && (e & (EDGE_RAMP | EDGE_TWIST)) === 0 && !selfBorne) {
         const lat = wh + WALL_T + 0.5;
         let free = true;
@@ -945,7 +970,7 @@ export class World {
     const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : id === 'talsperre' ? rgb(0xb9b2a5) : id === 'rampe' ? rgb(0xc4c0b6) : rgb(0xd9c7a8);
     const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : id === 'talsperre' ? rgb(0xf2b630) : id === 'rampe' ? rgb(0xff6a1f) : rgb(0x6fd0e6);
     const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : id === 'talsperre' ? rgb(0x8c867b) : id === 'rampe' ? rgb(0x4a4a4f) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, kristall: 0xc77dff, talsperre: 0xffe2a0, baum: 0xffd27a , rampe: 0xffd27a }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, kristall: 0xc77dff, talsperre: 0xffe2a0, baum: 0xffd27a, daecher: 0xffd890, rampe: 0xffd27a }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -1407,8 +1432,11 @@ export class World {
       // zweite Fahrbahn darüber, spannte sonst ein Dreieck von einer hohen Ecke über ihren Rand – kein Dreieck reicht
       // weiter als eine Felddiagonale.
       const shelf = 1.5 * this.terrainCell;
+      const kanal = t.def.theme === 'daecher';
       for (let i = 0; i < t.total; i++) {
         if ((t.edge[i] & (EDGE_GAP | EDGE_TUNNEL)) !== 0) continue;
+        // (Dächerjagd: im Kanal stehen senkrechte Kaimauern – siehe oben.)
+        if (kanal && t.deep[i]) continue;
         const dx = x - t.px[i];
         const dz = z - t.pz[i];
         const w = t.wh[i];
@@ -1553,6 +1581,29 @@ export class World {
       const liquid = th.liquidY ?? -Infinity;
       const snowLine = th.snowLine ?? 12;
       const tube = this.land && this.tunnelSegs.length > 0 ? this.tubeCutter(b, cell) : null;
+      // Dächerjagd: In der Stadt (nah an den Gassen) ist der Boden Pflaster und gestampfte Erde, draußen vor der Stadt
+      // Wiesen und Weinberge – je Ecke des Rasters der Abstand zur nächsten Fahrbahn (grob, jeder vierte Abschnitt).
+      const stadt = t.def.theme === 'daecher' ? new Float32Array((nx + 1) * (nz + 1)) : null;
+      if (stadt) {
+        for (let iz = 0; iz <= nz; iz++) {
+          for (let ix = 0; ix <= nx; ix++) {
+            const x = x0 + ix * cell;
+            const z = z0 + iz * cell;
+            let best = Infinity;
+            for (let k = 0; k < t.total; k += 4) {
+              const dd = (x - t.px[k]) ** 2 + (z - t.pz[k]) ** 2;
+              if (dd < best) best = dd;
+            }
+            stadt[iz * (nx + 1) + ix] = Math.sqrt(best);
+          }
+        }
+      }
+      const wiese = (p: V3): number => {
+        if (!stadt) return 0;
+        const ix = Math.max(0, Math.min(nx, Math.round((p[0] - x0) / cell)));
+        const iz = Math.max(0, Math.min(nz, Math.round((p[2] - z0) / cell)));
+        return stadt[iz * (nx + 1) + ix];
+      };
       const hole = (p: V3): boolean => this.schaechte.some((sch) => Math.hypot(p[0] - sch.x, p[2] - sch.z) < sch.r + 0.5);
       // (Startrampe: Ecken in einem Einschnitt – dort liegt kein Gelände.)
       const ramp = this.rampe;
@@ -1580,7 +1631,10 @@ export class World {
         let col: RGB;
         // Stausee: der Grund unter dem Spiegel ist schlammig, je tiefer, desto dunkler.
         if (this.lake && mid < t.sea - 0.4 && this.lake((a[0] + bb[0] + c[0]) / 3, (a[2] + bb[2] + c[2]) / 3)) col = mixRgb(rgb(0x7d7a5c), rgb(0x46564a), smooth((t.sea - mid) / 14));
-        else if (up < 0.8) col = g[2];
+        else if (stadt) {
+          const far = smooth((Math.min(wiese(a), wiese(bb), wiese(c)) - 42) / 26);
+          col = up < 0.8 ? mixRgb(g[2], shade(g[3], 0.85), far) : mixRgb(g[1], mixRgb(g[3], g[0], noise(a[0] * 0.02, a[2] * 0.02) * 0.25), far);
+        } else if (up < 0.8) col = g[2];
         else if (th.liquidY !== null && mid < liquid + 1.6) col = g[0];
         else if (mid > snowLine) col = mixRgb(g[1], g[3], smooth((mid - snowLine) / 6));
         else col = th.liquidY !== null ? g[1] : mixRgb(g[0], g[1], noise(a[0] * 0.03, a[2] * 0.03));

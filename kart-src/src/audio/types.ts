@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'rampe' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'daecher' | 'rampe' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -107,6 +107,8 @@ export type SfxName =
   | 'rubble' // Kristallmine: im Sprengort bricht das Hangende nach (ortsfest): Grollen, polternde Brocken, rieselnder Staub (~1,4 s)
   | 'lore' // Kristallmine: das eigene Kart rattert in der Lore über das Grubengleis (wird etwa alle 0,4 s aufgerufen und verschmilzt zu einem Bett): tiefes Rollen, blechernes Klappern, Schienenstöße
   | 'creak' // Baumkronenpfad: eine Hängebrücke knarzt am Ende eines Pendelschlags (ortsfest, bis ~80 m): Holz reibt an Holz – ein tiefer, stockender Ton, der etwas absinkt, darüber das Quietschen des gespannten Seils (~0,7 s)
+  | 'trambell' // Dächerjagd: die Straßenbahn klingelt (ortsfest an ihrer Spitze, bis ~90 m): zwei helle Schläge auf eine Glocke – „bimm-bimm“ (~0,5 s)
+  | 'bells' // Dächerjagd: ein Schlag einer Kirchenglocke im Turm (ortsfest, weit zu hören): Schlagton mit Unterton, kleiner Terz, Quinte und Oktave, langer Nachhall (~2,6 s); drei Glocken reihum (G, H, D)
   | 'cone' // Baumkronenpfad: ein Tannenzapfen schlägt auf dem Waldweg auf (ortsfest): kurzes Nadelrascheln, dann ein hölzernes „Plock“ mit dumpfem Bauch und ein paar abspringenden Schuppen (~0,35 s)
   | 'beep' // Startrampe: der Countdown piept über die Lautsprecher des Platzes (die letzten zehn Sekunden vor jedem Start, überall zu hören): sauberer Piepton mit leisem Nachhall (~0,3 s)
   | 'liftoff' // Startrampe: eine Rakete hebt ab (ortsfest an der Rakete, auf dem ganzen Platz zu hören): Zündstoß, brüllende Triebwerke, Knattern des Abgasstrahls, dann leiser und dunkler (~4 s)

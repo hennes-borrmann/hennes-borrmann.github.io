@@ -11,6 +11,7 @@ import { TALSPERRE_STUECK } from '../../src/audio/stuecke/talsperre';
 import { KRISTALL_STUECK } from '../../src/audio/stuecke/kristall';
 import { RAMPE_STUECK } from '../../src/audio/stuecke/rampe';
 import { BAUM_STUECK } from '../../src/audio/stuecke/baum';
+import { DAECHER_STUECK } from '../../src/audio/stuecke/daecher';
 import { RUMMEL_STUECK } from '../../src/audio/stuecke/rummel';
 import { ZIMMER_STUECK } from '../../src/audio/stuecke/zimmer';
 import { WUESTE_STUECK } from '../../src/audio/stuecke/wueste';
@@ -37,6 +38,7 @@ const STUECKE: { schluessel: MusicId; def: SongDef }[] = [
   { schluessel: 'talsperre', def: TALSPERRE_STUECK },
   { schluessel: 'kristall', def: KRISTALL_STUECK },
   { schluessel: 'baum', def: BAUM_STUECK },
+  { schluessel: 'daecher', def: DAECHER_STUECK },
   { schluessel: 'rampe', def: RAMPE_STUECK },
 ];
 

@@ -833,8 +833,8 @@ async function main() {
     check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
     await h6.page.click('#btn-step-next');
     check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
-    check('Vierundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 24);
-    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 24);
+    check('Fünfundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 25);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 25);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
@@ -1520,7 +1520,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen vierundzwanzig Strecken zur Wahl', cards === 24, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen fünfundzwanzig Strecken zur Wahl', cards === 25, `${cards} Karten`);
     await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2415,10 +2415,58 @@ async function main() {
     await toLobby(h7.page);
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
 
+    // Dächerjagd: Die Straßenbahn fährt nach der Rennzeit (auf beiden Bildschirmen gleich), hält an der Haltestelle und ist
+    // zwischendurch in der Remise. Zwei Abkürzungen: die Dachsprung-Kette ('risk', drei Lücken) und die Markthalle ('item');
+    // Gleitflug vom Kirchturm, Tauchen im Kanal. Wer auf die Lücke der Dachsprung-Kette gesetzt wird, fällt in die Gasse.
+    await pickTrack(h7.page, 23);
+    await c7.page.waitForFunction(() => window.__kart.lobby().track === 23, null, { timeout: 5000 });
+    await clickReady(c7.page);
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await clickStart(h7.page);
+    await c7.page.waitForFunction(() => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === 23, null, { timeout: 30000 });
+    {
+      let same = true;
+      let halted = 0;
+      let away = 0;
+      let moving = 0;
+      for (let sec = 1; sec < 40; sec += 0.75) {
+        const [a, b] = await Promise.all([kart(h7.page, `altstadt(${sec})`), kart(c7.page, `altstadt(${sec})`)]);
+        const key = (c) => c.trams.map((x) => `${x.present ? 1 : 0}/${x.at.toFixed(2)}/${x.speed.toFixed(2)}`).join();
+        if (key(a) !== key(b)) same = false;
+        for (const x of a.trams) {
+          if (!x.present) away++;
+          else if (x.speed < 0.05) halted++;
+          else moving++;
+        }
+      }
+      const info = await kart(h7.page, 'altstadt()');
+      check(
+        'Dächerjagd: Straßenbahn nach Fahrplan, auf beiden Bildschirmen gleich; Dachsprung-Kette und Markthalle, Gleitflug, Kanal',
+        same && halted > 0 && moving > halted && away > 0 && info.shortcuts.map((x) => x.kind).join() === 'risk,item' && info.shortcuts[0].gaps === 3 && info.glide > 100 && info.under > 0,
+        `${info.trams.length} Züge: Stichproben unterwegs ${moving}, hält ${halted}, in der Remise ${away}${same ? '' : ', Bildschirme verschieden'} · Lücken der Dachsprung-Kette ${info.shortcuts[0] ? info.shortcuts[0].gaps : '?'} · Gleitflug ${info.glide.toFixed(0)} m · unter Wasser ab ${info.under.toFixed(0)} m`,
+      );
+      // Anna mitten auf die erste Lücke der Dachsprung-Kette, ohne Tempo: Sie fällt in die Gasse und wird vor dem Sprung neu aufgesetzt.
+      const fell = await h7.page.evaluate(async () => {
+        const k = window.__kart;
+        const b = k.altstadt().shortcuts[0];
+        k.place(0, b.gapAt, 0, 0, 0);
+        let worst = 0;
+        for (let n = 0; n < 40; n++) {
+          await new Promise((r) => setTimeout(r, 100));
+          const s = k.authoritative(0);
+          worst = Math.max(worst, s.respawn);
+        }
+        return worst;
+      });
+      check('Dachsprung-Kette: Wer ohne Tempo in eine Lücke rollt, fällt in die Gasse und wird neu aufgesetzt', fell > 0, `Neuaufsetzen ${fell} Ticks`);
+    }
+    await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
     // Startrampe: Alle 40 s ein Start – der Starttakt, das Tor des Flammengrabens und der Raupentransporter mit der Schranke
     // am Transporterdach folgen der Rennzeit, auf beiden Bildschirmen gleich. Beim Start schiebt der Abgasstoß, wer neben der
     // Flammenzone steht, zur Seite – und wer in ihr steht, wird geworfen; beides sieht auch Ben.
-    const RAMPE = 23;
+    const RAMPE = 24;
     await pickTrack(h7.page, RAMPE);
     await c7.page.waitForFunction((k) => window.__kart.lobby().track === k, RAMPE, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2500,7 +2548,7 @@ async function main() {
     await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die vierundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die fünfundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 

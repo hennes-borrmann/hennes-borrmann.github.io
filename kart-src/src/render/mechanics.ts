@@ -25,6 +25,7 @@ import { buildAtrium } from './mechanics/atrium';
 import { buildDam } from './mechanics/dam';
 import { buildMine } from './mechanics/mine';
 import { buildCanopy } from './mechanics/canopy';
+import { buildAltstadt } from './mechanics/altstadt';
 import { buildRampe } from './mechanics/rampe';
 import { buildRails } from './mechanics/rails';
 import { buildSizers } from './mechanics/sizers';
@@ -60,7 +61,8 @@ export interface MechanicView {
  */
 export function buildMechanics(track: Track, detail: boolean, world: World): MechanicView[] {
   const out: MechanicView[] = [];
-  if (track.vehicles.some((v) => !v.roofs)) out.push(buildTraffic(track, detail));
+  // (Die Straßenbahn der Dächerjagd fährt nach Fahrplan auf ihrer Linie: die zeichnet mechanics/altstadt.ts.)
+  if (track.vehicles.some((v) => !v.roofs && !v.line)) out.push(buildTraffic(track, detail));
   // (Die U-Bahn der Neonhochbahn zeichnet mechanics/metro.ts.)
   if (track.roofed && track.vehicles.some((v) => v.roofs && !v.plan)) out.push(buildTrain(track, detail));
   if (track.bands.length > 0) out.push(buildBand(track, detail));
@@ -74,6 +76,8 @@ export function buildMechanics(track: Track, detail: boolean, world: World): Mec
   if (track.def.theme === 'talsperre') out.push(buildDam(track, detail, world));
   // Baumkronenpfad: Hängebrücken, Riesen und Holzböcke, der hohle Baumriese, Wasserfall und Teich, Tannenzapfen
   if (track.def.theme === 'baum') out.push(buildCanopy(track, detail, world));
+  // Dächerjagd: Häuser unter dem Dachweg, Kirche und Turm, Markthalle, Kaimauern und Brücken, Bastei, Straßenbahn
+  if (track.def.theme === 'daecher') out.push(buildAltstadt(track, detail, world));
   // Startrampe: Startsockel, Rakete, Flammengraben, Kriechweg mit Raupentransporter, Serviceturm, Magnetring, Countdown-Tafeln
   if (track.def.theme === 'rampe') out.push(buildRampe(track, detail, world));
   const presses = track.pulses.some((p) => p.kind === PULSE_PRESS);
