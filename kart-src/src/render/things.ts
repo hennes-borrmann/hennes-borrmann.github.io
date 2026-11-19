@@ -397,6 +397,29 @@ export class ThingVisuals {
       b.box(0, 6.0, 0, 0.14, 6.6, 0.14, rgb(0x5a5f6a));
       b.box(0, 9.35, 0, 0.9, 0.35, 0.5, rgb(0x2a2733));
       for (const sz of [-0.32, 0.32]) put(b, new THREE.CylinderGeometry(0.2, 0.2, 0.1, 8), 0x9aa0ae, 0, 9.5, sz, 1, 1, 1, Math.PI / 2);
+    } else if (this.theme === 'talsperre') {
+      // Turbinenläufer (Francis-Laufrad) am Haken des Hallenkrans: Kranz, Deckscheibe und geschwungene Schaufeln aus
+      // Bronze, darüber Welle, Seil und die Laufkatze auf der Kranbrücke (11,2 m über der Straße, die Brücke selbst steht
+      // fest – mechanics/dam.ts). Er dreht sich, während ihn die Katze quer über die Straße fährt.
+      const BRONZE = 0xc99a52;
+      const STEEL = 0x8e97a3;
+      put(b, new THREE.CylinderGeometry(1.7, 1.8, 0.42, 16), STEEL, 0, 2.55, 0);
+      put(b, new THREE.CylinderGeometry(1.45, 1.25, 0.5, 16, 1, true), BRONZE, 0, 0.75, 0);
+      for (let k = 0; k < 9; k++) {
+        const a = (k / 9) * Math.PI * 2;
+        put(b, new THREE.BoxGeometry(0.16, 1.7, 0.95), BRONZE, Math.cos(a) * 1.15, 1.65, Math.sin(a) * 1.15, 1, 1, 1, 0.35, -a + 0.6, 0.25);
+      }
+      put(b, new THREE.ConeGeometry(0.55, 1.4, 10), 0xc8432e, 0, 1.2, 0, 1, 1, 1, Math.PI);
+      // Warnring gelb-schwarz an der Deckscheibe
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2;
+        put(b, new THREE.BoxGeometry(0.85, 0.2, 0.12), k % 2 === 0 ? 0xffcf3a : 0x1e1c22, Math.cos(a) * 1.78, 2.55, Math.sin(a) * 1.78, 1, 1, 1, 0, -a + Math.PI / 2, 0);
+      }
+      put(b, new THREE.CylinderGeometry(0.2, 0.2, 2.2, 8), STEEL, 0, 3.8, 0);
+      put(b, new THREE.CylinderGeometry(0.5, 0.35, 0.7, 8), 0x2a2733, 0, 5.1, 0);
+      put(b, new THREE.CylinderGeometry(0.06, 0.06, 5.6, 5), 0x2a2733, 0, 8.2, 0);
+      put(b, new THREE.CylinderGeometry(0.85, 0.85, 0.9, 12), 0xffcf3a, 0, 11.25, 0);
+      put(b, new THREE.CylinderGeometry(0.95, 0.95, 0.12, 12), 0x2a2733, 0, 10.75, 0);
     } else {
       // Kehrroboter mit Warnlicht
       b.box(0, 0.75, 0, 2.3, 1.0, 1.9, rgb(0x1fd6c8), 0, rgb(0x16a79c));
@@ -823,6 +846,11 @@ export class ThingVisuals {
         // Die Gondel schaukelt am Gehänge: am Umkehrpunkt schräg, dazu ein leichtes Wiegen.
         inner.position.y = 0.15;
         inner.rotation.z = -(lat / Math.max(1, h.amp)) * 0.08 + Math.sin(time * 1.6 + i) * 0.02;
+      } else if (this.theme === 'talsperre') {
+        // Der Läufer dreht sich am Haken (Seil und Katze sind rund – sie drehen unsichtbar mit) und pendelt leicht.
+        inner.position.y = 0.02 * Math.sin(time * 1.3 + i);
+        inner.rotation.y = time * 2.4 + i;
+        inner.rotation.z = -(lat / Math.max(1, h.amp)) * 0.035;
       } else if (this.theme === 'hafen') {
         // Die Last hängt: am Umkehrpunkt steht sie schräg, in der Mitte gerade; dazu dreht sie leicht am Seil.
         inner.position.y = 0.12 + 0.05 * Math.sin(time * 1.3 + i);

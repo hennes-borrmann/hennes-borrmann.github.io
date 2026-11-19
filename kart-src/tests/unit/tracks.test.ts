@@ -131,9 +131,10 @@ describe('Alle Strecken', () => {
         const lines: string[] = [];
         const best: number[] = [];
         // Abkürzungen über ein Zugdach (Neonhochbahn) gibt es nur, solange ein Zug hält: Diese Wege fährt die KI mit Zügen
-        // und Tor (sie wartet vor dem Tor, bis es aufgeht). Weil das Warten je Runde verschieden lang dauert, zählt hier nur,
-        // dass der Weg fahrbar ist – die Ersparnis misst der Test der Strecke selbst.
-        const trainBits = (t.def.branches ?? []).reduce((m, b, k) => (b.shortcut === 'train' ? m | (1 << k) : m), 0);
+        // und Tor (sie wartet vor dem Tor, bis es aufgeht). Ebenso Zeitfenster nach Fahrplan (Talsperre: Schleuse). Weil das
+        // Warten je Runde verschieden lang dauert, zählt hier nur, dass der Weg fahrbar ist – die Ersparnis misst der Test der
+        // Strecke selbst.
+        const trainBits = (t.def.branches ?? []).reduce((m, b, k) => (b.shortcut === 'train' || b.shortcut === 'window' ? m | (1 << k) : m), 0);
         for (let route = 0; route < routes; route++) {
           let sum = 0;
           for (let slot = 0; slot < 4; slot++) {
@@ -162,9 +163,9 @@ describe('Alle Strecken', () => {
         } else if (t.def.branches?.some((b) => b.shortcut)) {
           // Echte Abkürzungen (ab der Gipfelbahn): Eine mit Risiko spart deutlich (die KI fährt sie ohne Patzer), eine,
           // die sich nur mit Schub lohnt, ist ohne Schub höchstens knapp schneller. Zusammen höchstens fünf Sekunden.
-          // (Wege über ein Zugdach: siehe oben – hier nicht verglichen.)
+          // (Wege über ein Zugdach oder durch ein Zeitfenster: siehe oben – hier nicht verglichen.)
           t.def.branches.forEach((b, k) => {
-            if (b.shortcut === 'train') return;
+            if (b.shortcut === 'train' || b.shortcut === 'window') return;
             const gain = best[0] - best[1 << k];
             if (b.shortcut === 'risk') {
               expect(gain).toBeGreaterThan(1.5);

@@ -309,6 +309,19 @@ const SHOTS = {
       [3, 437, 1.5],
     ],
   },
+  // Talsperre: von der Westseite der Schlucht schräg hinauf an die Luftseite der Staumauer – drei Karts liegen auf dem
+  // Schwebeband, das sich dort senkrecht an die Mauer gedreht hat; dahinter Krone mit Leuchten, Turmdrehkran, die Kehren am
+  // Osthang und der Stollen, aus dem das Band kommt.
+  talsperre: {
+    from: { xyz: [-52, 44, 52] },
+    to: { xyz: [4, 50, 22] },
+    fov: 50,
+    karts: [
+      [1, 776, -2],
+      [2, 786, 2.5],
+      [3, 798, -0.5],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

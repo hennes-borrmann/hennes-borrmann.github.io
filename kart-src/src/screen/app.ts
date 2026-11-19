@@ -1585,6 +1585,29 @@ export class App {
           gate: metro ? TRACK.gates.some((g) => TRACK.branchOf[g.first] === metro.branch && planActive(g.plan, time)) : false,
         };
       },
+      // Talsperre, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): ob das Schleusentor zu ist
+      // (und sein Takt in Sekunden), wie viele Turbinenläufer im Krafthaus pendeln, die Überlaufrinne (Länge, Schub der
+      // Strömung quer in m/s) und der Seespiegel samt erstem Meter unter Wasser (Hauptstrecke).
+      dam: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const kWin = TRACK.def.branches?.findIndex((b) => b.shortcut === 'window') ?? -1;
+        const kRisk = TRACK.def.branches?.findIndex((b) => b.shortcut === 'risk') ?? -1;
+        const gate = kWin >= 0 ? TRACK.gates.find((g) => TRACK.branchOf[g.first] === kWin) : undefined;
+        const weir = kRisk >= 0 ? TRACK.branches[kRisk] : null;
+        const push = weir ? TRACK.belts.find((b) => b.first >= weir.first && b.first < weir.first + weir.count)?.across ?? 0 : 0;
+        let under = -1;
+        for (let i = 0; i < TRACK.n && under < 0; i++) if (TRACK.deep[i] && TRACK.py[i] < TRACK.sea - 1) under = i * TRACK.step;
+        return {
+          time,
+          gate: gate ? planActive(gate.plan, time) : null,
+          period: gate ? gate.plan.period / 60 : 0,
+          turbines: TRACK.hazards.length,
+          weir: weir ? { length: weir.count * TRACK.step, push } : null,
+          sea: TRACK.sea,
+          under,
+        };
+      },
       // Fliegen: Flugstrecken (Meter ab Start, nur Hauptstrecke) und Zahl der Aufwinde und Schubringe.
       flight: () => {
         const glides: { from: number; to: number }[] = [];

@@ -329,8 +329,11 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         let take = random(b) < 0.5;
         // Abkürzung über ein Zugdach (Neonhochbahn): nur, wenn das Tor bei der Ankunft offen ist (dann hält ein Zug) –
         // ohne Zug wäre dort ein Graben. Ob sie es wagt, hängt an der Stärke (wie beim Aufspringen auf den Wüstenexpress).
-        const train = t.def.branches?.[k]?.shortcut === 'train';
-        if (train) take = false;
+        // Ebenso ein Zeitfenster nach Fahrplan (Talsperre: die Schleuse): Die KI rechnet aus, ob das Tor bei ihrer
+        // Ankunft offen ist.
+        const cut = t.def.branches?.[k]?.shortcut;
+        const timed = cut === 'train' || cut === 'window';
+        if (timed) take = false;
         // Liegt auf der Abzweigung ein Stück, durch das im Takt Lava läuft? Wer aufpasst,
         // nimmt sie genau dann, wenn sie bei der Durchfahrt frei ist (die Ampel zeigt es an).
         if (b.level > 0) {
@@ -363,7 +366,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           }
           if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 30)) {
             // Offen – und das ist es nicht immer: Wer aufpasst, nimmt den Weg meistens, solange es ihn gibt.
-            if (train && t.branchOf[g.first] === k) take = random(b) < TRAIN_DARE[b.level];
+            if (timed && t.branchOf[g.first] === k) take = random(b) < TRAIN_DARE[b.level];
             else if (t.branchOf[g.first] === k && b.level > 0 && !take) take = random(b) < 0.6;
             continue;
           }

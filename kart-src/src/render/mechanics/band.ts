@@ -11,23 +11,28 @@
 //   – Fassade: ein Turm rechts neben dem verdrehten Stück, mit Fensterbändern; das Band hängt an Haltern davor. Wo es
 //     sich erst wenig gedreht hat, stehen Stützen darunter.
 // Zusammen drei Zeichenaufrufe (Linien, Leuchtendes, Körper), alles stehende Geometrie bis auf die Texturverschiebung.
+//
+// Talsperre: dasselbe Band in den Farben des Abends (cyan und bernstein statt cyan und pink) – statt der Fassade steht
+// rechts die Luftseite der Staumauer (die zeichnet mechanics/dam.ts); das Band hängt auf ganzer Länge an Auslegern, die
+// in der Mauer verankert sind (keine Stützen hinunter in die Schlucht).
 
 import * as THREE from 'three';
 import { BAND_LINE_K, BAND_LINE_SPEED, BAND_LINE_WAVE } from '../../game/mechanics';
 import { EDGE_TWIST, rightX, rightZ, twistWarp, type Track } from '../../game/track';
+import { DAM_AIR, damRadius } from '../life/talsperreLand';
 import { MeshBuilder, seeded, shade, type RGB, type V3 } from '../build';
 import type { MechanicView } from '../mechanics';
 import { THEMES } from '../themes';
 import { rgb, toonMaterial } from '../toon';
 
-const CYAN = rgb(0x5ff3ff);
-const PINK = rgb(0xff3fae);
-const VIOLET = rgb(0x9a6bff);
+const CYAN_N = rgb(0x5ff3ff);
+const PINK_N = rgb(0xff3fae);
+const VIOLET_N = rgb(0x9a6bff);
 const WARM = rgb(0xffd27a);
-const DARK = rgb(0x151833);
+const DARK_N = rgb(0x151833);
 const FACADE = rgb(0x22264a);
 const FACADE_B = rgb(0x1a1d3b);
-const STEEL = rgb(0x3a3f66);
+const STEEL_N = rgb(0x3a3f66);
 
 /** So dick ist das Band (wie ein Steg, world.ts: DECK_D). */
 const SLAB = 1.1;
@@ -37,6 +42,13 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   group.name = 'Schwebeband';
   const disposables: { dispose(): void }[] = [];
   const farY = THEMES[t.def.theme].farY;
+  // Talsperre: Abendfarben, und statt des Fassadenturms die Staumauer (mechanics/dam.ts).
+  const dam = t.def.theme === 'talsperre';
+  const CYAN = dam ? rgb(0x58e0ff) : CYAN_N;
+  const PINK = dam ? rgb(0xffcf4a) : PINK_N;
+  const VIOLET = dam ? rgb(0xffa94a) : VIOLET_N;
+  const DARK = dam ? rgb(0x2b303b) : DARK_N;
+  const STEEL = dam ? rgb(0x6c717c) : STEEL_N;
 
   const tmp = { x: 0, y: 0, z: 0 };
   /** Punkt auf dem Band (gezeigte Stelle): Abschnitt i, Anteil f zum nächsten, seitlich lat, h über der Fahrbahn. */
@@ -62,7 +74,7 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
   g.lineCap = 'round';
-  const colors = ['#5ff3ff', '#ff4fc0'];
+  const colors = dam ? ['#58e0ff', '#ffb347'] : ['#5ff3ff', '#ff4fc0'];
   for (let k = 0; k < 2; k++) {
     const sign = k === 0 ? 1 : -1;
     const path = (): void => {
@@ -191,7 +203,27 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   // beim Drehen nicht hindurchstreicht (sie schwingt auf einem Kreis um die Achse); das Band hängt an Haltern davor.
   const twisted: number[] = [];
   for (let i = 0; i < t.n; i++) if ((t.edge[i] & EDGE_TWIST) !== 0) twisted.push(i);
-  if (twisted.length > 0) {
+  if (dam) {
+    // Talsperre: Ausleger alle 6 m von der Unterseite des Bands waagerecht zur Luftseite der Mauer, dort eine Ankerplatte.
+    // Wo das Band schon an der Mauer liegt, sind sie kurz; wo es flach davor hängt, lang (und unter ihm ein Zugband).
+    for (const b of t.bands) {
+      for (let k = 2; k < b.count - 2; k += 6) {
+        const i = (b.first + k) % t.n;
+        const wall = damRadius(t.px[i], t.pz[i]);
+        // Nur entlang der Mauer (an den Enden geht das Band aus dem Fels bzw. in ihn hinein).
+        const out = DAM_AIR - wall;
+        if (out < 6 || out > 20) continue;
+        const under = P(i, 0, 0, -SLAB);
+        const F = (lat: number, y: number): V3 => [t.px[i] + rightX(t, i) * lat, y, t.pz[i] + rightZ(t, i) * lat];
+        const anchor = F(out + 0.3, under[1]);
+        beam(solid, under, anchor, 0.55, STEEL);
+        // Strebe schräg hinab zur Mauer (trägt das flach hängende Band – unter ihm, nie über der Fahrbahn)
+        if (t.roll[i] < 0.6) beam(solid, P(i, 0, -t.rh[i] * 0.4, -SLAB), F(out + 0.3, under[1] - 6), 0.3, shade(STEEL, 0.85));
+        solid.box(anchor[0], anchor[1], anchor[2], 1.3, 1.3, 0.5, shade(STEEL, 0.75), Math.atan2(t.tx[i], t.tz[i]));
+        glow.box(anchor[0], anchor[1] + 0.85, anchor[2], 0.5, 0.18, 0.5, PINK);
+      }
+    }
+  } else if (twisted.length > 0) {
     const R = Math.max(...twisted.map((i) => t.twist[i]));
     const wMax = Math.max(...twisted.map((i) => t.wh[i]));
     const wall = Math.hypot(wMax, R + SLAB) + 0.4;

@@ -69,7 +69,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -230,9 +230,12 @@ export interface BranchDef extends PathFeatures {
    * 'item' = lohnt sich nur mit Schub oder Gleiter (ohne: kaum schneller, eher langsamer);
    * 'risk' = wer sie verpatzt (zu langsam, getroffen), stürzt ab.
    * 'train' = Zeitfenster (Neonhochbahn): Über den Gleisgraben (trench) trägt nur das Dach eines Zugs, der im Bahnhof
-   * hält – ein Tor an der Mündung ist nur offen, solange er steht. Ohne Angabe sind beide Wege gleichwertig.
+   * hält – ein Tor an der Mündung ist nur offen, solange er steht.
+   * 'window' = Zeitfenster nach Fahrplan (Talsperre: Schleuse): Ein Tor an der Mündung (gates mit every) ist nur zeitweise
+   * offen; wer es trifft, ist deutlich schneller, wer davor steht, wartet oder nimmt den anderen Weg.
+   * Ohne Angabe sind beide Wege gleichwertig.
    */
-  shortcut?: 'item' | 'risk' | 'train';
+  shortcut?: 'item' | 'risk' | 'train' | 'window';
   /**
    * Gleisgraben (mit shortcut 'train'): [von, bis] hat keine Fahrbahn – nur das Dach des haltenden Zugs der U-Bahn
    * (TrackDef.metro) liegt dort auf Höhe der Fahrbahn. Muss gerade sein. Wer hineinfällt, wird vor der Gabelung aufgesetzt.

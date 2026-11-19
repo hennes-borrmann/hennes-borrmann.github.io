@@ -3,7 +3,7 @@
 // Streckenbeschreibung erzeugt und zu wenigen großen Netzen zusammengefasst.
 
 import * as THREE from 'three';
-import { SURFACES } from '../game/surface';
+import { SURFACES, SURFACE_INDEX } from '../game/surface';
 import {
   EDGE_BROKEN,
   EDGE_DECK,
@@ -28,6 +28,7 @@ import {
 import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RGB, type V3 } from './build';
 import type { FxSink } from './fxApi';
 import { buildLife, type Life } from './life';
+import { inLake, landCut, landHeight } from './life/talsperreLand';
 import { buildScenery } from './scenery';
 import { THEMES, type Theme } from './themes';
 import { INK, addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
@@ -187,10 +188,20 @@ export class World {
   /** Sichtbare Größe jeder Kiste (0..1) – wächst nach dem Einsammeln wieder an. */
   private boxScale: Float32Array;
   private nonDeck: number[] = [];
+  /** Tunnelabschnitte, über denen das Gelände der Gebirgslandschaft liegen muss. */
+  private tunnelSegs: number[] = [];
   private deckSegs: number[] = [];
   private idwSegs: number[] = [];
   /** Vulkaninsel: der Krater, um dessen halben Rand die Strecke läuft (sonst null). */
   crater: Crater | null = null;
+  /**
+   * Gebirgslandschaft (Talsperre): Höhe des Geländes abseits der Fahrbahn statt einer ebenen Fläche (null = keine), dazu
+   * Stellen, an denen es tiefer liegen muss (Rinnen, Kammern), und der Stausee: Wo die Kamera unter dessen Spiegel
+   * taucht, wechseln Dunst und Licht wie in einer Unterwasserwelt (theme.under).
+   */
+  readonly land: ((x: number, z: number) => number) | null;
+  readonly landCut: ((x: number, z: number) => number) | null;
+  readonly lake: ((x: number, z: number) => boolean) | null;
   private life: Life | null = null;
   buildTimes: number[] = [];
 
@@ -203,6 +214,10 @@ export class World {
     const th = this.theme;
     const t = track;
     this.boxScale = new Float32Array(t.boxes.length).fill(1);
+    const dam = t.def.theme === 'talsperre';
+    this.land = dam ? (x, z) => landHeight(x, z, t.sea) : null;
+    this.landCut = dam ? (x, z) => landCut(x, z) : null;
+    this.lake = dam ? (x, z) => inLake(x, z, 6) : null;
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -214,7 +229,9 @@ export class World {
       minZ = Math.min(minZ, t.pz[i]);
       maxZ = Math.max(maxZ, t.pz[i]);
       if ((t.edge[i] & EDGE_DECK) === 0) {
-        this.nonDeck.push(i);
+        // (In der Gebirgslandschaft liegen Tunnel im Berg: Sie ziehen das Gelände nicht zu sich herunter.)
+        if (!(dam && (t.edge[i] & EDGE_TUNNEL) !== 0)) this.nonDeck.push(i);
+        else this.tunnelSegs.push(i);
         if (i % 8 === 0) this.idwSegs.push(i);
       } else {
         if (i % 2 === 0) this.deckSegs.push(i);
@@ -264,6 +281,34 @@ export class World {
       this.group.add(this.life.group);
       this.disposables.push(this.life);
     }
+  }
+
+  /** Das Raster des gezeichneten Geländes (null auf ebenen Welten). */
+  private grid: { x0: number; z0: number; nx: number; nz: number; cell: number; h: Float32Array } | null = null;
+
+  /**
+   * Höhe des gezeichneten Geländes an (x, z): so, wie die Dreiecke des Rasters dort liegen – an steilen Hängen kann
+   * das deutlich unter heightAt liegen (die Dreiecke spannen gerade über die Kante). Was auf dem Boden stehen soll,
+   * steht hierauf, sonst schwebt es. Außerhalb des Rasters heightAt.
+   */
+  groundY(x: number, z: number): number {
+    const g = this.grid;
+    if (!g) return this.heightAt(x, z);
+    const fx = (x - g.x0) / g.cell;
+    const fz = (z - g.z0) / g.cell;
+    const ix = Math.floor(fx);
+    const iz = Math.floor(fz);
+    if (ix < 0 || iz < 0 || ix >= g.nx || iz >= g.nz) return this.heightAt(x, z);
+    const u = fx - ix;
+    const w = fz - iz;
+    const H = (a: number, b: number): number => g.h[b * (g.nx + 1) + a];
+    const ha = H(ix, iz);
+    const hb = H(ix + 1, iz);
+    const hc = H(ix + 1, iz + 1);
+    const hd = H(ix, iz + 1);
+    // Diagonale wie in buildTerrain: abwechselnd a–c und b–d
+    if ((ix + iz) % 2 === 0) return u >= w ? ha + (hb - ha) * u + (hc - hb) * w : ha + (hc - hd) * u + (hd - ha) * w;
+    return u + w <= 1 ? ha + (hb - ha) * u + (hd - ha) * w : hc - (hc - hd) * (1 - u) - (hc - hb) * (1 - w);
   }
 
   /**
@@ -384,7 +429,12 @@ export class World {
           return { a: col(0x6fae3e), b: col(0x5f9e34), c: col(0xb7d86a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0x7fb84a), detail: 'ruts', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'band':
           // Schwebeband: dunkles, glattes Magnetband mit leuchtenden Rändern (die Magnetlinien zeichnet mechanics/band.ts)
+          // (Talsperre: graphitgrau mit cyanfarbenen Kanten, Leitplanke mit bernsteinfarbenem Band.)
+          if (t.def.theme === 'talsperre') return { a: rgb(0x2f3542), b: rgb(0x363d4b), c: rgb(0x58e0ff), band: 2, plain: false, lines: true, line: rgb(0x58e0ff), kerbs: false, shoulder: rgb(0x4b5567), detail: 'none', barrier: 'rail', wallA: rgb(0x3a404c), wallB: rgb(0xffb347) };
           return { a: rgb(0x1b2150), b: rgb(0x20275c), c: rgb(0x5ff3ff), band: 2, plain: false, lines: true, line: rgb(0x5ff3ff), kerbs: false, shoulder: rgb(0x2a7fd6), detail: 'none', barrier: 'rail', wallA: rgb(0x1f2240), wallB: rgb(0x5ff3ff) };
+        case 'concrete':
+          // Beton (Talsperre): heller, warmgrauer Beton mit Fugen, Brüstung aus Betonquadern, weiße Randlinien
+          return { a: col(0xc4bfb4), b: col(0xbab5aa), c: col(0x8e897f), band: 3, plain: false, lines: true, line: col(0xf4f0e6), kerbs: false, shoulder: col(0xa8a397), detail: 'plates', barrier: 'stone', wallA: col(0xd2cdc1), wallB: col(0xa9a397) };
         case 'marble':
           // Tempelplatten: heller Sandstein mit Fugen, Brüstung aus Quadern
           return { a: col(0xe6d6ac), b: col(0xd9c798), c: col(0xa9966a), band: 2, plain: false, lines: false, kerbs: false, shoulder: col(0xbcaa80), detail: 'plates', barrier: 'stone', wallA: col(0xdccb9e), wallB: col(0xc4b286) };
@@ -602,7 +652,19 @@ export class World {
           side(i, f0, f1, inner, -DECK_D, 0, sgn > 0, cDeckDark);
           continue;
         }
-        const skirt = deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]);
+        let skirt = deck ? -DECK_D : -0.7 - (t.py[q] - t.base[q]);
+        // Gebirgslandschaft: Fällt neben der Fahrbahn das Gelände steil ab (Straße am Hang, an der Schluchtwand), trägt
+        // sie eine Stützmauer bis hinunter zum Gelände – sonst sähe man unter dem Rand hindurch (die Dreiecke des Rasters
+        // hängen zwischen der Kante und der nächsten, tieferen Ecke durch).
+        if (this.land && !deck) {
+          let low = Infinity;
+          for (const k of [1, 6, 11]) {
+            const lat = sgn * (wh + WALL_T + k);
+            low = Math.min(low, this.heightAt(t.px[q] + rightX(t, q) * lat, t.pz[q] + rightZ(t, q) * lat));
+          }
+          const y = t.py[q] + sgn * wh * t.bank[q];
+          if (low < y - 0.7) skirt = Math.max(-18, Math.min(skirt, low - y - 1.5));
+        }
         const style = look.barrier;
         if (style === 'block' || style === 'stone') {
           const cA = style === 'stone' ? look.wallA! : cWallA;
@@ -725,7 +787,9 @@ export class World {
 
       // Stützen: links und rechts außerhalb der Bande, mit Querträger
       // (Unter dem Band an der Fassade trägt die Fassade – die Halter zeichnet mechanics/band.ts.)
-      if (deck && !gapI && !gapJ && i % 14 === 7 && (e & (EDGE_RAMP | EDGE_TWIST)) === 0) {
+      // (Talsperre: Mauerkrone, Wehrkrone und Schwebeband tragen sich selbst – die Mauer und ihre Halter zeichnet mechanics/dam.ts.)
+      const selfBorne = t.def.theme === 'talsperre' && (t.surf[i] === SURFACE_INDEX.concrete || t.surf[i] === SURFACE_INDEX.band);
+      if (deck && !gapI && !gapJ && i % 14 === 7 && (e & (EDGE_RAMP | EDGE_TWIST)) === 0 && !selfBorne) {
         const lat = wh + WALL_T + 0.5;
         let free = true;
         const posts: V3[] = [];
@@ -802,15 +866,16 @@ export class World {
     const id = t.def.theme;
     // Werkshof und Stadt bekommen eine Halle bzw. Unterführung mit geraden
     // Wänden, die Naturstrecken eine Höhle im Fels.
-    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen' || id === 'neon';
+    const hall = id === 'werkshof' || id === 'nacht' || id === 'wolken' || id === 'hafen' || id === 'neon' || id === 'talsperre';
     const H = TUNNEL_H;
     const R = hall ? 0.9 : TUNNEL_ROCK;
     const cRock = rgb(th.ground[2]);
     // (Gipfelbahn: Tunnel im Gletschereis – hellblaues Eis, dunkleres Blau im Scheitel.)
-    const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : rgb(0xd9c7a8);
-    const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : rgb(0x6fd0e6);
-    const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff }[id] ?? 0x7ef0ff);
+    // (Talsperre: Stollen mit Betonschale, gelb-schwarzer Warnstreifen, dunkle Firste.)
+    const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : id === 'talsperre' ? rgb(0xb9b2a5) : rgb(0xd9c7a8);
+    const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : id === 'talsperre' ? rgb(0xf2b630) : rgb(0x6fd0e6);
+    const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : id === 'talsperre' ? rgb(0x8c867b) : rgb(0xb5543c);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, talsperre: 0xffe2a0 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -876,10 +941,21 @@ export class World {
     };
     const cFace = hall ? shade(cWall, 0.85) : shade(cRock, 0.72);
     const rings = new Map<number, { inner: V3[]; outer: V3[] }>();
+    /** Talsperre: Wie weit der Abschnitt im Stollen liegt (Abschnitte bis zum nächsten Portal, höchstens 24). */
+    const depth = (i: number): number => {
+      let k = 0;
+      for (let a = i, b = i; k < 24 && (t.edge[a] & EDGE_TUNNEL) !== 0 && (t.edge[b] & EDGE_TUNNEL) !== 0; a = t.prev[a], b = t.next[b]) k++;
+      return k;
+    };
     const ring = (i: number): { inner: V3[]; outer: V3[] } => {
       let r = rings.get(i);
       if (r) return r;
       const W = t.wh[i] + WALL_T + 0.25;
+      // Talsperre: Nahe den Portalen ist die Betonschale dick (3 m Wand, gut 2 m Decke). Dort geht das Gelände vom
+      // Portal (unter der Fahrbahn) auf den Berg über der Röhre über; was davon durch die Röhre liefe, lässt
+      // buildTerrain weg – die Ränder dieser Lücken liegen in der Schale. Tiefer drinnen liegt der Berg über ihr.
+      const thick = id === 'talsperre' ? 1 - smooth((depth(i) - 16) / 8) : 0;
+      const Ri = R + (3 - R) * thick;
       const pin: V3[] = [];
       const pout: V3[] = [];
       for (let k = 0; k < K; k++) {
@@ -888,7 +964,8 @@ export class World {
         const n = hall ? 0.5 : noise(t.px[i] * 0.16 + k * 7.3, t.pz[i] * 0.16 - k * 3.1);
         const bulge = 1 + 0.5 * (n - 0.5);
         const side = OUT[k][0] < 0 ? -1 : OUT[k][0] > 0 ? 1 : 0;
-        pout.push(this.P(i, 0, OUT[k][0] * W + side * OUT[k][1] * R * bulge, k === 0 || k === K - 1 ? OUT[k][2] : OUT[k][2] * (0.9 + 0.2 * n)));
+        const lift = k === 0 || k === K - 1 ? 0 : thick * 1.0 * (1 - Math.abs(OUT[k][0]) * 0.3);
+        pout.push(this.P(i, 0, OUT[k][0] * W + side * OUT[k][1] * Ri * bulge, (k === 0 || k === K - 1 ? OUT[k][2] : OUT[k][2] * (0.9 + 0.2 * n)) + lift));
       }
       r = { inner: pin, outer: pout };
       rings.set(i, r);
@@ -1076,6 +1153,9 @@ export class World {
     // Nächstes Stück Fahrbahn, das auf dem Boden liegt
     let best = -1;
     let bestD = Infinity;
+    // Gebirgslandschaft: Neben jeder Fahrbahn (nicht nur der nächsten) bleibt das Gelände anderthalb Rasterfelder weit
+    // flach (ein Bankett). Steigt der Hang gleich daneben steil an oder liegt eine zweite Fahrbahn darüber, spannte sonst
+    // ein Dreieck von einer hohen Ecke über den Rand der Fahrbahn. (Kein Dreieck reicht weiter als eine Felddiagonale.)
     for (const i of this.nonDeck) {
       const dx = x - t.px[i];
       const dz = z - t.pz[i];
@@ -1093,7 +1173,9 @@ export class World {
 
     // Grundform abseits der Strecke
     let base: number;
-    if (th.liquidY === null) {
+    if (this.land) {
+      base = this.land(x, z);
+    } else if (th.liquidY === null) {
       base = th.farY;
     } else {
       // Insel: Höhen der Strecke weich in die Fläche verteilt, außen fällt sie ins Meer bzw. in die Lava.
@@ -1138,6 +1220,12 @@ export class World {
     // Unter einer geneigten Fahrbahn (Steilkurve) tiefer: Die Fahrbahn ist dort gewölbt, die Dreiecke des groben
     // Geländerasters spannen gerade darüber und stachen in engen Kurven durch die Fahrbahn.
     if (best >= 0 && d < whb) h -= this.roadSink(t.bank[best], whb - d);
+    // Gebirgslandschaft: Steigt der Hang gleich neben der Fahrbahn steil an, spannten die Dreiecke des Rasters von
+    // einer Ecke im Hang zu einer auf der Fahrbahn quer über deren Rand. Deshalb bleibt das Gelände anderthalb
+    // Rasterfelder neben der Bande noch flach (ein Bankett), erst dahinter steigt der Hang.
+    // Weiter draußen (bis zweieinhalb Rasterfelder) steigt er höchstens mäßig an – sonst spannte ein Dreieck von einer
+    // hohen Ecke in der Felswand über die geneigte Fahrbahn einer Kehre hinweg.
+
     const cr = this.crater;
     if (cr) {
       // Vulkaninsel: rings um den Krater steigt das Gelände zum Rand an, innen fällt es zum Lavasee ab.
@@ -1182,7 +1270,162 @@ export class World {
         if (want > h) h = want;
       }
     }
+    if (this.land) {
+      // Gebirgslandschaft: Neben Stegen (Schwebeband, Krone, Wehr) steigt das Gelände ebenso nur mäßig an.
+      const zone = 2.5 * this.terrainCell;
+      for (const i of this.deckSegs) {
+        if ((t.edge[i] & EDGE_GAP) !== 0) continue;
+        const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 1;
+        if (dd < zone) h = Math.min(h, t.py[i] - DECK_D - 0.8 + Math.max(0, dd) * 0.8);
+      }
+      // Über einem Tunnel liegt der Berg (gut hinter dem Portal); Rinnen und Kammern liegen tiefer.
+      // (Es zählt der nächste Tunnelabschnitt: Liegt der nahe am Portal, gilt nichts – vor dem Portal ist Zufahrt.)
+      let ti = -1;
+      let tBest = Infinity;
+      for (let k = 0; k < this.tunnelSegs.length; k++) {
+        const i = this.tunnelSegs[k];
+        const dd = (x - t.px[i]) ** 2 + (z - t.pz[i]) ** 2;
+        if (dd < tBest) {
+          tBest = dd;
+          ti = i;
+        }
+      }
+      if (ti >= 0) {
+        const dd = Math.sqrt(tBest) - t.wh[ti] - 3;
+        let inner = 0;
+        for (let a = ti, b = ti; inner < 8 && (t.edge[a] & EDGE_TUNNEL) !== 0 && (t.edge[b] & EDGE_TUNNEL) !== 0; a = t.prev[a], b = t.next[b]) inner++;
+        if (dd <= 6 && inner >= 8) {
+          const cover = t.py[ti] + TUNNEL_H + 2.6 - Math.max(0, dd) * 0.6;
+          if (h < cover) h = cover;
+        } else if (inner < 8) {
+          // Am Portal (die ersten Meter der Röhre) bleibt das Gelände unter der Fahrbahn, gut ein Rasterfeld über die
+          // Außenwand hinaus – sonst spannte der Hang ein Dreieck durch die Röhre. (Die Röhre steht dort frei als
+          // Betonbau vor dem Hang, die Fassade aus mechanics/dam.ts deckt die Stirn.)
+          const out = Math.sqrt(tBest) - t.wh[ti] - WALL_T - 1.2;
+          const floor = t.base[ti] - 1.6;
+          const cell = this.terrainCell;
+          if (h > floor && out < 1.8 * cell) h = floor + (h - floor) * smooth((out - cell) / (0.8 * cell));
+        }
+      }
+      if (this.landCut) h = Math.min(h, this.landCut(x, z));
+      // Zuletzt: Neben jeder Fahrbahn und jedem Steg (nicht nur dem nächsten; nur nicht neben dem Stück derselben
+      // Fahrbahn gleich vor und hinter dem nächsten – das liegt am Hang ohnehin tiefer oder höher) bleibt das Gelände
+      // anderthalb Rasterfelder weit flach bzw. unter dem Steg. Steigt der Hang daneben steil an oder liegt eine
+      // zweite Fahrbahn darüber, spannte sonst ein Dreieck von einer hohen Ecke über ihren Rand – kein Dreieck reicht
+      // weiter als eine Felddiagonale.
+      const shelf = 1.5 * this.terrainCell;
+      for (let i = 0; i < t.total; i++) {
+        if ((t.edge[i] & (EDGE_GAP | EDGE_TUNNEL)) !== 0) continue;
+        const dx = x - t.px[i];
+        const dz = z - t.pz[i];
+        const w = t.wh[i];
+        const dd = dx * dx + dz * dz;
+        if (dd > (w + shelf) ** 2) continue;
+        if (best >= 0 && t.branchOf[i] === t.branchOf[best]) {
+          const k = Math.abs(segDelta(t, best, i));
+          if (k > 3 && k < 30) continue;
+        }
+        const r = Math.sqrt(dd) - w;
+        const l = dx * rightX(t, i) + dz * rightZ(t, i);
+        const deckI = (t.edge[i] & EDGE_DECK) !== 0;
+        const y = t.base[i] + Math.max(-w, Math.min(w, l)) * t.bank[i] - (deckI ? DECK_D + 0.8 : 0.3);
+        const lim = y + Math.max(0, r - 1) * 0.12;
+        if (lim < h) h = lim;
+      }
+    }
     return h;
+  }
+
+  /**
+   * Gebirgslandschaft mit Stollen: Das Gelände liegt über der Röhre (heightAt), an den Portalen unter der Fahrbahn.
+   * Dazwischen liefe ein Rasterdreieck quer durch die Röhre. Solche Dreiecke werden fein geteilt (Teile von knapp
+   * einem Meter), und was davon in die Röhre ragt, fällt weg; die Ränder der Lücke liegen in der dicken Schale
+   * (buildTunnels). Dreiecke, die die Röhre nicht berühren, bleiben, wie sie sind.
+   */
+  private tubeCutter(b: MeshBuilder, cell: number): { near(a: V3, bb: V3, c: V3): boolean; emit(a: V3, bb: V3, c: V3, col: RGB): void } {
+    const t = this.track;
+    const H = TUNNEL_H;
+    // Abschnitte der Röhre und je vier davor und dahinter (vor dem Portal ist Zufahrt, nicht Röhre).
+    const near: number[] = [];
+    for (const i of this.tunnelSegs) {
+      for (let k = -4; k <= 4; k++) {
+        const j = (((i + k) % t.n) + t.n) % t.n;
+        if (!near.includes(j)) near.push(j);
+      }
+    }
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let z0 = Infinity;
+    let z1 = -Infinity;
+    for (const i of this.tunnelSegs) {
+      x0 = Math.min(x0, t.px[i] - t.wh[i]);
+      x1 = Math.max(x1, t.px[i] + t.wh[i]);
+      z0 = Math.min(z0, t.pz[i] - t.wh[i]);
+      z1 = Math.max(z1, t.pz[i] + t.wh[i]);
+    }
+    const pad = cell * 1.5 + 2;
+    /** Liegt der Punkt im Hohlraum der Röhre (zwischen den Innenwänden, über der Fahrbahn, unter dem First)? */
+    const inside = (x: number, y: number, z: number): boolean => {
+      if (x < x0 - 2 || x > x1 + 2 || z < z0 - 2 || z > z1 + 2) return false;
+      let best = -1;
+      let bd = Infinity;
+      for (const i of near) {
+        const d = (x - t.px[i]) ** 2 + (z - t.pz[i]) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = i;
+        }
+      }
+      if (best < 0 || (t.edge[best] & EDGE_TUNNEL) === 0) return false;
+      const W = t.wh[best] + WALL_T + 0.25;
+      const lat = (x - t.px[best]) * rightX(t, best) + (z - t.pz[best]) * rightZ(t, best);
+      const f = Math.abs(lat) / W;
+      if (f > 1) return false;
+      const dy = y - (t.py[best] + lat * t.bank[best]);
+      const roof = f < 0.5 ? 1.04 * H - 0.14 * H * f : 0.97 * H - 0.26 * H * (f - 0.5);
+      return dy > 0.05 && dy < roof;
+    };
+    const N = Math.max(2, Math.round(cell / 0.94));
+    return {
+      near: (a, bb, c) => {
+        const xl = Math.min(a[0], bb[0], c[0]);
+        const xh = Math.max(a[0], bb[0], c[0]);
+        const zl = Math.min(a[2], bb[2], c[2]);
+        const zh = Math.max(a[2], bb[2], c[2]);
+        return xh > x0 - pad && xl < x1 + pad && zh > z0 - pad && zl < z1 + pad;
+      },
+      emit: (a, bb, c, col) => {
+        const P = (i: number, j: number): V3 => [
+          a[0] + ((bb[0] - a[0]) * i + (c[0] - a[0]) * j) / N,
+          a[1] + ((bb[1] - a[1]) * i + (c[1] - a[1]) * j) / N,
+          a[2] + ((bb[2] - a[2]) * i + (c[2] - a[2]) * j) / N,
+        ];
+        const pts: V3[][] = [];
+        const ins: boolean[][] = [];
+        let any = false;
+        for (let i = 0; i <= N; i++) {
+          pts.push([]);
+          ins.push([]);
+          for (let j = 0; i + j <= N; j++) {
+            const p = P(i, j);
+            pts[i].push(p);
+            const k = inside(p[0], p[1], p[2]);
+            ins[i].push(k);
+            if (k) any = true;
+          }
+        }
+        if (!any) {
+          b.tri(a, bb, c, col);
+          return;
+        }
+        for (let i = 0; i < N; i++) {
+          for (let j = 0; i + j < N; j++) {
+            if (!ins[i][j] && !ins[i + 1][j] && !ins[i][j + 1]) b.tri(pts[i][j], pts[i + 1][j], pts[i][j + 1], col);
+            if (i + j + 2 <= N && !ins[i + 1][j] && !ins[i + 1][j + 1] && !ins[i][j + 1]) b.tri(pts[i + 1][j], pts[i + 1][j + 1], pts[i][j + 1], col);
+          }
+        }
+      },
+    };
   }
 
   private buildTerrain(minX: number, maxX: number, minZ: number, maxZ: number): void {
@@ -1206,12 +1449,14 @@ export class World {
           h[iz * (nx + 1) + ix] = th.farY + (y - th.farY) * smooth(edge);
         }
       }
+      this.grid = { x0, z0, nx, nz, cell, h };
       const b = new MeshBuilder();
       const g = th.ground.map((c) => rgb(c));
       const rnd = seeded(77 + t.index);
       const P = (ix: number, iz: number): V3 => [x0 + ix * cell, h[iz * (nx + 1) + ix], z0 + iz * cell];
       const liquid = th.liquidY ?? -Infinity;
       const snowLine = th.snowLine ?? 12;
+      const tube = this.land && this.tunnelSegs.length > 0 ? this.tubeCutter(b, cell) : null;
       const tri = (a: V3, bb: V3, c: V3): void => {
         const top = Math.max(a[1], bb[1], c[1]);
         // Was tief unter Wasser liegt, sieht man nicht – außer in einer Unterwasserwelt: dort ist es der Meeresboden.
@@ -1228,11 +1473,15 @@ export class World {
         const up = nyn / Math.hypot(nxn, nyn, nzn);
         const mid = (a[1] + bb[1] + c[1]) / 3;
         let col: RGB;
-        if (up < 0.8) col = g[2];
+        // Stausee: der Grund unter dem Spiegel ist schlammig, je tiefer, desto dunkler.
+        if (this.lake && mid < t.sea - 0.4 && this.lake((a[0] + bb[0] + c[0]) / 3, (a[2] + bb[2] + c[2]) / 3)) col = mixRgb(rgb(0x7d7a5c), rgb(0x46564a), smooth((t.sea - mid) / 14));
+        else if (up < 0.8) col = g[2];
         else if (th.liquidY !== null && mid < liquid + 1.6) col = g[0];
         else if (mid > snowLine) col = mixRgb(g[1], g[3], smooth((mid - snowLine) / 6));
         else col = th.liquidY !== null ? g[1] : mixRgb(g[0], g[1], noise(a[0] * 0.03, a[2] * 0.03));
-        b.tri(a, bb, c, shade(col, 0.94 + rnd() * 0.12));
+        const cc = shade(col, 0.94 + rnd() * 0.12);
+        if (tube && tube.near(a, bb, c)) tube.emit(a, bb, c, cc);
+        else b.tri(a, bb, c, cc);
       };
       for (let iz = 0; iz < nz; iz++) {
         for (let ix = 0; ix < nx; ix++) {
@@ -1316,6 +1565,23 @@ export class World {
       this.group.add(under);
       this.disposables.push(below);
     }
+  }
+
+  /**
+   * Wasser einer Kulisse (Talsperre: Stausee und Fluss) mit dem Wasserbild der Welt: drei flache Farbstufen, die langsam
+   * wandern – derselbe Shader wie das Meer bis zum Horizont, kein neuer. back = von unten gesehen (Unterwasserwelt).
+   */
+  liquid(colors: [number, number, number], back = false): THREE.Material {
+    const m = fogShader(LIQUID_FRAG, {
+      time: { value: 0 },
+      c0: { value: new THREE.Color(colors[0]) },
+      c1: { value: new THREE.Color(colors[1]) },
+      c2: { value: new THREE.Color(colors[2]) },
+    });
+    if (back) m.side = THREE.BackSide;
+    this.timed.push(m);
+    this.disposables.push(m);
+    return m;
   }
 
   // --- Himmel ----------------------------------------------------------------
@@ -1477,8 +1743,10 @@ export class World {
     this.life?.update(time, dt, camera, fx, raceTime);
     // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund.
     const un = this.theme.under;
-    if (un && this.theme.liquidY !== null) {
-      const want = camera.y < this.theme.liquidY - 0.15 ? 1 : 0;
+    // (Ohne Meer bis zum Horizont gilt der Stausee: unter dessen Spiegel und über seinem Grund – track.sea, this.lake.)
+    const level = this.theme.liquidY ?? (this.lake ? this.track.sea : null);
+    if (un && level !== null) {
+      const want = camera.y < level - 0.15 && (this.lake === null || this.lake(camera.x, camera.z)) ? 1 : 0;
       const k = this.depth + (want - this.depth) * Math.min(1, dt * 9);
       if (k !== this.depth) {
         this.depth = Math.abs(k - want) < 0.002 ? want : k;
