@@ -53,8 +53,10 @@ async function openScreen(name, query = '') {
       if (/\[link\]|\[endpoint\]/.test(m.text())) console.log(`        ${new Date().toISOString().slice(17, 23)} [${name}] ${m.text()}`);
     });
   }
-  // Ohne Ton und mit einfacher Grafik: ohne Grafikkarte rendert Chromium sonst zu langsam.
-  await page.goto(`${BASE}?signal=${SIGNAL}&mute=1&q=low${query}`);
+  // Ohne Ton und mit einfacher Grafik: ohne Grafikkarte rendert Chromium sonst zu langsam. Startaufstellung nach
+  // Platznummer (Anna vorn), damit die Prüfungen nicht vom Los abhängen – außer ein Abschnitt verlangt es anders.
+  const grid = /[?&]grid=/.test(query) ? '' : '&grid=fest';
+  await page.goto(`${BASE}?signal=${SIGNAL}&mute=1&q=low${grid}${query}`);
   return { ctx, page, name };
 }
 
@@ -2668,7 +2670,8 @@ async function main() {
   if (wants('cup')) {
     // === Turnier =============================================================
     section('Turnier: Auslosung auf zwei Bildschirmen, Sterne je Platz, Gesamtsieg');
-    const hc = await openScreen('hostT', '&laps=1');
+    // (Mit Los und Spiegeln wie im echten Spiel.)
+    const hc = await openScreen('hostT', '&laps=1&grid=los');
     const codeT = await createLobby(hc, 'Anna');
     const cc = await openScreen('clientT', '&laps=1');
     await joinLobby(cc, 'Ben', codeT);
@@ -2704,6 +2707,13 @@ async function main() {
       await hc.page.waitForSelector('#app[data-view="game"]', { timeout: 30000 });
       const [th, tc] = await Promise.all([kart(hc.page, 'track()'), kart(cc.page, 'track()')]);
       tracks.push(th.index);
+      if (race > 0) {
+        // Gespiegelte Startaufstellung: Wer im Vorrennen Letzter war, startet vorn, der Sieger ganz hinten.
+        const prevStars = (await kart(hc.page, 'lobby()')).cup.last;
+        const want = [0, 1, 2, 3].sort((a, b) => prevStars[a] - prevStars[b]);
+        const grid = (await kart(hc.page, 'standings()')).map((st) => st.slot);
+        check(`Rennen ${race + 1}: Startaufstellung gespiegelt (Letzter vorn, Sieger hinten)`, grid.join() === want.join(), `vorn→hinten ${grid.join(', ')}, Sterne im Vorrennen ${prevStars.join(', ')}`);
+      }
       if (race === 0) {
         check('Der Streifen bleibt auf der ausgelosten Strecke stehen, und genau die wird gefahren', !!dh && th.index === dh.pick && tc.index === dh.pick && name === th.name, `${name} / ${th.name}`);
         check('Die Auslosung ist weg, sobald das Rennen beginnt', !(await hc.page.isVisible('#draw')) && !(await cc.page.isVisible('#draw')));

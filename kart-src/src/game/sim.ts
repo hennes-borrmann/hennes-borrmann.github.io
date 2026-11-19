@@ -679,9 +679,9 @@ export function copyState(dst: KartState, src: KartState): KartState {
   return dst;
 }
 
-/** Zustand am Startplatz. */
-export function gridState(slot: number, char = slot): KartState {
-  const g = gridPosition(TRACK, slot);
+/** Zustand am Startplatz pos (0 = ganz vorn). */
+export function gridState(pos: number, char = pos): KartState {
+  const g = gridPosition(TRACK, pos);
   const s = newState();
   s.char = ((char % CHARACTERS.length) + CHARACTERS.length) % CHARACTERS.length;
   s.x = g.x;

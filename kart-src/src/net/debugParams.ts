@@ -17,6 +17,7 @@
 //   ?ai=0         Stärke der KI vorwählen (0 leicht, 1 mittel, 2 schwer)
 //   ?q=low        Grafikqualität: low, medium, high oder auto
 //   ?mute=1       ohne Ton starten
+//   ?grid=fest    Startaufstellung nach Platznummer statt gelost/gespiegelt (gilt für den Host)
 
 export type TurnMode = 'auto' | 'force' | 'off';
 
@@ -42,6 +43,8 @@ export interface DebugParams {
   ai: number;
   quality: 'auto' | 'low' | 'medium' | 'high' | null;
   mute: boolean;
+  /** Startaufstellung nach Platznummer (?grid=fest), sonst gelost bzw. im Turnier gespiegelt. */
+  fixedGrid: boolean;
 }
 
 const FORWARDED = ['turn', 'lag', 'jitter', 'loss', 'signal', 'debug', 'peerlog', 'laps', 'auto', 'q', 'mute'];
@@ -71,6 +74,7 @@ export function readDebugParams(search: string = location.search): DebugParams {
     ai: p.has('ai') ? Math.max(0, Math.min(2, Math.round(Number(p.get('ai')) || 0))) : -1,
     quality: ['auto', 'low', 'medium', 'high'].includes(q ?? '') ? (q as 'auto' | 'low' | 'medium' | 'high') : null,
     mute: p.get('mute') === '1',
+    fixedGrid: p.get('grid') === 'fest',
   };
 }
 

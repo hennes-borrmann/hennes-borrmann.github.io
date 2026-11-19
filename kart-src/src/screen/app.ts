@@ -10,7 +10,7 @@ import { BOT_NAMES, botCmd, newBrain, type BotBrain } from '../game/ai';
 import { ClientGame, CLIENT_INTERP_DELAY } from '../game/clientGame';
 import { HostGame } from '../game/hostGame';
 import { KeyboardInput, mergeInput } from '../game/input';
-import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
+import { ITEM_NONE, MAX_PLAYERS, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
 import { PULSE_BLAST, PULSE_FLAME, crawlerAt, PULSE_BUBBLE, PULSE_ICICLE, PULSE_KICK, pulseCycle, pulseWarning, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront, vehicleSpeed } from '../game/mechanics';
@@ -19,7 +19,7 @@ import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
 import { ClientLobby } from '../lobby/clientLobby';
 import { HostLobby } from '../lobby/hostLobby';
-import { cupOver, cupRanking } from '../lobby/cup';
+import { cupOver, cupRanking, gridOrder } from '../lobby/cup';
 import { ROOM_CODE_LENGTH, isValidCode, normalizeCode, randomCode, randomToken } from '../net/codes';
 import { forwardDebugParams, readDebugParams } from '../net/debugParams';
 import { PeerEndpoint, type EndpointStatus } from '../net/endpoint';
@@ -265,6 +265,7 @@ export class App {
       again: () => {
         if (!this.hostGame || !this.hostLobby || this.hostLobby.cup) return;
         this.hostGame.setRoster(this.hostLobby.slots(), this.hostLobby.bots, this.hostLobby.characters());
+        this.hostGame.setGrid(this.startGrid());
         this.hostGame.newRace();
       },
       setBots: (bots) => this.hostLobby?.setBots(bots),
@@ -815,6 +816,18 @@ export class App {
     return list;
   }
 
+  /**
+   * Startaufstellung des nächsten Rennens (nur beim Host): im Einzelrennen und im ersten Turnierrennen gelost, danach
+   * gespiegelt – der Letzte des Vorrennens startet vorn, der Sieger hinten. Mit ?grid=fest nach Platznummer (Tests).
+   */
+  private startGrid(): number[] {
+    const slots = Array.from({ length: MAX_PLAYERS }, (_, i) => i);
+    if (this.debug.fixedGrid) return slots;
+    const lobby = this.hostLobby;
+    const prev = lobby?.cup && lobby.cup.done > 0 ? lobby.lastStandings : null;
+    return gridOrder(slots, prev, Math.random);
+  }
+
   private enterGame(): void {
     const state = this.lobbyState();
     if (!state) return;
@@ -872,6 +885,7 @@ export class App {
         // Absturz), meldet sein eigener Bildschirm ohne Umweg; hier nur, was allein der Host weiß.
         else if (HOST_ONLY_FX.has(kind)) lobby.sendFx(slot, kind);
       };
+      game.setGrid(this.startGrid());
       game.newRace();
     } else if (this.clientLobby) {
       const lobby = this.clientLobby;

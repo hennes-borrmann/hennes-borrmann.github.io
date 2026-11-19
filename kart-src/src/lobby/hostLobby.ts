@@ -90,6 +90,8 @@ export class HostLobby {
   cupRaces = 0;
   /** Das laufende (oder gerade beendete) Turnier. */
   cup: CupState | null = null;
+  /** Turnier: Platzierungen des zuletzt gewerteten Rennens (nur beim Host) – daraus die gespiegelte Startaufstellung. */
+  lastStandings: { slot: number; place: number }[] | null = null;
   readonly localSlot: number;
 
   /** Irgendetwas an der Lobby hat sich geändert (für die Anzeige). */
@@ -217,6 +219,7 @@ export class HostLobby {
     if (this.cupRaces <= 0) return;
     this.cup = newCup(this.cupRaces);
     this.cupRaceOpen = false;
+    this.lastStandings = null;
     this.changed();
   }
 
@@ -249,7 +252,13 @@ export class HostLobby {
     if (!this.cup || !this.cupRaceOpen) return;
     this.cupRaceOpen = false;
     this.cup = scoreRace(this.cup, this.track, standings);
+    this.lastStandings = standings.map((s) => ({ slot: s.slot, place: s.place }));
     this.changed();
+  }
+
+  /** Ein Platz wechselt den Besitzer: Der Neue erbt keinen Startplatz aus dem Vorrennen (er startet vorn). */
+  private forgetStanding(slot: number): void {
+    if (this.lastStandings) this.lastStandings = this.lastStandings.filter((s) => s.slot !== slot);
   }
 
   /** Beendet das Turnier (auch mittendrin): Es gilt wieder, was in der Lobby eingestellt ist. */
@@ -257,6 +266,7 @@ export class HostLobby {
     if (!this.cup) return;
     this.cup = null;
     this.cupRaceOpen = false;
+    this.lastStandings = null;
     this.changed();
   }
 
@@ -444,6 +454,7 @@ export class HostLobby {
       this.seats[free] = seat;
       // Bisher fuhr auf diesem Platz die KI (oder jemand anderes): ihre Sterne erbt der Neue nicht.
       if (this.cup) this.cup = resetSlot(this.cup, free);
+      this.forgetStanding(free);
       isNew = true;
     } else {
       seat.name = cleanName(msg.name, seat.name);
@@ -519,6 +530,7 @@ export class HostLobby {
     this.seats[seat.slot] = null;
     seat.link = null;
     if (this.cup) this.cup = resetSlot(this.cup, seat.slot);
+    this.forgetStanding(seat.slot);
     this.onSeatsChanged?.();
     this.changed();
   }
