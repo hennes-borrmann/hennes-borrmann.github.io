@@ -1025,10 +1025,10 @@ export interface Drum {
 // das Bild wird gedreht (twistWarp in track.ts); die Magnete halten, nichts sackt ab, nichts rutscht. Den Teil der
 // Kurve, den man an der Wand im Bild nicht sieht, fährt das Band selbst (sim.ts: twistYaw).
 //   – Magnetlinien: Zwei Leuchtspuren schlängeln sich spiegelbildlich über das Band und wandern dabei mit
-//     BAND_LINE_SPEED voran. Wer auf einer bleibt, fährt schneller (ein kleiner Dauerschub). Wo sie liegen, folgt
+//     BAND_LINE_SPEED voran. Wer auf einer bleibt, fährt ein wenig schneller (ein leichter Dauerschub). Wo sie liegen, folgt
 //     allein aus der Stelle und der Rennzeit – auf jedem Bildschirm gleich.
-//   – Abstoßen: Berühren sich zwei schwebende Karts, stoßen sie sich ab, und beide bekommen kurz Schub (bandRepel in
-//     sim.ts). Ebenso an den Prallpollern am Bandrand.
+//   – Sonst fährt sich das Band genau wie Straße: kein Abstoßen, keine Prallpoller (beides gab es früher – es schob die
+//     Karts quer über das Band, gegen das Lenken half wenig).
 
 /** Ein Stück Schwebeband: Abschnitte first … first+count−1. */
 export interface Band {
@@ -1043,15 +1043,9 @@ export const BAND_LINE_SPEED = 11;
 /** So nah (Meter, Kartmitte zur Linie) fährt man „auf“ der Linie. */
 export const BAND_LINE_HALF = 0.9;
 /** Faktor auf das Höchsttempo auf einer Magnetlinie. */
-export const BAND_LINE_PULL = 1.09;
+export const BAND_LINE_PULL = 1.04;
 /** So hoch schwebt das Kart über dem Band (nur Bild). */
 export const BAND_HOVER = 0.32;
-/** Abstoßen: Schub für beide (Ticks) und Abstoßtempo quer (m/s). */
-export const REPEL_TICKS = 38;
-export const REPEL_PUSH = 5.5;
-/** Prallpoller: Halbmesser (Meter) und Schub (Ticks). */
-export const BUMPER_RADIUS = 0.5;
-export const BUMPER_TICKS = 34;
 
 /**
  * Seitliche Lage der Magnetlinie k (0 oder 1) auf einem Schwebeband der halben Breite rh, s Meter nach dessen Anfang,

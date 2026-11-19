@@ -59,9 +59,8 @@ export const SURFACES: Surface[] = [
   // Hohes Gras (Almwiese, Gipfelbahn): richtig langsam – eine Abkürzung darüber lohnt sich nur mit Schub (der hebt die
   // Bremswirkung des Untergrunds auf, siehe sim.ts) oder im Gleitflug darüber hinweg.
   { id: 'meadow', name: 'Hohes Gras', grip: 0.8, speed: 0.56, accel: 0.66, brake: 0.9, charge: 0.2 },
-  // Schwebeband (Neonhochbahn): Das Kart schwebt über dem Magnetband – Halt wie auf Asphalt (die Magnete halten auch an
-  // der Wand), ein Hauch schneller, weil nichts rollt; gebremst wird magnetisch, etwas weicher.
-  { id: 'band', name: 'Schwebeband', grip: 1, speed: 1.02, accel: 1, brake: 0.9, charge: 0 },
+  // Schwebeband: Das Kart schwebt über dem Magnetband – und fährt sich genau wie auf Asphalt (auch an der Wand).
+  { id: 'band', name: 'Schwebeband', grip: 1, speed: 1, accel: 1, brake: 1, charge: 0 },
   // Beton (Talsperre: Mauerkrone, Stollen, Schleuse, Wehrkrone): glatt abgezogen, griffig und schnell.
   { id: 'concrete', name: 'Beton', grip: 1.03, speed: 1.02, accel: 1.02, brake: 1.05, charge: 0 },
   // Rinde (Baumkronenpfad: der Ast ohne Geländer): rau und trocken – hält ordentlich, rollt aber nicht ganz so frei wie

@@ -189,7 +189,7 @@ describe('Get Gold', () => {
     });
   });
 
-  it('etwas schneller (rund 11 %) – und nach dem Ende wieder normal', () => {
+  it('deutlich schneller (rund 22 %) – und nach dem Ende wieder normal', () => {
     useTrack(oval());
     const plain = gridState(0);
     placeAt(plain, STRAIGHT, 0, V_MAX);
@@ -200,8 +200,8 @@ describe('Get Gold', () => {
     const gold = run(s, 300).top;
     console.log(`Höchsttempo ${normal.toFixed(2)} m/s, mit Get Gold ${gold.toFixed(2)} m/s (+${((gold / normal - 1) * 100).toFixed(1)} %)`);
     expect(normal).toBeLessThan(V_MAX * 1.01);
-    expect(gold).toBeGreaterThan(normal * 1.08);
-    expect(gold).toBeLessThan(normal * 1.14);
+    expect(gold).toBeGreaterThan(normal * 1.19);
+    expect(gold).toBeLessThan(normal * 1.25);
     // Abgelaufen: wieder Normaltempo.
     run(s, GOLD_TICKS);
     expect(s.gold).toBe(0);

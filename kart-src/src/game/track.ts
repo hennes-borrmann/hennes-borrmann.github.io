@@ -2180,6 +2180,17 @@ export function centerHeight(t: Track, seg: number, along: number): number {
   return t.py[seg] + (t.py[j] - t.py[seg]) * f;
 }
 
+/**
+ * Neigung der Fahrbahn an einer Stelle (along Meter hinter dem Abschnitt seg), zwischen zwei Abschnitten gemittelt wie
+ * die Höhe – so, wie die Fahrbahn auch gezeichnet ist. (Vorher galt je Abschnitt eine feste Neigung: Am Rand einer
+ * Steilkurve wurde der Boden so zur Treppe mit Stufen bis über einen halben Meter, und das Kart hüpfte darüber.)
+ */
+export function bankAt(t: Track, seg: number, along: number): number {
+  const j = along >= 0 ? t.next[seg] : t.prev[seg];
+  const f = Math.min(1, Math.abs(along) / t.step);
+  return t.bank[seg] + (t.bank[j] - t.bank[seg]) * f;
+}
+
 /** So weit darf ein Körper mit Radius 0 auf der Seite side (−1 links, 1 rechts) von der Mittellinie weg. */
 export function sideLimit(t: Track, seg: number, side: number): number {
   return t.edge[seg] & (side > 0 ? EDGE_FREE_R : EDGE_FREE_L) ? t.free[seg] : t.wh[seg];
@@ -2196,7 +2207,7 @@ export function groundAt(t: Track, seg: number, along: number, lat: number): num
     if (lat < -t.wh[seg] && e & EDGE_OPEN_L) return NO_GROUND;
     if (lat > t.wh[seg] && e & EDGE_OPEN_R) return NO_GROUND;
   }
-  return centerHeight(t, seg, along) + lat * t.bank[seg];
+  return centerHeight(t, seg, along) + lat * bankAt(t, seg, along);
 }
 
 /** Hub des Seegangs an einem Abschnitt (Mitte) zur Rennzeit time. */

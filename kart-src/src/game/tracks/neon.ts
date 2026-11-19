@@ -3,8 +3,8 @@
 // Hauptbühne ist das Schwebeband (mechanics.ts: Band): Auf ihm schweben die Karts mit eingeklappten Rädern über einem
 // Magnetband. Es steigt vom Boulevard steil an, legt sich als Steilkurve um den ersten Turm und dreht sich dann an die
 // Fassade des Nachbarturms – ein Stück lang fährt man senkrecht an der Wand (gerechnet wird flach, das Bild dreht sich:
-// twistWarp in track.ts). Über das Band wandern zwei Magnetlinien; wer auf einer bleibt, wird schneller. Wer ein anderes
-// schwebendes Kart berührt, stößt sich ab – und beide bekommen Schub; ebenso an den Prallpollern am Rand.
+// twistWarp in track.ts). Gefahren wird darauf wie auf der Straße. Über das Band wandern zwei Magnetlinien; wer auf einer
+// bleibt, bekommt einen leichten Schub.
 //
 // Danach hoch über den Boulevard hinweg (die Strecke kreuzt sich selbst), über die Dachstraße am Atriumturm, im
 // Gleitflug zwischen den Dächern hinunter, die Parkhausspirale hinab in die untere Ebene und am Bahnhof der U-Bahn vorbei
@@ -22,7 +22,7 @@ export const NEON: TrackDef = {
   name: 'Neonhochbahn',
   theme: 'neon',
   blurb: 'Boulevard, auf dem Schwebeband steil hinauf, Steilkurve um den Turm, an der Fassade entlang, über die eigene Strecke hinweg, Gleitflug zwischen den Dächern, Parkhausspirale hinab und am U-Bahnhof vorbei.',
-  twist: 'Auf dem Schwebeband schwebt man: Magnetlinien ziehen, Berührungen stoßen ab und geben Schub – und das Band dreht sich senkrecht an die Fassade. Abkürzungen mitten durchs Atrium (ohne Geländer) und über das Dach der U-Bahn (nur wenn sie hält).',
+  twist: 'Auf dem Schwebeband schwebt man und fährt wie auf der Straße – Magnetlinien geben leichten Schub, und das Band dreht sich senkrecht an die Fassade. Abkürzungen mitten durchs Atrium (ohne Geländer) und über das Dach der U-Bahn (nur wenn sie hält).',
   grade: 3,
   scale: 0.95,
   surface: 'neon',
@@ -121,12 +121,6 @@ export const NEON: TrackDef = {
     [9.2, 12.7, 0],
     // Parkhausspirale: leicht geneigt
     [24.6, 32.6, 0.18],
-  ],
-  bumpers: [
-    { at: 4.2, lat: -5.3 },
-    { at: 4.6, lat: 5.3 },
-    { at: 5.4, lat: -5.3 },
-    { at: 8.9, lat: 5.3 },
   ],
   surfaces: [[2.7, 12.7, 'band']],
   glides: [[21.15, 23.55]],

@@ -933,6 +933,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const inner = ((s.x - t.px[s.seg]) * rightX(t, s.seg) + (s.z - t.pz[s.seg]) * rightZ(t, s.seg)) * s.driftDir;
     // (Auf schmaler Bahn – Bobbahn, Steg – ist der Spielraum kleiner: dort erst dichter am Rand.)
     if (k < DRIFT_WIDE && inner > t.rh[s.seg] - DRIFT_INNER_MARGIN * Math.min(1, (t.rh[s.seg] - 3) / 3.5)) buttons &= ~BTN_DRIFT;
+    // Und rutscht der Drift nach außen bis kurz vor die Bande, ebenfalls loslassen: Mit Griff kommt man noch herum.
+    if (-inner > t.rh[s.seg] - 1.4) buttons &= ~BTN_DRIFT;
     // Hinter einem Fahrzeug eingeklemmt: Drift halten – loslassen würde den Mini-Turbo zünden.
     if (jam) buttons |= BTN_DRIFT;
     const into = ((k - DRIFT_WIDE) / (DRIFT_TIGHT - DRIFT_WIDE)) * 2 - 1;

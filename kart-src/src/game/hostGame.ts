@@ -69,7 +69,6 @@ import {
   copyState,
   gridState,
   flattenKart,
-  bandRepel,
   hitKart,
   newState,
   stallKart,
@@ -1100,16 +1099,6 @@ export class HostGame implements GameView {
         }
         // Auf der Brücke und darunter begegnet man sich nicht.
         if (Math.abs(a.state.y - b.state.y) > 1.6) continue;
-        // Schwebeband: Wer sich berührt, stößt sich ab – und beide bekommen Schub.
-        if (TRACK.bands.length > 0 && bandRepel(TRACK, a.state, b.state)) {
-          for (const k of [a, b]) {
-            if (k.bumpCooldown === 0) {
-              k.bumpCooldown = 25;
-              this.fx(k, 'bump');
-            }
-          }
-          continue;
-        }
         const dx = b.state.x - a.state.x;
         const dz = b.state.z - a.state.z;
         const d = Math.hypot(dx, dz);

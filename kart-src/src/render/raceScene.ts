@@ -71,7 +71,6 @@ import {
   vehicleSpeed,
   VEH_STADTBAHN,
   BAND_HOVER,
-  REPEL_TICKS,
 } from '../game/mechanics';
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
@@ -550,11 +549,10 @@ function labelSprite(name: string, color: string): THREE.Sprite {
 
 const Y_UP = new THREE.Vector3(0, 1, 0);
 /**
- * Schwebeband an der Fassade: Um diesen Anteil der Verdrehung kippt „oben“ der Kamera mit (1 = ganz). Etwas weniger als
- * ganz: Das Band steht im Bild leicht schräg, die Fassade daneben senkrecht – man sieht, dass man an der Wand fährt,
- * ohne dass sich die Welt ganz umdreht.
+ * Schwebeband an der Fassade: Um diesen Anteil der Verdrehung kippt „oben“ der Kamera mit (1 = ganz). Ganz: Das Band liegt
+ * im Bild vor einem wie eine Straße – links ist links –, die Welt dreht sich drumherum.
  */
-const TWIST_CAM_UP = 0.8;
+const TWIST_CAM_UP = 1;
 const ROCKET_Q = new THREE.Quaternion();
 
 /** So viel weiter als in der Rechnung gilt ein Schubring für die Anzeige als durchflogen (das Bild läuft dem Treffer leicht nach). */
@@ -1938,13 +1936,6 @@ export class RaceScene {
         k.visual.squash(-0.8);
         this.emit('charge', k, local);
         if (local) this.shake = Math.max(this.shake, 0.2);
-      } else if (e.boost > k.boost + 20 && e.boost <= REPEL_TICKS && k.driftDir === 0 && !air && e.seg < this.track.total && (this.track.edge[e.seg] & EDGE_BAND) !== 0) {
-        // Schwebeband: abgestoßen (von einem anderen Kart oder einem Prallpoller) – Schub für beide.
-        this.pop('ZOING!', e, 'cool', 3);
-        this.burst(e.x, e.y + 0.5, e.z, 12, 8, 0x5ff3ff, true, 0.45, 0.4, 2);
-        k.visual.squash(-0.7);
-        this.emit('kick', k, local);
-        if (local) this.shake = Math.max(this.shake, 0.16);
       } else if (e.boost > 0 && e.boost > k.boost + 20 && k.tow === 0) {
         const turbo = k.driftDir !== 0 ? Math.max(1, k.driftStage) : 0;
         this.pop(turbo ? 'WUSCH!' : 'ZISCH!', e, turbo === 3 ? 'violet' : turbo ? 'cool' : 'warm', 2.6 + turbo * 0.35);
@@ -2772,8 +2763,7 @@ export class RaceScene {
     cam.position.copy(this.camPos);
     // Schwebeband an der Fassade: Die Kamera dreht sich mit dem eigenen Kart an die Wand – um die Achse an seiner Stelle,
     // mit geglättetem Winkel: Zwischen zwei Abschnitten ruckt nichts, und nach einem Neuaufsetzen dreht sie weich zurück.
-    // „Oben“ kippt nur zu TWIST_CAM_UP mit: Das Band steht im Bild leicht schräg, der Horizont bleibt zu ahnen – man weiß,
-    // wo man ist, ohne dass sich die ganze Welt umdreht.
+    // „Oben“ kippt mit (TWIST_CAM_UP): Das Band liegt vor einem wie eine Straße.
     const twisted = this.twistSegs.length > 0 && me.respawn === 0 && me.seg < t.total && (t.edge[me.seg] & EDGE_TWIST) !== 0 && this.twistTurn(me.x, me.z, me.seg);
     if (twisted) {
       this.camAxis.copy(this.dAxis);

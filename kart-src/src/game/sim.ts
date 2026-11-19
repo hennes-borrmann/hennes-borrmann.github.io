@@ -107,10 +107,6 @@ import {
   RAIL_VMIN,
   BAND_LINE_HALF,
   BAND_LINE_PULL,
-  BUMPER_RADIUS,
-  BUMPER_TICKS,
-  REPEL_PUSH,
-  REPEL_TICKS,
   bandLineLat,
   metroFront,
 } from './mechanics';
@@ -129,6 +125,7 @@ import {
   EDGE_OPEN_R,
   NO_GROUND,
   TRACK,
+  bankAt,
   centerHeight,
   gridPosition,
   gateShut,
@@ -411,7 +408,7 @@ export const GOLD_DRINK_TICKS = 48;
 export const GOLD_TICKS = 420;
 export const GOLD_ALL = GOLD_DRINK_TICKS + GOLD_TICKS;
 export const GOLD_WARN = 60;
-export const GOLD_VMAX = 1.11;
+export const GOLD_VMAX = 1.22;
 const GOLD_ACCEL = 1.15;
 export const GOLD_SCALE = 1.4;
 const GOLD_GRIP = 1;
@@ -441,8 +438,8 @@ const TOW_ACCEL = 70;
 const TOW_LOOK = 9;
 /** Steilkurven: Querneigung über das gewöhnliche Maß hinaus gibt Halt – bis zu diesem Zuschlag. */
 const BANK_FROM = 0.2;
-const BANK_GRIP = 3;
-const BANK_GRIP_MAX = 0.9;
+const BANK_GRIP = 2;
+const BANK_GRIP_MAX = 0.5;
 
 /**
  * Faktor auf den Kurvenhalt in einer Steilkurve. dir = Richtung der Kurve
@@ -1205,35 +1202,6 @@ export function twistYaw(t: Track, seg: number, along: number, lat: number, vx: 
   return (u * k * hide) / Math.max(0.3, 1 - k * lat);
 }
 
-/**
- * Abstoßen auf dem Schwebeband (der Host ruft es für jedes Paar sich berührender Karts auf): Schweben beide, stoßen sie
- * sich ab – auseinandergeschoben, jedes mit REPEL_PUSH/2 von der Berührstelle weg – und beide bekommen kurz Schub.
- * Gibt true zurück, wenn es so war (dann gilt kein gewöhnlicher Rempler).
- */
-export function bandRepel(t: Track, a: KartState, b: KartState): boolean {
-  if (!hovering(t, a) || !hovering(t, b)) return false;
-  const dx = b.x - a.x;
-  const dz = b.z - a.z;
-  const d = Math.hypot(dx, dz);
-  if (d >= KART_RADIUS * 2 || d < 1e-6) return false;
-  const nx = dx / d;
-  const nz = dz / d;
-  const push = (KART_RADIUS * 2 - d) / 2;
-  a.x -= nx * push;
-  a.z -= nz * push;
-  b.x += nx * push;
-  b.z += nz * push;
-  const rel = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
-  const k = (rel < 0 ? -rel / 2 : 0) + REPEL_PUSH / 2;
-  a.vx -= nx * k;
-  a.vz -= nz * k;
-  b.vx += nx * k;
-  b.vz += nz * k;
-  if (a.boost < REPEL_TICKS) a.boost = REPEL_TICKS;
-  if (b.boost < REPEL_TICKS) b.boost = REPEL_TICKS;
-  return true;
-}
-
 export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const t = TRACK;
   let ev = 0;
@@ -1315,7 +1283,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       tlat = side * tlimit;
     }
     // Schwebt eine Armlänge über der Fahrbahn – auch über Lücken hinweg.
-    const hover = centerHeight(t, s.seg, proj.along) + tlat * t.bank[s.seg] + heaveAt(t, s.seg, proj.along, env.time) + TOW_LIFT;
+    const hover = centerHeight(t, s.seg, proj.along) + tlat * bankAt(t, s.seg, proj.along) + heaveAt(t, s.seg, proj.along, env.time) + TOW_LIFT;
     s.y += (hover - s.y) * Math.min(1, 7 * DT);
     // Gedämpft folgt das Kart der Fahrbahn; an steilen Anstiegen (Kettenlift, 46 %) blieb es dabei bis zu 1,6 m unter
     // ihr zurück und flog durch Schienen und Boden. Tiefer als knapp über der Fahrbahn darf es nicht hängen.
@@ -1354,7 +1322,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     railProject(t, s.x, s.z, s.seg, env.time, size);
     const seg = proj.seg;
     const rail = railOf(t, seg);
-    if (rail && s.y <= centerHeight(t, seg, proj.along) + proj.lat * t.bank[seg] + RAIL_CATCH && Math.abs(proj.lat) <= t.wh[seg] + 1) {
+    if (rail && s.y <= centerHeight(t, seg, proj.along) + proj.lat * bankAt(t, seg, proj.along) + RAIL_CATCH && Math.abs(proj.lat) <= t.wh[seg] + 1) {
       const canSteer = env.canDrive && !spinning;
       const steer = canSteer ? Math.max(-1, Math.min(1, cmd.steer / 127)) : 0;
       // Welche Schiene: die nächste – mit Lenkeinschlag die Nachbarschiene in Lenkrichtung.
@@ -1404,7 +1372,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       s.x += rightX(t, seg1) * (lat - proj.lat);
       s.z += rightZ(t, seg1) * (lat - proj.lat);
       s.seg = seg1;
-      s.y = centerHeight(t, seg1, proj.along) + lat * t.bank[seg1];
+      s.y = centerHeight(t, seg1, proj.along) + lat * bankAt(t, seg1, proj.along);
       s.vy = 0;
       s.vx = t.tx[seg1] * v;
       s.vz = t.tz[seg1] * v;
@@ -1499,7 +1467,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   const diving = t.deep[seg0] !== 0 && y0 < t.sea;
   // Die Steilkurve gibt nur beim normalen Lenken mehr Halt (man kommt schneller herum). Im Drift dreht das Kart immer
   // im Verhältnis zum Halt – mit dem Zuschlag drehte es dort fast doppelt so eng und fuhr in die Innenbande.
-  const banked = wasAir || turnDir === 0 || s.driftDir !== 0 ? 1 : bankGrip(t, seg0, turnDir);
+  // (Und nur so viel, wie man einlenkt: Ein Tipp aufs Lenkrad lenkt in der Steilkurve so fein wie auf der Geraden, erst
+  // voller Einschlag holt den ganzen Zuschlag – vorher drehte schon leichtes Lenken dort fast doppelt so stark.)
+  const banked = wasAir || turnDir === 0 || s.driftDir !== 0 ? 1 : 1 + (bankGrip(t, seg0, turnDir) - 1) * Math.abs(steer);
   const hold = A_LAT * ch.grip * (golden ? GOLD_GRIP : big ? BIG_GRIP : small ? SMALL_GRIP : 1) * (ground.turn ?? ground.grip) * (diving ? DIVE_GRIP : 1) * banked;
   // Gleitflug: über einer Flugstrecke trägt die Luft (siehe mechanics.ts) – und überall, solange der Gleiter die Flügel ausbreitet
   // (nicht unter Wasser: dort trägt das Wasser).
@@ -1703,7 +1673,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   let along = proj.along;
   let flags = itemBtn ? FLAG_ITEM_HELD : 0;
   // Wer schon unter die Fahrbahn gefallen ist, stößt nirgends mehr an.
-  const sunk = y0 < centerHeight(t, s.seg, along) + lat * t.bank[s.seg] + heaveAt(t, s.seg, along, env.time) - STEP_MAX;
+  const sunk = y0 < centerHeight(t, s.seg, along) + lat * bankAt(t, s.seg, along) + heaveAt(t, s.seg, along, env.time) - STEP_MAX;
   // (Auf einer pendelnden Hängebrücke pendelt das Geländer mit: gemessen wird gegenüber der Brücke.)
   const shift = t.swaying && t.floatA[s.seg] >= 0 ? swayAt(t, s.seg, along, env.time) : 0;
   const side = lat - shift > 0 ? 1 : -1;
@@ -1737,36 +1707,6 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
         const turn = wrapAngle(trackHeading(t, s.seg) - s.heading);
         if (Math.abs(turn) < Math.PI / 2) s.heading = wrapAngle(s.heading + turn * 0.08);
       }
-    }
-  }
-
-  // --- Prallpoller am Rand des Schwebebands: abprallen und Schub ---
-  if (t.bumpers.length > 0 && !sunk && (t.edge[s.seg] & EDGE_BAND) !== 0) {
-    for (const b of t.bumpers) {
-      if (Math.abs(b.seg - s.seg) > 4) continue;
-      const dx = s.x - b.x;
-      const dz = s.z - b.z;
-      const reach = BUMPER_RADIUS + KART_RADIUS;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= reach * reach || Math.abs(y0 - b.y) > 2) continue;
-      const d = Math.sqrt(d2) || 1e-6;
-      const nx = dx / d;
-      const nz = dz / d;
-      s.x += nx * (reach - d);
-      s.z += nz * (reach - d);
-      const vn = s.vx * nx + s.vz * nz;
-      // Weg vom Poller: was auf ihn zulief, wird umgekehrt, und es gibt einen Stoß dazu – nie ein Abbremsen.
-      const out = Math.max(0, -vn) * 2 + REPEL_PUSH * 0.6;
-      s.vx += nx * out;
-      s.vz += nz * out;
-      if (s.boost < BUMPER_TICKS - 8) {
-        s.boost = BUMPER_TICKS;
-        ev |= EV_PAD;
-      }
-      projectOnTrack(t, s.x, s.z, s.seg);
-      s.seg = proj.seg;
-      lat = proj.lat;
-      along = proj.along;
     }
   }
 
@@ -1963,7 +1903,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.y = g;
     // Am Boden ist die Steiggeschwindigkeit die des Hangs. Endet der Hang
     // (Kuppe, Schanze), nimmt das Kart sie mit und hebt ab.
-    s.vy = g0 > NO_GROUND / 2 ? Math.max(-14, Math.min(14, (g - g0) / DT)) : 0;
+    // In der Steilkurve steigt der Boden auch, wenn man quer zum Hang hinauffährt oder die Neigung zunimmt – diese
+    // Steiggeschwindigkeit nimmt das Kart nicht mit in die Luft (sonst hüpfte es, sobald man aufhört hinaufzulenken oder
+    // die Kurve flacher wird). Abheben lassen nur Kuppen und Schanzen der Fahrbahn selbst; bergab folgt es dem Boden.
+    const tilt = Math.max(0, Math.min(14, (lat * bankAt(t, s.seg, along) - lat0 * bankAt(t, seg0, along0)) / DT));
+    s.vy = g0 > NO_GROUND / 2 ? Math.max(-14, Math.min(14, (g - g0) / DT - tilt)) : 0;
   }
   // Abheben erst ab einer Handbreit über dem Boden; wer einmal fliegt, fliegt bis zur Berührung.
   const air = s.y > g + AIR_EPS || (wasAir && s.y > g);
