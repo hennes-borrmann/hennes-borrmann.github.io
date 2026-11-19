@@ -33,7 +33,7 @@ function fullGust(w: { period: number; phase: number; on: number }): number {
 }
 
 describe('Sturmhafen: Böen', () => {
-  it('nur der Sturmhafen hat Wind und Pontons (der Baumkronenpfad hat Hängebrücken)', () => {
+  it('nur der Sturmhafen hat Wind und Pontons (der Baumkronenpfad hat Hängebrücken, die Startrampe den Abgasstoß)', () => {
     for (let i = 0; i < TRACK_COUNT; i++) {
       const t = getTrack(i);
       if (i === HAFEN) {
@@ -45,6 +45,11 @@ describe('Sturmhafen: Böen', () => {
         // Hängebrücken: die Pontons-Mechanik als schwingende Saite, an den Enden fest – kein Wind.
         expect(t.winds.length).toBe(0);
         for (const p of t.pontoons) expect(p.arch).toBe(true);
+      } else if (t.def.id === 'rampe') {
+        // Abgasstoß beim Raketenstart: eine „Böe“ im Takt der Starts, ohne Windschatten – keine Pontons.
+        expect(t.winds.length).toBe(1);
+        expect(t.winds[0].lee.length).toBe(0);
+        expect(t.pontoons.length).toBe(0);
       } else {
         expect(t.winds.length).toBe(0);
         expect(t.pontoons.length).toBe(0);

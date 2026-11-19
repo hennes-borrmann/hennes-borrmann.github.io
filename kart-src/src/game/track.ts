@@ -42,6 +42,12 @@ import {
   PULSE_ROD,
   PULSE_KICK,
   PULSE_BLAST,
+  PULSE_FLAME,
+  type CrawlerPlan,
+  crawlerAt,
+  crawlerSpeed,
+  CRAWLER_HALF,
+  CRAWLER_DECK,
   PONTOON_LINK,
   pontoonLift,
   pontoonShift,
@@ -71,7 +77,7 @@ import {
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'rampe';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -195,6 +201,11 @@ export interface PathFeatures {
   bumpers?: { at: number; lat: number }[];
   /** Sprengladungen (Kristallmine): gehen im Takt hoch und werfen, wer daneben ist (mechanics.ts, PULSE_BLAST). */
   blasts?: { at: number; lat: number; period: number; phase: number }[];
+  /**
+   * Abgasstrahl (Startrampe): beim Start einer Rakete steht hier im Takt das Feuer (mechanics.ts, PULSE_FLAME) – radius
+   * in Metern (ohne Angabe der der Sorte).
+   */
+  flames?: { at: number; lat: number; period: number; phase: number; radius?: number }[];
   /** Schubmagnete auf einer Schiene (lat = Lage dieser Schiene): ziehen im Takt an (mechanics.ts, PULSE_KICK). */
   kicks?: { at: number; lat: number; period: number; phase: number }[];
   /**
@@ -311,6 +322,14 @@ export interface TrackDef extends PathFeatures {
    * Sekunden, phase in Sekunden. Gehalten wird so, dass der Zug den Graben genau überdeckt.
    */
   metro?: { branch: number; speed: number; accel: number; dwell: number; period: number; phase: number };
+  /**
+   * Raupentransporter (Startrampe, mechanics.ts: CrawlerPlan): Er kriecht in seinem Graben hin und her. Am Ende 0 steht die
+   * Mitte seiner Plattform über der Mitte des Grabens (trench) der Abkürzung branch – genau auf Höhe ihrer Fahrbahn –, am
+   * Ende 1 bei to [x, z] (Meter, wie die Stützpunkte). floor = Höhe der Sohle des Kriechwegs. travel und dwell (Halt am
+   * Ende 0 und 1) in Sekunden, phase in Sekunden. Ein Tor an der Mündung der Abkürzung ist nur offen, solange die
+   * Plattform den Graben überbrückt, wenn man dort ankommt.
+   */
+  crawler?: { branch: number; to: [number, number]; floor: number; travel: number; dwell: [number, number]; phase: number };
 }
 
 export interface BoostPad {
@@ -504,6 +523,8 @@ export interface Track {
   bumpers: Bumper[];
   /** U-Bahn: Linie und Züge (null = keine). Die Züge stehen mit in vehicles. */
   metro: MetroLine | null;
+  /** Raupentransporter (Startrampe; sonst null). */
+  crawler: Crawler | null;
   /** Portale (mechanics.ts). */
   portals: Portal[];
   /** Fährt hier ein Fahrzeug mit befahrbarem Dach (mechanics.ts: VehicleSpec.roofs)? */
@@ -544,6 +565,37 @@ export interface Bumper {
  * Linie der U-Bahn: im Meterabstand abgetastet (Lage und Höhe der Schienenoberkante, Fahrtrichtung). Sie liegt gerade im
  * Gleisgraben ihrer Abzweigung und taucht an beiden Enden unter die Fahrbahn ab.
  */
+/**
+ * Raupentransporter (Startrampe): Kriechweg von Ende 0 (x0, z0 – Mitte der Plattform über dem Graben der Abkürzung) in
+ * Richtung (ux, uz) bis zum Ende 1, Fahrplan, Höhe der Sohle und der Plattform-Oberkante; first … last = die Abschnitte der
+ * Abkürzung ohne Fahrbahn (über dem Graben).
+ */
+export interface Crawler {
+  plan: CrawlerPlan;
+  x0: number;
+  z0: number;
+  ux: number;
+  uz: number;
+  floor: number;
+  top: number;
+  branch: number;
+  first: number;
+  last: number;
+  /** So weit (Meter) darf die Plattform vom Ende 0 weg sein, und sie überbrückt den Graben noch ganz. */
+  cover: number;
+}
+
+/** Wo der Raupentransporter zur Rennzeit time steht: Mitte (x, z) und Tempo (m/s). */
+export function crawlerPose(c: Crawler, time: number, out: { x: number; z: number; vx: number; vz: number }): { x: number; z: number; vx: number; vz: number } {
+  const s = crawlerAt(c.plan, time);
+  const v = crawlerSpeed(c.plan, time);
+  out.x = c.x0 + c.ux * s;
+  out.z = c.z0 + c.uz * s;
+  out.vx = c.ux * v;
+  out.vz = c.uz * v;
+  return out;
+}
+
 export interface MetroLine {
   n: number;
   x: Float64Array;
@@ -1171,6 +1223,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     bands: [],
     bumpers: [],
     metro: null,
+    crawler: null,
     portals: [],
     roofed: false,
     sizers: [],
@@ -1240,6 +1293,10 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     for (const b of p.f.rods ?? []) pulse(PULSE_ROD, b);
     for (const b of p.f.kicks ?? []) pulse(PULSE_KICK, b);
     for (const b of p.f.blasts ?? []) pulse(PULSE_BLAST, b);
+    for (const b of p.f.flames ?? []) {
+      pulse(PULSE_FLAME, b);
+      if (b.radius !== undefined) track.pulses[track.pulses.length - 1].radius = b.radius;
+    }
     for (const b of p.f.belts ?? []) {
       const first = segAt(p, b.from);
       const last = segAt(p, b.to);
@@ -1532,6 +1589,7 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     }
   }
   if (def.metro) buildMetro(track, def.metro);
+  if (def.crawler) buildCrawler(track, def.crawler);
   track.swaying = track.pontoons.some((p) => p.sway !== 0);
   return track;
 }
@@ -1639,6 +1697,61 @@ function buildMetro(t: Track, m: NonNullable<TrackDef['metro']>): void {
 }
 
 /**
+ * Raupentransporter anlegen: Kriechweg von der Mitte des Grabens der Abkürzung bis zum Ende 1, Fahrplan – und das Tor an
+ * der Mündung der Abkürzung: offen nur, wenn die Plattform den Graben überbrückt, solange man ihn quert (auch ein schnelles
+ * Kart, 30 m/s, erreicht ihn nicht zu früh, und ein langsames, 20 m/s, ist hinüber, bevor sie ihn freigibt).
+ */
+function buildCrawler(t: Track, c: NonNullable<TrackDef['crawler']>): void {
+  const b = t.branches[c.branch];
+  if (!b) return;
+  let first = -1;
+  let last = -1;
+  let wide = 0;
+  for (let g = b.first; g < b.first + b.count; g++) {
+    if ((t.edge[g] & EDGE_GAP) === 0) continue;
+    if (first < 0) first = g;
+    last = g;
+    wide = Math.max(wide, t.wh[g]);
+  }
+  if (first < 0) return;
+  const scale = t.def.scale ?? 1;
+  const x0 = (t.px[first] + t.px[last]) / 2;
+  const z0 = (t.pz[first] + t.pz[last]) / 2;
+  const dx = c.to[0] * scale - x0;
+  const dz = c.to[1] * scale - z0;
+  const length = Math.hypot(dx, dz);
+  const travel = Math.round(c.travel * 60);
+  const dwell0 = Math.round(c.dwell[0] * 60);
+  const dwell1 = Math.round(c.dwell[1] * 60);
+  const plan: CrawlerPlan = { period: 2 * travel + dwell0 + dwell1, phase: Math.round(c.phase * 60), travel, dwell0, dwell1, length };
+  const cover = CRAWLER_HALF - wide - 0.5;
+  t.crawler = { plan, x0, z0, ux: dx / length, uz: dz / length, floor: c.floor, top: c.floor + CRAWLER_DECK, branch: c.branch, first, last, cover };
+  // Tor an der Mündung
+  let mouth = 0;
+  while (mouth < b.count - 6 && t.twin[b.first + mouth] >= 0) mouth++;
+  const toGap = (first - b.first) * t.step;
+  const across = (last - first + 1) * t.step;
+  const P = plan.period;
+  const covered = new Uint8Array(P);
+  for (let k = 0; k < P; k++) covered[k] = crawlerAt(plan, k) <= cover ? 1 : 0;
+  const ok = (a: number, z: number): boolean => {
+    for (let u = Math.floor(a); u <= Math.ceil(z); u++) if (!covered[((u % P) + P) % P]) return false;
+    return true;
+  };
+  const spans: number[] = [];
+  let from = -1;
+  for (let k = 0; k <= P; k++) {
+    const shut = k < P && !ok(k + (toGap / 30) * 60, k + ((toGap + across) / 20) * 60 + 12);
+    if (shut && from < 0) from = k;
+    if (!shut && from >= 0) {
+      spans.push(from, k);
+      from = -1;
+    }
+  }
+  t.gates.push({ first: b.first, count: mouth + 5, plan: { period: P, spans }, warn: GATE_WARN, noteOpen: '', noteShut: '', only: 0 });
+}
+
+/**
  * Je Art (PULSE_*): Radius, Dauer der Gefahr und der Vorwarnung in Ticks.
  * Geysir: Ausbruch. Lavabombe: Einschlag samt Glutpfütze, davor wächst ihr
  * Schatten. Stampfpresse: der Stempel ist unten, davor blinkt die Warnleuchte.
@@ -1663,6 +1776,8 @@ const PULSE_KINDS = [
   { radius: 3, on: 75, warn: 45 },
   // Sprengladung: kurzer, harter Knall mit großem Umkreis; zweieinhalb Sekunden vorher brennt die Zündschnur, blinkt die Lampe
   { radius: 3.6, on: 24, warn: 150 },
+  // Abgasstrahl: anderthalb Sekunden Feuer; zehn Sekunden vorher beginnt der Countdown
+  { radius: 4.5, on: 96, warn: 600 },
 ];
 /** Innenradius eines Schubrings (Meter). */
 const RING_RADIUS = 3.4;

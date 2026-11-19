@@ -82,6 +82,14 @@ import {
   KICK_TICKS,
   PULSE_KICK,
   PULSE_BLAST,
+  PULSE_FLAME,
+  CRAWLER_HALF,
+  CRAWLER_HALF_WIDTH,
+  CRAWLER_SLAB,
+  CRAWLER_LEG_U,
+  CRAWLER_LEG_W,
+  CRAWLER_LEG_HALF,
+  CRAWLER_LEG_HALF_WIDTH,
   RAIL_BOOST,
   RAIL_BRAKE,
   RAIL_CATCH,
@@ -142,6 +150,7 @@ import {
   vehiclePose,
   walk,
   type Track,
+  crawlerPose,
 } from './track';
 import { SURFACES } from './surface';
 
@@ -702,6 +711,8 @@ const CRASH_INSET = 0.3;
 const VENT_LAUNCH = 10.5;
 /** So hoch wirft eine Sprengladung (Kristallmine) ein Kart (m/s). */
 const BLAST_LAUNCH = 7.5;
+/** So hoch wirft der Abgasstrahl (Startrampe) ein Kart (m/s). */
+const FLAME_LAUNCH = 6.5;
 /** Internes Bit aus stepTraffic: das Kart wurde verschoben. */
 const TRAFFIC_MOVED = 1 << 30;
 
@@ -793,6 +804,128 @@ function metroNear(t: Track, v: Vehicle, x: number, z: number, time: number): bo
   if (dx * dx + dz * dz > m.reach * m.reach) return false;
   const f = metroFront(v.plan!, v.train ?? 0, time);
   return f > 0 && f - (v.cars - 1) * v.pitch - 2 * v.half < m.n;
+}
+
+const CPOSE = { x: 0, z: 0, vx: 0, vz: 0 };
+/** Ergebnis von crawlerDeck: Tempo der Plattform unter dem Kart (m/s). */
+let crawlerVx = 0;
+let crawlerVz = 0;
+
+/**
+ * Raupentransporter (Startrampe): Höhe der Plattform unter (x, z), auf der ein Kart in Höhe y steht oder landen kann – sonst
+ * NO_GROUND. Wie ein Wagendach trägt sie nur, wer höchstens ROOF_STEP unter ihrer Oberkante ist; was auf ihr steht, nimmt
+ * sie mit (crawlerVx, crawlerVz).
+ */
+export function crawlerDeck(t: Track, x: number, y: number, z: number, time: number): number {
+  const c = t.crawler;
+  if (!c || y < c.top - ROOF_STEP) return NO_GROUND;
+  crawlerPose(c, time, CPOSE);
+  const dx = x - CPOSE.x;
+  const dz = z - CPOSE.z;
+  if (Math.abs(dx * c.ux + dz * c.uz) > CRAWLER_HALF + ROOF_EDGE || Math.abs(-dx * c.uz + dz * c.ux) > CRAWLER_HALF_WIDTH + ROOF_EDGE) return NO_GROUND;
+  crawlerVx = CPOSE.vx;
+  crawlerVz = CPOSE.vz;
+  return c.top;
+}
+
+/**
+ * Raupentransporter: die vier Raupenböcke sind fahrende Wände (von der Sohle bis unter die Plattform). Wer gegen einen fährt,
+ * prallt ab wie an einer Bande; wen ein Bock vor sich herschiebt, der wird mitgenommen. Drückt er ein Kart gegen die Bande,
+ * wird es erfasst: ein Dreher, und es landet längs der Straße neben dem Bock (sonst steckte es zwischen beiden fest).
+ */
+function stepCrawler(t: Track, s: KartState, time: number): number {
+  const c = t.crawler!;
+  if (s.y > c.top - CRAWLER_SLAB || s.y < c.floor - 1.5) return 0;
+  crawlerPose(c, time, CPOSE);
+  const ux = c.ux;
+  const uz = c.uz;
+  const wx = -uz;
+  const wz = ux;
+  let ev = 0;
+  for (let k = 0; k < 4; k++) {
+    const lx = CPOSE.x + ux * (k & 1 ? CRAWLER_LEG_U : -CRAWLER_LEG_U) + wx * (k & 2 ? CRAWLER_LEG_W : -CRAWLER_LEG_W);
+    const lz = CPOSE.z + uz * (k & 1 ? CRAWLER_LEG_U : -CRAWLER_LEG_U) + wz * (k & 2 ? CRAWLER_LEG_W : -CRAWLER_LEG_W);
+    const du = (s.x - lx) * ux + (s.z - lz) * uz;
+    const dw = (s.x - lx) * wx + (s.z - lz) * wz;
+    const pu = CRAWLER_LEG_HALF + KART_RADIUS - Math.abs(du);
+    const pw = CRAWLER_LEG_HALF_WIDTH + KART_RADIUS - Math.abs(dw);
+    if (pu <= 0 || pw <= 0) continue;
+    // Tempo des Karts aus Sicht des Bocks (längs des Kriechwegs u, quer w)
+    const legU = CPOSE.vx * ux + CPOSE.vz * uz;
+    let ku = s.vx * ux + s.vz * uz;
+    let kw = s.vx * wx + s.vz * wz;
+    // An den Ecken ist das Kart ein Kreis gegen eine Ecke.
+    const cu = Math.abs(du) - CRAWLER_LEG_HALF;
+    const cw = Math.abs(dw) - CRAWLER_LEG_HALF_WIDTH;
+    let nu = 0;
+    let nw = 0;
+    let push = 0;
+    if (cu > 0 && cw > 0) {
+      const d2 = cu * cu + cw * cw;
+      if (d2 >= KART_RADIUS * KART_RADIUS) continue;
+      const dist = Math.sqrt(d2) || 1e-6;
+      nu = ((du > 0 ? 1 : -1) * cu) / dist;
+      nw = ((dw > 0 ? 1 : -1) * cw) / dist;
+      push = KART_RADIUS - dist;
+    } else if (pu < pw) {
+      nu = du > 0 ? 1 : -1;
+      push = pu;
+    } else {
+      nw = dw > 0 ? 1 : -1;
+      push = pw;
+    }
+    let nx = ux * nu + wx * nw;
+    let nz = uz * nu + wz * nw;
+    // Schiebt der Bock das Kart gegen die Bande der Straße? Dann ist es erfasst.
+    projectOnTrack(t, s.x + nx * push, s.z + nz * push, s.seg);
+    const side = proj.lat > 0 ? 1 : -1;
+    if (Math.abs(proj.lat) > sideLimit(t, proj.seg, side) - KART_RADIUS && (t.edge[proj.seg] & (side > 0 ? EDGE_OPEN_R : EDGE_OPEN_L)) === 0 && nu !== 0) {
+      nu = 0;
+      nw = dw > 0 ? 1 : -1;
+      push = pw;
+      nx = wx * nw;
+      nz = wz * nw;
+      const r = hitKart(s);
+      if (r === HIT_BLOCKED) ev |= EV_BLOCK;
+      else if (r === HIT_SPIN) ev |= EV_HIT;
+      ku = s.vx * ux + s.vz * uz;
+      kw = s.vx * wx + s.vz * wz;
+    }
+    s.x += nx * push;
+    s.z += nz * push;
+    ev |= TRAFFIC_MOVED;
+    // Was auf den Bock zuläuft, prallt ab (gerechnet gegen dessen eigenes Tempo).
+    const vn = (ku - legU) * nu + kw * nw;
+    if (vn < 0) {
+      ku -= nu * vn * 1.3;
+      kw -= nw * vn * 1.3;
+      const loss = Math.min(0.5, 0.01 + -vn * 0.025);
+      kw *= 1 - loss * Math.abs(nw);
+      if (vn < -5) {
+        ev |= EV_WALL;
+        s.driftDir = 0;
+        s.driftCharge = 0;
+      }
+    }
+    s.vx = ux * ku + wx * kw;
+    s.vz = uz * ku + wz * kw;
+  }
+  return ev;
+}
+
+/** Steht an dieser Stelle gerade ein Raupenbock? (für Rollreifen und Co.) */
+function crawlerBlocks(t: Track, x: number, y: number, z: number, radius: number, time: number): boolean {
+  const c = t.crawler;
+  if (!c || y > c.top - CRAWLER_SLAB + radius || y < c.floor - 1.5) return false;
+  crawlerPose(c, time, CPOSE);
+  for (let k = 0; k < 4; k++) {
+    const lx = CPOSE.x + c.ux * (k & 1 ? CRAWLER_LEG_U : -CRAWLER_LEG_U) - c.uz * (k & 2 ? CRAWLER_LEG_W : -CRAWLER_LEG_W);
+    const lz = CPOSE.z + c.uz * (k & 1 ? CRAWLER_LEG_U : -CRAWLER_LEG_U) + c.ux * (k & 2 ? CRAWLER_LEG_W : -CRAWLER_LEG_W);
+    const cu = Math.max(0, Math.abs((x - lx) * c.ux + (z - lz) * c.uz) - CRAWLER_LEG_HALF);
+    const cw = Math.max(0, Math.abs(-(x - lx) * c.uz + (z - lz) * c.ux) - CRAWLER_LEG_HALF_WIDTH);
+    if (cu * cu + cw * cw < radius * radius) return true;
+  }
+  return false;
 }
 
 /**
@@ -927,6 +1060,7 @@ function stepTraffic(t: Track, s: KartState, time: number): number {
 
 /** Steht an dieser Stelle gerade ein Fahrzeug? (für Rollreifen und Co.) */
 export function trafficBlocks(t: Track, x: number, y: number, z: number, radius: number, seg: number, time: number): boolean {
+  if (t.crawler && crawlerBlocks(t, x, y, z, radius, time)) return true;
   const lap = t.n * t.step;
   const mine = t.prog[seg] * t.step;
   for (const v of t.vehicles) {
@@ -1303,6 +1437,15 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
       carryX = roofVx;
       carryZ = roofVz;
       carryTurn = roofTurn;
+    }
+  }
+  // Plattform des Raupentransporters (Startrampe): ebenso Boden, der mitnimmt.
+  if (t.crawler) {
+    const d0 = crawlerDeck(t, x0, y0, z0, env.time - 1);
+    if (d0 !== NO_GROUND && (d0 > g0 || g0 === NO_GROUND)) {
+      g0 = d0;
+      carryX = crawlerVx;
+      carryZ = crawlerVz;
     }
   }
 
@@ -1705,6 +1848,16 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
 
   // --- Verkehr: fahrende Wände, in die man besser nicht hineinrauscht ---
   // (Wer im Ziel ausgerollt ist oder noch an der Ampel steht, wird in Ruhe gelassen.)
+  if (t.crawler && env.canDrive) {
+    const cev = stepCrawler(t, s, env.time);
+    if (cev !== 0) {
+      ev |= cev & ~TRAFFIC_MOVED;
+      projectOnTrack(t, s.x, s.z, s.seg);
+      s.seg = proj.seg;
+      lat = proj.lat;
+      along = proj.along;
+    }
+  }
   if (t.vehicles.length > 0 && env.canDrive) {
     const tev = stepTraffic(t, s, env.time);
     if (tev !== 0) {
@@ -1723,6 +1876,10 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   let g = sunk ? NO_GROUND : groundNow(t, s.seg, along, lat, env.time);
   if (t.roofed && !sunk) {
     const r = roofUnder(t, s.x, y0, s.z, s.seg, env.time);
+    if (r !== NO_GROUND && (r > g || g === NO_GROUND)) g = r;
+  }
+  if (t.crawler && !sunk) {
+    const r = crawlerDeck(t, s.x, y0, s.z, env.time);
     if (r !== NO_GROUND && (r > g || g === NO_GROUND)) g = r;
   }
   if (g > y0 + STEP_MAX) {
@@ -1882,7 +2039,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     else if (r === HIT_SPIN) {
       ev |= EV_HIT;
       // Der Geysir wirft das Kart hoch, die Sprengladung ein gutes Stück, Bombe und Eiszapfen nur ein wenig.
-      s.vy = p.kind === PULSE_VENT ? VENT_LAUNCH : p.kind === PULSE_BLAST ? BLAST_LAUNCH : 4.5;
+      s.vy = p.kind === PULSE_VENT ? VENT_LAUNCH : p.kind === PULSE_BLAST ? BLAST_LAUNCH : p.kind === PULSE_FLAME ? FLAME_LAUNCH : 4.5;
       s.y += AIR_EPS + 0.05;
       flags |= FLAG_AIR;
     }

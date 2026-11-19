@@ -224,6 +224,75 @@ export const PULSE_KICK = 9;
  * Treffer wie von der Lavabombe, nur heftiger. Danach hängt Staub in der Luft (nur Bild).
  */
 export const PULSE_BLAST = 10;
+/**
+ * Abgasstrahl (Startrampe): Beim Start einer Rakete schießt das Feuer durch den Flammengraben hinaus – wer in der
+ * Flammenzone ist, wird getroffen und hochgeworfen (wie von der Sprengladung). Die zehn Sekunden davor läuft der
+ * Countdown (warn: Anzeigetafeln, Piepen); Takt und Versatz aller Abgasstrahlen einer Strecke sind gleich.
+ */
+export const PULSE_FLAME = 11;
+
+// --- Raupentransporter (Startrampe) --------------------------------------------------
+// Ein Raupentransporter kriecht auf seinem Kriechweg hin und her: Der Kriechweg liegt in einem Graben, so tief, wie die
+// Plattform des Transporters hoch ist. Steht er an seinem einen Ende, überbrückt die Plattform den Graben genau dort, wo
+// eine Abkürzung ihn quert (BranchDef.trench) – dann trägt sie wie ein Stück Fahrbahn; die Hauptstraße taucht dagegen
+// in den Graben hinunter und quert ihn auf der Sohle, unter der Plattform hindurch, zwischen den vier Raupenböcken.
+// Wo er gerade ist, folgt allein aus der Rennzeit (wie aller Verkehr).
+
+/**
+ * Fahrplan: Ein Umlauf dauert 2·travel + dwell0 + dwell1 Ticks. Er beginnt am Ende 0 (über der Abkürzung) mit dwell0
+ * Ticks Halt, dann travel Ticks Fahrt zum Ende 1 (length Meter weiter), dwell1 Ticks Halt, travel Ticks zurück.
+ * Anfahren und Anhalten sind weich (die Fahrt folgt einer halben Kosinuswelle).
+ */
+export interface CrawlerPlan {
+  period: number;
+  phase: number;
+  travel: number;
+  dwell0: number;
+  dwell1: number;
+  length: number;
+}
+
+/** Maße des Transporters (Meter): Plattform (halbe Länge längs des Kriechwegs, halbe Breite, Dicke, Oberkante über der Sohle). */
+export const CRAWLER_HALF = 13;
+export const CRAWLER_HALF_WIDTH = 9.2;
+export const CRAWLER_SLAB = 1.7;
+export const CRAWLER_DECK = 6.5;
+/** Die vier Raupenböcke: Lage ihrer Mitte (längs, quer) und halbe Maße (längs, quer). Sie reichen von der Sohle bis unter die Plattform. */
+export const CRAWLER_LEG_U = 9.6;
+export const CRAWLER_LEG_W = 6.6;
+export const CRAWLER_LEG_HALF = 2.9;
+export const CRAWLER_LEG_HALF_WIDTH = 1.9;
+
+/** Stand im Umlauf: 0 ≤ c < period. */
+function crawlerCycle(p: CrawlerPlan, time: number): number {
+  const c = (time + p.phase) % p.period;
+  return c < 0 ? c + p.period : c;
+}
+
+/** Wo der Transporter zur Rennzeit time (Ticks, auch gebrochen) steht: Meter vom Ende 0 aus (0 … length). */
+export function crawlerAt(p: CrawlerPlan, time: number): number {
+  let c = crawlerCycle(p, time);
+  if (c < p.dwell0) return 0;
+  c -= p.dwell0;
+  if (c < p.travel) return (p.length * (1 - Math.cos((Math.PI * c) / p.travel))) / 2;
+  c -= p.travel;
+  if (c < p.dwell1) return p.length;
+  c -= p.dwell1;
+  return (p.length * (1 + Math.cos((Math.PI * c) / p.travel))) / 2;
+}
+
+/** Tempo des Transporters zur Rennzeit time (m/s, zum Ende 1 hin positiv). */
+export function crawlerSpeed(p: CrawlerPlan, time: number): number {
+  let c = crawlerCycle(p, time);
+  if (c < p.dwell0) return 0;
+  c -= p.dwell0;
+  const k = (p.length * Math.PI * 60) / (2 * p.travel);
+  if (c < p.travel) return k * Math.sin((Math.PI * c) / p.travel);
+  c -= p.travel;
+  if (c < p.dwell1) return 0;
+  c -= p.dwell1;
+  return -k * Math.sin((Math.PI * c) / p.travel);
+}
 
 // --- Wetterleuchten ------------------------------------------------------------------
 // Auf einer dunklen Strecke (Gewitterkamm) erhellt jeder Blitz für einen Augenblick alles. Wie hell es

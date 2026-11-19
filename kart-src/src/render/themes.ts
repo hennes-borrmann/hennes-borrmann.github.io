@@ -89,6 +89,44 @@ export interface Theme {
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Startrampe: ein Raketenstartplatz an der Küste an einem klaren Nachmittag mit dramatischem Himmel – tiefes Blau oben,
+  // ein warmer, heller Horizont über dem Meer, große Haufenwolken mit kräftigem Schatten. Weißer Beton, Stahlgrau und das
+  // Signalorange der Startanlagen; Dünen aus hellem Sand mit Strandhafer.
+  rampe: {
+    sky: [0x1a4aa8, 0x5f9be0, 0xf6e4c2],
+    fog: 0xdde4ea,
+    fogNear: 220,
+    fogFar: 900,
+    sunDir: [-0.55, 0.6, 0.42],
+    sunColor: 0xfff0d6,
+    sunIntensity: 2.5,
+    hemiSky: 0xd2e2f4,
+    hemiGround: 0xc8b088,
+    hemiIntensity: 1.3,
+    disc: 0xfff6de,
+    discSize: 32,
+    clouds: 0xffffff,
+    cloudShade: 0x8e9cb8,
+    stars: false,
+    road: 0x50535b,
+    roadAlt: 0x585b63,
+    line: 0xffffff,
+    kerbA: 0xff6a1f,
+    kerbB: 0xffffff,
+    shoulder: 0xc9b98e,
+    wallA: 0xf0efe8,
+    wallB: 0xff6a1f,
+    wallCap: 0x2e333d,
+    deck: 0x9aa0a8,
+    deckDark: 0x5c626b,
+    pillar: 0x6b717a,
+    ground: [0xe9d8a6, 0x9ab46a, 0xb9ad92, 0xf2e6c4],
+    liquidY: -1.6,
+    liquid: [0x1a6cb4, 0x2f9ed8, 0xd2f2ff],
+    liquidGlow: false,
+    farY: -9,
+    rough: 1.1,
+  },
   // Kristallmine: eine Zeche bei Nacht – über Tage Mondlicht, tiefblauer Himmel, warmes Licht aus den Fenstern; unter Tage
   // Fels in tiefem Violettbraun, und was leuchtet, sind die Kristalle und die Grubenlampen (Kulisse, ohne Lichtquellen).
   // Wie in der Nachtschicht entsteht die Dunkelheit ohne eigene Shader: über Dunst, Himmelslicht und gedämpfte Farben.

@@ -107,8 +107,12 @@ describe('Vulkaninsel: Bruchstellen', () => {
         expect(t.holes.length).toBe(0);
         // (Größentore – Riesenkinderzimmer – haben keinen Zeitplan: Sie hängen am Kart, nicht an der Rennzeit. Das Tor
         // zum Zugdach der Neonhochbahn wiederholt sich mit der U-Bahn und sperrt nichts für immer – neon.test.ts; ebenso das
-        // Schleusentor der Talsperre, das nach Fahrplan auf- und zugeht – talsperre.test.ts.)
-        const timed = (g: (typeof t.gates)[number]): boolean => g.plan.period > 0 && t.branchOf[g.first] >= 0 && ((t.metro !== null && t.branchOf[g.first] === t.metro.branch) || t.def.branches?.[t.branchOf[g.first]]?.shortcut === 'window');
+        // Schleusentor der Talsperre, das nach Fahrplan auf- und zugeht – talsperre.test.ts –, und die Schranke am
+        // Transporterdach der Startrampe, die dem Raupentransporter folgt – startrampe.test.ts.)
+        const timed = (g: (typeof t.gates)[number]): boolean =>
+          g.plan.period > 0 &&
+          t.branchOf[g.first] >= 0 &&
+          ((t.metro !== null && t.branchOf[g.first] === t.metro.branch) || (t.crawler !== null && t.branchOf[g.first] === t.crawler.branch) || t.def.branches?.[t.branchOf[g.first]]?.shortcut === 'window');
         expect(t.gates.filter((g) => g.only === 0 && !timed(g)).length).toBe(0);
         for (let k = 0; k < t.total; k++) expect(t.edge[k] & EDGE_BROKEN).toBe(0);
       }
