@@ -1,4 +1,4 @@
-// Schwebeband an der Wand (Neonhochbahn, Talsperre, Kristallmine): Gerechnet wird flach, gezeigt wird die Bahn
+// Schwebeband an der Wand (Neonhochbahn, Talsperre, Kristallmine, Startrampe): Gerechnet wird flach, gezeigt wird die Bahn
 // verdreht. Die Kurve, die die flache Bahn dort macht, sieht man an der Wand nicht – also fährt das Band sie selbst
 // (sim.ts: twistYaw). Ohne das wurde man an der Wand ohne sichtbaren Grund an den Rand gedrückt, und in der Geode der
 // Kristallmine (Radius bis unter 13 m) half nicht einmal voller Einschlag.
@@ -32,7 +32,7 @@ function after(seg: number, lat: number, steer: number, ticks: number): number {
 }
 
 describe('Schwebeband an der Wand', () => {
-  for (const id of ['neon', 'talsperre', 'kristall']) {
+  for (const id of ['neon', 'talsperre', 'kristall', 'rampe']) {
     it(`${id}: ohne Lenken bleibt man an der Wand in seiner Spur, und Lenken wirkt nach beiden Seiten`, () => {
       setTrack(TRACK_DEFS.findIndex((d) => d.id === id));
       const t = TRACK;

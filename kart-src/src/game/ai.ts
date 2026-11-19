@@ -878,7 +878,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // Rechts lenken verkleinert die Blickrichtung → Vorzeichen umdrehen. (Auf dem Schwebeband an der Wand dreht das Band
   // selbst mit – den Teil muss die Lenkung nicht mehr leisten.)
   let wantYaw = -err * 4.2;
-  if (!air && (t.edge[s.seg] & EDGE_TWIST) !== 0) {
+  if ((t.edge[s.seg] & EDGE_TWIST) !== 0) {
     projectOnTrack(t, s.x, s.z, s.seg);
     wantYaw -= twistYaw(t, proj.seg, proj.along, proj.lat, s.vx, s.vz);
   }

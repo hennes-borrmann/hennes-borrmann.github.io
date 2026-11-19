@@ -1654,8 +1654,9 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   }
 
   // Schwebeband an der Wand: Die Kurve, die man im Bild nicht sieht, fährt das Band selbst – es dreht Nase und Fahrt mit
-  // (wie das Wagendach im Bogen). Geradeaus im Bild heißt dann: Lenkrad gerade, man bleibt in seiner Spur.
-  if (!wasAir && (t.edge[seg0] & EDGE_TWIST) !== 0) {
+  // (wie das Wagendach im Bogen). Geradeaus im Bild heißt dann: Lenkrad gerade, man bleibt in seiner Spur. Auch bei einem
+  // Hüpfer über eine Kuppe: Die Luft über dem Band ist im Bild mitgedreht – sonst landete man schief und triebe nach außen.
+  if ((t.edge[seg0] & EDGE_TWIST) !== 0) {
     const a = -twistYaw(t, seg0, along0, lat0, s.vx, s.vz) * DT;
     if (a !== 0) {
       const cos = Math.cos(a);
