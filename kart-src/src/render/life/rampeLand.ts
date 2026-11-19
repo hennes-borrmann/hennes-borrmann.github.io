@@ -1,8 +1,8 @@
 // Startrampe: die Form des Startplatzes – geteilt von world.ts (Gelände), mechanics/rampe.ts (Bauten der Mechanik) und
 // life/rampe.ts (Kulisse).
 //
-// Der Platz liegt eben auf Höhe PLATZ.y; nach Osten fällt er über einen Dünengürtel und den Strand ins Meer. Der Gleitflug
-// landet auf einem Dünenhügel im Nordwesten. Ins Gelände geschnitten sind (Einschnitte – dort zeichnet world.ts kein
+// Der Platz liegt eben auf Höhe PLATZ.y, auf einer Insel (kuesteD): nach Osten fällt er über einen Dünengürtel und den
+// Strand ins offene Meer, rundum flache Strände. Der Gleitflug landet auf einem Dünenhügel im Nordwesten. Ins Gelände geschnitten sind (Einschnitte – dort zeichnet world.ts kein
 // Gelände, die Wände und Böden zeichnet mechanics/rampe.ts):
 //   – die Startrampe: ein Betonsockel um die Rakete (darunter läuft der Flammengraben im Tunnel);
 //   – der Flammengraben, wo er außerhalb des Sockels unter dem Platz liegt;
@@ -28,6 +28,24 @@ export const HALLE_X = -372;
 /** Die Küste: x der Wasserlinie (abhängig von z). */
 export function kuesteX(z: number): number {
   return 186 + 12 * Math.sin(z / 95) + 6 * Math.sin(z / 37 + 1.3);
+}
+/** Mitte der Insel (für Strahlen zur Wasserlinie). */
+export const INSEL = { x: -130, z: -5 };
+/**
+ * Abstand landeinwärts zur Wasserlinie (Meter; negativ = im Wasser). Der Startplatz liegt auf einer Insel: im Osten das
+ * offene Meer mit Dünen und Strand, im Norden und Süden flache Strände, im Westen hinter der Montagehalle die Lagune. Die
+ * Ecken sind gerundet (weiches Minimum).
+ */
+export function kuesteD(x: number, z: number): number {
+  const ost = kuesteX(z) - x;
+  const nord = z - (-208 + 8 * Math.sin(x / 57 + 0.4) + 4 * Math.sin(x / 21 + 2));
+  const sued = 200 + 9 * Math.sin(x / 66 + 1.1) + 4 * Math.sin(x / 25) - z;
+  const west = x + 440 + 5 * Math.sin(z / 45);
+  return smin(smin(ost, nord, 60), smin(sued, west, 60), 60);
+}
+function smin(a: number, b: number, k: number): number {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.min(a, b) - (h * h * k) / 4;
 }
 /** Dünenhügel, auf dem der Gleitflug landet: Mitte, Halbmesser, Höhe. */
 export const HUEGEL = { x: -168, z: -96, r: 78, h: 11.5 };
@@ -116,14 +134,16 @@ export function rampeLand(t: Track): RampeLand {
       return Math.min(d, s.d);
     },
     base(x, z) {
-      const xc = kuesteX(z);
-      // Platz eben, zur Küste hin ein Dünengürtel (wellig), dann der Strand bis unter die Wasserlinie.
-      const dune = smooth((x - (xc - 75)) / 30) * (1 - smooth((x - (xc - 22)) / 14));
+      const de = kuesteX(z) - x;
+      const d = kuesteD(x, z);
+      // Platz eben, zur offenen See (Osten) hin ein Dünengürtel (wellig, zu den Ecken der Insel hin flacher), dann rundum
+      // der Strand bis unter die Wasserlinie.
+      const dune = smooth((75 - de) / 30) * (1 - smooth((22 - de) / 14)) * smooth((d - 6) / 30);
       const wave = 0.5 + 0.5 * Math.sin(z / 13 + Math.sin(x / 21) * 1.6);
       let y = g - 0.6 + dune * (2.2 + 2.4 * wave);
-      const beach = smooth((x - (xc - 24)) / 40);
+      const beach = smooth((24 - d) / 40);
       y += (-4.5 - y) * beach;
-      if (x > xc + 16) y = Math.min(y, -4.5 - (x - xc - 16) * 0.12);
+      if (d < -16) y = Math.min(y, -4.5 + (d + 16) * 0.12);
       // Dünenhügel der Landung
       const dh = Math.hypot(x - HUEGEL.x, z - HUEGEL.z) / HUEGEL.r;
       if (dh < 1) y += HUEGEL.h * (1 - smooth(dh)) * (0.92 + 0.08 * Math.sin(x / 9 + z / 13));

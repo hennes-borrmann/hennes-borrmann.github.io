@@ -185,7 +185,7 @@ function beam(b: MeshBuilder, a: V3, c: V3, s: number, color: RGB): void {
 }
 
 /** Senkrechter (auch kegeliger) Zylinder um (x, z) von y0 (Halbmesser r0) bis y1 (r1), sides Seiten, mit Deckeln. */
-function zyl(b: MeshBuilder, x: number, z: number, y0: number, y1: number, r0: number, r1: number, sides: number, col: RGB, top?: RGB, bottom = false): void {
+export function zyl(b: MeshBuilder, x: number, z: number, y0: number, y1: number, r0: number, r1: number, sides: number, col: RGB, top?: RGB, bottom = false): void {
   for (let k = 0; k < sides; k++) {
     const a0 = (k / sides) * Math.PI * 2;
     const a1 = ((k + 1) / sides) * Math.PI * 2;

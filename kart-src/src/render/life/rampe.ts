@@ -1,16 +1,18 @@
-// Kulisse der Startrampe: ein Raketenstartplatz an der Küste.
+// Kulisse der Startrampe: ein Raketenstartplatz auf einer Insel an der offenen See.
 //
 // Im Westen, am Ende des Kriechwegs, die riesige Montagehalle mit ihrem hohen Tor; am Start die Zuschauertribüne (bunte
-// Zuschauer, Sonnensegel) und gegenüber das Kontrollzentrum mit Fensterband und Antennen; Radarschüsseln auf Gittermasten,
-// die sich drehen; kugelförmige Tanks und ein liegender Tank auf Stelzen; Hangars; zwei hohe Blitzschutzmasten am
-// Sockel; Palmen und Strandhafer auf den Dünen; am Strand eine Brandungslinie, draußen auf dem Meer ein Bergungsschiff und
-// ein Lotsenboot; Möwen.
+// Zuschauer, Sonnensegel) und gegenüber das Kontrollzentrum mit Fensterband, Antennen und Parkplatz; daneben der
+// Raketengarten der Besucher; Radarschüsseln auf Gittermasten, die sich drehen; kugelförmige Tanks, ein liegender Tank
+// auf Stelzen, der Wasserturm und das Treibstofflager; Hangars; zwei hohe Blitzschutzmasten am Sockel; im Südosten ein
+// zweiter, kleinerer Startplatz mit seiner Rakete, an der Nordostecke ein Leuchtturm; Palmen, Sträucher und Strandhafer
+// auf den Dünen; rings um die Insel eine Brandungslinie, draußen auf dem Meer ein Bergungsschiff und ein Lotsenboot;
+// Möwen.
 //
 // Reine Kulisse: nichts steht auf einer Fahrbahn (world.clearance), nichts im Kriechweg oder im Flammengraben
 // (rampeLand.near), nichts in der Flugbahn über dem Platz. Alles mit festem Zufall.
 //
 // Zeichenaufrufe: Bauten (Toon), Leuchtendes und Fensterbänder (unbeleuchtet), Radarschüsseln (eine Instanzgruppe),
-// Brandung, Möwen = 5 (niedrige Stufe ohne Möwen: 4). Dreiecke: niedrig ≈ 14 000, hoch ≈ 30 000.
+// Brandung, Möwen = 5 (niedrige Stufe ohne Möwen: 4). Dreiecke: niedrig ≈ 10 000, hoch ≈ 18 000.
 
 import * as THREE from 'three';
 import { EDGE_GLIDE, type Track } from '../../game/track';
@@ -19,7 +21,8 @@ import { MeshBuilder, seeded, shade, type RGB, type V3 } from '../build';
 import type { Life } from '../life';
 import { rgb, toonMaterial } from '../toon';
 import type { World } from '../world';
-import { HALLE_X, kuesteX, rampeLand } from './rampeLand';
+import { zyl } from '../mechanics/rampe';
+import { HALLE_X, INSEL, kuesteD, kuesteX, rampeLand } from './rampeLand';
 
 const WEISS = rgb(0xf2f0ea);
 const GRAU = rgb(0xc9c6bf);
@@ -38,6 +41,15 @@ const STAMM = rgb(0x8a6a48);
 const PALME = rgb(0x4f9a46);
 const PALME_2 = rgb(0x3f8238);
 const SCHIFF = rgb(0x2e3440);
+const SCHWARZ = rgb(0x24262b);
+const BUSCH = rgb(0x5f8f45);
+const BUSCH_2 = rgb(0x7a9a4a);
+const ECKEN = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+] as const;
 const ZUSCHAUER = [0xe84a3a, 0x3a8ee8, 0xf2c23a, 0x46b46a, 0xf2f0ea, 0xff8a2a, 0x8a5ad8, 0x2fc4c4].map(rgb);
 
 export function buildRampeLife(world: World): Life {
@@ -95,7 +107,8 @@ export function buildRampeLife(world: World): Life {
     const cz = KRIECHWEG.z;
     const y0 = G - 3;
     // Körper in zwei Grautönen, oben ein dunkles Band; das Tor (dunkel) zum Kriechweg hin
-    bau.box(cx, y0 + H / 2, cz, W, H, D, WEISS, 0, GRAU);
+    // (reicht bis unter den Meeresspiegel: am Westrand fällt das Gelände zur Lagune ab)
+    bau.box(cx, y0 + (H - 10) / 2, cz, W, H + 10, D, WEISS, 0, GRAU);
     bau.box(cx, y0 + H + 2, cz, W - 6, 4, D - 6, GRAU_D);
     // senkrechte Rippen an der Ostseite und an den Längsseiten
     for (let z = cz - D / 2 + 4; z < cz + D / 2; z += 8) bau.box(x1 + 0.4, y0 + H / 2, z, 0.8, H, 1.2, GRAU);
@@ -244,6 +257,156 @@ export function buildRampeLife(world: World): Life {
     return (sx + sz) % 4 === 0 ? ROT : WEISS;
   }
 
+  // --- Zweiter Startplatz im Südosten: ein kleinerer Turm mit seiner Rakete (startet nicht) -----------------------
+  {
+    const [x, z] = placeBuilding(112, 150, 20);
+    const y = ground(x, z) - 0.4;
+    bau.box(x, y - 1, z, 30, 4, 30, GRAU, 0, rgb(0xd9d5cc));
+    bau.box(x, y + 1.6, z, 8, 1.2, 8, GRAU_D);
+    const ry = y + 2.2;
+    zyl(bau, x, z, ry, ry + 24, 2.2, 2.2, 12, WEISS);
+    zyl(bau, x, z, ry + 7, ry + 9, 2.24, 2.24, 12, SCHWARZ);
+    zyl(bau, x, z, ry + 24, ry + 27, 2.2, 1.7, 12, ORANGE);
+    zyl(bau, x, z, ry + 27, ry + 32, 1.7, 0.05, 12, WEISS);
+    for (const s of [-1, 1]) {
+      zyl(bau, x + s * 3.3, z, ry, ry + 15, 1, 1, 8, WEISS);
+      zyl(bau, x + s * 3.3, z, ry + 15, ry + 18, 1, 0.1, 8, ORANGE);
+    }
+    // Gitterturm daneben mit einem Arm zur Rakete
+    const tx = x;
+    const tz = z - 8;
+    const H = 40;
+    for (const [sx, sz] of ECKEN) bau.box(tx + sx * 2, ry + H / 2, tz + sz * 2, 0.5, H, 0.5, ROT);
+    for (let h = 4; h < H; h += 4) bau.box(tx, ry + h, tz, 4.4, 0.35, 4.4, h % 8 === 0 ? ROT : WEISS);
+    bau.box(tx, ry + H + 0.6, tz, 5, 1.2, 5, GRAU_D);
+    bau.box(tx, ry + H + 4, tz, 0.3, 6, 0.3, STAHL_D);
+    bau.box(tx, ry + 22, (tz + z) / 2, 1.4, 0.8, 4, STAHL);
+  }
+
+  // --- Leuchtturm an der Nordostecke der Insel (rot-weiß geringelt) ------------------------------------------------
+  {
+    const x = 138;
+    const z = -178;
+    const y = ground(x, z);
+    bau.box(x, y - 2, z, 9, 6, 9, GRAU_D, 0.3, GRAU);
+    const y0 = y + 1;
+    const H = 26;
+    for (let k = 0; k < 6; k++) {
+      const a = y0 + (k * H) / 6;
+      const b = y0 + ((k + 1) * H) / 6;
+      zyl(bau, x, z, a, b, 3 - (k / 6) * 1.1, 3 - ((k + 1) / 6) * 1.1, 12, k % 2 === 0 ? WEISS : ROT);
+    }
+    bau.box(x, y0 + H + 0.3, z, 5, 0.6, 5, STAHL_D);
+    glow.box(x, y0 + H + 2, z, 2.6, 2.8, 2.6, rgb(0xfff2b0));
+    zyl(bau, x, z, y0 + H + 3.4, y0 + H + 5.4, 2, 0.1, 10, ROT);
+  }
+
+  // --- Treibstofflager im Norden: drei stehende Tanks, verbunden durch eine Rohrleitung -----------------------------
+  for (let k = 0; k < 3; k++) {
+    const x = 34 + k * 19;
+    const z = -150;
+    if (!frei(x, z, 8)) continue;
+    const y = ground(x, z) - 0.4;
+    zyl(bau, x, z, y, y + 11, 6.5, 6.5, 14, WEISS, GRAU);
+    zyl(bau, x, z, y + 8.5, y + 9.7, 6.55, 6.55, 14, ORANGE);
+    bau.box(x, y + 1, z + 8, 2, 2, 3, STAHL_D);
+    if (k < 2) bau.box(x + 9.5, y + 1.6, z + 8.5, 19, 0.8, 0.8, STAHL);
+  }
+
+  // --- Wasserturm (Wasser zum Dämpfen des Starts): Kugel auf vier Stelzen -----------------------------------------
+  {
+    const [x, z] = placeBuilding(-40, -132, 9);
+    const y = ground(x, z) - 0.4;
+    const H = 34;
+    for (const [sx, sz] of ECKEN) {
+      const top: V3 = [x + sx * 2.4, y + H, z + sz * 2.4];
+      const foot: V3 = [x + sx * 5.5, y, z + sz * 5.5];
+      bau.box((top[0] + foot[0]) / 2, y + H / 2, (top[2] + foot[2]) / 2, 0.8, H, 0.8, STAHL);
+    }
+    for (const h of [10, 22]) bau.box(x, y + h, z, 9 - h * 0.15, 0.4, 9 - h * 0.15, STAHL_D);
+    zyl(bau, x, z, y, y + H, 0.9, 0.9, 8, GRAU);
+    const kugelW = new THREE.SphereGeometry(7.5, lo ? 12 : 16, lo ? 8 : 10);
+    m4.compose(new THREE.Vector3(x, y + H + 6, z), new THREE.Quaternion(), new THREE.Vector3(1, 0.85, 1));
+    bau.add(kugelW, WEISS, m4);
+    kugelW.dispose();
+    zyl(bau, x, z, y + H + 4.6, y + H + 6.4, 7.45, 7.45, 16, BLAU);
+  }
+
+  // --- Raketengarten der Besucher: ausgemusterte Raketen auf einem runden Platz ------------------------------------
+  {
+    const [x, z] = placeBuilding(-258, 84, 16);
+    const y = ground(x, z);
+    zyl(bau, x, z, y - 1.5, y + 0.25, 15, 15, 18, rgb(0xd9d5cc), rgb(0xd9d5cc));
+    const modelle: [number, number, number, RGB, RGB][] = [
+      // Abstand, Winkel, Höhe, Hauptfarbe, Ringfarbe
+      [0, 0, 26, WEISS, SCHWARZ],
+      [8.5, 0.3, 18, WEISS, ORANGE],
+      [8.5, 1.9, 15, GRAU, ROT],
+      [9, 3.3, 21, WEISS, BLAU],
+      [8, 4.7, 12, ORANGE, WEISS],
+    ];
+    for (const [d, a, h, c, ring] of modelle) {
+      const rx = x + Math.cos(a) * d;
+      const rz = z + Math.sin(a) * d;
+      const r = 0.9 + h * 0.04;
+      zyl(bau, rx, rz, y + 0.25, y + 0.25 + h * 0.75, r, r, 10, c);
+      zyl(bau, rx, rz, y + 0.25 + h * 0.3, y + 0.25 + h * 0.36, r * 1.03, r * 1.03, 10, ring);
+      zyl(bau, rx, rz, y + 0.25 + h * 0.75, y + 0.25 + h, r, 0.05, 10, ring);
+      for (let f = 0; f < 3; f++) {
+        const fa = (f / 3) * Math.PI * 2 + a;
+        const fx = Math.cos(fa);
+        const fz = Math.sin(fa);
+        bau.box(rx + fx * (r + 0.6), y + 0.25 + h * 0.08, rz + fz * (r + 0.6), 1.3, h * 0.16, 0.2, ring, -fa);
+      }
+    }
+  }
+
+  // --- Parkplatz westlich des Kontrollzentrums --------------------------------------------------------------------
+  {
+    const [x, z] = placeBuilding(-214, 58, 14);
+    const y = ground(x, z) + 0.06;
+    bau.quad([x - 17, y, z + 9], [x + 17, y, z + 9], [x + 17, y, z - 9], [x - 17, y, z - 9], rgb(0x56585e));
+    const autos = [0xe84a3a, 0x3a8ee8, 0xf2f0ea, 0x2e3440, 0xf2c23a, 0x9aa3ad, 0x46b46a, 0xf2f0ea].map(rgb);
+    for (const row of [-4.5, 4.5]) {
+      for (let s = 0; s < 11; s++) {
+        const cx = x - 15 + s * 3;
+        bau.box(cx, y + 0.01, z + row, 0.15, 0.02, 5.2, WEISS);
+        if (rnd() < 0.25) continue;
+        const ax = cx + 1.5;
+        const col = autos[Math.floor(rnd() * autos.length)];
+        bau.box(ax, y + 0.65, z + row, 1.8, 0.9, 4, col);
+        bau.box(ax, y + 1.4, z + row - 0.2, 1.6, 0.65, 2.2, shade(col, 0.9), 0, GLAS);
+      }
+    }
+  }
+
+  // --- Sträucher auf dem Gras ----------------------------------------------------------------------------------------
+  const nBusch = lo ? 50 : hi ? 150 : 100;
+  for (let n = 0, tries = 0; n < nBusch && tries < 2000; tries++) {
+    const x = -420 + rnd() * 580;
+    const z = -195 + rnd() * 385;
+    if (kuesteD(x, z) < 26) continue;
+    if (!frei(x, z, 1.5)) continue;
+    const y = ground(x, z) - 0.25;
+    const r = 1 + rnd() * 1.4;
+    const h = r * (0.9 + rnd() * 0.5);
+    const col = rnd() < 0.5 ? BUSCH : BUSCH_2;
+    const a0 = rnd() * Math.PI;
+    const ring = (k: number, rr: number, yy: number): V3 => {
+      const a = a0 + (k / 6) * Math.PI * 2;
+      return [x + Math.cos(a) * rr, yy, z + Math.sin(a) * rr];
+    };
+    for (let k = 0; k < 6; k++) {
+      const b0 = ring(k, r * 0.7, y);
+      const b1 = ring(k + 1, r * 0.7, y);
+      const m0 = ring(k, r, y + h * 0.45);
+      const m1 = ring(k + 1, r, y + h * 0.45);
+      bau.quad(b1, b0, m0, m1, shade(col, 0.8));
+      bau.tri(m1, m0, [x, y + h, z], k % 2 === 0 ? col : shade(col, 0.92));
+    }
+    n++;
+  }
+
   // --- Palmen und Strandhafer, Brandung ---------------------------------------------------------
   const palme = (x: number, z: number, h: number): void => {
     const y = ground(x, z) - 0.3;
@@ -275,12 +438,12 @@ export function buildRampeLife(world: World): Life {
       bau.tri([ex, ey, ez], top, [mid[0] - sx, mid[1], mid[2] - sz], shade(col, 0.8));
     }
   };
-  const nPalmen = lo ? 14 : 30;
-  for (let n = 0, tries = 0; n < nPalmen && tries < 400; tries++) {
-    // an Tribüne, Kontrollzentrum und am Rand des Platzes
-    const x = -260 + rnd() * 420;
-    const z = -150 + rnd() * 280;
-    if (x > kuesteX(z) - 30) continue;
+  const nPalmen = lo ? 22 : hi ? 46 : 36;
+  for (let n = 0, tries = 0; n < nPalmen && tries < 800; tries++) {
+    // überall auf der Insel, nicht auf dem Strand
+    const x = -420 + rnd() * 590;
+    const z = -190 + rnd() * 380;
+    if (kuesteD(x, z) < 24) continue;
     if (!frei(x, z, 3, true)) continue;
     palme(x, z, 9 + rnd() * 5);
     n++;
@@ -290,7 +453,7 @@ export function buildRampeLife(world: World): Life {
     const z = -260 + rnd() * 520;
     const xc = kuesteX(z);
     const x = xc - 75 + rnd() * 60;
-    if (!frei(x, z, 1)) continue;
+    if (kuesteD(x, z) < 14 || !frei(x, z, 1)) continue;
     const y = ground(x, z) - 0.1;
     const s = 0.55 + rnd() * 0.5;
     // Büschel aus fünf schmalen Halmen, die nach außen kippen
@@ -305,22 +468,45 @@ export function buildRampeLife(world: World): Life {
     }
     n++;
   }
-  // Brandung: helle, unregelmäßige Streifen entlang der Wasserlinie (leicht bewegt, siehe update)
+  // Brandung: helle, unregelmäßige Streifen rings um die Insel entlang der Wasserlinie (pulsiert, siehe update). Die
+  // Wasserlinie wird auf Strahlen von der Inselmitte aus gesucht; quer dazu liegen die Streifen in Richtung des Gefälles.
   const brandung = new MeshBuilder();
   {
     const water = world.theme.liquidY ?? -1.6;
-    for (let z = -360; z < 360; z += 6) {
+    const N = 320;
+    const linie: { x: number; z: number; nx: number; nz: number }[] = [];
+    for (let k = 0; k < N; k++) {
+      const a = (k / N) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      let r = 80;
+      while (r < 700 && land.base(INSEL.x + ca * r, INSEL.z + sa * r) > water) r += 1;
+      const x = INSEL.x + ca * r;
+      const z = INSEL.z + sa * r;
+      // nach außen: gegen den Anstieg des Abstands zur Küste
+      const gx = kuesteD(x + 1, z) - kuesteD(x - 1, z);
+      const gz = kuesteD(x, z + 1) - kuesteD(x, z - 1);
+      const gl = Math.hypot(gx, gz) || 1;
+      linie.push({ x, z, nx: -gx / gl, nz: -gz / gl });
+    }
+    for (let k = 0; k < N; k++) {
+      const p = linie[k];
+      const q = linie[(k + 1) % N];
       for (const [off, w, col] of [
         [0, 2.2, rgb(0xffffff)],
         [6, 1.2, rgb(0xd8f2fa)],
       ] as [number, number, RGB][]) {
-        // Wasserlinie: wo der Strand den Meeresspiegel kreuzt (grob gesucht)
-        let xw = kuesteX(z);
-        for (let n = 0; n < 40 && land.base(xw, z) > water; n++) xw += 1;
-        const x0 = xw + off - 1;
-        const zz = z + (rnd() - 0.5) * 2;
         if (rnd() < 0.2) continue;
-        brandung.quad([x0, water + 0.06, zz + 6], [x0 + w, water + 0.06, zz + 6], [x0 + w, water + 0.06, zz], [x0, water + 0.06, zz], col);
+        const o = off - 1 + (rnd() - 0.5) * 1.5;
+        const y = water + 0.06;
+        const a: V3 = [p.x + p.nx * o, y, p.z + p.nz * o];
+        const b: V3 = [q.x + q.nx * o, y, q.z + q.nz * o];
+        const c: V3 = [q.x + q.nx * (o + w), y, q.z + q.nz * (o + w)];
+        const d: V3 = [p.x + p.nx * (o + w), y, p.z + p.nz * (o + w)];
+        // nach oben zeigen lassen
+        const up = (b[0] - a[0]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[0] - a[0]);
+        if (up < 0) brandung.quad(a, b, c, d, col);
+        else brandung.quad(b, a, d, c, col);
       }
     }
   }
@@ -439,8 +625,7 @@ export function buildRampeLife(world: World): Life {
         dishMesh.setMatrixAt(n, m4);
       });
       dishMesh.instanceMatrix.needsUpdate = true;
-      // Brandung läuft leicht vor und zurück
-      brandMesh.position.x = Math.sin(time * 0.6) * 1.2;
+      // Brandung pulsiert
       brandMat.opacity = 0.65 + 0.2 * Math.sin(time * 0.6 + 1);
       if (birds) {
         birdOrbit.forEach((b, n) => {

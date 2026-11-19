@@ -123,8 +123,9 @@ export const RAMPE: TrackDef = {
   bank: 1.2,
   fallDepth: 6,
   landmarkAt: R0 + 3,
-  // Die Wendel hängt frei am Turm, Brücke und Magnetring frei in der Luft.
-  decks: [[W0 + 0.6, R1 + 0.6]],
+  // Die Wendel hängt frei am Turm, Brücke und Magnetring frei in der Luft – und das Stück Anlauf bis zur Kante des
+  // Gleitflugs (sonst zöge es das Gelände zu sich hinauf).
+  decks: [[W0 + 0.6, R1 + 0.8]],
   widths: [
     // Schwebeband wie in der Neonhochbahn
     [W1 + 0.3, R1 + 0.6, 5.6, 0.9],
