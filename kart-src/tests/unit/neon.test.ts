@@ -124,7 +124,7 @@ describe('Neonhochbahn', () => {
     twistWarp(t, seg, 0, 4, 0, b);
     expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeLessThan(1e-6);
     expect(b.y - a.y).toBeCloseTo(8, 6);
-    // Fahren an der Wand = fahren auf flachem Band: dieselben Eingaben, dieselbe Bahn (nichts sackt ab, nichts rutscht).
+    // Fahren an der Wand = fahren auf flachem Band.
     const drive = (): KartState => {
       const s = gridState(0);
       placeAt(s, t.prev[t.prev[seg]], 1.5, 24);
@@ -136,9 +136,11 @@ describe('Neonhochbahn', () => {
     t.roll = new Float32Array(t.total);
     const flat = drive();
     t.roll = keep;
-    expect(onWall.x).toBeCloseTo(flat.x, 9);
-    expect(onWall.z).toBeCloseTo(flat.z, 9);
-    expect(onWall.heading).toBeCloseTo(flat.heading, 9);
+    // Halt und Tempo mindestens wie flach: nichts sackt ab, nichts rutscht. (Die Bahn ist nicht mehr dieselbe: Den Teil
+    // der Kurve, den man an der Wand nicht sieht, fährt das Band mit – siehe wandfahrt.test.ts. In der engen Geode der
+    // Kristallmine landete man ohne das mit diesen Eingaben in der Bande.)
+    expect(Math.hypot(onWall.vx, onWall.vz)).toBeGreaterThan(Math.hypot(flat.vx, flat.vz) - 0.5);
+    expect(onWall.flags & 8).toBe(0);
   });
 
   it('Magnetlinien: wer auf einer bleibt, fährt schneller; sie liegen auf jedem Bildschirm gleich', () => {

@@ -197,8 +197,11 @@ describe('Talsperre', () => {
     t.roll = new Float32Array(t.total);
     const flat = drive();
     t.roll = keep;
-    expect(onWall.x).toBeCloseTo(flat.x, 9);
-    expect(onWall.z).toBeCloseTo(flat.z, 9);
+    // Halt und Tempo mindestens wie flach: nichts sackt ab, nichts rutscht. (Die Bahn ist nicht mehr dieselbe: Den Teil
+    // der Kurve, den man an der Wand nicht sieht, fährt das Band mit – siehe wandfahrt.test.ts. In der engen Geode der
+    // Kristallmine landete man ohne das mit diesen Eingaben in der Bande.)
+    expect(Math.hypot(onWall.vx, onWall.vz)).toBeGreaterThan(Math.hypot(flat.vx, flat.vz) - 0.5);
+    expect(onWall.flags & 8).toBe(0);
   });
 
   it('Überlaufrinne: das Wasser drückt zur Kante – wer nicht dagegenhält, fällt; die KI kommt durch und spart deutlich', () => {
