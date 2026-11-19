@@ -65,13 +65,15 @@ import {
   type Band,
   type MetroPlan,
   VEH_METRO,
+  VEH_STADTBAHN,
+  lineFront,
   metroArrive,
   metroFront,
 } from './mechanics';
 import { SURFACE_INDEX, type SurfaceId } from './surface';
 import { TRACK_DEFS } from './tracks';
 
-export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum';
+export type ThemeId = 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'daecher';
 
 /** Was auf einem Streckenstück liegt – gilt für die Hauptstrecke wie für Abzweigungen. */
 export interface PathFeatures {
@@ -311,6 +313,14 @@ export interface TrackDef extends PathFeatures {
    * Sekunden, phase in Sekunden. Gehalten wird so, dass der Zug den Graben genau überdeckt.
    */
   metro?: { branch: number; speed: number; accel: number; dwell: number; period: number; phase: number };
+  /**
+   * Straßenbahn (Dächerjagd): fährt nach Fahrplan auf der Spur lat (Meter, rechts positiv) der Hauptstrecke von from bis
+   * to (Stützpunkt-Einheiten). Davor kommt sie über die Punkte enter ([x, z] wie die Stützpunkte, mit scale) aus der
+   * Remise, danach biegt sie über die Punkte leave in eine Seitengasse ab. Gehalten wird mit der Spitze bei stop
+   * (Haltestelle). Fahrplan wie MetroPlan (mechanics.ts): speed in m/s, accel in m/s², dwell, period und phase in Sekunden.
+   * So viele Züge, dass alle period Sekunden einer kommt.
+   */
+  tram?: { from: number; to: number; lat: number; stop: number; speed: number; accel: number; dwell: number; period: number; phase: number; enter: number[][]; leave: number[][] };
 }
 
 export interface BoostPad {
@@ -1532,8 +1542,111 @@ export function buildTrack(def: TrackDef, index = 0): Track {
     }
   }
   if (def.metro) buildMetro(track, def.metro);
+  if (def.tram) buildTram(track, def.tram, main.meters);
   track.swaying = track.pontoons.some((p) => p.sway !== 0);
   return track;
+}
+
+/**
+ * Straßenbahn anlegen (Dächerjagd): Linie von from bis to auf der Hauptstrecke, Züge nach Fahrplan. Die Linie liegt auf
+ * einer Spur der Fahrbahn – die Züge fahren mit dem Feld, nur langsamer, und halten an der Haltestelle.
+ */
+function buildTram(t: Track, m: NonNullable<TrackDef['tram']>, meters: (u: number) => number): void {
+  const lap = t.n * t.step;
+  const sc = t.def.scale ?? 1;
+  const s0 = Math.round(meters(m.from) / t.step) % t.n;
+  const s1 = Math.round(meters(m.to) / t.step) % t.n;
+  const laneN = (s1 - s0 + t.n) % t.n;
+  // Spur auf der Gasse: je Abschnitt ein Punkt
+  const lane: number[][] = [];
+  for (let k = 0; k <= laneN; k++) {
+    const i = (s0 + k) % t.n;
+    const lat = (m.lat * t.rh[i]) / t.def.roadHalf;
+    lane.push([t.px[i] + rightX(t, i) * lat, t.py[i] + lat * t.bank[i], t.pz[i] + rightZ(t, i) * lat]);
+  }
+  /** Weicher Bogen durch die Punkte pts (x, z) bis an das Gleis heran – Catmull-Rom, alle 0,25 m abgetastet. */
+  const arcTo = (pts: number[][], y: number): number[][] => {
+    const out: number[][] = [];
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const p0 = pts[Math.max(0, k - 1)];
+      const p1 = pts[k];
+      const p2 = pts[k + 1];
+      const p3 = pts[Math.min(pts.length - 1, k + 2)];
+      const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      const sub = Math.max(2, Math.ceil(len * 4));
+      for (let q = 0; q < sub; q++) {
+        const u = q / sub;
+        out.push([catmull(p0[0], p1[0], p2[0], p3[0], u), y, catmull(p0[1], p1[1], p2[1], p3[1], u)]);
+      }
+    }
+    return out;
+  };
+  const a0 = lane[0];
+  const a1 = lane[Math.min(lane.length - 1, 6)];
+  const b0 = lane[lane.length - 1];
+  const b1 = lane[Math.max(0, lane.length - 7)];
+  // Bogen aus der Remise: endet tangential am Anfang der Spur (zwei Punkte auf ihr geben die Richtung).
+  const enter = arcTo([...m.enter.map((p) => [p[0] * sc, p[1] * sc]), [a0[0] - (a1[0] - a0[0]), a0[2] - (a1[2] - a0[2])], [a0[0], a0[2]], [a1[0], a1[2]]].slice(0, -1), a0[1]);
+  const leave = arcTo([[b1[0], b1[2]], [b0[0], b0[2]], [b0[0] + (b0[0] - b1[0]), b0[2] + (b0[2] - b1[2])], ...m.leave.map((p) => [p[0] * sc, p[1] * sc])].slice(1), b0[1]);
+  // Alles zusammen, gleichmäßig im Meterabstand neu abgetastet
+  const raw = [...enter, ...lane, ...leave.slice(1)];
+  const cum = [0];
+  for (let k = 1; k < raw.length; k++) cum.push(cum[k - 1] + Math.hypot(raw[k][0] - raw[k - 1][0], raw[k][2] - raw[k - 1][2]));
+  const total = cum[cum.length - 1];
+  const n = Math.floor(total) + 1;
+  const x = new Float64Array(n);
+  const y = new Float64Array(n);
+  const z = new Float64Array(n);
+  const seg = new Int32Array(n);
+  const latA = new Float64Array(n);
+  const along = new Float64Array(n);
+  let j = 0;
+  for (let i = 0; i < n; i++) {
+    while (j < raw.length - 2 && cum[j + 1] < i) j++;
+    const f = Math.max(0, Math.min(1, (i - cum[j]) / Math.max(1e-9, cum[j + 1] - cum[j])));
+    x[i] = raw[j][0] + (raw[j + 1][0] - raw[j][0]) * f;
+    y[i] = raw[j][1] + (raw[j + 1][1] - raw[j][1]) * f;
+    z[i] = raw[j][2] + (raw[j + 1][2] - raw[j][2]) * f;
+    // nächster Abschnitt der Hauptstrecke (in der Nähe der Spur)
+    let best = s0;
+    let bd = Infinity;
+    for (let k = -90; k <= laneN + 90; k++) {
+      const q = (((s0 + k) % t.n) + t.n) % t.n;
+      const d = (t.px[q] - x[i]) ** 2 + (t.pz[q] - z[i]) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = q;
+      }
+    }
+    seg[i] = best;
+    latA[i] = (x[i] - t.px[best]) * rightX(t, best) + (z[i] - t.pz[best]) * rightZ(t, best);
+    along[i] = t.prog[best] * t.step;
+  }
+  // Haltestelle: Meter auf der Linie, an dem die Spitze hält
+  let stopM = meters(m.stop) - s0 * t.step;
+  if (stopM < 0) stopM += lap;
+  const enterLen = cum[enter.length];
+  const spec = VEHICLE_SPECS[VEH_STADTBAHN];
+  const plan: MetroPlan = {
+    period: Math.round(m.period * 60),
+    phase: Math.round(m.phase * 60),
+    stop: enterLen + stopM,
+    speed: m.speed,
+    accel: m.accel,
+    dwell: Math.round(m.dwell * 60),
+    trains: 1,
+  };
+  // So viele Züge, dass immer einer kommt: einer lebt vom Auftauchen, bis das Heck am Ende der Linie verschwunden ist.
+  const train = 2 * spec.half + (spec.cars - 1) * spec.pitch;
+  const out = n - 1 - plan.stop + train;
+  const tv = m.speed / m.accel;
+  const life = metroArrive(plan) + plan.dwell + (out <= 0.5 * m.speed * tv ? Math.sqrt((2 * out) / m.accel) : tv + (out - 0.5 * m.speed * tv) / m.speed) * 60;
+  plan.trains = Math.max(1, Math.ceil(life / plan.period));
+  const line = { n, x, y, z, seg, lat: latA, along, plan };
+  let id = t.vehicles.length;
+  for (let k = 0; k < plan.trains; k++) {
+    t.vehicles.push({ ...spec, id: id++, kind: VEH_STADTBAHN, lat: m.lat, speed: m.speed, offset: 0, train: k, line });
+  }
 }
 
 /** Wie tief die Linie hinter dem Graben je Meter abtaucht, und wie weit sie vor und hinter ihm reicht (Meter). */
@@ -1700,6 +1813,7 @@ export function newVehiclePose(): VehiclePose {
 export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
   if (v.plan) return metroPose(t, v, car, time, out);
   const lap = t.n * t.step;
+  if (v.line) return tramPose(t, v, car, time, out);
   let s = vehicleAt(v, time, lap);
   if (car > 0 && v.roofs) {
     // Ein langer Zug reicht durch mehrere Kurven: Jeder Wagen folgt dem vor ihm im Abstand der Kupplung, gemessen
@@ -1737,6 +1851,40 @@ export function vehiclePose(t: Track, v: Vehicle, car: number, time: number, out
   out.bank = bank;
   out.seg = i;
   out.lat = lat;
+  return out;
+}
+
+/**
+ * Lage eines Wagens der Straßenbahn auf ihrer Linie (Vehicle.line): Mitte des Wagens car Meter hinter der Spitze, Richtung
+ * aus der Linie (über zwei Meter gemittelt). Ist der Wagen noch in der Remise oder schon in der Seitengasse verschwunden,
+ * ist out.seg −1 – er ist dann für niemanden da.
+ */
+function tramPose(t: Track, v: Vehicle, car: number, time: number, out: VehiclePose): VehiclePose {
+  const l = v.line!;
+  const s = lineFront(v, time) - v.half - car * v.pitch;
+  if (!(s > 0 && s < l.n - 1)) {
+    out.seg = -1;
+    out.x = l.x[0];
+    out.y = l.y[0] - 50;
+    out.z = l.z[0];
+    out.heading = 0;
+    out.slope = 0;
+    out.bank = 0;
+    out.lat = 0;
+    return out;
+  }
+  const i = Math.floor(s);
+  const f = s - i;
+  out.x = l.x[i] + (l.x[i + 1] - l.x[i]) * f;
+  out.y = l.y[i] + (l.y[i + 1] - l.y[i]) * f;
+  out.z = l.z[i] + (l.z[i + 1] - l.z[i]) * f;
+  const a = Math.max(0, i - 1);
+  const b = Math.min(l.n - 1, i + 2);
+  out.heading = Math.atan2(l.x[b] - l.x[a], l.z[b] - l.z[a]);
+  out.slope = (l.y[b] - l.y[a]) / Math.max(1e-6, Math.hypot(l.x[b] - l.x[a], l.z[b] - l.z[a]));
+  out.seg = l.seg[i];
+  out.bank = t.bank[out.seg];
+  out.lat = l.lat[i];
   return out;
 }
 

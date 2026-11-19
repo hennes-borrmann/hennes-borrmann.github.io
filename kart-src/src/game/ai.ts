@@ -39,7 +39,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt, bandLineLat } from './mechanics';
+import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt, vehicleSpeed, bandLineLat } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_BAND,
@@ -552,11 +552,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         const there = aheadSeg(Math.max(0, rear));
         if (t.branchOf[there] >= 0 && t.twin[there] < 0) continue;
         if (Number.isNaN(offTarget) || Number.isNaN(offHere)) continue;
+        // Tempo des Fahrzeugs gerade jetzt (die Straßenbahn der Dächerjagd hält an der Haltestelle).
+        const vs = vehicleSpeed(veh, ctx.time);
         // Wer langsamer ist als das Fahrzeug und dahinter, holt es nicht ein.
-        if (rear > 6 && vf < veh.speed + 1) continue;
+        if (rear > 6 && vf < vs + 1) continue;
         const vl = (veh.lat * t.rh[target]) / t.def.roadHalf;
         // Wie bald bin ich dort? Was in zwei Sekunden neben mir ist, zählt voll.
-        const eta = rear <= 0 ? 0 : rear / Math.max(2, vf - veh.speed);
+        const eta = rear <= 0 ? 0 : rear / Math.max(2, vf - vs);
         // Zug mit befahrbarem Dach: Wer oben ist, bleibt in der Mitte der Wagen. Wer von hinten kommt und es
         // wagt (je Zug einmal entschieden), hält auf das Gleis zu und fährt über die Rampe auf – der Zug ist
         // dann kein Hindernis. Wer zu spät dran ist, um noch sauber einzufädeln, bleibt daneben.
@@ -585,7 +587,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         if (eta < 1.2) close = true;
         block(vl - offTarget - veh.halfWidth - margin, vl - offTarget + veh.halfWidth + margin, eta < 2 ? 1 : Math.max(0.15, 1 - (eta - 2) / 3));
         // Direkt davor und zu schnell: vom Gas.
-        if (rear > 0 && rear < 5 + (vf - veh.speed) * 0.7 && Math.abs(here - (vl - offHere)) < veh.halfWidth + margin - 0.3) jam = true;
+        if (rear > 0 && rear < 5 + (vf - vs) * 0.7 && Math.abs(here - (vl - offHere)) < veh.halfWidth + margin - 0.3) jam = true;
       }
     }
     let bubbleAt = 60;

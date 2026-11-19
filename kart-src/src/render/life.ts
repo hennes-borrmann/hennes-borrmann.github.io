@@ -30,6 +30,7 @@ import { buildNeonLife } from './life/neon';
 import { buildTalsperreLife } from './life/talsperre';
 import { buildKristallLife } from './life/kristall';
 import { buildBaumLife } from './life/baum';
+import { buildDaecherLife } from './life/daecher';
 import type { World } from './world';
 
 export interface Life {
@@ -92,6 +93,8 @@ export function buildLife(world: World): Life | null {
       return buildKristallLife(world);
     case 'baum':
       return buildBaumLife(world);
+    case 'daecher':
+      return buildDaecherLife(world);
     default:
       return null;
   }

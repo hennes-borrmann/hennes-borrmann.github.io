@@ -346,6 +346,19 @@ const SHOTS = {
       [3, 352, -0.5],
     ],
   },
+  // Dächerjagd: die Dachsprung-Kette von Süden – ein Kart springt über die letzte Gasse auf die Kamera zu, das nächste rollt
+  // auf dem Dach davor, ein drittes fliegt über die mittlere Gasse; hinten der Kirchturm mit Uhr und Turmhelm, die
+  // Schubringe des Gleitflugs, ringsum die Ziegeldächer der Altstadt und die Hügel.
+  daecher: {
+    from: { xyz: [-168, 31, 54] },
+    to: { xyz: [-148, 28.5, -10] },
+    fov: 46,
+    karts: [
+      [1, 86, 0.8, 0, 1.7],
+      [2, 74, -1.2, 0, 0],
+      [3, 62, 0.6, 0, 1.0],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

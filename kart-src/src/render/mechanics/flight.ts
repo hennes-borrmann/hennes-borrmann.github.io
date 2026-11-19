@@ -177,7 +177,9 @@ export function buildFlight(track: Track, detail: boolean): MechanicView {
       for (const sd of [-1, 1]) lights.push({ pos: A(e, along, sd * (wh - 0.4), 0.22), size: 0.32, kind: K_TAKE, k });
     }
 
-    // Portal 9 m vor der Kante.
+    // Portal 9 m vor der Kante. (Dächerjagd: Abgesprungen wird aus der Glockenstube des Kirchturms – der Turm ist das
+    // Portal, ihn zeichnet mechanics/altstadt.ts.)
+    if (t.def.theme === 'daecher') continue;
     const s = walkSeg(t, e, -9);
     const rx = rightX(t, s);
     const rz = rightZ(t, s);
