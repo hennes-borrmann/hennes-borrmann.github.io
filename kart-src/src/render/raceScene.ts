@@ -433,6 +433,13 @@ const DUST: number[] = SURFACES.map((s) => ({ sand: 0xe9d49a, dirt: 0xa07a54, gr
  * Ticks aus dem Spielstand (0 = aus) → weich laufende Sekunden für die Darstellung: Fremde Karts melden ihren Stand nur
  * stoßweise; dazwischen läuft die Zeit mit dem Bild weiter und wird sacht nachgezogen. Große Sprünge werden übernommen.
  */
+/** Roboter: wann (s nach dem Auslösen) Knie, Schultern und Fäuste einrasten und wie hoch über der Fahrbahn das ist (m). */
+const ROBOT_CLACKS: readonly (readonly [number, number])[] = [
+  [0.21, 0.8],
+  [0.29, 2.1],
+  [0.39, 1.8],
+];
+
 function followTicks(cur: number, ticks: number, dt: number): number {
   if (ticks <= 0) return 0;
   const want = ticks / 60;
@@ -2204,10 +2211,10 @@ export class RaceScene {
         if (local) this.shake = Math.max(this.shake, 0.12);
       }
       if (e.robot > 0 && k.robot > 0) {
-        // Einrasten der Teile: kurze Funken an Knien und Schultern (Zeitpunkte wie in kartModel.ts)
-        for (const at of [0.2, 0.32, 0.42]) {
+        // Einrasten der Teile: kurze Funken an Knien, Schultern und Fäusten (Zeitpunkte und Höhen wie in kartModel.ts)
+        for (const [at, up] of ROBOT_CLACKS) {
           const tick = Math.round(at * 60);
-          if (k.robot < tick && e.robot >= tick) this.burst(e.x, e.y + 0.9 + at, e.z, 5, 3, 0xffe9a8, true, 0.14, 0.2, 2);
+          if (k.robot < tick && e.robot >= tick) this.burst(e.x, e.y + up, e.z, 5, 3, 0xffe9a8, true, 0.14, 0.2, 2);
         }
       }
       if (e.robot >= ROBOT_LEAP_AT && k.robot < ROBOT_LEAP_AT && k.robot > 0) {
