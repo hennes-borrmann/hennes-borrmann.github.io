@@ -39,7 +39,7 @@ import {
   type KartState,
   windPush,
 } from './sim';
-import { PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt, vehicleSpeed, bandLineLat } from './mechanics';
+import { CRAWLER_LEG_HALF, CRAWLER_LEG_HALF_WIDTH, CRAWLER_LEG_U, CRAWLER_LEG_W, CRAWLER_SLAB, planUntil, PULSE_AVALANCHE, PULSE_BUBBLE, PULSE_KICK, PULSE_ROD, FLOOD_FROM, floodPeak, gustStrength, gustWarning, planActive, portalOpen, pulseCycle, SIZE_WARN, sizeClass, raftAt, tideLevel, tidePhase, vehicleAt, vehicleSpeed, bandLineLat } from './mechanics';
 import { SURFACES } from './surface';
 import {
   EDGE_BAND,
@@ -63,6 +63,7 @@ import {
   segDelta,
   walk,
   raftLane,
+  crawlerPose,
 } from './track';
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
@@ -193,6 +194,8 @@ const DRIFT_TIGHT = 1.55;
 
 /** Die nächsten Abschnitte auf dem gewählten Weg (ab dem eigenen); botCmd füllt sie zu Beginn. */
 const PATH = new Int32Array(84);
+/** Lage des Raupentransporters (wiederverwendet). */
+const CRAWL = { x: 0, z: 0, vx: 0, vz: 0 };
 /** So weit vor einer Gabelung fällt die Entscheidung (Abschnitte). */
 const DECIDE_AT = 64;
 
@@ -514,11 +517,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
 
   // --- Verkehr, Geysire, Lavabomben: gesperrte Streifen voraus ---
   let jam = false;
+  /** Wartet vor einem geschlossenen Tor (dann ist Stillstand kein Festfahren). */
+  let gateWait = false;
   /** Bis zu diesem Tempo wird im Stau gebremst. Vor einer Lawine sinkt es bis zum Stillstand – auf Eis rollte das Kart sonst hinein. */
   let haltSpeed = 13;
   /** Ein Fahrzeug ist gleich neben mir: jetzt nicht driften. */
   let close = false;
-  if ((t.vehicles.length > 0 || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0 || t.portals.length > 0 || t.sizers.length > 0) && !air) {
+  if ((t.vehicles.length > 0 || t.crawler !== null || t.pulses.length > 0 || t.belts.length > 0 || t.tide || t.holes.length > 0 || t.gates.length > 0 || t.rivers.length > 0 || t.portals.length > 0 || t.sizers.length > 0) && !air) {
     blocks = 0;
     projectOnTrack(t, s.x, s.z, s.seg);
     const here = proj.lat;
@@ -530,7 +535,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     /** Bei Flut: die höhere, flachere Seite der Fahrbahn (−1 links, 1 rechts, 0 = keine Flut hier). */
     let shallow = 0;
     // Im Verkehr nutzt die KI die Fahrbahn bis an den Rand. (Die U-Bahn fährt nicht auf der Fahrbahn: kein Verkehr.)
-    const traffic = t.vehicles.length > (t.metro ? t.metro.plan.trains : 0);
+    const traffic = t.vehicles.length > (t.metro ? t.metro.plan.trains : 0) || t.crawler !== null;
     const room = traffic && !openAhead ? Math.max(maxLat, t.rh[target] - 0.9) : maxLat;
     // Zug: die Spur, auf die ich will, um aufs Dach zu kommen oder oben zu bleiben (NaN = keine Vorliebe)
     let trainWant = Number.NaN;
@@ -588,6 +593,29 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         block(vl - offTarget - veh.halfWidth - margin, vl - offTarget + veh.halfWidth + margin, eta < 2 ? 1 : Math.max(0.15, 1 - (eta - 2) / 3));
         // Direkt davor und zu schnell: vom Gas.
         if (rear > 0 && rear < 5 + (vf - vs) * 0.7 && Math.abs(here - (vl - offHere)) < veh.halfWidth + margin - 0.3) jam = true;
+      }
+    }
+    // Raupentransporter (Startrampe): Wo stehen seine vier Böcke, wenn ich an der Stelle ankomme? Dort vorbei.
+    // (Auf der Plattform – der Abkürzung über den Graben – gibt es keine Böcke.)
+    const cr = t.crawler;
+    if (cr) {
+      for (let k = 2; k < PATH.length && k * t.step <= range; k += 2) {
+        const g = PATH[k];
+        if (t.py[g] > cr.top - CRAWLER_SLAB) continue;
+        const across = -(t.px[g] - cr.x0) * cr.uz + (t.pz[g] - cr.z0) * cr.ux;
+        if (Math.abs(across) > CRAWLER_LEG_W + CRAWLER_LEG_HALF_WIDTH + 4) continue;
+        const eta = ((k * t.step) / Math.max(v, 8)) * 60;
+        crawlerPose(cr, ctx.time + eta, CRAWL);
+        for (let q = 0; q < 4; q++) {
+          const lx = CRAWL.x + cr.ux * (q & 1 ? CRAWLER_LEG_U : -CRAWLER_LEG_U) - cr.uz * (q & 2 ? CRAWLER_LEG_W : -CRAWLER_LEG_W);
+          const lz = CRAWL.z + cr.uz * (q & 1 ? CRAWLER_LEG_U : -CRAWLER_LEG_U) + cr.ux * (q & 2 ? CRAWLER_LEG_W : -CRAWLER_LEG_W);
+          const along = (lx - t.px[g]) * t.tx[g] + (lz - t.pz[g]) * t.tz[g];
+          if (Math.abs(along) > CRAWLER_LEG_HALF_WIDTH + KART_HALF + 1.6) continue;
+          const ll = (lx - t.px[g]) * rightX(t, g) + (lz - t.pz[g]) * rightZ(t, g);
+          const spread = CRAWLER_LEG_HALF + KART_HALF + 0.9 + Math.abs(CRAWL.vx * cr.ux + CRAWL.vz * cr.uz) * 0.25;
+          if (eta < 70) close = true;
+          block(ll - spread, ll + spread, eta < 110 ? 1 : 0.6);
+        }
       }
     }
     let bubbleAt = 60;
@@ -762,13 +790,24 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       if (g.only !== 0) continue;
       // (Wer schon auf dem gesperrten Stück ist, kommt hinaus. Wer noch auf der Hauptstrecke daneben fährt – an der
       // Mündung liegen beide ineinander –, für den beginnt das Tor schon dort, wo sein Weg das gesperrte Stück erreicht.)
-      if (s.seg >= g.first && s.seg < g.first + g.count) continue;
+      // (Liegt es aber noch in der Mündung neben der Hauptstrecke, steht man davor: Dort hält das Tor jeden zurück.)
+      // (Nur wer diesen Weg nehmen will und weiß, dass das Tor bald wieder aufgeht – sonst plant er um, siehe oben.)
+      if (s.seg >= g.first && s.seg < g.first + g.count) {
+        const k = t.branchOf[g.first];
+        if (t.twin[s.seg] >= 0 && k >= 0 && (b.route >> k) & 1 && planActive(g.plan, ctx.time) && planUntil(g.plan, ctx.time) < 20 * 60) {
+          jam = true;
+          gateWait = true;
+          haltSpeed = 0;
+        }
+        continue;
+      }
       for (let k = 0; k < PATH.length && k * t.step <= range; k++) {
         if (PATH[k] < g.first || PATH[k] >= g.first + g.count) continue;
         if (PATH[k] !== g.first && k > 0 && t.twin[PATH[k]] < 0) break;
         if (planActive(g.plan, ctx.time + ((k * t.step) / Math.max(v, 8)) * 60)) {
           jam = true;
           haltSpeed = Math.min(haltSpeed, Math.sqrt(Math.max(0, 20 * (k * t.step - 6))));
+          if (k * t.step < 14) gateWait = true;
         }
         break;
       }
@@ -839,7 +878,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   // Rechts lenken verkleinert die Blickrichtung → Vorzeichen umdrehen. (Auf dem Schwebeband an der Wand dreht das Band
   // selbst mit – den Teil muss die Lenkung nicht mehr leisten.)
   let wantYaw = -err * 4.2;
-  if (!air && (t.edge[s.seg] & EDGE_TWIST) !== 0) {
+  if ((t.edge[s.seg] & EDGE_TWIST) !== 0) {
     projectOnTrack(t, s.x, s.z, s.seg);
     wantYaw -= twistYaw(t, proj.seg, proj.along, proj.lat, s.vx, s.vz);
   }
@@ -849,7 +888,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     b.reverse--;
     return { steer: Math.round(Math.max(-1, Math.min(1, err * 2)) * 127), buttons: BTN_BRAKE };
   }
-  if (v < 1.5 && s.spin === 0 && s.rocket === 0 && !air) {
+  if (v < 1.5 && s.spin === 0 && s.rocket === 0 && !air && !gateWait) {
     if (++b.stuck > 80) {
       b.stuck = 0;
       b.reverse = 45;

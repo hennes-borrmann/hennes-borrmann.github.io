@@ -1,6 +1,6 @@
 // Öffentliche Typen des Audio-Moduls.
 
-export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'daecher' | 'results';
+export type MusicId = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'daecher' | 'rampe' | 'results';
 
 export type SfxName =
   | 'ui-click'
@@ -110,6 +110,9 @@ export type SfxName =
   | 'trambell' // Dächerjagd: die Straßenbahn klingelt (ortsfest an ihrer Spitze, bis ~90 m): zwei helle Schläge auf eine Glocke – „bimm-bimm“ (~0,5 s)
   | 'bells' // Dächerjagd: ein Schlag einer Kirchenglocke im Turm (ortsfest, weit zu hören): Schlagton mit Unterton, kleiner Terz, Quinte und Oktave, langer Nachhall (~2,6 s); drei Glocken reihum (G, H, D)
   | 'cone' // Baumkronenpfad: ein Tannenzapfen schlägt auf dem Waldweg auf (ortsfest): kurzes Nadelrascheln, dann ein hölzernes „Plock“ mit dumpfem Bauch und ein paar abspringenden Schuppen (~0,35 s)
+  | 'beep' // Startrampe: der Countdown piept über die Lautsprecher des Platzes (die letzten zehn Sekunden vor jedem Start, überall zu hören): sauberer Piepton mit leisem Nachhall (~0,3 s)
+  | 'liftoff' // Startrampe: eine Rakete hebt ab (ortsfest an der Rakete, auf dem ganzen Platz zu hören): Zündstoß, brüllende Triebwerke, Knattern des Abgasstrahls, dann leiser und dunkler (~4 s)
+  | 'crawler' // Startrampe: der Raupentransporter fährt (ortsfest, etwa alle 0,42 s, solange man in der Nähe ist): Dieselbrummen und das Rasseln der Kettenglieder (verschmilzt zu einem Bett)
   | 'wind' // Fahrtwind im Gleitflug, nur eigenes Kart (wird etwa alle 0,42 s aufgerufen und verschmilzt zu einem Rauschen)
   | 'win'
   | 'lose'; // Ergebnis: Platz 1 bzw. hinten

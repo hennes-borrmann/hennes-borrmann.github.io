@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BLAST, PULSE_BUBBLE, PULSE_ICICLE, PULSE_KICK, pulseCycle, pulseWarning, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, vehicleSpeed, bandLineLat, metroFront } from '../game/mechanics';
+import { PULSE_BLAST, PULSE_FLAME, crawlerAt, PULSE_BUBBLE, PULSE_ICICLE, PULSE_KICK, pulseCycle, pulseWarning, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront, vehicleSpeed } from '../game/mechanics';
 import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_GLIDE, TRACK, bandMeters, bandOf, heaveAt, newVehiclePose, rightX, rightZ, setTrack, swayAt, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1754,6 +1754,35 @@ export class App {
             .map((p) => ({ at: TRACK.prog[p.seg] * TRACK.step, lat: p.lat, cycle: pulseCycle(p, time) / 60, period: p.period / 60, on: pulseCycle(p, time) < p.on })),
           rails,
           roll,
+        };
+      },
+      // Startrampe, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): Stand im Starttakt (Sekunden
+      // seit dem letzten Start) und dessen Takt, ob der Abgasstrahl gerade brennt, wie stark der Abgasstoß schiebt (0 … 1),
+      // ob das Tor des Flammengrabens zu ist, wo der Raupentransporter steht (Meter vom Ende 0 über der Abkürzung) und ob
+      // die Schranke am Transporterdach zu ist; dazu die Flammenzone (Meter ab Start, seitliche Lage, Halbmesser) und der
+      // Bereich des Abgasstoßes (Meter ab Start, Länge, Schub in m/s) – und die Abkürzungen.
+      rampe: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const flame = TRACK.pulses.find((p) => p.kind === PULSE_FLAME && TRACK.branchOf[p.seg] < 0);
+        const kWin = TRACK.def.branches?.findIndex((b) => b.shortcut === 'window') ?? -1;
+        const gate = kWin >= 0 ? TRACK.gates.find((g) => TRACK.branchOf[g.first] === kWin) : undefined;
+        const c = TRACK.crawler;
+        const cGate = c ? TRACK.gates.find((g) => TRACK.branchOf[g.first] === c.branch) : undefined;
+        const w = TRACK.winds[0];
+        return {
+          time,
+          cycle: flame ? pulseCycle(flame, time) / 60 : -1,
+          period: flame ? flame.period / 60 : 0,
+          flame: flame ? pulseCycle(flame, time) < flame.on : false,
+          gust: w ? gustStrength(w, time) : 0,
+          trenchShut: gate ? planActive(gate.plan, time) : null,
+          crawler: c ? crawlerAt(c.plan, time) : -1,
+          crawlerLength: c ? c.plan.length : 0,
+          crawlerShut: cGate ? planActive(cGate.plan, time) : null,
+          zone: flame ? { at: TRACK.prog[flame.seg] * TRACK.step, lat: flame.lat, radius: flame.radius } : null,
+          push: w ? { at: w.first * TRACK.step, length: w.count * TRACK.step, push: w.push } : null,
+          shortcuts: (TRACK.def.branches ?? []).map((b) => b.shortcut ?? ''),
         };
       },
       // Gezeit zur Rennzeit dieses Bildschirms: Stand 0 (Ebbe) … 1 (Flut) und Höhe des Wasserspiegels.

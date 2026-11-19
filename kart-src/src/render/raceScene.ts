@@ -51,6 +51,7 @@ import {
   PULSE_BOLT,
   PULSE_METEOR,
   PULSE_BLAST,
+  PULSE_FLAME,
   PULSE_ROD,
   PULSE_PRESS,
   PULSE_VENT,
@@ -75,10 +76,11 @@ import {
 import { clearStep, isCareful, markStep, readCrash, skipList } from './gfxGuard';
 import { buildMechanics, type MechanicView } from './mechanics';
 import { SURFACES } from '../game/surface';
-import { EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, twistRadiusAt, twistRollAt, twistWarp, vehiclePose, walk, type Track } from '../game/track';
+import { crawlerPose, EDGE_BAND, EDGE_DRUM, EDGE_GAP, EDGE_RAIL, EDGE_RIVER, EDGE_TWIST, NO_GROUND, TRACK, railOf, groundNow, newVehiclePose, progDelta, proj, projectOnTrack, raftLane, rightX, rightZ, twistRadiusAt, twistRollAt, twistWarp, vehiclePose, walk, type Track } from '../game/track';
 import { CHANNEL, CHANNEL_FLOOR, DAM_AIR, DAM_CZ, RIVER_Y } from './life/talsperreLand';
 import { FALL } from './life/baumLand';
 import { DAUER, LAEUTEN, TURM } from './life/daecherLand';
+import { RAKETE } from '../game/tracks/rampe';
 import type { RaceView, RenderEntity } from '../game/view';
 import { RACE_COUNTDOWN, RACE_RESULTS, THING_SMOKE, THING_TIRE, THING_TOP, type SnapshotThing } from '../net/protocol';
 import { PLAYER_COLORS } from '../util/players';
@@ -253,7 +255,14 @@ export interface SceneEvent {
     | 'cone'
     /** Dächerjagd (ortsfest, slot −1): die Straßenbahn klingelt / ein Schlag der Kirchenglocken. */
     | 'trambell'
-    | 'bells';
+    | 'bells'
+    /**
+     * Startrampe: der Countdown piept (überall zu hören); eine Rakete hebt ab bzw. setzt zur Landung an (an der Rakete);
+     * der Raupentransporter rasselt (ortsfest, wiederholt, solange man in der Nähe ist).
+     */
+    | 'beep'
+    | 'liftoff'
+    | 'crawler';
   slot: number;
   local: boolean;
   /** -1 links … 1 rechts, aus Sicht der Kamera */
@@ -604,6 +613,8 @@ export class RaceScene {
   /** Verkehr, Geysire, Lava – was die Strecke an Mechanik hat (mechanics.ts). */
   private mechanics: MechanicView[] = [];
   private mechTime = 0;
+  /** Startrampe: Lage des Raupentransporters (wiederverwendet). */
+  private readonly crawl = { x: 0, z: 0, vx: 0, vz: 0 };
   private honkWait = 0;
   private burnWait = 0;
   /** Kamera: Anteil Gleitflug (0 … 1, geglättet). */
@@ -1053,7 +1064,9 @@ export class RaceScene {
     const steady = time > before && time - before < 30;
     if (steady) {
       // Sturmhafen: eine Böe setzt ein – zu hören von der Mitte ihres Bereichs.
+      // (Startrampe: Der Abgasstoß kommt mit dem Start – den hört man als Startdonner, unten.)
       for (const w of t.winds) {
+        if (t.def.theme === 'rampe') break;
         if (gustStrength(w, time) > 0 && gustStrength(w, before) === 0) {
           const mid = w.first + (w.count >> 1);
           this.emitAt('gust', t.px[mid], t.py[mid], t.pz[mid]);
@@ -1099,6 +1112,15 @@ export class RaceScene {
         // Talsperre: Die Schleuse öffnet mit Rauschen (das Wasser gleicht sich aus) und schließt mit dem Klack der Antriebe.
         if (t.def.theme === 'talsperre') {
           this.emitAt(shut ? 'magnetoff' : 'drain', t.px[g.first + g.count], t.py[g.first + g.count] + 2, t.pz[g.first + g.count], 160);
+          continue;
+        }
+        // Startrampe: Das Schutztor des Flammengrabens fährt zu bzw. auf (Klack der Antriebe, steigender Ton), die
+        // Schranke am Transporterdach klackt.
+        if (t.def.theme === 'rampe') {
+          const at = Math.min(g.first + g.count + 2, t.total - 1);
+          const k = t.branchOf[g.first];
+          if (t.crawler && k === t.crawler.branch) this.emitAt('clamp', t.px[at], t.py[at] + 1, t.pz[at], 70);
+          else this.emitAt(shut ? 'magnetoff' : 'magneton', t.px[at], t.py[at] + 2, t.pz[at], 140);
           continue;
         }
         // Kristallmine: Der Sprengort wird freigesprengt (Knall) bzw. das Hangende bricht nach (Poltern) – am Geröll.
@@ -1194,7 +1216,34 @@ export class RaceScene {
         const c1 = (((time + f.phase) % f.period) + f.period) % f.period;
         if (c0 < 50 && c1 >= 50) this.onEvent?.({ kind: 'rumble', slot: -1, local: false, pan: 0, gain: 0.35 + 0.5 * f.power });
       }
+      // Startrampe: Die letzten zehn Sekunden vor einem Start piept der Countdown über den ganzen Platz; beim Start der
+      // Donner (an der Rakete, in der Nähe bebt das Bild), beim Landeanflug der nächsten Rakete noch einmal leiser.
+      // Der Raupentransporter rasselt, solange er fährt und man in seiner Nähe ist.
+      if (t.def.theme === 'rampe') {
+        const flame = t.pulses.find((p) => p.kind === PULSE_FLAME);
+        if (flame) {
+          const c0 = pulseCycle(flame, before) / 60;
+          const c1 = pulseCycle(flame, time) / 60;
+          const P = flame.period / 60;
+          const d = me ? Math.hypot(me.x - RAKETE.x, me.z - RAKETE.z) : 200;
+          const far = Math.max(0.4, 1 - d / 650);
+          if (c1 < c0) {
+            this.onEvent?.({ kind: 'liftoff', slot: -1, local: false, pan: 0, gain: Math.max(0.55, 1 - d / 700) });
+            if (d < 160) this.shake = Math.max(this.shake, 0.7 * (1 - d / 160));
+          } else if (Math.floor(P - c1) !== Math.floor(P - c0) && P - c1 < 10 && P - c1 > 0) {
+            this.onEvent?.({ kind: 'beep', slot: -1, local: false, pan: 0, gain: far * (P - c1 < 3 ? 1 : 0.75) });
+          }
+          if (c0 < 23.4 && c1 >= 23.4) this.onEvent?.({ kind: 'liftoff', slot: -1, local: false, pan: 0, gain: Math.max(0.3, 0.6 - d / 900) });
+        }
+        const cr = t.crawler;
+        if (cr && me && Math.floor(time / 25) !== Math.floor(before / 25)) {
+          crawlerPose(cr, time, this.crawl);
+          if (Math.hypot(this.crawl.vx, this.crawl.vz) > 0.3) this.emitAt('crawler', this.crawl.x, cr.floor + 3, this.crawl.z, 75);
+        }
+      }
       for (const p of t.pulses) {
+        // (Startrampe: den Abgasstrahl meldet der Startdonner, oben.)
+        if (p.kind === PULSE_FLAME) continue;
         // Kristallmine: Zu Beginn der Vorwarnung tönt das Sprenghorn.
         if (p.kind === PULSE_BLAST) {
           const w = p.period - p.warn;

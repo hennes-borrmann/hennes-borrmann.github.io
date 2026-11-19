@@ -307,6 +307,12 @@ const LEVEL: Record<SfxName, number> = {
   cone: 3.2,
   trambell: 2.4,
   bells: 2.2,
+  // Startrampe: das Piepen des Countdowns (über die Lautsprecher des ganzen Platzes, nicht lauter als das Zählen der
+  // Startampel), der Startdonner so mächtig wie der Donner des Gewitterkamms (er kommt meist aus der Ferne), das Rasseln
+  // des Raupentransporters ein Bett wie das Rattern der Lore.
+  beep: 1.6,
+  liftoff: 3.2,
+  crawler: 1.1,
   rumble: 1.2,
   charge: 2,
   // Kristallmine: die Sprengung so kräftig wie der Meteorit (sie kommt ortsfest und muss aus 30 m über Motor und Musik
@@ -512,6 +518,9 @@ export class SfxPlayer {
   private coneTick = 0;
   private bellTick = 0;
   private tramTick = 0;
+  private beepTick = 0;
+  private liftTick = 0;
+  private crawlTick = 0;
   private meteorTick = 0;
   private gustTick = 0;
   private smashTick = 0;
@@ -1887,6 +1896,52 @@ export class SfxPlayer {
           .tone('triangle', f * 2.02, f * 1.7, 0.5, 0.05, { attack: 0.06, tremHz: tr, at: 0.04 })
           .noise(900, 760, 0.55, 0.09, { q: 2.2, attack: 0.08 })
           .tone('triangle', 620 + k * 40, 700 + k * 40, 0.24, 0.035, { attack: 0.03, at: 0.3, vibHz: 9, vibDepth: 0.01 });
+        break;
+      }
+      case 'beep': {
+        // Countdown über die Lautsprecher des Startplatzes: ein sauberer Piepton (Sinus 880 Hz mit leiser Oktave darüber),
+        // 0,13 s, weich eingesetzt; das Platzlautsprechernetz hallt zweimal leiser nach (nach 0,11 und 0,23 s). Reihum zwei
+        // Tonhöhen (die letzten drei Sekunden schickt raceScene mit mehr Pegel – der Ton bleibt).
+        const k = this.beepTick++ % 2;
+        const f = k === 0 ? 880 : 932;
+        v.tone('sine', f, f, 0.13, 0.32, { attack: 0.006, sustain: 0.8 })
+          .tone('triangle', f * 2, f * 2, 0.1, 0.05, { attack: 0.006 })
+          .tone('sine', f, f, 0.1, 0.1, { attack: 0.01, at: 0.11 })
+          .tone('sine', f, f, 0.08, 0.04, { attack: 0.01, at: 0.23 });
+        break;
+      }
+      case 'liftoff': {
+        // Startdonner (ortsfest an der Rakete, auf dem ganzen Platz zu hören), ~4 s. Die Zündung: ein harter, breiter Stoß
+        // und ein Fauchen, das in 0,5 s aufbrandet; dann das Brüllen der Triebwerke – braunes Rauschen in zwei tiefen
+        // Bändern (um 90 und 160 Hz), ein schwankender Sinus um 45 Hz als Bauch – und darüber das Knattern des Abgasstrahls:
+        // viele sehr kurze, breite Stöße um 1–3 kHz in unregelmäßigem Abstand (das typische „Krachen“ einer Rakete). Zum
+        // Ende wird alles dunkler und leiser, die Rakete steigt davon. Reihum zwei Fassungen des Knatterns.
+        const k = this.liftTick++ % 2;
+        v.noise(3000, 900, 0.18, 0.55, { q: 0.6, attack: 0.002 })
+          .tone('sine', 70, 40, 0.5, 0.5, { attack: 0.01 })
+          .noise(2200, 900, 3.4, 0.3, { q: 0.5, attack: 0.45 })
+          .noise(180, 70, 3.9, 0.8, { q: 0.7, brown: true, attack: 0.5 })
+          .noise(110, 55, 3.9, 0.85, { type: 'lowpass', brown: true, attack: 0.6 })
+          .tone('sine', 46, 38, 3.6, 0.2, { attack: 0.5, sustain: 0.5, vibHz: 3.5, vibDepth: 0.12 });
+        for (let i = 0; i < 26; i++) {
+          const at = 0.35 + i * 0.12 + (((i * 7 + k * 3) % 5) - 2) * 0.018;
+          const f = 1100 + ((i * 13 + k * 5) % 9) * 220;
+          v.noise(f, f * 0.7, 0.035, 0.22 * (1 - i / 34), { q: 0.9, at, attack: 0.002 });
+        }
+        break;
+      }
+      case 'crawler': {
+        // Der Raupentransporter fährt (ortsfest an ihm, etwa alle 0,42 s aufgerufen, solange man in der Nähe ist): tiefes
+        // Dieselbrummen (Rechteck um 36 Hz hinter dem Mischpult kaum zu hören – darum ein Band braunes Rauschen um 120 Hz)
+        // und das metallische Rasseln der Kettenglieder: vier kurze, enge Rauschbänder um 1,3–2,4 kHz im Takt der Glieder,
+        // je Aufruf reihum versetzt; dazu ein leiser, hoher Quietschton der Laufrollen.
+        const k = this.crawlTick++;
+        v.noise(150, 110, 0.5, 0.18, { q: 0.9, brown: true, attack: 0.12 }).tone('square', 36, 35, 0.48, 0.05, { attack: 0.1 });
+        for (let i = 0; i < 4; i++) {
+          const f = 1300 + ((k + i) % 4) * 330;
+          v.noise(f, f * 0.8, 0.04, 0.12, { q: 3, at: i * 0.105 + (k % 2) * 0.02, attack: 0.002 }).tone('triangle', f * 0.5, f * 0.46, 0.03, 0.03, { at: i * 0.105 });
+        }
+        if (k % 3 === 0) v.tone('sine', 2100, 2180, 0.22, 0.02, { attack: 0.05, at: 0.1 });
         break;
       }
       case 'cone': {

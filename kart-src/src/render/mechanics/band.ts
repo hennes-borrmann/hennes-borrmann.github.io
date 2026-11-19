@@ -26,6 +26,7 @@ import { DAM_AIR, damRadius } from '../life/talsperreLand';
 import { MeshBuilder, seeded, shade, type RGB, type V3 } from '../build';
 import type { MechanicView } from '../mechanics';
 import { GEODE } from '../../game/tracks/kristall';
+import { RAKETE } from '../../game/tracks/rampe';
 import { geodeFloor, geodeForm } from '../life/kristall';
 import { THEMES } from '../themes';
 import { rgb, toonMaterial } from '../toon';
@@ -50,13 +51,16 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   // Talsperre: Abendfarben, und statt des Fassadenturms die Staumauer (mechanics/dam.ts).
   const dam = t.def.theme === 'talsperre';
   const CYAN = dam ? rgb(0x58e0ff) : CYAN_N;
-  const PINK = dam ? rgb(0xffcf4a) : PINK_N;
-  const VIOLET = dam ? rgb(0xffa94a) : VIOLET_N;
+  const PINK = dam ? rgb(0xffcf4a) : t.def.theme === 'rampe' ? rgb(0xff7a2a) : PINK_N;
+  const VIOLET = dam ? rgb(0xffa94a) : t.def.theme === 'rampe' ? rgb(0xf6f4ee) : VIOLET_N;
   const DARK = dam ? rgb(0x2b303b) : DARK_N;
-  const STEEL = dam ? rgb(0x6c717c) : STEEL_N;
+  const STEEL = dam ? rgb(0x6c717c) : t.def.theme === 'rampe' ? rgb(0x7a818b) : STEEL_N;
   // Kristallmine: Das Band liegt an der Wand der Riesengeode (die zeichnet life/kristall.ts) – keine Fassade, Halter zur
   // Felswand, Stützen hinab in die Mulde; Magnetlinien in Eis und Amethyst.
   const mine = t.def.theme === 'kristall';
+  // Startrampe: Das Band hängt am Fachwerk des Magnetrings um die Rakete (das zeichnet mechanics/rampe.ts) – Halter
+  // waagerecht zum Ring; wo es noch flach liegt (auf der Brücke), tragen es Pylone. Magnetlinien in Cyan und Signalorange.
+  const rampe = t.def.theme === 'rampe';
 
   const tmp = { x: 0, y: 0, z: 0 };
   /** Punkt auf dem Band (gezeigte Stelle): Abschnitt i, Anteil f zum nächsten, seitlich lat, h über der Fahrbahn. */
@@ -82,7 +86,7 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
   g.lineCap = 'round';
-  const colors = dam ? ['#58e0ff', '#ffb347'] : mine ? ['#5ff3ff', '#c77dff'] : ['#5ff3ff', '#ff4fc0'];
+  const colors = dam ? ['#58e0ff', '#ffb347'] : mine ? ['#5ff3ff', '#c77dff'] : rampe ? ['#5ff3ff', '#ff8a2a'] : ['#5ff3ff', '#ff4fc0'];
   for (let k = 0; k < 2; k++) {
     const sign = k === 0 ? 1 : -1;
     const path = (): void => {
@@ -229,6 +233,23 @@ export function buildBand(t: Track, _detail: boolean): MechanicView {
         if (t.roll[i] < 0.6) beam(solid, P(i, 0, -t.rh[i] * 0.4, -SLAB), F(out + 0.3, under[1] - 6), 0.3, shade(STEEL, 0.85));
         solid.box(anchor[0], anchor[1], anchor[2], 1.3, 1.3, 0.5, shade(STEEL, 0.75), Math.atan2(t.tx[i], t.tz[i]));
         glow.box(anchor[0], anchor[1] + 0.85, anchor[2], 0.5, 0.18, 0.5, PINK);
+      }
+    }
+  } else if (rampe) {
+    // Startrampe: Halter alle 6 m von der Unterseite des Bands waagerecht zum Fachwerk des Magnetrings.
+    const RR = RAKETE.r + RAKETE.axis + 2.6;
+    for (const b of t.bands) {
+      for (let k = 2; k < b.count - 2; k += 6) {
+        const i = (b.first + k) % t.n;
+        if (t.roll[i] <= 0.45) continue;
+        const under = P(i, 0, 0, -SLAB);
+        const dx = under[0] - RAKETE.x;
+        const dz = under[2] - RAKETE.z;
+        const d = Math.hypot(dx, dz);
+        if (d > RR - 0.3) continue;
+        const ringP: V3 = [RAKETE.x + (dx / d) * RR, under[1], RAKETE.z + (dz / d) * RR];
+        beam(solid, under, ringP, 0.5, STEEL);
+        glow.box(ringP[0] - (dx / d) * 0.6, ringP[1], ringP[2] - (dz / d) * 0.6, 0.6, 0.6, 0.6, PINK);
       }
     }
   } else if (mine) {

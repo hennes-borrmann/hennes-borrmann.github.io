@@ -5,7 +5,7 @@
 import type { FxKind } from '../net/protocol';
 import type { KartAudio, SceneEvent } from '../render/raceScene';
 
-export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'daecher' | 'results';
+export type MusicName = 'menu' | 'werkshof' | 'klippe' | 'glut' | 'nacht' | 'wolken' | 'riff' | 'eis' | 'mond' | 'hafen' | 'vulkan' | 'ruine' | 'gewitter' | 'dschungel' | 'spiegel' | 'wueste' | 'zimmer' | 'rummel' | 'magnet' | 'gipfel' | 'neon' | 'talsperre' | 'kristall' | 'baum' | 'daecher' | 'rampe' | 'results';
 
 /** Was diese Datei vom Ton-Modul braucht (deckungsgleich mit audio/GameAudio). */
 export interface AudioEngine {
@@ -110,6 +110,9 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   // Dächerjagd: die Straßenbahn klingelt, die Kirchenglocken läuten (beides ortsfest)
   'trambell',
   'bells',
+  'beep',
+  'liftoff',
+  'crawler',
 ]);
 
 export class Sound {

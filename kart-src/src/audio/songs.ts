@@ -25,6 +25,7 @@ import { TALSPERRE_STUECK } from './stuecke/talsperre';
 import { KRISTALL_STUECK } from './stuecke/kristall';
 import { BAUM_STUECK } from './stuecke/baum';
 import { DAECHER_STUECK } from './stuecke/daecher';
+import { RAMPE_STUECK } from './stuecke/rampe';
 import { RUMMEL_STUECK } from './stuecke/rummel';
 import { ZIMMER_STUECK } from './stuecke/zimmer';
 import { WUESTE_STUECK } from './stuecke/wueste';
@@ -462,6 +463,8 @@ export const SONGS: Record<MusicId, SongDef> = {
   baum: BAUM_STUECK,
   // Dächerjagd: eigenes Stück (stuecke/daecher.ts)
   daecher: DAECHER_STUECK,
+  // Startrampe: eigenes Stück (stuecke/rampe.ts)
+  rampe: RAMPE_STUECK,
   results: RESULTS,
 };
 

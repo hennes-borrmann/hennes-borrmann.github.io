@@ -955,7 +955,7 @@ export class HostGame implements GameView {
         }
         if (th.bounces > TIRE_BOUNCES) gone = true;
         // Am Verkehr zerschellt er.
-        if (t.vehicles.length > 0 && trafficBlocks(t, th.x, th.y, th.z, TIRE_RADIUS, th.seg, this.tick - this.goTick)) gone = true;
+        if ((t.vehicles.length > 0 || t.crawler) && trafficBlocks(t, th.x, th.y, th.z, TIRE_RADIUS, th.seg, this.tick - this.goTick)) gone = true;
         radius = KART_RADIUS + TIRE_RADIUS;
       } else if (th.kind === THING_OIL) {
         radius = OIL_RADIUS;
