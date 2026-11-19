@@ -346,6 +346,19 @@ const SHOTS = {
       [3, 352, -0.5],
     ],
   },
+  // Startrampe: von Südosten über die Straße auf den Startsockel, gut zwei Sekunden nach dem Start – die Rakete steigt
+  // über dem Magnetring auf, rechts der Abgasstrahl aus dem Flammengraben vor der Wendel am Serviceturm.
+  rampe: {
+    from: { xyz: [150, 18, 64] },
+    to: { xyz: [15, 42, -10] },
+    fov: 60,
+    karts: [
+      [1, 328, -2],
+      [2, 335, 2.5],
+      [3, 342, 0],
+    ],
+    moment: { period: 40, phase: 20, t: 2.2 },
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */
