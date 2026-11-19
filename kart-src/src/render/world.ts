@@ -1299,7 +1299,8 @@ export class World {
       const cut = this.rampe.cut(x, z);
       if (cut === cut) return cut - 0.5;
       const nd = this.rampe.near(x, z);
-      if (nd < APRON + 12) h = PLATZ.y - 0.36 + (h - (PLATZ.y - 0.36)) * smooth((nd - APRON) / 12);
+      // (Nur absenken: Wo eine Fahrbahn neben dem Vorfeld tiefer liegt – die Rampen hinab –, folgt das Gelände ihr.)
+      if (nd < APRON + 12) h = Math.min(h, PLATZ.y - 0.36 + (h - (PLATZ.y - 0.36)) * smooth((nd - APRON) / 12));
     }
     // Gebirgslandschaft: Steigt der Hang gleich neben der Fahrbahn steil an, spannten die Dreiecke des Rasters von
     // einer Ecke im Hang zu einer auf der Fahrbahn quer über deren Rand. Deshalb bleibt das Gelände anderthalb

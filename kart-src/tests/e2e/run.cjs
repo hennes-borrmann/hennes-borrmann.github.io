@@ -833,8 +833,8 @@ async function main() {
     check('Start- und Bereit-Knopf erst im Schritt „Start“', (await h6.page.isHidden('#btn-start')) && (await c6.page.isHidden('#btn-ready')) && (await h6.page.isVisible('#btn-step-next')));
     await h6.page.click('#btn-step-next');
     check('„Weiter“ führt zur Strecke', (await h6.page.getAttribute('.view-lobby', 'data-step')) === '2' && (await h6.page.isVisible('.track-card >> nth=0')));
-    check('Dreiundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 23);
-    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 23);
+    check('Vierundzwanzig Strecken stehen zur Wahl', (await h6.page.locator('.track-card').count()) === 24);
+    check('Jede Strecke als Kachel mit Bild', (await h6.page.locator('.track-card img.track-img').count()) === 24);
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
@@ -1520,7 +1520,7 @@ async function main() {
 
     // Eiszapfen-Pass: Anna steht in einem Lawinenstrich, bis die Lawine kommt – sie wird auf beiden Bildschirmen talwärts geschoben.
     const cards = await h7.page.locator('.track-card').count();
-    check('Mit dem Test-Schalter stehen dreiundzwanzig Strecken zur Wahl', cards === 23, `${cards} Karten`);
+    check('Mit dem Test-Schalter stehen vierundzwanzig Strecken zur Wahl', cards === 24, `${cards} Karten`);
     await pickTrack(h7.page, 6);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 6, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2389,9 +2389,94 @@ async function main() {
       check('Hängebrücke: Anna steht mitten darauf und pendelt mit, ohne herunterzufallen', moved > 0.3 && lat.every((q) => q.respawn === 0), `größte Auslenkung ${moved.toFixed(2)} m`);
     }
     await toLobby(h7.page);
+    await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
+
+    // Startrampe: Alle 40 s ein Start – der Starttakt, das Tor des Flammengrabens und der Raupentransporter mit der Schranke
+    // am Transporterdach folgen der Rennzeit, auf beiden Bildschirmen gleich. Beim Start schiebt der Abgasstoß, wer neben der
+    // Flammenzone steht, zur Seite – und wer in ihr steht, wird geworfen; beides sieht auch Ben.
+    const RAMPE = 23;
+    await pickTrack(h7.page, RAMPE);
+    await c7.page.waitForFunction((k) => window.__kart.lobby().track === k, RAMPE, { timeout: 5000 });
+    await clickReady(c7.page);
+    await h7.page.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 8000 });
+    await clickStart(h7.page);
+    await c7.page.waitForFunction((k) => window.__kart.race() && window.__kart.race().phase === 1 && window.__kart.track().index === k, RAMPE, { timeout: 30000 });
+    {
+      let rampeSame = true;
+      const counts = { trenchOpen: 0, trenchShut: 0, crawlerOpen: 0, crawlerShut: 0, flame: 0 };
+      let crawlerMin = Infinity;
+      let crawlerMax = -Infinity;
+      for (let sec = 1; sec < 61; sec += 0.5) {
+        const [a, b] = await Promise.all([kart(h7.page, `rampe(${sec})`), kart(c7.page, `rampe(${sec})`)]);
+        const key = (r) => `${r.cycle.toFixed(3)}|${r.flame}|${r.gust.toFixed(3)}|${r.trenchShut}|${r.crawler.toFixed(3)}|${r.crawlerShut}`;
+        if (key(a) !== key(b)) rampeSame = false;
+        if (a.trenchShut) counts.trenchShut++;
+        else counts.trenchOpen++;
+        if (a.crawlerShut) counts.crawlerShut++;
+        else counts.crawlerOpen++;
+        if (a.flame) counts.flame++;
+        crawlerMin = Math.min(crawlerMin, a.crawler);
+        crawlerMax = Math.max(crawlerMax, a.crawler);
+      }
+      const info = await kart(h7.page, 'rampe()');
+      check(
+        'Startrampe: Starttakt (alle 40 s), Tor des Flammengrabens und Raupentransporter mit Schranke nach der Rennzeit – auf beiden Bildschirmen gleich',
+        rampeSame && info.period === 40 && counts.flame >= 2 && counts.trenchOpen > 20 && counts.trenchShut > 20 && counts.crawlerOpen > 20 && counts.crawlerShut > 20 && crawlerMin < 0.5 && crawlerMax > info.crawlerLength - 0.5 && info.shortcuts.join() === 'window,train',
+        `Takt ${info.period} s · Graben ${counts.trenchOpen} offen / ${counts.trenchShut} zu · Schranke ${counts.crawlerOpen} offen / ${counts.crawlerShut} zu · Transporter ${crawlerMin.toFixed(1)}–${crawlerMax.toFixed(1)} m · ${counts.flame} Stichproben mit Feuer${rampeSame ? '' : ', Bildschirme verschieden'}`,
+      );
+      // Abgasstoß: Die Rennzeit springt kurz vor einen Start; Anna steht rechts neben der Flammenzone, bis es losgeht – dann
+      // schiebt der Stoß sie nach rechts (zum Strand hin), auf beiden Bildschirmen.
+      const pushM = info.push.at + info.push.length * 0.8;
+      await kart(h7.page, `clock(${20 + info.period - 1.6})`);
+      const pushed = await h7.page.evaluate(async ([m, period]) => {
+        const k = window.__kart;
+        const a = k.spot(m, 0, 0);
+        const r = k.spot(m, 1, 0);
+        const rx = r[0] - a[0];
+        const rz = r[2] - a[2];
+        let launched = false;
+        for (let n = 0; n < 400 && !launched; n++) {
+          k.place(0, m, 2, -1);
+          await new Promise((res) => setTimeout(res, 16));
+          const c = k.rampe();
+          launched = c.cycle < 1 && c.gust > 0;
+        }
+        const s0 = k.authoritative(0);
+        await new Promise((res) => setTimeout(res, 1300));
+        const s1 = k.authoritative(0);
+        return { launched, side: (s1.x - s0.x) * rx + (s1.z - s0.z) * rz, x0: s0.x, z0: s0.z, rx, rz, period };
+      }, [pushM, info.period]);
+      let benSide = 0;
+      for (const until = Date.now() + 1500; Date.now() < until; ) {
+        const e = (await kart(c7.page, 'entities()')).find((q) => q.slot === 0);
+        if (e) benSide = Math.max(benSide, (e.x - pushed.x0) * pushed.rx + (e.z - pushed.z0) * pushed.rz);
+        await sleep(60);
+      }
+      check('Abgasstoß: beim Start schiebt er Anna neben der Flammenzone zur Seite – auch auf Bens Bildschirm', pushed.launched && pushed.side > 1 && benSide > 0.6, `${pushed.side.toFixed(2)} m bei Anna, ${benSide.toFixed(2)} m bei Ben${pushed.launched ? '' : ', kein Start erlebt'}`);
+      // Abgasstrahl: Anna steht in der Flammenzone, als die nächste Rakete abhebt – sie wird geworfen, auch auf Bens Bildschirm.
+      await kart(h7.page, `clock(${20 + 2 * info.period - 1.6})`);
+      const burnt = await h7.page.evaluate(async ([at, lat]) => {
+        const k = window.__kart;
+        let spin = 0;
+        for (let n = 0; n < 300 && spin === 0; n++) {
+          k.place(0, at, lat);
+          await new Promise((r) => setTimeout(r, 16));
+          spin = k.authoritative(0).spin;
+        }
+        return { spin };
+      }, [info.zone.at, info.zone.lat]);
+      let seenBurn = false;
+      for (const until = Date.now() + 1500; Date.now() < until && !seenBurn; ) {
+        const e = (await kart(c7.page, 'entities()')).find((q) => q.slot === 0);
+        if (e && e.spin > 0) seenBurn = true;
+        else await sleep(30);
+      }
+      check('Abgasstrahl: Anna steht in der Flammenzone, als die Rakete abhebt – sie wird geworfen, auch auf Bens Bildschirm', burnt.spin > 0 && seenBurn, `Dreher ${burnt.spin} Ticks, bei Ben ${seenBurn ? 'gesehen' : 'nicht gesehen'}`);
+    }
+    await toLobby(h7.page);
     await h7.ctx.close();
     await c7.ctx.close();
-    // Der Browser räumt die dreiundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
+    // Der Browser räumt die vierundzwanzig großen Welten noch auf; das soll nicht in die Zeitmessung des nächsten Abschnitts laufen.
     await sleep(10000);
   }
 
