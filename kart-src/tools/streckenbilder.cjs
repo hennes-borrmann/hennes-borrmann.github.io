@@ -322,6 +322,18 @@ const SHOTS = {
       [3, 798, -0.5],
     ],
   },
+  // Kristallmine: in der Riesengeode, von der Kristallkugel her auf die Wand – drei Karts liegen auf dem Schwebeband, das
+  // sich dort senkrecht an den Fels gedreht hat; ringsum leuchtende Kristalle.
+  kristall: {
+    from: { xyz: [-295.2, -22.9, 57.6] },
+    to: { xyz: [-324.7, -23.9, 65.0] },
+    fov: 58,
+    karts: [
+      [1, 1048, -1.5],
+      [2, 1055, 1.5],
+      [3, 1063, 0],
+    ],
+  },
 };
 
 /** Standardaufnahme für Strecken ohne eigenen Eintrag. */

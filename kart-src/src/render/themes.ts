@@ -69,9 +69,88 @@ export interface Theme {
     /** Wasseroberfläche von unten gesehen: dunkel, mittel, Lichtflecken. */
     surface: [number, number, number];
   };
+  /**
+   * Unter Tage (Kristallmine): Sobald die Kamera tiefer als y ist, wechseln Dunst und Licht auf diese Werte – in den
+   * Stollen sieht man nicht weit, und das Licht ist warm-dunkel. (Ein Tauchgang darunter folgt under, gemessen am
+   * Meeresspiegel der Strecke.)
+   */
+  cave?: {
+    y: number;
+    fog: number;
+    fogNear: number;
+    fogFar: number;
+    sunColor: number;
+    sunIntensity: number;
+    hemiSky: number;
+    hemiGround: number;
+    /** Stärke des Himmelslichts unter Tage (sonst wie über Tage). */
+    hemiIntensity?: number;
+  };
 }
 
 export const THEMES: Record<ThemeId, Theme> = {
+  // Kristallmine: eine Zeche bei Nacht – über Tage Mondlicht, tiefblauer Himmel, warmes Licht aus den Fenstern; unter Tage
+  // Fels in tiefem Violettbraun, und was leuchtet, sind die Kristalle und die Grubenlampen (Kulisse, ohne Lichtquellen).
+  // Wie in der Nachtschicht entsteht die Dunkelheit ohne eigene Shader: über Dunst, Himmelslicht und gedämpfte Farben.
+  // Unter Tage (cave) rückt der Dunst nah heran und wird warm-dunkel; im Grubensee (under) grünlich-blau.
+  kristall: {
+    sky: [0x05060f, 0x141a3a, 0x2c2a52],
+    fog: 0x1a1a36,
+    fogNear: 80,
+    fogFar: 380,
+    sunDir: [-0.4, 0.75, 0.45],
+    sunColor: 0xb4c2ff,
+    sunIntensity: 1.45,
+    hemiSky: 0x7c84d8,
+    hemiGround: 0x6a3f2c,
+    hemiIntensity: 1.5,
+    disc: 0xf2f0e0,
+    discSize: 22,
+    clouds: 0x262a52,
+    cloudShade: 0x14162e,
+    stars: true,
+    road: 0x3f3a44,
+    roadAlt: 0x46404c,
+    line: 0xffd77a,
+    kerbA: 0xffc23a,
+    kerbB: 0x2a2530,
+    shoulder: 0x4a4048,
+    wallA: 0x3a3238,
+    wallB: 0xffc23a,
+    wallCap: 0x1c181e,
+    deck: 0x5a4a3e,
+    deckDark: 0x30261f,
+    pillar: 0x4a3c32,
+    ground: [0x383850, 0x423f50, 0x4a3c4a, 0x5c5264],
+    liquidY: null,
+    liquid: [0x0c3a4a, 0x1a6a78, 0x7fe8e0],
+    liquidGlow: false,
+    farY: 0,
+    rough: 1.5,
+    under: {
+      fog: 0x0f3a46,
+      fogNear: 8,
+      fogFar: 120,
+      sunColor: 0x8fe8e0,
+      sunIntensity: 1.1,
+      hemiSky: 0x5fd8d0,
+      hemiGround: 0x1f4a50,
+      surface: [0x1a6a78, 0x3fb8c0, 0xbffcf4],
+    },
+    // (Unter Tage nicht zu dunkel: Auch auf einem kleinen Bildschirm müssen Fahrbahnränder und Wände klar zu lesen sein –
+    // Dunst, Himmels- und Bodenlicht gut ein Drittel heller als die Nacht über Tage es nahelegte.)
+    cave: {
+      y: -6,
+      fog: 0x2a1f30,
+      fogNear: 34,
+      fogFar: 200,
+      sunColor: 0xe4c8ff,
+      sunIntensity: 1.25,
+      hemiSky: 0xc8a2ff,
+      hemiGround: 0x7a4e38,
+      hemiIntensity: 1.65,
+    },
+  },
   // Neonhochbahn: Zukunftsstadt bei Nacht. Tiefer, fast schwarzer Himmel mit violettem Dunst am Horizont (der Widerschein
   // der Stadt), kühles Mondlicht von oben, magentafarbene Rückstrahlung von unten – wie in der Nachtschicht entsteht die
   // Nacht ganz ohne eigene Shader und ohne zusätzliche Lichtquellen: über Dunst, Himmelslicht und gedämpfte Farben.

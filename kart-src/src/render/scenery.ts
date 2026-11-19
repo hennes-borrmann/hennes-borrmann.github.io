@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { SURFACE_INDEX } from '../game/surface';
-import { EDGE_DECK, EDGE_TUNNEL, rightX, rightZ } from '../game/track';
+import { EDGE_DECK, EDGE_TUNNEL, EDGE_TWIST, rightX, rightZ } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, textTexture, type RGB } from './build';
 import { addSmoothNormals, outlineMaterial, rgb, toonMaterial } from './toon';
 import type { World } from './world';
@@ -143,8 +143,9 @@ export function buildScenery(world: World): { group: THREE.Group; dispose(): voi
     for (let i = 0; i < t.total; i += 5) {
       const k = t.curv[i];
       if (Math.abs(k) < 1 / 30) continue;
-      // Wo zwei Fahrbahnen ineinander liegen, stünde die Tafel mitten auf der anderen.
-      if (t.twin[i] >= 0) continue;
+      // Wo zwei Fahrbahnen ineinander liegen, stünde die Tafel mitten auf der anderen. (Auf verdrehter Bahn – das Band an der
+      // Wand der Geode – stünde sie in der Luft.)
+      if (t.twin[i] >= 0 || (t.edge[i] & EDGE_TWIST) !== 0) continue;
       // Außenseite der Kurve; in Fahrtrichtung lesbar.
       const sgn = k > 0 ? -1 : 1;
       if (t.edge[i] & (sgn < 0 ? 1 : 2)) continue;

@@ -13,7 +13,7 @@ import { KeyboardInput, mergeInput } from '../game/input';
 import { ITEM_NONE, TICK_RATE, type Cmd, type KartState } from '../game/sim';
 import { COUNTDOWN_TICKS } from '../game/hostGame';
 import { FixedTicker } from '../game/ticker';
-import { PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront } from '../game/mechanics';
+import { PULSE_BLAST, PULSE_BUBBLE, PULSE_KICK, pulseCycle, eraAt, eraSince, gustStrength, gustWarning, planActive, portalOpen, raftAt, raftDrift, roofTop, stormLight, pontoonLift, tideLevel, tidePhase, vehicleAt, bandLineLat, metroFront } from '../game/mechanics';
 import { EDGE_BAND, EDGE_DRUM, EDGE_GLIDE, TRACK, bandMeters, bandOf, newVehiclePose, rightX, rightZ, setTrack, vehiclePose } from '../game/track';
 import { OFFERED_TRACKS } from './offered';
 import type { RenderEntity } from '../game/view';
@@ -1669,6 +1669,31 @@ export class App {
         let from = -1;
         for (let i = 0; i < TRACK.n && from < 0; i++) if (TRACK.deep[i] && TRACK.py[i] < TRACK.sea - 1) from = i * TRACK.step;
         return { sea: TRACK.sea, from, currents: TRACK.belts.filter((b) => b.swim).length, vents: TRACK.pulses.filter((p) => p.kind === PULSE_BUBBLE).length };
+      },
+      // Kristallmine, zur Rennzeit dieses Bildschirms bzw. zur angegebenen Rennzeit (Sekunden): ob die Weiche zum Sprengort
+      // auf geradeaus gestellt ist (der Sprengort verschüttet) und ihr Takt, die Sprengladungen (Meter ab Start, seitliche Lage,
+      // Stand im Zyklus in Sekunden, ob sie gerade hochgeht), die Meter der Lorenbahn und die größte Verdrehung des Bands.
+      mine: (seconds?: number) => {
+        const view = this.hostGame ?? this.clientGame;
+        const time = seconds !== undefined ? seconds * 60 : view ? view.race(performance.now() / 1000).time : 0;
+        const kWin = TRACK.def.branches?.findIndex((b) => b.shortcut === 'window') ?? -1;
+        const gate = kWin >= 0 ? TRACK.gates.find((g) => TRACK.branchOf[g.first] === kWin) : undefined;
+        let rails = 0;
+        let roll = 0;
+        for (let i = 0; i < TRACK.n; i++) {
+          if (TRACK.edge[i] & 4096) rails += TRACK.step;
+          roll = Math.max(roll, (TRACK.roll[i] * 180) / Math.PI);
+        }
+        return {
+          time,
+          gate: gate ? planActive(gate.plan, time) : null,
+          period: gate ? gate.plan.period / 60 : 0,
+          blasts: TRACK.pulses
+            .filter((p) => p.kind === PULSE_BLAST)
+            .map((p) => ({ at: TRACK.prog[p.seg] * TRACK.step, lat: p.lat, cycle: pulseCycle(p, time) / 60, period: p.period / 60, on: pulseCycle(p, time) < p.on })),
+          rails,
+          roll,
+        };
       },
       // Gezeit zur Rennzeit dieses Bildschirms: Stand 0 (Ebbe) … 1 (Flut) und Höhe des Wasserspiegels.
       tide: () => {

@@ -420,6 +420,25 @@ export class ThingVisuals {
       put(b, new THREE.CylinderGeometry(0.06, 0.06, 5.6, 5), 0x2a2733, 0, 8.2, 0);
       put(b, new THREE.CylinderGeometry(0.85, 0.85, 0.9, 12), 0xffcf3a, 0, 11.25, 0);
       put(b, new THREE.CylinderGeometry(0.95, 0.95, 0.12, 12), 0x2a2733, 0, 10.75, 0);
+    } else if (this.theme === 'kristall') {
+      // Lore (Förderwagen) voller Erz und leuchtender Kristalle: rollt auf dem Querschlag quer über die Fahrbahn (Längsachse
+      // quer zur Strecke); rostroter Kasten mit dunklen Bändern, vier Räder, vorn und hinten Puffer, oben eine Warnleuchte.
+      const RUST = 0x9a4a2a;
+      const BAND = 0x2a2830;
+      put(b, new THREE.BoxGeometry(2.7, 1.25, 1.55), RUST, 0, 1.15, 0);
+      for (const x of [-1.1, 0, 1.1]) put(b, new THREE.BoxGeometry(0.14, 1.3, 1.6), BAND, x, 1.15, 0);
+      put(b, new THREE.BoxGeometry(2.8, 0.14, 1.65), BAND, 0, 1.78, 0);
+      // Erz und Kristalle obenauf
+      put(b, new THREE.DodecahedronGeometry(0.62, 0), 0x3a3238, -0.6, 1.85, 0.1);
+      put(b, new THREE.DodecahedronGeometry(0.55, 0), 0x463c42, 0.55, 1.85, -0.15);
+      put(b, new THREE.OctahedronGeometry(1, 0), 0xc77dff, -0.2, 2.25, 0.2, 0.28, 0.75, 0.28, 0.3, 0, 0.2);
+      put(b, new THREE.OctahedronGeometry(1, 0), 0x3fe8ff, 0.5, 2.15, 0.25, 0.22, 0.6, 0.22, -0.4, 0, -0.3);
+      put(b, new THREE.OctahedronGeometry(1, 0), 0xff4fd8, 0.1, 2.1, -0.35, 0.2, 0.5, 0.2, 0.2, 0, -0.5);
+      // Fahrgestell, Räder, Puffer
+      put(b, new THREE.BoxGeometry(2.4, 0.22, 1.1), BAND, 0, 0.45, 0);
+      for (const x of [-0.85, 0.85]) for (const z of [-0.62, 0.62]) put(b, new THREE.CylinderGeometry(0.34, 0.34, 0.16, 10), 0x5a5f6a, x, 0.36, z, 1, 1, 1, Math.PI / 2);
+      for (const x of [-1.5, 1.5]) put(b, new THREE.CylinderGeometry(0.16, 0.16, 0.3, 8), 0xffcf3a, x, 0.75, 0, 1, 1, 1, 0, 0, Math.PI / 2);
+      put(b, new THREE.SphereGeometry(0.2, 8, 6), 0xffb02e, 1.2, 1.95, 0.6);
     } else {
       // Kehrroboter mit Warnlicht
       b.box(0, 0.75, 0, 2.3, 1.0, 1.9, rgb(0x1fd6c8), 0, rgb(0x16a79c));
@@ -856,6 +875,10 @@ export class ThingVisuals {
         inner.position.y = 0.12 + 0.05 * Math.sin(time * 1.3 + i);
         inner.rotation.z = -(lat / Math.max(1, h.amp)) * 0.1;
         inner.rotation.y = Math.sin(time * 0.7 + i * 2.1) * 0.08;
+      } else if (this.theme === 'kristall') {
+        // Die Lore rumpelt über die Schienenstöße: leichtes Rucken und Schaukeln.
+        inner.position.y = 0.03 * Math.abs(Math.sin(time * 9 + i));
+        inner.rotation.z = Math.sin(time * 7 + i) * 0.025;
       } else {
         inner.position.y = 0.04 * Math.sin(time * 20);
       }

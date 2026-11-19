@@ -218,6 +218,12 @@ export const PULSE_ROD = 8;
  * rollt, wird angeschoben. Die Magnete der Schienen nebeneinander ziehen abwechselnd: Man wählt die Schiene nach dem Takt.
  */
 export const PULSE_KICK = 9;
+/**
+ * Sprengladung (Kristallmine): Im Takt geht eine Ladung im Stoß neben oder in der Fahrbahn hoch. Vorher brennt die
+ * Zündschnur ab, eine Lampe blinkt, die Sirene heult (warn Ticks); die Explosion wirft, wer im Umkreis ist, hoch – ein
+ * Treffer wie von der Lavabombe, nur heftiger. Danach hängt Staub in der Luft (nur Bild).
+ */
+export const PULSE_BLAST = 10;
 
 // --- Wetterleuchten ------------------------------------------------------------------
 // Auf einer dunklen Strecke (Gewitterkamm) erhellt jeder Blitz für einen Augenblick alles. Wie hell es

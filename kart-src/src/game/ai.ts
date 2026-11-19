@@ -997,6 +997,22 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           near = p.seg;
         }
       }
+      // Weiche voraus (oder schon zwischen den Zungen): Das Gleis auf der Seite der Abzweigung führt hinein, das andere
+      // geradeaus – je nachdem, welchen Weg die KI gewählt hat. (Ist die Weiche auf geradeaus gestellt, bleibt man ohnehin.)
+      for (let k = 0; k < t.branches.length && near < 0; k++) {
+        const br = t.branches[k];
+        if ((t.edge[br.from] & EDGE_RAIL) === 0) continue;
+        const own = t.branchOf[s.seg];
+        let ahead = false;
+        if (own < 0) {
+          const d = segDelta(t, s.seg, br.from);
+          ahead = (d >= -2 && d <= 90) || (t.twin[s.seg] >= 0 && t.branchOf[t.twin[s.seg]] === k);
+        } else if (own === k && t.twin[s.seg] >= 0 && s.seg < br.first + (br.count >> 1)) ahead = true;
+        if (!ahead) continue;
+        const into = ((b.route >> k) & 1) === 1;
+        const lanes = rail.lanes;
+        want = into === br.side > 0 ? lanes[lanes.length - 1] : lanes[0];
+      }
       if (near >= 0) {
         if (b.kickSeg !== near) {
           b.kickSeg = near;

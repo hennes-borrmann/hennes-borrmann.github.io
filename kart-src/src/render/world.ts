@@ -27,6 +27,7 @@ import {
 } from '../game/track';
 import { MeshBuilder, mixRgb, noise, seeded, shade, smooth, textTexture, type RGB, type V3 } from './build';
 import type { FxSink } from './fxApi';
+import { SCHACHT, WETTERSCHACHT } from '../game/tracks/kristall';
 import { buildLife, type Life } from './life';
 import { inLake, landCut, landHeight } from './life/talsperreLand';
 import { buildScenery } from './scenery';
@@ -84,6 +85,30 @@ interface SurfaceLook {
   wallB?: RGB;
   glow?: RGB;
   glowB?: RGB;
+}
+
+/** Kristallmine: Fahrbahn tiefer als das liegt unter Tage. */
+const UNTER_TAGE = -3;
+
+/**
+ * Kristallmine: die beiden Schächte – senkrechte Röhren durch das Gelände. Über ihnen hat das Gelände ein Loch (die
+ * Schachtwand und die Sohle zeichnet die Kulisse); dessen gezackten Rand deckt der Schachtkranz der Kulisse zu.
+ * Mitte, Halbmesser der Schachtwand, Breite des Kranzes (so weit reichen die weggelassenen Dreiecke höchstens) und
+ * Höhe der Sohle.
+ */
+export interface Schacht {
+  x: number;
+  z: number;
+  r: number;
+  funnel: number;
+  floor: number;
+}
+export function kristallSchaechte(cell: number): Schacht[] {
+  const f = Math.ceil(cell * 1.5) + 2;
+  return [
+    { x: SCHACHT.x, z: SCHACHT.z, r: SCHACHT.wall, funnel: f, floor: SCHACHT.floor },
+    { x: WETTERSCHACHT.x, z: WETTERSCHACHT.z, r: WETTERSCHACHT.wall, funnel: f, floor: WETTERSCHACHT.floor },
+  ];
 }
 
 /** Tunnel und Höhlen: lichte Höhe über der Fahrbahn und Dicke des Felsmantels. */
@@ -173,6 +198,7 @@ export class World {
   depth = 0;
   private readonly depthFrom = { fog: new THREE.Color(), sun: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), bg: new THREE.Color() };
   private readonly depthTo = { fog: new THREE.Color(), sun: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color() };
+  private readonly caveTo = { fog: new THREE.Color(), sun: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color() };
 
   private readonly skyGroup = new THREE.Group();
   private readonly clouds = new THREE.Group();
@@ -202,6 +228,10 @@ export class World {
   readonly land: ((x: number, z: number) => number) | null;
   readonly landCut: ((x: number, z: number) => number) | null;
   readonly lake: ((x: number, z: number) => boolean) | null;
+  /** Kristallmine: die Schächte (sonst leer). */
+  readonly schaechte: Schacht[] = [];
+  /** Kristallmine: wie weit die Kamera unter Tage ist (0 über, 1 unter Tage; geglättet). */
+  cave = 0;
   private life: Life | null = null;
   buildTimes: number[] = [];
 
@@ -228,6 +258,8 @@ export class World {
       maxX = Math.max(maxX, t.px[i]);
       minZ = Math.min(minZ, t.pz[i]);
       maxZ = Math.max(maxZ, t.pz[i]);
+      // Kristallmine: Was unter Tage liegt, formt das Gelände nicht – es liegt darüber (Stollen und Höhlen zeichnet die Kulisse).
+      if (t.def.theme === 'kristall' && t.py[i] < UNTER_TAGE) continue;
       if ((t.edge[i] & EDGE_DECK) === 0) {
         // (In der Gebirgslandschaft liegen Tunnel im Berg: Sie ziehen das Gelände nicht zu sich herunter.)
         if (!(dam && (t.edge[i] & EDGE_TUNNEL) !== 0)) this.nonDeck.push(i);
@@ -241,6 +273,7 @@ export class World {
       }
     }
     if (t.def.theme === 'vulkan') this.crater = this.findCrater();
+    if (t.def.theme === 'kristall') this.schaechte.push(...kristallSchaechte(this.terrainCell));
     this.center.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     this.radius = Math.hypot(maxX - minX, maxZ - minZ) / 2;
 
@@ -251,6 +284,12 @@ export class World {
     this.depthFrom.hemiSky.set(th.hemiSky);
     this.depthFrom.hemiGround.set(th.hemiGround);
     this.depthFrom.bg.set(th.sky[2]);
+    if (th.cave) {
+      this.caveTo.fog.set(th.cave.fog);
+      this.caveTo.sun.set(th.cave.sunColor);
+      this.caveTo.hemiSky.set(th.cave.hemiSky);
+      this.caveTo.hemiGround.set(th.cave.hemiGround);
+    }
     if (th.under) {
       this.depthTo.fog.set(th.under.fog);
       this.depthTo.sun.set(th.under.sunColor);
@@ -406,6 +445,9 @@ export class World {
         case 'grass':
           return { a: col(0x86c45c), b: col(0x77b650), c: col(0x6aa646), band: 4, plain: false, lines: true, line: col(0xf7f4e8), kerbs: false, shoulder: null, detail: 'none', barrier: 'fence', wallA: wood[0], wallB: wood[1] };
         case 'rock':
+          // (Kristallmine: Unter Tage zeigen gelbe Randlinien – wie die Sicherheitsfarbe im Bergwerk –, wo die Fahrbahn endet;
+          // der Fels der Fahrbahn ist etwas heller als der der Wände.)
+          if (t.def.theme === 'kristall') return { a: rgb(0x5a4c60), b: rgb(0x524558), c: rgb(0xa898b8), band: 3, plain: false, lines: true, line: rgb(0xffc23a), kerbs: false, shoulder: rgb(0x6a5868), detail: 'cracks', barrier: 'rock', wallA: rgb(0x86707e), wallB: rgb(0x6c5a6c) };
           return { a: col(0x57495a), b: col(0x4b3f50), c: crack, band: 3, plain: false, lines: false, kerbs: false, shoulder: col(0x3c3242), detail: 'cracks', barrier: 'rock', wallA: col(0x6b5565), wallB: col(0x54445a) };
         case 'metal':
           return { a: col(0x8792a0), b: col(0x77828f), c: col(0x4d5560), band: 3, plain: false, lines: true, line: col(0xffd23f), kerbs: false, shoulder: col(0x5c6570), detail: 'plates', barrier: 'rail', wallA: col(0x3a4049), wallB: col(0xc9d2dc) };
@@ -875,7 +917,7 @@ export class World {
     const cWall = id === 'neon' ? rgb(0x262a4e) : id === 'nacht' ? rgb(0x2d3050) : id === 'wolken' ? rgb(0xe9eef6) : id === 'gipfel' ? rgb(0xbfe4f4) : id === 'talsperre' ? rgb(0xb9b2a5) : rgb(0xd9c7a8);
     const cBand = id === 'neon' ? rgb(0xff3fae) : id === 'nacht' ? rgb(0xff5ad1) : id === 'wolken' ? rgb(0xe8483f) : id === 'gipfel' ? rgb(0x4fb6dc) : id === 'talsperre' ? rgb(0xf2b630) : rgb(0x6fd0e6);
     const cRoof = id === 'neon' ? rgb(0x1b1e3a) : id === 'nacht' ? rgb(0x23263f) : id === 'wolken' ? rgb(0x8fa3bd) : id === 'gipfel' ? rgb(0x7fb8d8) : id === 'talsperre' ? rgb(0x8c867b) : rgb(0xb5543c);
-    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, talsperre: 0xffe2a0 }[id] ?? 0x7ef0ff);
+    const cGlow = rgb({ werkshof: 0xfff3b0, klippe: 0x7ef0ff, glut: 0xff8a2a, nacht: 0xff5ad1, wolken: 0xfff3b0, riff: 0x7effd8, eis: 0x9fe8ff, mond: 0xff8a2a, hafen: 0xffd23f, vulkan: 0xff8a2a, ruine: 0x58f0d8, gewitter: 0xbfe9ff, dschungel: 0xfff3b0 , spiegel: 0x9fe8ff, wueste: 0xffd23f, zimmer: 0xfff3b0, rummel: 0xffd23a, magnet: 0x7fd0ff, gipfel: 0x9fe8ff, neon: 0x5ff3ff, kristall: 0xc77dff, talsperre: 0xffe2a0 }[id] ?? 0x7ef0ff);
     // Querschnitt von links unten über den Scheitel nach rechts unten:
     // innen [Anteil der halben Breite, Höhe], außen [Anteil der halben Breite, Anteil des Mantels, Höhe].
     const IN: [number, number][] = hall
@@ -1246,6 +1288,17 @@ export class World {
       const dd = Math.hypot(x - t.px[i], z - t.pz[i]) - t.wh[i] - 2.5;
       if (dd < 5) h = cap + (h - cap) * smooth(dd / 5);
     }
+    // Kristallmine: Schächte sind Löcher im Gelände – innen liegt die Sohle, ringsum das Gelände eben (unter dem Schachtkranz
+    // der Kulisse). Die Dreiecke über dem Loch zeichnet buildTerrain nicht: Ein Trichter im groben Raster reichte sonst
+    // in die Stollen, die unten aus dem Schacht führen.
+    if (t.def.theme === 'kristall') {
+      for (const sch of this.schaechte) {
+        const r = Math.hypot(x - sch.x, z - sch.z);
+        if (r >= sch.r + sch.funnel + 24) continue;
+        if (r >= sch.r) h += (Math.min(h, th.farY + 0.4) - h) * (1 - smooth((r - sch.r - sch.funnel) / 24));
+        else h = sch.floor;
+      }
+    }
     // Fluss: Wo das Land neben dem Flussbett tiefer liegt als der Wasserspiegel (am Hang zum Tiefland hin), bekommt
     // der Fluss einen Uferdamm – sonst stünde das Wasser als Kante frei über dem Land. Der Damm liegt seitlich
     // neben dem Fluss (nicht vor der Kante des Wasserfalls): gezählt wird nur, was quer zu einem Flussabschnitt liegt.
@@ -1457,7 +1510,10 @@ export class World {
       const liquid = th.liquidY ?? -Infinity;
       const snowLine = th.snowLine ?? 12;
       const tube = this.land && this.tunnelSegs.length > 0 ? this.tubeCutter(b, cell) : null;
+      const hole = (p: V3): boolean => this.schaechte.some((sch) => Math.hypot(p[0] - sch.x, p[2] - sch.z) < sch.r + 0.5);
       const tri = (a: V3, bb: V3, c: V3): void => {
+        // (Kristallmine: das Loch über einem Schacht)
+        if (this.schaechte.length > 0 && (hole(a) || hole(bb) || hole(c))) return;
         const top = Math.max(a[1], bb[1], c[1]);
         // Was tief unter Wasser liegt, sieht man nicht – außer in einer Unterwasserwelt: dort ist es der Meeresboden.
         if (!th.under && top < liquid - 2.5) return;
@@ -1523,6 +1579,8 @@ export class World {
     }
     for (let iz = 0; iz < cn - 1; iz++) {
       for (let ix = 0; ix < cn - 1; ix++) {
+        // Kristallmine: Über den Schächten fehlt die Grundfläche (sie läge sonst als Deckel auf dem Loch im Gelände).
+        if (this.schaechte.some((sch) => this.overCell(sch, cuts[ix], cuts[ix + 1], cuts[iz], cuts[iz + 1]))) continue;
         const a = iz * cn + ix;
         pi.push(a, a + cn, a + 1, a + 1, a + cn, a + cn + 1);
       }
@@ -1582,6 +1640,13 @@ export class World {
     this.timed.push(m);
     this.disposables.push(m);
     return m;
+  }
+
+  /** Berührt der Schacht (samt Trichter) das Feld der Grundfläche [x0, x1] × [z0, z1] (um die Mitte der Strecke)? */
+  private overCell(sch: Schacht, x0: number, x1: number, z0: number, z1: number): boolean {
+    const cx = Math.max(this.center.x + x0, Math.min(this.center.x + x1, sch.x));
+    const cz = Math.max(this.center.z + z0, Math.min(this.center.z + z1, sch.z));
+    return Math.hypot(cx - sch.x, cz - sch.z) < sch.r + 1;
   }
 
   // --- Himmel ----------------------------------------------------------------
@@ -1741,24 +1806,53 @@ export class World {
   update(time: number, dt: number, camera: THREE.Vector3, boxMask: number, fx: FxSink, raceTime = 0): void {
     for (const m of this.timed) m.uniforms.time.value = time;
     this.life?.update(time, dt, camera, fx, raceTime);
-    // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund.
+    // Unterwasserwelt: taucht die Kamera ab, wechseln Dunst, Licht und Hintergrund. Unter Tage (Kristallmine) ebenso – erst
+    // auf die Werte der Stollen, im Grubensee (unter dem Meeresspiegel der Strecke) weiter auf die unter Wasser.
     const un = this.theme.under;
-    // (Ohne Meer bis zum Horizont gilt der Stausee: unter dessen Spiegel und über seinem Grund – track.sea, this.lake.)
-    const level = this.theme.liquidY ?? (this.lake ? this.track.sea : null);
-    if (un && level !== null) {
-      const want = camera.y < level - 0.15 && (this.lake === null || this.lake(camera.x, camera.z)) ? 1 : 0;
+    const cv = this.theme.cave;
+    // (Ohne Meer bis zum Horizont gilt der Stausee: unter dessen Spiegel und über seinem Grund – track.sea, this.lake. Unter Tage
+    // – Kristallmine – zählt der Meeresspiegel der Strecke: der Grubensee.)
+    const level = this.theme.liquidY ?? (this.lake || cv ? this.track.sea : null);
+    if ((un && level !== null) || cv) {
+      const want = un && level !== null && camera.y < level - 0.15 && (this.lake === null || this.lake(camera.x, camera.z)) ? 1 : 0;
+      const wantCave = cv && camera.y < cv.y ? 1 : 0;
       const k = this.depth + (want - this.depth) * Math.min(1, dt * 9);
-      if (k !== this.depth) {
+      const kc = this.cave + (wantCave - this.cave) * Math.min(1, dt * 3);
+      if (k !== this.depth || kc !== this.cave) {
         this.depth = Math.abs(k - want) < 0.002 ? want : k;
+        this.cave = Math.abs(kc - wantCave) < 0.002 ? wantCave : kc;
         const d = this.depth;
-        this.fog.color.copy(this.depthFrom.fog).lerp(this.depthTo.fog, d);
-        this.fog.near = this.theme.fogNear + (un.fogNear - this.theme.fogNear) * d;
-        this.fog.far = this.theme.fogFar + (un.fogFar - this.theme.fogFar) * d;
-        this.sun.color.copy(this.depthFrom.sun).lerp(this.depthTo.sun, d);
-        this.sun.intensity = this.theme.sunIntensity + (un.sunIntensity - this.theme.sunIntensity) * d;
-        this.hemi.color.copy(this.depthFrom.hemiSky).lerp(this.depthTo.hemiSky, d);
-        this.hemi.groundColor.copy(this.depthFrom.hemiGround).lerp(this.depthTo.hemiGround, d);
-        this.background.copy(this.depthFrom.bg).lerp(this.depthTo.fog, d);
+        const c = this.cave;
+        const th = this.theme;
+        const near = cv ? th.fogNear + (cv.fogNear - th.fogNear) * c : th.fogNear;
+        const far = cv ? th.fogFar + (cv.fogFar - th.fogFar) * c : th.fogFar;
+        const sunI = cv ? th.sunIntensity + (cv.sunIntensity - th.sunIntensity) * c : th.sunIntensity;
+        this.hemi.intensity = cv ? th.hemiIntensity + ((cv.hemiIntensity ?? th.hemiIntensity) - th.hemiIntensity) * c : th.hemiIntensity;
+        this.fog.color.copy(this.depthFrom.fog);
+        this.sun.color.copy(this.depthFrom.sun);
+        this.hemi.color.copy(this.depthFrom.hemiSky);
+        this.hemi.groundColor.copy(this.depthFrom.hemiGround);
+        this.background.copy(this.depthFrom.bg);
+        if (cv && c > 0) {
+          this.fog.color.lerp(this.caveTo.fog, c);
+          this.sun.color.lerp(this.caveTo.sun, c);
+          this.hemi.color.lerp(this.caveTo.hemiSky, c);
+          this.hemi.groundColor.lerp(this.caveTo.hemiGround, c);
+          this.background.lerp(this.caveTo.fog, c);
+        }
+        this.fog.near = near;
+        this.fog.far = far;
+        this.sun.intensity = sunI;
+        if (un && d > 0) {
+          this.fog.color.lerp(this.depthTo.fog, d);
+          this.fog.near = near + (un.fogNear - near) * d;
+          this.fog.far = far + (un.fogFar - far) * d;
+          this.sun.color.lerp(this.depthTo.sun, d);
+          this.sun.intensity = sunI + (un.sunIntensity - sunI) * d;
+          this.hemi.color.lerp(this.depthTo.hemiSky, d);
+          this.hemi.groundColor.lerp(this.depthTo.hemiGround, d);
+          this.background.lerp(this.depthTo.fog, d);
+        }
         // Von unten ist der Himmel nicht zu sehen (die Wasseroberfläche liegt davor).
         this.skyGroup.visible = d < 0.5;
       }

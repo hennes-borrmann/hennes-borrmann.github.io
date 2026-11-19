@@ -50,6 +50,7 @@ import {
   PULSE_ICICLE,
   PULSE_BOLT,
   PULSE_METEOR,
+  PULSE_BLAST,
   PULSE_ROD,
   PULSE_PRESS,
   PULSE_VENT,
@@ -225,6 +226,14 @@ export interface SceneEvent {
     | 'chain'
     | 'kick'
     | 'crest'
+    /**
+     * Kristallmine: eine Sprengladung geht hoch (ortsfest) / das Sprenghorn warnt vor ihr (ortsfest) / im Sprengort bricht
+     * das Geröll nach (ortsfest) / das eigene Kart rattert in der Lore über die Schienen (wiederholt, statt 'coaster').
+     */
+    | 'blast'
+    | 'siren'
+    | 'rubble'
+    | 'lore'
     /**
      * Magnetwerk: die Magnete packen das eigene Kart beim Einfahren in die Trommel / das eigene Kart fährt in der Trommel
      * (wiederholt; ortsfest gemeldet, damit der Pegel – er trägt die Verdrehung – ankommt) / eine Deckenplatte schaltet ab
@@ -1081,6 +1090,16 @@ export class RaceScene {
           this.emitAt(shut ? 'magnetoff' : 'drain', t.px[g.first + g.count], t.py[g.first + g.count] + 2, t.pz[g.first + g.count], 160);
           continue;
         }
+        // Kristallmine: Der Sprengort wird freigesprengt (Knall) bzw. das Hangende bricht nach (Poltern) – am Geröll.
+        if (t.def.theme === 'kristall') {
+          const at = Math.min(g.first + g.count + 10, t.total - 1);
+          this.emitAt(shut ? 'rubble' : 'blast', t.px[at], t.py[at] + 1, t.pz[at], shut ? 120 : 220);
+          if (!shut && me) {
+            const d = Math.hypot(me.x - t.px[at], me.z - t.pz[at]);
+            if (d < 50) this.shake = Math.max(this.shake, 0.5 * (1 - d / 50));
+          }
+          continue;
+        }
         // Das hört die ganze Insel – in der Ferne leise.
         this.emitAt(shut ? 'collapse' : 'drain', t.px[g.first], t.py[g.first], t.pz[g.first], 600);
         if (shut && me) {
@@ -1136,6 +1155,13 @@ export class RaceScene {
         if (c0 < 50 && c1 >= 50) this.onEvent?.({ kind: 'rumble', slot: -1, local: false, pan: 0, gain: 0.35 + 0.5 * f.power });
       }
       for (const p of t.pulses) {
+        // Kristallmine: Zu Beginn der Vorwarnung tönt das Sprenghorn.
+        if (p.kind === PULSE_BLAST) {
+          const w = p.period - p.warn;
+          const c0 = pulseCycle(p, before);
+          const c1 = pulseCycle(p, time);
+          if (c0 < w && c1 >= w && c1 > c0) this.emitAt('siren', p.x, p.y + 2.5, p.z, 160);
+        }
         // Der Zyklus ist seit dem letzten Bild über null gelaufen: Ausbruch bzw. Einschlag.
         if (pulseCycle(p, time) < pulseCycle(p, before)) {
           if (p.kind === PULSE_BUBBLE) {
@@ -1150,6 +1176,15 @@ export class RaceScene {
             if (me) {
               const d = Math.hypot(me.x - p.x, me.z - p.z);
               if (d < 60) this.shake = Math.max(this.shake, (bolt ? 0.5 : 0.25) * (1 - d / 60));
+            }
+            continue;
+          }
+          if (p.kind === PULSE_BLAST) {
+            // Sprengladung: weit zu hören, in der Nähe bebt das Bild kräftig.
+            this.emitAt('blast', p.x, p.y, p.z, 220);
+            if (me) {
+              const d = Math.hypot(me.x - p.x, me.z - p.z);
+              if (d < 55) this.shake = Math.max(this.shake, 0.7 * (1 - d / 55));
             }
             continue;
           }
@@ -1634,7 +1669,8 @@ export class RaceScene {
           k.railWait -= dt;
           if (k.railWait <= 0) {
             k.railWait = 0.4;
-            this.emit('coaster', k, true);
+            // (In der Kristallmine rattert die Lore auf dem Grubengleis.)
+            this.emit(tr.def.theme === 'kristall' ? 'lore' : 'coaster', k, true);
           }
           if (lift) {
             k.chainWait -= dt;

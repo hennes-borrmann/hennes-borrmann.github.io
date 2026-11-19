@@ -34,11 +34,12 @@ import { rgb, toonMaterial, withOutline } from '../toon';
 
 const C_STEEL = rgb(0xdfe4ec);
 const C_STEEL_SIDE = rgb(0x7d8597);
-const C_LEFT = rgb(0xe2483a); // linke Schiene: Rot
-const C_RIGHT = rgb(0x1fc8c0); // rechte Schiene: Türkis
+// (In der Kristallmine – Lorenbahn – gedämpfter: Bernstein und Eisblau, Grubenholz; gesetzt in buildRails.)
+let C_LEFT = rgb(0xe2483a); // linke Schiene: Rot
+let C_RIGHT = rgb(0x1fc8c0); // rechte Schiene: Türkis
 const C_TIE = rgb(0x5b3a24);
 const C_TIE_SIDE = rgb(0x3b2618);
-const C_WALK = rgb(0x8c7a66);
+let C_WALK = rgb(0x8c7a66);
 // Gerüst: auf dem Rummel weiß gestrichenes Holz, auf der Gipfelbahn (Sommerrodelbahn) verzinkter Stahl – gesetzt in buildRails.
 let C_WOOD = rgb(0xf2efe6);
 let C_WOOD_2 = rgb(0xe2dccd);
@@ -46,8 +47,8 @@ let C_WOOD_3 = rgb(0xcfc7b4);
 const C_PLATE = rgb(0x24212b);
 const C_PLATE_SIDE = rgb(0x17151c);
 const C_TROUGH = rgb(0x2b2a31);
-const C_RED = rgb(0xd8382c);
-const C_WHITE = rgb(0xf6f0dc);
+let C_RED = rgb(0xd8382c);
+let C_WHITE = rgb(0xf6f0dc);
 const C_MAST = rgb(0x3a3646);
 const C_BOARD = rgb(0x1e1b24);
 const C_PLATFORM = rgb(0xd9b27a);
@@ -242,6 +243,14 @@ const CHEV_SPACING = PLATE_LEN / CHEV_N;
 
 export function buildRails(track: Track, detail: boolean): MechanicView {
   const alpine = track.def.theme === 'gipfel';
+  // Kristallmine: Lorenbahn – kein Bahnhof, kein Holzgerüst (in der Wendel hängen die Gleise an der Schachtwand, unten
+  // liegen sie auf der Sohle; das zeichnet die Kulisse), Bremsen gelb-schwarz, gedämpfte Farbstreifen.
+  const mine = track.def.theme === 'kristall';
+  C_LEFT = rgb(mine ? 0xd98a2a : 0xe2483a);
+  C_RIGHT = rgb(mine ? 0x2ab8d8 : 0x1fc8c0);
+  C_WALK = rgb(mine ? 0x5e4630 : 0x8c7a66);
+  C_RED = rgb(mine ? 0xe8b22a : 0xd8382c);
+  C_WHITE = rgb(mine ? 0x1c1a20 : 0xf6f0dc);
   C_WOOD = rgb(alpine ? 0xa9b0bc : 0xf2efe6);
   C_WOOD_2 = rgb(alpine ? 0x8c939f : 0xe2dccd);
   C_WOOD_3 = rgb(alpine ? 0x737a86 : 0xcfc7b4);
@@ -397,7 +406,7 @@ export function buildRails(track: Track, detail: boolean): MechanicView {
     // --- Gerüst: weiße Holzböcke vom Gelände bis unter das Deck ---
     const bentStep = detail ? 4 : 8;
     let prevBent: { s: number; levels: number[]; lat: (y: number) => number } | null = null;
-    for (let s = first + 2; s <= last - 1; s += bentStep) {
+    for (let s = first + 2; !mine && s <= last - 1; s += bentStep) {
       // Die Pfeiler der Welt (jeder 14. Abschnitt, Mitte bei 7) übernehmen dort die Rolle des Bocks.
       const m = (((s - 7) % 14) + 14) % 14;
       if (m <= 1 || m >= 13) {
@@ -546,7 +555,8 @@ export function buildRails(track: Track, detail: boolean): MechanicView {
     }
 
     // --- Bahnhof: die ersten 44 m. Bahnsteige neben dem Deck, Dach ab 10 m über der Bahn, Gatter ---
-    const st1 = Math.min(last, first + 44);
+    // (Die Lorenbahn hat keinen: Ihre Hängebank am Förderturm zeichnet die Kulisse; die Abzweigung schon gar nicht.)
+    const st1 = mine || t.branchOf[first] >= 0 ? first : Math.min(last, first + 44);
     for (const sg of [-1, 1]) {
       const i0 = 4.45;
       const i1 = 7.8;
