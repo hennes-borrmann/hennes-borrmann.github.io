@@ -358,7 +358,7 @@ describe('Startrampe', () => {
     expect(walls + hits).toBeLessThanOrEqual(Math.ceil(runs * 0.3));
   });
 
-  it('Magnetring: das Band dreht sich weich bis senkrecht an die Wand rings um die Rakete – und ist dort gerechnet wie flach', () => {
+  it('Magnetring: das Band dreht sich weich bis senkrecht an die Wand rings um die Rakete – und hält dort wie flach', () => {
     setTrack(RAMPE);
     let wall = 0;
     let maxStep = 0;
@@ -384,7 +384,7 @@ describe('Startrampe', () => {
     expect(c.y - a.y).toBeCloseTo(8, 6);
     expect(Math.hypot(a.x - RAKETE.x, a.z - RAKETE.z)).toBeGreaterThan(RAKETE.r + RAKETE.axis - 1.5);
     expect(Math.hypot(a.x - RAKETE.x, a.z - RAKETE.z)).toBeLessThan(RAKETE.r + RAKETE.axis + 1.5);
-    // Fahren an der Wand = fahren auf flachem Band.
+    // Fahren an der Wand: mindestens so gut wie auf flachem Band.
     const drive = (): KartState => {
       const s = gridState(0);
       placeAt(s, t.prev[t.prev[seg]], 1.5, 20);
@@ -396,8 +396,9 @@ describe('Startrampe', () => {
     t.roll = new Float32Array(t.total);
     const flat = drive();
     t.roll = keep;
-    expect(onWall.x).toBeCloseTo(flat.x, 9);
-    expect(onWall.z).toBeCloseTo(flat.z, 9);
-    expect(onWall.heading).toBeCloseTo(flat.heading, 9);
+    // Halt und Tempo mindestens wie flach: nichts sackt ab, nichts rutscht. (Die Bahn ist nicht dieselbe: Den Teil der
+    // Kurve, den man an der Wand nicht sieht, fährt das Band mit – siehe wandfahrt.test.ts.)
+    expect(Math.hypot(onWall.vx, onWall.vz)).toBeGreaterThan(Math.hypot(flat.vx, flat.vz) - 0.5);
+    expect(onWall.flags & 8).toBe(0);
   });
 });
