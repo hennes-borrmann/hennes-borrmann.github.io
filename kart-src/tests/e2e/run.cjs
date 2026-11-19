@@ -2178,8 +2178,8 @@ async function main() {
     await c7.page.waitForSelector('#app[data-view="lobby"]', { timeout: 15000 });
 
     // Neonhochbahn: Auf dem Schwebeband schweben die Karts; es dreht sich senkrecht an eine Fassade, zwei Magnetlinien wandern
-    // darüber – nach der Rennzeit, auf beiden Bildschirmen gleich. Berühren sich zwei schwebende Karts, stoßen sie sich ab,
-    // und beide bekommen Schub. Die U-Bahn hält nach Fahrplan im Bahnhof; das Tor zur Abkürzung über ihr Dach folgt ihm.
+    // darüber – nach der Rennzeit, auf beiden Bildschirmen gleich. Die U-Bahn hält nach Fahrplan im Bahnhof; das Tor zur
+    // Abkürzung über ihr Dach folgt ihm.
     await pickTrack(h7.page, 19);
     await c7.page.waitForFunction(() => window.__kart.lobby().track === 19, null, { timeout: 5000 });
     await clickReady(c7.page);
@@ -2192,32 +2192,9 @@ async function main() {
     const [nH2, nC2] = await Promise.all([kart(h7.page, 'band(5, 440)'), kart(c7.page, 'band(5, 440)')]);
     check(
       'Neonhochbahn hat ein Schwebeband, das sich senkrecht an die Fassade dreht, und zwei wandernde Magnetlinien – auf beiden Bildschirmen gleich',
-      nH0.bands.length === 1 && nH0.hover && Math.abs(nH0.roll) < 1 && nH2.roll > 85 && nH0.lines.length === 2 && lineState(nH0) === lineState(nC0) && lineState(nH1) === lineState(nC1) && lineState(nH0) !== lineState(nH1) && nH2.roll === nC2.roll && nH0.bumpers >= 2,
+      nH0.bands.length === 1 && nH0.hover && Math.abs(nH0.roll) < 1 && nH2.roll > 85 && nH0.lines.length === 2 && lineState(nH0) === lineState(nC0) && lineState(nH1) === lineState(nC1) && lineState(nH0) !== lineState(nH1) && nH2.roll === nC2.roll && nH0.bumpers === 0,
       `Band ${nH0.bands.map((b) => `${b.at.toFixed(0)}–${(b.at + b.length).toFixed(0)} m`).join(', ')} · Verdrehung bei 440 m ${nH2.roll.toFixed(0)}° · Linien bei 2 s ${lineState(nH0)} / ${lineState(nC0)}, bei 3,5 s ${lineState(nH1)} / ${lineState(nC1)}`,
     );
-    // Abstoßen: Anna (Host) und Ben (Mitspieler) nebeneinander auf dem Band, eine Handbreit Überlappung – beide bekommen Schub.
-    const repel = await h7.page.evaluate(async () => {
-      const k = window.__kart;
-      k.place(0, 180, -0.7);
-      k.place(1, 180, 0.7);
-      for (let n = 0; n < 40; n++) {
-        await new Promise((r) => setTimeout(r, 16));
-        const a = k.authoritative(0);
-        const b = k.authoritative(1);
-        if (a.boost > 0 && b.boost > 0) return { a: a.boost, b: b.boost, apart: Math.hypot(a.x - b.x, a.z - b.z) };
-      }
-      const a = k.authoritative(0);
-      const b = k.authoritative(1);
-      return { a: a.boost, b: b.boost, apart: Math.hypot(a.x - b.x, a.z - b.z) };
-    });
-    // (Ben sieht seinen Schub auch selbst: Die Vorhersage seines Bildschirms übernimmt den Stand des Hosts.)
-    let benBoost = 0;
-    for (const until = Date.now() + 1500; Date.now() < until && benBoost === 0; ) {
-      const p = await kart(c7.page, 'predicted()');
-      benBoost = p ? p.boost : 0;
-      if (benBoost === 0) await sleep(30);
-    }
-    check('Schwebeband: Anna und Ben stoßen sich ab, und beide bekommen Schub – auch auf Bens Bildschirm', repel.a > 0 && repel.b > 0 && repel.apart >= 1.9 && benBoost > 0, `Schub ${repel.a} / ${repel.b} Ticks, ${repel.apart.toFixed(2)} m auseinander, bei Ben ${benBoost}`);
     // U-Bahn: Solange das Tor offen ist, steht ein Zug im Bahnhof oder rollt gerade die letzten Meter heran (das Tor geht
     // so viel früher auf, wie man von der Einfahrt bis zum Graben braucht) – auf beiden Bildschirmen gleich.
     let gateOk = true;

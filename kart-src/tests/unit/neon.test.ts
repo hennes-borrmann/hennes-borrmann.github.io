@@ -31,7 +31,8 @@ import {
   twistWarp,
 } from '../../src/game/track';
 import { AI_EASY, AI_HARD, botCmd, newBrain } from '../../src/game/ai';
-import { EV_FALL, FLAG_AIR, bandRepel, gridState, onBandLine, stepKart, type Cmd, type KartState } from '../../src/game/sim';
+import { EV_FALL, FLAG_AIR, gridState, onBandLine, stepKart, type Cmd, type KartState } from '../../src/game/sim';
+import { SURFACES } from '../../src/game/surface';
 import { withoutMechanics } from './helpers';
 
 const NEON = TRACK_DEFS.findIndex((d) => d.id === 'neon');
@@ -166,7 +167,8 @@ describe('Neonhochbahn', () => {
     };
     const on = run(true);
     const off = run(false);
-    expect(on).toBeGreaterThan(off * 1.05);
+    // (nur ein leichter Schub)
+    expect(on).toBeGreaterThan(off * 1.02);
     // Die Linien sind Spiegelbilder, wandern mit der Zeit voran und hängen nur von Stelle und Rennzeit ab.
     expect(bandLineLat(5.6, 30, 600, 0)).toBeCloseTo(-bandLineLat(5.6, 30, 600, 1), 12);
     expect(bandLineLat(5.6, 30 + 11, 600 + 60, 0)).toBeCloseTo(bandLineLat(5.6, 30, 600, 0), 9);
@@ -198,50 +200,12 @@ describe('Neonhochbahn', () => {
     expect(hard).toBeGreaterThan(easy + 0.1);
   });
 
-  it('Abstoßen: zwei schwebende Karts stoßen sich ab, und beide bekommen Schub', () => {
+  it('Schwebeband fährt sich wie Straße: kein Abstoßen, keine Prallpoller, Untergrund wie Asphalt', () => {
     setTrack(NEON);
-    const seg = t.bands[0].first + 40;
-    const a = gridState(0);
-    const b = gridState(1);
-    placeAt(a, seg, -0.8, 22);
-    placeAt(b, seg, 0.8, 24);
-    expect(bandRepel(t, a, b)).toBe(true);
-    expect(a.boost).toBeGreaterThan(20);
-    expect(b.boost).toBeGreaterThan(20);
-    // auseinander: a nach links, b nach rechts – und keiner hat Tempo in Fahrtrichtung verloren
-    const side = (s: KartState): number => s.vx * rightX(t, seg) + s.vz * rightZ(t, seg);
-    expect(side(a)).toBeLessThan(-1);
-    expect(side(b)).toBeGreaterThan(1);
-    const fwd = (s: KartState): number => s.vx * t.tx[seg] + s.vz * t.tz[seg];
-    expect(fwd(a)).toBeCloseTo(22, 6);
-    expect(fwd(b)).toBeCloseTo(24, 6);
-    // Auf der Straße gilt der gewöhnliche Rempler.
-    const c = gridState(2);
-    const d = gridState(3);
-    placeAt(c, 30, -0.8, 22);
-    placeAt(d, 30, 0.8, 24);
-    expect(bandRepel(t, c, d)).toBe(false);
-  });
-
-  it('Prallpoller: wer ihn streift, prallt ab und bekommt Schub', () => {
-    setTrack(NEON);
-    const p = t.bumpers[0];
-    const s = gridState(0);
-    // schräg auf den Poller zu
-    placeAt(s, p.seg - 14, p.lat * 0.5, 22);
-    const toward = Math.atan2(p.x - s.x, p.z - s.z);
-    s.heading = toward;
-    s.vx = Math.sin(toward) * 22;
-    s.vz = Math.cos(toward) * 22;
-    let boosted = false;
-    for (let tick = 0; tick < 60 && !boosted; tick++) {
-      stepKart(s, GAS, { canDrive: true, speedFactor: 1, time: tick });
-      if (s.boost > 20) boosted = true;
-    }
-    expect(boosted).toBe(true);
-    // danach vom Poller weg
-    const away = (s.x - p.x) * s.vx + (s.z - p.z) * s.vz;
-    expect(away).toBeGreaterThan(0);
+    expect(t.bumpers.length).toBe(0);
+    const band = SURFACES.find((x) => x.id === 'band')!;
+    const asphalt = SURFACES.find((x) => x.id === 'asphalt')!;
+    expect({ ...band, id: 'asphalt', name: '' }).toEqual({ ...asphalt, name: '' });
   });
 
   it('Zugdach: ohne Zug ein Graben – mit haltendem Zug deutlich schneller als außen herum', () => {
