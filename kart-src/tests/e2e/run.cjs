@@ -1073,6 +1073,9 @@ async function main() {
         if (anna) g.other = Math.max(g.other, anna.glue);
       }, 16);
     };
+    // (Die beiden KI-Karts weit zurück – sonst fährt womöglich eine zwischen Anna und Ben, und der Kleber trifft zu Recht sie.)
+    await kart(h6.page, 'place(2, 40, -2)');
+    await kart(h6.page, 'place(3, 60, 2)');
     await kart(h6.page, 'place(0, 330, 0)');
     await kart(h6.page, 'place(1, 318, 0)');
     await sleep(400);
