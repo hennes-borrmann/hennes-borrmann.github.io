@@ -790,6 +790,21 @@ async function main() {
     await clickStart(h5.page);
     await c5.page.waitForSelector('#app[data-view="game"]', { timeout: 25000 });
     const t0 = Date.now();
+    // Cockpit-Ansicht beim Mitspieler: umschalten – es wird weiter gezeichnet (das eigene Kart im zweiten Durchgang),
+    // das Menü bietet den Rückweg an, die Wahl bleibt gespeichert.
+    await c5.page.waitForFunction(() => window.__kart.race().phase === 1, null, { timeout: 60000 });
+    const tpStats = await kart(c5.page, 'scene()');
+    await c5.page.evaluate(() => window.__kart.setView('first'));
+    await sleep(1500);
+    const fpStats = await kart(c5.page, 'scene()');
+    const fpLabel = await c5.page.textContent('#btn-view');
+    const fpSaved = await c5.page.evaluate(() => localStorage.getItem('kart.view'));
+    check(
+      'Cockpit-Ansicht: umgeschaltet, gezeichnet, Menü bietet „Verfolger“ an, Wahl gespeichert',
+      fpLabel === 'Ansicht: Verfolger' && fpSaved === 'first' && fpStats.calls > 0 && fpStats.fps > 0,
+      `${tpStats.calls} → ${fpStats.calls} Zeichenaufrufe`,
+    );
+    await c5.page.evaluate(() => window.__kart.setView('third'));
     await h5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 120000 });
     await c5.page.waitForFunction(() => window.__kart.race().phase === 2, null, { timeout: 5000 });
     const [stH, stC] = await Promise.all([kart(h5.page, 'standings()'), kart(c5.page, 'standings()')]);
@@ -888,7 +903,15 @@ async function main() {
     check('„Handy koppeln“ zeigt QR-Code, Stand und Anleitung', (await h6.page.textContent('#modal-title')) === 'Handy koppeln' && (await h6.page.locator('#modal .qr svg').count()) === 1 && /Kein Handy verbunden/.test(await h6.page.textContent('#pair-status')) && (await h6.page.locator('#modal .steps li').count()) === 3);
     await h6.page.click('#modal-actions button');
     await h6.page.click('#btn-tools');
-    check('Zahnrad öffnet Einstellungen und Diagnose', (await h6.page.isVisible('#lobby-tools')) && (await h6.page.locator('#tools-settings .seg button').count()) === 4 && (await h6.page.locator('#debug-slot #debug').count()) === 1);
+    // (Zwei Gruppen: Ansicht – Verfolger, Cockpit – und Grafik mit vier Stufen.)
+    check(
+      'Zahnrad öffnet Einstellungen und Diagnose',
+      (await h6.page.isVisible('#lobby-tools')) &&
+        (await h6.page.locator('#tools-settings .seg').count()) === 2 &&
+        (await h6.page.locator('#tools-settings .seg button').count()) === 6 &&
+        (await h6.page.locator('#tools-settings .seg button', { hasText: 'Cockpit' }).count()) === 1 &&
+        (await h6.page.locator('#debug-slot #debug').count()) === 1,
+    );
     await h6.page.click('#btn-tools-close');
     check('… und schließt wieder', await h6.page.isHidden('#lobby-tools'));
     await shot(h6.page, 'lobby-phase3.png');

@@ -83,6 +83,49 @@ export interface KartPose {
   plant?: number;
 }
 
+/** Cockpit-Ansicht: so weit rückt das Lenkrad höher und zur Figur (Meter) und so viel steiler steht es (rad). */
+export const COCKPIT_STEER: [number, number, number] = [0.2, -0.12, -0.42];
+/** Cockpit-Ansicht: Grundhaltung mit Item (raus, hoch, vor – wie HOLD): vor der rechten Schulter, über dem Lenkrad. */
+export const COCKPIT_HOLD: [number, number, number] = [0.08, 0.12, 0.36];
+/** Cockpit-Ansicht: Hand-Ziel der Arme gegenüber dem Griff am Kranz – nach außen, zur Figur hin (Meter). */
+export const COCKPIT_WRIST: [number, number] = [0.03, 0.07];
+/** Cockpit-Ansicht: Richtung, in die die Ellbogen knicken (außen, oben, vorn – wie in solveArm). */
+export const COCKPIT_ELBOW: [number, number, number] = [0.5, -0.75, -0.35];
+
+/** Was die Cockpit-Ansicht (firstPerson.ts) vom eigenen Kart braucht. Knochen im Raum der Karosserie bzw. des Oberkörpers. */
+export interface CockpitRig {
+  root: THREE.Object3D;
+  chassis: THREE.Bone;
+  torso: THREE.Bone;
+  head: THREE.Bone;
+  steer: THREE.Bone;
+  handL: THREE.Bone;
+  handR: THREE.Bone;
+  steerR: number;
+  /** Mitte des Lenkrads (Raum der Karosserie). */
+  steerAt: readonly [number, number, number];
+  /** Radius der Kugelhand. */
+  hand: number;
+  hip: readonly [number, number, number];
+  torsoLen: number;
+  /** 0 … 1: rechte Hand weg vom Lenkrad (Item, Geste, Leine) / linke Hand weg (Trinken, Arme hoch, Schwimmen). */
+  holdR: number;
+  holdL: number;
+  /** Item in der Hand (Nummer wie in game/sim.ts), Geste läuft für dieses Item (0 = keine). */
+  held: number;
+  gesture: number;
+  /** Fortschritt Austrinken / Bohrer einstecken / Roboter (Sekunden) / Rakete (0 … 1). */
+  drink: number;
+  plant: number;
+  robot: number;
+  /** Wie weit das Kart gerade ein Roboter ist (0 … 1) und wie gold es ist (0 … 1). */
+  robotLook: number;
+  rocket: number;
+  gold: number;
+  /** Der Gegenstand in der Hand (sein Netz). */
+  prop: THREE.Object3D;
+}
+
 /** 0 niedrig (ohne Konturen, weniger Segmente), 1 mittel, 2 hoch. */
 export type KartDetail = 0 | 1 | 2;
 
@@ -4629,6 +4672,13 @@ export class KartVisual {
   };
   /** Roboter: zählt die Schritte (jeder aufgesetzte Fuß) – das Spiel lässt dort Staub aufwirbeln. */
   robotSteps = 0;
+  /**
+   * Cockpit-Ansicht des eigenen Karts: Kopf und Kugelhände sind ausgeblendet (die Kamera sitzt im Kopf, die
+   * Handschuhe zeichnet firstPerson.ts), Item-Gesten nehmen die Fassungen, die man aus dem Fahrersitz sieht.
+   */
+  firstPerson = false;
+  private fpWas = false;
+  private fpSteerK = 0;
   /** Roboter: wo der letzte Fuß aufgesetzt hat (Raum von root). */
   readonly robotFoot = new THREE.Vector3();
 
@@ -5554,6 +5604,45 @@ export class KartVisual {
     this.extra.visible = this.robWas || this.gunOut > 0.0005 || this.bones[B.glueHead].scale.x > 0;
     this.pickEyes(pose);
     this.placeAnchors();
+    if (this.firstPerson || this.fpWas) {
+      // (Auf fast null, nicht null: so bleiben die Matrizen umkehrbar.)
+      const s = this.firstPerson ? 1e-4 : 1;
+      this.bones[B.head].scale.setScalar(s);
+      this.bones[B.handL].scale.setScalar(s);
+      this.bones[B.handR].scale.setScalar(s);
+      this.fpWas = this.firstPerson;
+    }
+  }
+
+  /** Für die Cockpit-Ansicht (firstPerson.ts): die Knochen, an denen Kamera, Handschuhe und Armaturen hängen, und Maße. */
+  get cockpit(): CockpitRig {
+    const bn = this.bones;
+    const sp = this.spec;
+    return {
+      root: this.root,
+      chassis: bn[B.chassis],
+      torso: bn[B.torso],
+      head: bn[B.head],
+      steer: bn[B.steer],
+      handL: bn[B.handL],
+      handR: bn[B.handR],
+      steerR: sp.steerR,
+      steerAt: sp.steer,
+      hand: sp.hand,
+      hip: sp.hip,
+      torsoLen: sp.torsoLen,
+      holdR: this.holdW,
+      holdL: Math.max(this.drinkW, this.armsUp, this.swimS),
+      held: this.fHeld,
+      gesture: this.gT >= 0 ? this.gItem : 0,
+      drink: this.fDrink,
+      plant: this.fPlant,
+      robot: this.fRobot,
+      robotLook: this.robotLook,
+      rocket: this.fRocket,
+      gold: this.goldLook,
+      prop: this.prop,
+    };
   }
 
   /** Gold: ausbreiten, glänzen, blinken, zurückweichen – und ein goldenes Glimmen. */
@@ -6263,7 +6352,15 @@ export class KartVisual {
 
     // Lenkrad dreht mit, die Hände bleiben dran
     const st = bn[B.steer];
-    st.rotation.set(this.restRot[B.steer * 3], 0, -steer * 1.15 + driftS * 0.35);
+    // Cockpit-Ansicht: Das Lenkrad rückt höher und näher zur Figur und steht steiler – aus dem Kopf der großen
+    // Comic-Figuren läge es sonst unter dem Bildrand. (Die Arme folgen über solveArm.)
+    const fpk = (this.fpSteerK = damp(this.fpSteerK, this.firstPerson ? 1 : 0, 12, dt));
+    st.position.set(
+      this.restPos[B.steer * 3],
+      this.restPos[B.steer * 3 + 1] + COCKPIT_STEER[0] * fpk,
+      this.restPos[B.steer * 3 + 2] + COCKPIT_STEER[1] * fpk,
+    );
+    st.rotation.set(this.restRot[B.steer * 3] + COCKPIT_STEER[2] * fpk, 0, -steer * 1.15 + driftS * 0.35);
     st.updateMatrix();
     // Rechte Hand: Item halten, Geste, Leine – Ziel relativ zur Schulter, mitgedreht mit dem Oberkörper.
     // Seitlich nicht mit der Armlänge skaliert: auch zierliche Figuren halten den Gegenstand neben den Kopf.
@@ -6610,6 +6707,18 @@ export class KartVisual {
     this.plantW = damp(this.plantW, pp > 0 ? 1 : 0, pp > 0 ? 18 : 14, dt);
     this.drinkW = damp(this.drinkW, dp > 0 && dp < DRINK_THROW - 0.04 ? 1 : 0, dp > 0 ? 22 : 12, dt);
     if (dp <= 0) this.drinkThrown = false;
+    // Cockpit-Ansicht: Neben dem Kopf sähe man das Item nicht. Dort hält die Figur es vor der rechten Schulter über dem
+    // Lenkrad, und jede Geste läuft in diesem Raum: Würfe gehen von dort nach vorn ins Bild, Würfe nach hinten über die
+    // Schulter aus dem Bild hinaus. Oberkörper und Kopf bewegen sich dabei weniger mit – die Kamera sitzt im Kopf.
+    if (this.firstPerson && dp <= 0 && pp <= 0) {
+      out = COCKPIT_HOLD[0] + (out - HOLD[0]) * 0.5;
+      up = COCKPIT_HOLD[1] + (up - HOLD[1]) * 0.55;
+      fwd = COCKPIT_HOLD[2] + (fwd - HOLD[2]) * 0.7;
+      tx *= 0.5;
+      ty *= 0.5;
+      tz *= 0.5;
+      hx *= 0.4;
+    }
     this.hOut = damp(this.hOut, out, rate, dt);
     this.hUp = damp(this.hUp, up, rate, dt);
     this.hFwd = damp(this.hFwd, fwd, rate, dt);
@@ -6757,7 +6866,8 @@ export class KartVisual {
     if (item === I_GOLD && this.gFly >= 0) rx -= this.drinkTilt;
     _iq.setFromEuler(_ie.set(rx, this.propSpin, rz, 'XZY'));
     prop.quaternion.multiplyQuaternions(bn[B.torso].quaternion, _iq);
-    let s = Math.max(this.propS, 0) * mul;
+    // (Aus dem Cockpit ist der Gegenstand ganz nah vor der Kamera: dort kleiner – im Flug wächst er zurück.)
+    let s = Math.max(this.propS, 0) * mul * (this.firstPerson ? (this.gFly >= 0 ? 0.62 + 0.38 * Math.min(1, this.gFly * 4) : 0.62) : 1);
     if (item === I_GOLD && (this.drinkW > 0.001 || this.gFly >= 0)) {
       // Beim Trinken: in beiden Händen, Hals zum Mund geneigt (Übergang aus der Hand weich, so schnell wie die Hände).
       const w = this.gFly >= 0 ? 1 : this.drinkW;
@@ -7062,7 +7172,10 @@ export class KartVisual {
     // Schulter im Raum der Karosserie
     _sh.set(side * sp.shoulder[0], sp.shoulder[1], sp.shoulder[2]).applyMatrix4(torso.matrix);
     // Ziel: Griff am Lenkrad …
-    _hd.set(side * sp.steerR * 0.82, -sp.steerR * 0.5, 0.03).applyMatrix4(bn[B.steer].matrix);
+    // (In der Cockpit-Ansicht endet der Unterarm am Handgelenk des Handschuhs – etwas außen und zur Figur hin –, die Faust
+    // um den Kranz zeichnet cockpitKit.ts.)
+    const wk = 1 + (this.fpSteerK * COCKPIT_WRIST[0]) / sp.steerR;
+    _hd.set(side * sp.steerR * 0.82 * wk, -sp.steerR * 0.5 * wk, 0.03 + this.fpSteerK * COCKPIT_WRIST[1]).applyMatrix4(bn[B.steer].matrix);
     // … oder hochgerissen (Luft, Jubel) – beim Jubeln winkend
     const up = this.armsUp;
     if (up > 0.001) {
@@ -7104,8 +7217,10 @@ export class KartVisual {
     const l2 = sp.fore * k;
     const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
     const h = Math.sqrt(Math.max(l1 * l1 - a * a, 0));
-    // Ellbogen knickt nach außen-unten
-    _w.set(side * 0.8, -0.55, -0.25);
+    // Ellbogen knickt nach außen-unten – in der Cockpit-Ansicht nach unten: Dann kommen die Unterarme von unten an den
+    // Kranz, und die Hände greifen ihn von außen (mit weit abgespreizten Ellbogen griffen sie aus dem Sitz gesehen von innen).
+    const fpk = this.fpSteerK;
+    _w.set(side * (0.8 + (COCKPIT_ELBOW[0] - 0.8) * fpk), -0.55 + (COCKPIT_ELBOW[1] + 0.55) * fpk, -0.25 + (COCKPIT_ELBOW[2] + 0.25) * fpk);
     _w.addScaledVector(_u, -_w.dot(_u));
     if (_w.lengthSq() < 1e-8) _w.set(side, 0, 0);
     _w.normalize();
@@ -7121,7 +7236,9 @@ export class KartVisual {
       _t.multiplyScalar(1 / len);
     }
     upper.quaternion.setFromUnitVectors(Y_AXIS, _t);
-    upper.scale.set(1, len / sp.upper, 1);
+    // (Aus dem Cockpit sind die Arme ganz nah vor der Kamera: dort etwas schlanker.)
+    const thin = 1 - 0.22 * fpk;
+    upper.scale.set(thin, len / sp.upper, thin);
 
     fore.position.copy(_el);
     _t.subVectors(_hd, _el);
@@ -7133,7 +7250,7 @@ export class KartVisual {
       _t.multiplyScalar(1 / len);
     }
     fore.quaternion.setFromUnitVectors(Y_AXIS, _t);
-    fore.scale.set(1, len / sp.fore, 1);
+    fore.scale.set(thin, len / sp.fore, thin);
     hand.position.copy(_hd);
     hand.quaternion.copy(fore.quaternion);
   }

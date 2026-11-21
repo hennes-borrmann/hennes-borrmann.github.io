@@ -94,6 +94,7 @@ import { PLAYER_COLORS } from '../util/players';
 import { BlobShadows, Bolts, ComicPops, LightPools, Particles, SkidMarks, SpeedLines } from './effects';
 import type { FxSink } from './fxApi';
 import { KartVisual, type KartDetail, type KartPose } from './kartModel';
+import { Cockpit, COCKPIT_LAYER } from './firstPerson';
 import { GlueShots } from './glueShots';
 import { ThingVisuals } from './things';
 import { setOutlinesVisible } from './toon';
@@ -619,8 +620,17 @@ const ROCKET_Q = new THREE.Quaternion();
 /** So viel weiter als in der Rechnung gilt ein Schubring für die Anzeige als durchflogen (das Bild läuft dem Treffer leicht nach). */
 const RING_SEEN = 2.5;
 
+/** Ansicht des eigenen Karts: von hinten (Verfolger) oder aus dem Cockpit. */
+export type ViewMode = 'third' | 'first';
+
 export class RaceScene {
   cameraMode: 'chase' | 'top' = 'chase';
+  /** Verfolger oder Cockpit (Einstellung je Bildschirm, siehe app.ts). */
+  view: ViewMode = 'third';
+  /** Cockpit-Ansicht: Kamera im Kopf, zweiter Durchgang fürs eigene Kart (firstPerson.ts). */
+  private readonly cockpit = new Cockpit();
+  /** Im letzten Bild aus dem Cockpit gesehen (beim Wechsel setzt die Verfolgerkamera neu an). */
+  private fpWas = false;
   /** Fotokamera: fester Standort, Blickpunkt und Bildwinkel – null = normale Kamera. */
   photo: { from: number[]; to: number[]; fov: number } | null = null;
   /** Wie tief das eigene Kart in einer Rauchwolke steckt (0..1) – die Oberfläche legt einen Schleier darüber. */
@@ -760,6 +770,7 @@ export class RaceScene {
   private readonly color = new THREE.Color();
   private readonly v1 = new THREE.Vector3();
   private readonly v2 = new THREE.Vector3();
+  private readonly v3 = new THREE.Vector3();
   private readonly q1 = new THREE.Quaternion();
   private readonly e1 = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly flat = new THREE.Quaternion();
@@ -880,6 +891,9 @@ export class RaceScene {
     this.stagedPending = true;
     this.scene.fog = this.world.fog;
     this.scene.background = this.world.background;
+    // Das eigene Kart liegt in der Cockpit-Ansicht auf einer eigenen Ebene – Sonne und Himmelslicht müssen es dort beleuchten.
+    this.world.sun.layers.enable(COCKPIT_LAYER);
+    this.world.hemi.layers.enable(COCKPIT_LAYER);
     this.camReady = false;
     this.needsCompile = true;
     this.pops.prewarm(this.renderer, [
@@ -2422,6 +2436,7 @@ export class RaceScene {
       this.hitstop -= dt;
       this.applyShake(dt);
       this.renderer.render(this.scene, this.camera);
+      this.cockpit.render(this.renderer, this.scene, this.camera);
       return;
     }
     this.time += dt;
@@ -2445,11 +2460,15 @@ export class RaceScene {
     this.lights.begin();
     let me: RenderEntity | null = null;
     let meView: KartView | null = null;
+    // Cockpit-Ansicht: nur im Rennen, nicht in der Übersicht, nicht für die Fotokamera; nach dem Ziel wieder von außen
+    // (dann sieht man die eigene Figur jubeln).
+    const fpWanted = this.view === 'first' && this.cameraMode === 'chase' && !this.photo && race.phase !== RACE_RESULTS;
 
     for (const e of entities) {
       const local = e.slot === localSlot;
       const k = this.kartView(e.slot, e.char);
       k.seen = true;
+      k.visual.firstPerson = local && fpWanted && !e.finished;
       // Spiegelkabinett: Wer durch ein Portal fährt, steht im selben Augenblick woanders. Das ist kein Fahren, sondern
       // ein Schnitt – nichts wird dorthin geglättet, keine Bremsspur quer durch die Halle, die eigene Kamera springt mit.
       if (t.portals.length > 0) {
@@ -2603,7 +2622,8 @@ export class RaceScene {
       root.scale.set((1 + 0.22 * k.flatK) * k.sizeK, (1 - 0.7 * k.flatK) * k.sizeK, (1 + 0.12 * k.flatK) * k.sizeK);
       // Nach einem Treffer blinkt das Kart, solange es unverwundbar ist – nur nicht, solange es platt ist:
       // die Flunder soll man sehen.
-      root.visible = !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
+      // (Aus dem Cockpit blinkt nichts: Das eigene Kart füllt dort das halbe Bild.)
+      root.visible = k.visual.firstPerson || !(e.shield > 0 && e.spin === 0 && e.respawn === 0 && e.flat === 0 && Math.floor(this.time * 14) % 2 === 0);
       // Roboter und Klebepistole: Zeit seit dem Auslösen (weich – fremde Karts melden sie nur stoßweise); die Pistole zielt
       // auf das gezeigte Ziel (im Raum dieses Karts). Kleckse auf Gesicht und Haube, solange der Kleber klebt.
       k.robotT = followTicks(k.robotT, e.robot, dt);
@@ -2729,6 +2749,24 @@ export class RaceScene {
     this.sparks.update(dt);
     this.pops.update(dt);
 
+    this.cockpit.active = !!meView && meView.visual.firstPerson;
+    this.cockpit.setKart(this.cockpit.active && meView ? meView.visual : null, parseInt(PLAYER_COLORS[localSlot % PLAYER_COLORS.length].slice(1), 16));
+    if (this.cockpit.active && me && meView) {
+      this.cockpit.mirrorEvery = this.level === 0 ? 0 : this.level === 1 ? 4 : 3;
+      this.cockpit.update(
+        {
+          speed: Math.hypot(me.vx, me.vz),
+          speed01: Math.hypot(me.vx, me.vz) / V_MAX,
+          driftDir: me.driftDir,
+          stage: meView.driftStage,
+          boost: me.boost > 0,
+          itemReady: me.item !== 0 && me.roulette === 0,
+        },
+        dt,
+      );
+    }
+    if (this.fpWas && !this.cockpit.active) this.camReady = false;
+    this.fpWas = this.cockpit.active;
     this.updateCamera(me, meView, race, dt);
     // Tempostriche: voll bei Schub, sonst bei hohem Tempo – und im Windschatten wachsen sie mit der Ladung.
     const wake = me ? (me.draft >= DRAFT_PULL_FROM ? 0.8 : (me.draft / DRAFT_FULL) * 0.5) : 0;
@@ -2754,6 +2792,11 @@ export class RaceScene {
     this.renderer.render(this.scene, this.camera);
     this.stats.calls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
+    if (this.cockpit.active) {
+      this.stats.calls += this.cockpit.renderMirror(this.renderer, this.scene);
+      this.stats.calls += this.cockpit.render(this.renderer, this.scene, this.camera);
+      this.stats.triangles += this.renderer.info.render.triangles;
+    }
     this.gfx.frames++;
 
   }
@@ -2945,6 +2988,29 @@ export class RaceScene {
           );
         }
       }
+      // Aus dem Cockpit sieht man die Hinterräder nicht: Dort sprühen auch an der Außenseite des Vorderrads Funken
+      // seitlich nach vorn ins Bild.
+      if (k.visual.firstPerson && Math.random() < n * 0.8) {
+        const outer = e.driftDir > 0 ? A.wheelFrontL : A.wheelFrontR;
+        const f = this.v3.copy(outer).applyMatrix4(root.matrixWorld);
+        const side = e.driftDir > 0 ? 1 : -1;
+        const sx = Math.cos(e.heading) * side;
+        const sz = -Math.sin(e.heading) * side;
+        this.sparks.emit(
+          f.x,
+          f.y + 0.05,
+          f.z,
+          e.vx * 0.55 + sx * (2 + Math.random() * 3),
+          1.2 + Math.random() * 2.5,
+          e.vz * 0.55 + sz * (2 + Math.random() * 3),
+          0.16 + Math.random() * 0.14,
+          0.22 + stage * 0.06,
+          this.color,
+          -0.5,
+          12,
+          1,
+        );
+      }
       if (lv.skid && k.hasTrail && dust === 0) {
         this.skids.add(k.rl.x, k.rl.y, k.rl.z, rl.x, rl.y, rl.z, 0.3);
         this.skids.add(k.rr.x, k.rr.y, k.rr.z, rr.x, rr.y, rr.z, 0.3);
@@ -3038,6 +3104,22 @@ export class RaceScene {
       cam.fov = 55;
       cam.updateProjectionMatrix();
       this.camReady = false;
+      return;
+    }
+    if (this.cockpit.active) {
+      const seg = me.seg < t.total ? me.seg : 0;
+      const wall = me.respawn === 0 && (t.edge[seg] & (EDGE_TWIST | EDGE_DRUM)) !== 0;
+      this.cockpit.place(cam, k.visual.cockpit, k.char, Math.hypot(me.vx, me.vz) / V_MAX, me.boost > 0 || me.tow > 0, dt, {
+        drift: (me.flags & FLAG_AIR) !== 0 ? 0 : me.driftDir,
+        stage: k.driftStage,
+        loose: (me.flags & FLAG_AIR) === 0 && DUST[t.surf[seg]] !== 0,
+        offroad: (me.flags & (FLAG_OFFROAD | FLAG_AIR)) === FLAG_OFFROAD,
+        level: wall || me.spin > 0 ? 0 : 0.5,
+      });
+      if (me.rocket > 0 && race.phase !== RACE_RESULTS) {
+        this.cockpit.placeRocket(cam, k.visual.cockpit, Math.min(1, me.rocket / ROCKET_MORPH_TICKS), me.rocket > ROCKET_MORPH_TICKS, dt);
+      }
+      this.applyShake(dt);
       return;
     }
     if (me.rocket > 0 && !me.finished && race.phase !== RACE_RESULTS) {

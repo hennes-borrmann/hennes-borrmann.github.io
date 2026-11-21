@@ -1,14 +1,16 @@
 # Stand Claude
 
-Zuletzt aktualisiert: 2026-11-21 15:40 UTC · geschrieben nur von Claude
+Zuletzt aktualisiert: 2026-11-21 17:10 UTC · geschrieben nur von Claude
 
 ## Woran gerade gearbeitet wird
 
 | Wer | Aufgabe | Bereich (für Codex gesperrt) |
 | --- | --- | --- |
-| Claude | Auftrag vom 2026-11-21: Ansicht aus der ersten Person (Cockpit, Hände, Rückspiegel, Item-Animationen) – in Arbeit. | `kart-src/src/render/` (Kamera, Cockpit) |
+| Claude | Auftrag vom 2026-11-21 (KI-Stärken, Cockpit-Ansicht) – abgeschlossen und veröffentlicht. | – |
 
 ## Veröffentlicht
+
+- Schritt 28 (2026-11-21, Version 261121-1628, Protokoll 29): Cockpit-Ansicht, je Bildschirm wählbar (Einstellungen, Rennmenü, Taste V). Kamera im Kopf der Figur (Kopf und Kugelhände ausgeblendet), eigenes Kart in einem zweiten Durchgang mit naher Nahgrenze. Nur in dieser Ansicht: Handschuhe mit 17 Knochen (Faust außen um den Kranz, Stulpe folgt dem Unterarm), Lenkrad-Aufsatz, Armaturen (Tacho, Drift-Lampen, Item-Lampe), Rückspiegel (Renderziel 256 × 80, jedes 3./4. Bild, bei Niedrig aus). Lenkrad rückt höher/näher, Ellbogen nach unten, Arme schlanker (kartModel.ts COCKPIT_*). Fahrgefühl: Kopfbewegung gedämpft, Rütteln je Untergrund und Drift-Stufe, Turbo-Stoß, halber Horizontausgleich, Funken am Vorderrad. Items vor der rechten Schulter, Gesten umgerechnet (COCKPIT_HOLD), Gegenstand kleiner; Gold färbt Handschuhe/Lenkrad/Armaturen; Blick zum Bohrer; Roboter- und Raketenkamera. Gemessen (Chromium ohne Grafikkarte, Werkshof, Hoch): 73 Aufrufe von hinten, 83–92 aus dem Cockpit, ~130 mit neuem Spiegelbild. Geprüft: 791 Unit-Tests; Browser-Test race (neue Prüfung Cockpit-Ansicht) und phase3 81/81 (ein Lauf vorher unter Last: Roboter-Prüfung zweimal gescheitert, im Wiederholungslauf bestanden); Screenshots aller vier Figuren, aller Items und Sonderabläufe. Nicht geprüft: Safari/iPad, Bildrate auf Geräten, Spielgefühl mit Menschen. Offen: Taucherbrille/Helmrand im Bild.
 
 - Schritt 27 (2026-11-21, Version 261121-1533, Protokoll 29): fünf KI-Stärken statt drei (Rückmeldung: „Schwer“ ist zu leicht zu schlagen). Neu „Sehr leicht“ (Grundtempo −0,17, vorsichtiger in Kurven, Anlauf vor Sprüngen) und „Profi“ (Tempo 1, Ideallinie, Bremspunkt-Rechnung, Boost-Felder und Kisten gezielt, längere Drifts, bevorzugter Weg je Strecke `PRO_ROUTE`, Abwehr-Items in Führung, kein Gummiband nach vorn). Alte Stufen unverändert (Messläufe aufs Zehntel gleich); gespeicherte Lobby-Stärke wird umgerechnet. Gemessen allein, 3 Runden, 25 Strecken: 5488 / 5008 / 4496 / 4224 / 3995 s; in 100 Host-Rennen gewinnt eine KI wie „Schwer“ mit vollem Tempo gegen 3× Schwer 59-mal, gegen 3× Profi 7-mal. Geprüft: 791 Unit-Tests (neu `kistufen.test.ts`); Browser-Test Abschnitte phase3, race, cup 107/108 (Bohrer-Momentaufnahme; Wiederholung phase3 81/81). Nicht geprüft: Safari/iPad, Spielgefühl mit Menschen.
 

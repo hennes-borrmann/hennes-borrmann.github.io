@@ -113,6 +113,8 @@ export interface RaceHudModel {
 
 export interface SettingsModel {
   quality: 'auto' | 'low' | 'medium' | 'high';
+  /** Ansicht im Rennen: von hinten oder aus dem Cockpit. */
+  view: 'third' | 'first';
   music: number;
   sfx: number;
   muted: boolean;
@@ -281,6 +283,9 @@ export interface UiHandlers {
   setVolumes(music: number, sfx: number): void;
   setMuted(muted: boolean): void;
   setShowFps(show: boolean): void;
+  /** Ansicht im Rennen wählen bzw. umschalten (Verfolger ↔ Cockpit). */
+  setView(view: 'third' | 'first'): void;
+  toggleView(): void;
   /** Aktueller Stand der Einstellungen (für den Dialog). */
   settings(): SettingsModel;
   /** Ein Knopf wurde gedrückt (für den Klick-Ton). */
@@ -461,11 +466,14 @@ export class ScreenUi {
     menuAction('btn-menu-close', () => undefined);
     menuAction('btn-settings-game', () => this.showSettings());
     menuAction('btn-pair', () => on.showPairing());
+    menuAction('btn-view', () => on.toggleView());
     menuAction('btn-camera', () => on.toggleCamera());
     menuAction('btn-debug', () => on.toggleDebug());
     menuAction('btn-back', () => on.backToLobby());
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape' && this.view === 'game') menu.hidden = !menu.hidden;
+      // V: Ansicht umschalten (Verfolger ↔ Cockpit) – nicht, solange ein Eingabefeld den Fokus hat.
+      if (e.code === 'KeyV' && this.view === 'game' && !(document.activeElement instanceof HTMLInputElement)) on.toggleView();
     });
 
     for (const btn of document.querySelectorAll<HTMLButtonElement>('#ai-level button')) {
@@ -900,6 +908,11 @@ export class ScreenUi {
 
   setCameraLabel(top: boolean): void {
     $('btn-camera').textContent = top ? 'Kamera: Verfolger' : 'Kamera: Übersicht';
+  }
+
+  /** Der Menüknopf nennt die andere Ansicht – die, zu der er umschaltet. */
+  setViewLabel(first: boolean): void {
+    $('btn-view').textContent = first ? 'Ansicht: Verfolger' : 'Ansicht: Cockpit';
   }
 
   setCountdown(text: string | null): void {
@@ -1482,9 +1495,29 @@ export class ScreenUi {
       box.addEventListener('change', () => set(box.checked));
       return h('label', { class: 'settings-check' }, box, h('span', { text }));
     };
+    const viewSeg = h('div', { class: 'seg', role: 'group' });
+    const views: [SettingsModel['view'], string][] = [
+      ['third', 'Verfolger'],
+      ['first', 'Cockpit'],
+    ];
+    for (const [value, label] of views) {
+      const b = h('button', { type: 'button', text: label });
+      b.setAttribute('aria-pressed', String(value === cur.view));
+      b.addEventListener('click', () => {
+        on.click('click');
+        on.setView(value);
+        for (const o of viewSeg.querySelectorAll('button')) o.setAttribute('aria-pressed', String(o === b));
+      });
+      viewSeg.append(b);
+    }
     return h(
       'div',
       { class: 'settings' },
+      h('div', { class: 'settings-row' }, h('span', { text: 'Ansicht' }), viewSeg),
+      h('p', {
+        class: 'settings-note',
+        text: '„Verfolger“ zeigt dein Kart von hinten, „Cockpit“ den Blick aus dem Fahrersitz mit Rückspiegel. Im Rennen auch über das Menü oder die Taste V.',
+      }),
       h('div', { class: 'settings-row' }, h('span', { text: 'Grafik' }), seg),
       h('p', {
         class: 'settings-note',
