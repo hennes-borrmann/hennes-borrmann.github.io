@@ -230,15 +230,15 @@ describe('Wüstenexpress', () => {
 
   it('die KI kommt mit den Zügen zurecht: die gute fährt über die Dächer, niemand wird überrollt', () => {
     const t = setTrack(WUESTE);
-    const roof = [0, 0, 0];
-    const hits = [0, 0, 0];
-    const walls = [0, 0, 0];
-    const time = [0, 0, 0];
+    const roof = [0, 0, 0, 0, 0];
+    const hits = [0, 0, 0, 0, 0];
+    const walls = [0, 0, 0, 0, 0];
+    const time = [0, 0, 0, 0, 0];
     let falls = 0;
     for (let slot = 0; slot < 4; slot++) {
       for (const level of [AI_EASY, AI_MEDIUM, AI_HARD]) {
         const s = gridState(slot);
-        const brain = newBrain(slot + level * 4, level);
+        const brain = newBrain(slot + (level - AI_EASY) * 4, level);
         let progress = progDelta(t, 0, s.seg);
         let tick = 1;
         for (; tick < 60 * 300 && progress < 3 * t.n; tick++) {
@@ -256,7 +256,7 @@ describe('Wüstenexpress', () => {
       }
     }
     console.log(
-      `Wüstenexpress, KI in je 12 Runden: Sekunden auf dem Dach leicht/mittel/schwer ${roof.map((x) => (x / 60).toFixed(0)).join('/')}, Treffer ${hits.join('/')}, Bandenstöße ${walls.join('/')}, Stürze ${falls}; Rundenzeit ${time.map((x) => (x / 4).toFixed(1)).join(' / ')} s`,
+      `Wüstenexpress, KI in je 12 Runden: Sekunden auf dem Dach leicht/mittel/schwer ${roof.slice(AI_EASY, AI_HARD + 1).map((x) => (x / 60).toFixed(0)).join('/')}, Treffer ${hits.slice(AI_EASY, AI_HARD + 1).join('/')}, Bandenstöße ${walls.slice(AI_EASY, AI_HARD + 1).join('/')}, Stürze ${falls}; Rundenzeit ${time.slice(AI_EASY, AI_HARD + 1).map((x) => (x / 4).toFixed(1)).join(' / ')} s`,
     );
     expect(falls).toBe(0);
     for (const n of hits) expect(n).toBeLessThanOrEqual(2);

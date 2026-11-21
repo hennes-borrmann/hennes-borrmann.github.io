@@ -138,12 +138,12 @@ describe('Magnettrommel', () => {
 
   it('die KI fährt durch die Trommel: alle schaffen drei Runden, die gute fällt kaum je durch eine Platte', () => {
     const t = setTrack(MAGNET);
-    const falls = [0, 0, 0];
-    const time = [0, 0, 0];
+    const falls = [0, 0, 0, 0, 0];
+    const time = [0, 0, 0, 0, 0];
     for (let slot = 0; slot < 4; slot++) {
       for (const level of [AI_EASY, AI_MEDIUM, AI_HARD]) {
         const s = gridState(slot);
-        const brain = newBrain(slot + level * 4, level);
+        const brain = newBrain(slot + (level - AI_EASY) * 4, level);
         let progress = progDelta(t, 0, s.seg);
         let tick = 1;
         for (; tick < 60 * 300 && progress < 3 * t.n; tick++) {
@@ -158,8 +158,8 @@ describe('Magnettrommel', () => {
         time[level] += tick / 60 / 3;
       }
     }
-    console.log(`Magnetwerk, KI in je 12 Runden: Stürze in der Trommel leicht/mittel/schwer ${falls.join('/')}; Rundenzeit ${time.map((x) => (x / 4).toFixed(1)).join('/')} s`);
-    expect(falls[2]).toBeLessThanOrEqual(2);
-    expect(falls[0]).toBeLessThanOrEqual(8);
+    console.log(`Magnetwerk, KI in je 12 Runden: Stürze in der Trommel leicht/mittel/schwer ${falls.slice(AI_EASY, AI_HARD + 1).join('/')}; Rundenzeit ${time.slice(AI_EASY, AI_HARD + 1).map((x) => (x / 4).toFixed(1)).join('/')} s`);
+    expect(falls[AI_HARD]).toBeLessThanOrEqual(2);
+    expect(falls[AI_EASY]).toBeLessThanOrEqual(8);
   }, 120000);
 });

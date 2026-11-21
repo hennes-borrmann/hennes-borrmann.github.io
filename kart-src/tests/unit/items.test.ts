@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { botCmd, newBrain } from '../../src/game/ai';
+import { AI_MEDIUM, botCmd, newBrain } from '../../src/game/ai';
 import { HostGame } from '../../src/game/hostGame';
 import {
   EV_FALL,
@@ -402,7 +402,7 @@ describe('Neue Items', () => {
     setTrack(2);
     const s = gridState(1);
     placeAt(s, 40, 0, 22);
-    const brain = newBrain(1, 1);
+    const brain = newBrain(1, AI_MEDIUM);
     s.item = ITEM_KITE;
     let towed = 0;
     let ev = 0;
@@ -618,7 +618,7 @@ describe('Neue Items', () => {
   it('KI zündet die Rakete bald nach dem Aufnehmen', () => {
     const s = gridState(1);
     placeAt(s, 40, 0, 22);
-    const brain = newBrain(1, 1);
+    const brain = newBrain(1, AI_MEDIUM);
     s.item = ITEM_ROCKET;
     let ev = 0;
     for (let tick = 1; tick <= 120; tick++) ev |= stepKart(s, botCmd(s, brain, [], true, { tick, time: tick, place: 4, smoke: false }), ENV);

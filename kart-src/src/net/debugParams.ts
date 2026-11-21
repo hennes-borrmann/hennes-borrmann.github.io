@@ -14,7 +14,7 @@
 //   ?aufbau=behutsam  das erste Bild Teil für Teil vorbereiten und festhalten, wobei die Grafik stirbt (gfxGuard.ts)
 //   ?auto=1       das eigene Kart fährt von selbst (zum Testen ohne Controller)
 //   ?track=2      Strecke vorwählen (0–3, gilt für den Host)
-//   ?ai=0         Stärke der KI vorwählen (0 leicht, 1 mittel, 2 schwer)
+//   ?ai=0         Stärke der KI vorwählen (0 sehr leicht, 1 leicht, 2 mittel, 3 schwer, 4 Profi)
 //   ?q=low        Grafikqualität: low, medium, high oder auto
 //   ?mute=1       ohne Ton starten
 //   ?grid=fest    Startaufstellung nach Platznummer statt gelost/gespiegelt (gilt für den Host)
@@ -71,7 +71,7 @@ export function readDebugParams(search: string = location.search): DebugParams {
     autopilot: p.get('auto') === '1',
     careful: p.get('aufbau') === 'behutsam',
     track: p.has('track') ? Math.max(0, Math.round(Number(p.get('track')) || 0)) : -1,
-    ai: p.has('ai') ? Math.max(0, Math.min(2, Math.round(Number(p.get('ai')) || 0))) : -1,
+    ai: p.has('ai') ? Math.max(0, Math.min(4, Math.round(Number(p.get('ai')) || 0))) : -1,
     quality: ['auto', 'low', 'medium', 'high'].includes(q ?? '') ? (q as 'auto' | 'low' | 'medium' | 'high') : null,
     mute: p.get('mute') === '1',
     fixedGrid: p.get('grid') === 'fest',

@@ -22,7 +22,7 @@ import {
   type SnapshotKart,
   type SnapshotThing,
 } from '../net/protocol';
-import { AI_MEDIUM, botCmd, newBrain, rubberBand, type BotBrain, type BotContext } from './ai';
+import { AI_MEDIUM, botCmd, botSpeed, newBrain, rubberBand, type BotBrain, type BotContext } from './ai';
 import { SIZE_MASS, sizeClass, sizeScale } from './mechanics';
 import { EntityInterp, lerpState } from './interp';
 import {
@@ -428,6 +428,7 @@ export class HostGame implements GameView {
         this.botCtx.time = raceTime;
         this.botCtx.place = k.place;
         this.botCtx.smoke = this.inSmoke(k.state);
+        this.botCtx.boxes = this.boxTimers;
         // (Der Bohrer prallt am Führenden ab, solange der einen Stoßfänger hat oder gold ist.)
         const lead = this.drillTarget(k.slot);
         this.botCtx.leaderSafe = !!lead && (lead.state.guard > 0 || lead.state.gold > 0);
@@ -435,6 +436,7 @@ export class HostGame implements GameView {
         copyState(k.prev, k.state);
         const cmd = botCmd(k.state, k.brain, others, canDrive, this.botCtx);
         this.env.canDrive = canDrive;
+        this.env.speedFactor = botSpeed(k.brain, this.env.speedFactor);
         this.advance(k, cmd);
         if (!k.bot) {
           k.starved++;

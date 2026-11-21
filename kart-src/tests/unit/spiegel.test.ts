@@ -252,14 +252,14 @@ describe('Portale', () => {
 
   it('die KI fährt die Strecke: die gute nutzt die Spiegel, in die Falle gerät sie selten', () => {
     const t = setTrack(SPIEGEL);
-    const forward = [0, 0, 0];
-    const back = [0, 0, 0];
-    const time = [0, 0, 0];
+    const forward = [0, 0, 0, 0, 0];
+    const back = [0, 0, 0, 0, 0];
+    const time = [0, 0, 0, 0, 0];
     let falls = 0;
     for (let slot = 0; slot < 4; slot++) {
       for (const level of [AI_EASY, AI_MEDIUM, AI_HARD]) {
         const s = gridState(slot);
-        const brain = newBrain(slot + level * 4, level);
+        const brain = newBrain(slot + (level - AI_EASY) * 4, level);
         let progress = progDelta(t, 0, s.seg);
         let tick = 1;
         for (; tick < 60 * 300 && progress < 3 * t.n; tick++) {
@@ -278,7 +278,7 @@ describe('Portale', () => {
       }
     }
     console.log(
-      `Spiegelkabinett, KI in je 12 Runden: Spiegel vorwärts leicht/mittel/schwer ${forward.join('/')}, zurück ${back.join('/')}, Stürze ${falls}; Rundenzeit ${time.map((x) => (x / 4).toFixed(1)).join(' / ')} s`,
+      `Spiegelkabinett, KI in je 12 Runden: Spiegel vorwärts leicht/mittel/schwer ${forward.slice(AI_EASY, AI_HARD + 1).join('/')}, zurück ${back.slice(AI_EASY, AI_HARD + 1).join('/')}, Stürze ${falls}; Rundenzeit ${time.slice(AI_EASY, AI_HARD + 1).map((x) => (x / 4).toFixed(1)).join(' / ')} s`,
     );
     expect(falls).toBeLessThanOrEqual(4);
     // schwer: im Schnitt mindestens ein Spiegel je Runde; leicht: deutlich seltener

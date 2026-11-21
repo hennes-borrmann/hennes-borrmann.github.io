@@ -6,6 +6,7 @@
 // wieder, bekommt er genau diesen Platz zurück.
 
 import { BUILD_ID } from '../build';
+import { AI_MEDIUM, cleanAiLevel } from '../game/ai';
 import type { Link } from '../net/link';
 import {
   PROTOCOL_VERSION,
@@ -54,6 +55,9 @@ export interface HostLobbySave {
   code: string;
   seats: { slot: number; token: string; name: string; isHost: boolean; character?: number }[];
   bots?: boolean;
+  /** Stärke der KI (0 sehr leicht … 4 Profi). */
+  aiStufe?: number;
+  /** Alte Fassung mit drei Stufen (0 leicht, 1 mittel, 2 schwer) – wird beim Laden umgerechnet. */
   aiLevel?: number;
   track?: number;
   laps?: number;
@@ -80,8 +84,8 @@ export class HostLobby {
   phase: Phase = 'lobby';
   /** Freie Plätze im Rennen mit KI-Gegnern auffüllen. */
   bots = true;
-  /** Stärke der KI-Gegner: 0 leicht, 1 mittel, 2 schwer. */
-  aiLevel = 1;
+  /** Stärke der KI-Gegner: 0 sehr leicht, 1 leicht, 2 mittel, 3 schwer, 4 Profi. */
+  aiLevel = AI_MEDIUM;
   /** Gewählte Strecke. */
   track = 0;
   /** Rundenzahl des Rennens. */
@@ -119,7 +123,8 @@ export class HostLobby {
   ) {
     if (saved && saved.code === code) {
       if (typeof saved.bots === 'boolean') this.bots = saved.bots;
-      if (typeof saved.aiLevel === 'number') this.aiLevel = Math.max(0, Math.min(2, saved.aiLevel | 0));
+      if (typeof saved.aiStufe === 'number') this.aiLevel = cleanAiLevel(saved.aiStufe);
+      else if (typeof saved.aiLevel === 'number') this.aiLevel = cleanAiLevel(Math.max(0, Math.min(2, saved.aiLevel | 0)) + 1);
       if (typeof saved.track === 'number') this.track = Math.max(0, saved.track | 0);
       if (typeof saved.laps === 'number') this.laps = cleanLaps(saved.laps);
       this.cupRaces = cleanCupRaces(saved.cupRaces);
@@ -277,7 +282,7 @@ export class HostLobby {
   }
 
   setAiLevel(level: number): void {
-    const l = Math.max(0, Math.min(2, level | 0));
+    const l = cleanAiLevel(level);
     if (this.aiLevel === l) return;
     this.aiLevel = l;
     this.changed();
@@ -392,7 +397,7 @@ export class HostLobby {
         .filter((s): s is Seat => s !== null)
         .map((s) => ({ slot: s.slot, token: s.token, name: s.name, isHost: s.isHost, character: s.character })),
       bots: this.bots,
-      aiLevel: this.aiLevel,
+      aiStufe: this.aiLevel,
       track: this.track,
       laps: this.laps,
       cupRaces: this.cupRaces,

@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 28;
+export const PROTOCOL_VERSION = 29;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -123,7 +123,7 @@ export interface LobbyState {
   cup: CupState | null;
   /** Freie Plätze im Rennen mit KI-Gegnern auffüllen. */
   bots: boolean;
-  /** Stärke der KI-Gegner: 0 leicht, 1 mittel, 2 schwer. */
+  /** Stärke der KI-Gegner: 0 sehr leicht, 1 leicht, 2 mittel, 3 schwer, 4 Profi. */
   aiLevel: number;
   /** Gewählte Strecke (Index in TRACK_DEFS). */
   track: number;

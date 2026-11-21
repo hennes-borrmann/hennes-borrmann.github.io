@@ -198,15 +198,17 @@ describe('Riesenkinderzimmer', () => {
       [0, 0],
       [0, 0],
       [0, 0],
+      [0, 0],
+      [0, 0],
     ];
-    const walls = [0, 0, 0];
-    const time = [0, 0, 0];
+    const walls = [0, 0, 0, 0, 0];
+    const time = [0, 0, 0, 0, 0];
     let falls = 0;
     let hits = 0;
     for (let slot = 0; slot < 4; slot++) {
       for (const level of [AI_EASY, AI_MEDIUM, AI_HARD]) {
         const s = gridState(slot);
-        const brain = newBrain(slot + level * 4, level);
+        const brain = newBrain(slot + (level - AI_EASY) * 4, level);
         let progress = progDelta(t, 0, s.seg);
         let was = -1;
         let tick = 1;
@@ -227,7 +229,7 @@ describe('Riesenkinderzimmer', () => {
       }
     }
     console.log(
-      `Riesenkinderzimmer, KI in je 12 Runden: Mauseloch/Burg leicht ${used[0].join('/')}, mittel ${used[1].join('/')}, schwer ${used[2].join('/')}; Bandenstöße ${walls.join('/')}, Stürze ${falls}, Treffer ${hits}; Rundenzeit ${time.map((x) => (x / 4).toFixed(1)).join(' / ')} s`,
+      `Riesenkinderzimmer, KI in je 12 Runden: Mauseloch/Burg leicht ${used[AI_EASY].join('/')}, mittel ${used[AI_MEDIUM].join('/')}, schwer ${used[AI_HARD].join('/')}; Bandenstöße ${walls.slice(AI_EASY, AI_HARD + 1).join('/')}, Stürze ${falls}, Treffer ${hits}; Rundenzeit ${time.slice(AI_EASY, AI_HARD + 1).map((x) => (x / 4).toFixed(1)).join(' / ')} s`,
     );
     expect(falls).toBeLessThanOrEqual(1);
     expect(hits).toBe(0);
