@@ -37,15 +37,48 @@ export const FP_TUNE = {
   /** Abwärtsblick (rad). */
   pitch: 0.28,
   /** Anteil der Kopfdrehung, den die Kamera mitmacht (der Rest ist die Lage der Karosserie). */
-  head: 0.4,
+  head: 0.3,
   /** Senkrechter Bildwinkel (Grad) im Stand, Zuschlag bei Höchsttempo und mit Schub. */
   fov: 74,
   fovSpeed: 5,
   fovBoost: 7,
+  /** Roboter: so weit höher und nach vorn sitzt die Kamera (Meter), so viel steiler blickt sie abwärts (rad). */
+  robotUp: 0.45,
+  robotFwd: 0.35,
+  robotPitch: 0.25,
+  /** Rakete: so weit entlang der Achse sitzt die Kamera (Meter). */
+  rocketNose: 2.9,
+  rocketSide: 0.8,
 };
+
+/** Was man im Sitz spürt (für Rütteln, Horizont, Turbo-Stoß). */
+export interface CockpitFeel {
+  /** Driftrichtung (−1, 0, 1) und aufgeladene Turbo-Stufe (0 … 3). */
+  drift: number;
+  stage: number;
+  /** Loser Untergrund (Sand, Schotter, Schnee …) bzw. neben der Fahrbahn. */
+  loose: boolean;
+  offroad: boolean;
+  /** Anteil, um den der Horizont gerade gehalten wird (0 = Kamera kippt ganz mit dem Kart). */
+  level: number;
+}
+const NO_FEEL: CockpitFeel = { drift: 0, stage: 0, loose: false, offroad: false, level: 0 };
+const _f = new THREE.Vector3();
+const _x = new THREE.Vector3(1, 0, 0);
+const _t = new THREE.Vector3();
+const _m = new THREE.Matrix4();
+
+function smooth(x: number): number {
+  const c = x < 0 ? 0 : x > 1 ? 1 : x;
+  return c * c * (3 - 2 * c);
+}
+const _u = new THREE.Vector3();
+const _w = new THREE.Vector3();
+const _c = new THREE.Vector3();
 
 const Y_FLIP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 const _qa = new THREE.Quaternion();
+const _qc = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 
@@ -60,6 +93,11 @@ export class Cockpit {
   private mirrorTick = 0;
   private kart: KartVisual | null = null;
   private kit: CockpitKit | null = null;
+  private time = 0;
+  private glance = 0;
+  private rumble = 0;
+  private kick = 0;
+  private driftWas = 0;
 
   constructor() {
     this.cam.layers.set(COCKPIT_LAYER);
@@ -88,27 +126,104 @@ export class Cockpit {
   /** Nach KartVisual.update: Handschuhe, Tacho, Lampen. */
   update(state: CockpitState, dt: number): void {
     if (!this.kart || !this.kit) return;
+    this.kit.setOutlines(this.mirrorEvery > 0);
     this.kit.update(this.kart.cockpit, state, dt);
   }
 
   /**
    * Stellt die Welt-Kamera camera in den Kopf des eigenen Karts. rig: Knochen des Karts (nach KartVisual.update).
-   * speed01: Tempo als Anteil des Höchsttempos; boost: Schub aktiv.
+   * speed01: Tempo als Anteil des Höchsttempos; boost: Schub aktiv; feel: was man im Sitz spürt.
    */
-  place(camera: THREE.PerspectiveCamera, rig: CockpitRig, character: number, speed01: number, boost: boolean, dt: number): void {
+  place(camera: THREE.PerspectiveCamera, rig: CockpitRig, character: number, speed01: number, boost: boolean, dt: number, feel: CockpitFeel = NO_FEEL): void {
     rig.root.updateMatrixWorld(true);
     const eye = FP_EYE[character] ?? FP_EYE[0];
     // (Der Kopf ist auf fast null geschrumpft: Ort und Drehung des Knochens nehmen, nicht seine Skalierung.)
     rig.head.getWorldQuaternion(_qb);
     rig.head.getWorldPosition(camera.position);
     camera.position.add(_v.set(eye[0], eye[1], eye[2]).applyQuaternion(_qb).multiplyScalar(rig.root.scale.y));
+    // Roboter: Die Figur sitzt obenauf, davor ragen Brust und Schultern (die aufgestellte Karosserie) auf – die Kamera
+    // rückt höher und über die Brust nach vorn und schaut von oben über den Mech.
+    const rob = rig.robotLook;
+    if (rob > 0.001) {
+      rig.root.getWorldQuaternion(_qc);
+      camera.position.add(_v.set(0, FP_TUNE.robotUp, FP_TUNE.robotFwd).applyQuaternion(_qc).multiplyScalar(rob * rig.root.scale.y));
+    }
     rig.chassis.getWorldQuaternion(_qa);
     _qa.slerp(_qb, FP_TUNE.head).multiply(Y_FLIP);
     camera.quaternion.copy(_qa);
     camera.up.set(0, 1, 0).applyQuaternion(_qa);
-    camera.rotateX(-FP_TUNE.pitch);
-    const want = FP_TUNE.fov + Math.min(1.3, speed01) * FP_TUNE.fovSpeed + (boost ? FP_TUNE.fovBoost : 0);
+    camera.rotateX(-FP_TUNE.pitch - FP_TUNE.robotPitch * rob);
+    // Bohrer: Beim Einstecken schaut die Figur hin – die Kamera dreht sich zum Bohrer neben dem Kart und folgt ihm in
+    // den Boden (Gewicht: hinschauen bis zur Hälfte, beim Hineinrammen am stärksten, danach zurück auf die Strecke).
+    const p = rig.plant;
+    const look = p > 0 ? smooth(p / 0.3) * (1 - smooth((p - 0.9) / 0.1)) * 0.45 : 0;
+    this.glance += (look - this.glance) * Math.min(1, dt * (look > this.glance ? 10 : 5));
+    if (this.glance > 0.002) {
+      rig.prop.getWorldPosition(_t);
+      _m.lookAt(camera.position, _t, camera.up);
+      _qa.setFromRotationMatrix(_m);
+      camera.quaternion.slerp(_qa, this.glance);
+    }
+    this.time += dt;
+    // Horizont halb ausgleichen: Der Kopf hält die Welt gerader, als das Kart sich legt (nicht an der Wand – dort kippt
+    // „oben“ ganz mit, wie in der Verfolgeransicht).
+    if (feel.level > 0) {
+      _f.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      _u.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      _w.set(0, 1, 0).addScaledVector(_f, -_f.y);
+      if (_w.lengthSq() > 1e-4) {
+        _w.normalize();
+        const roll = Math.atan2(_f.dot(_c.crossVectors(_u, _w)), _u.dot(_w));
+        camera.quaternion.premultiply(_qa.setFromAxisAngle(_f, roll * feel.level));
+      }
+    }
+    // Rütteln: loser Untergrund, Grünstreifen, Drift (je Stufe mehr) – kleine, schnelle Drehungen, kein Wackeln der Lage.
+    const rough = (feel.loose ? 0.0035 : 0) + (feel.offroad ? 0.006 : 0) + (feel.drift !== 0 ? 0.0022 + feel.stage * 0.0012 : 0);
+    this.rumble += (rough * Math.min(1, speed01) - this.rumble) * Math.min(1, dt * 10);
+    // Mini-Turbo: Drift endet mit Schub → kurzer Stoß nach hinten in den Sitz.
+    if (this.driftWas !== 0 && feel.drift === 0 && boost) this.kick = 1;
+    this.driftWas = feel.drift;
+    this.kick = Math.max(0, this.kick - dt * 3.2);
+    if (this.rumble > 1e-5 || this.kick > 0) {
+      const t = this.time;
+      const r = this.rumble;
+      const kick = this.kick * this.kick;
+      camera.rotateX(r * (Math.sin(t * 61) + 0.6 * Math.sin(t * 97 + 1)) + kick * 0.05);
+      camera.rotateY(r * 0.7 * Math.sin(t * 73 + 2));
+      camera.rotateZ(r * 0.5 * Math.sin(t * 53 + 3) + (feel.drift !== 0 ? -feel.drift * 0.012 * (1 + feel.stage * 0.3) : 0));
+    }
+    const want = FP_TUNE.fov + Math.min(1.3, speed01) * FP_TUNE.fovSpeed + (boost ? FP_TUNE.fovBoost : 0) + this.kick * 6;
     this.fov += (want - this.fov) * Math.min(1, dt * 5);
+    if (Math.abs(camera.fov - this.fov) > 0.05) {
+      camera.fov = this.fov;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  /**
+   * Rakete aus dem Cockpit: Während der Verwandlung richtet sich das Kart auf, und der Blick geht mit nach oben in den
+   * Himmel; im Flug sitzt die Kamera an der Spitze und schaut in Flugrichtung – beim Sturz kommt das Ziel auf einen zu.
+   * morph: Fortschritt der Verwandlung (0 … 1), flying: fliegt schon. Erst place() aufrufen (Kopf-Kamera als Ausgang).
+   */
+  placeRocket(camera: THREE.PerspectiveCamera, rig: CockpitRig, morph: number, flying: boolean, dt: number): void {
+    rig.root.getWorldQuaternion(_qa);
+    // Kamera schaut entlang −z: so drehen, dass sie entlang +y der Rakete schaut, „oben“ = +z des Karts.
+    _qa.multiply(_qb.setFromAxisAngle(_x, Math.PI / 2));
+    rig.root.getWorldPosition(_t);
+    _f.set(0, 1, 0).applyQuaternion(rig.root.quaternion);
+    const k = flying ? 1 : smooth(morph * 1.2 - 0.2);
+    // (Außen am Rumpf, knapp unter der Spitze: Die Spitze liegt unten im Bild, der Blick geht an ihr vorbei.)
+    _t.addScaledVector(_f, FP_TUNE.rocketNose * k).addScaledVector(_u.set(0, 0, 1).applyQuaternion(rig.root.quaternion), FP_TUNE.rocketSide * k);
+    camera.position.lerp(_t, k);
+    camera.quaternion.slerp(_qa, k);
+    camera.up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    // Rütteln im Flug, stärker beim Zünden.
+    this.time += dt;
+    const r = flying ? 0.006 : 0.012 * k;
+    camera.rotateX(r * Math.sin(this.time * 71));
+    camera.rotateY(r * Math.sin(this.time * 59 + 1));
+    const want = flying ? 80 : FP_TUNE.fov;
+    this.fov += (want - this.fov) * Math.min(1, dt * 3);
     if (Math.abs(camera.fov - this.fov) > 0.05) {
       camera.fov = this.fov;
       camera.updateProjectionMatrix();

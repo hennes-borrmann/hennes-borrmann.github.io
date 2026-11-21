@@ -85,6 +85,8 @@ export interface KartPose {
 
 /** Cockpit-Ansicht: so weit rückt das Lenkrad höher und zur Figur (Meter) und so viel steiler steht es (rad). */
 export const COCKPIT_STEER: [number, number, number] = [0.2, -0.12, -0.42];
+/** Cockpit-Ansicht: Grundhaltung mit Item (raus, hoch, vor – wie HOLD): vor der rechten Schulter, über dem Lenkrad. */
+export const COCKPIT_HOLD: [number, number, number] = [0.08, 0.12, 0.36];
 /** Cockpit-Ansicht: Hand-Ziel der Arme gegenüber dem Griff am Kranz – nach außen, zur Figur hin (Meter). */
 export const COCKPIT_WRIST: [number, number] = [0.03, 0.07];
 /** Cockpit-Ansicht: Richtung, in die die Ellbogen knicken (außen, oben, vorn – wie in solveArm). */
@@ -116,7 +118,10 @@ export interface CockpitRig {
   drink: number;
   plant: number;
   robot: number;
+  /** Wie weit das Kart gerade ein Roboter ist (0 … 1) und wie gold es ist (0 … 1). */
+  robotLook: number;
   rocket: number;
+  gold: number;
   /** Der Gegenstand in der Hand (sein Netz). */
   prop: THREE.Object3D;
 }
@@ -5633,7 +5638,9 @@ export class KartVisual {
       drink: this.fDrink,
       plant: this.fPlant,
       robot: this.fRobot,
+      robotLook: this.robotLook,
       rocket: this.fRocket,
+      gold: this.goldLook,
       prop: this.prop,
     };
   }
@@ -6700,6 +6707,18 @@ export class KartVisual {
     this.plantW = damp(this.plantW, pp > 0 ? 1 : 0, pp > 0 ? 18 : 14, dt);
     this.drinkW = damp(this.drinkW, dp > 0 && dp < DRINK_THROW - 0.04 ? 1 : 0, dp > 0 ? 22 : 12, dt);
     if (dp <= 0) this.drinkThrown = false;
+    // Cockpit-Ansicht: Neben dem Kopf sähe man das Item nicht. Dort hält die Figur es vor der rechten Schulter über dem
+    // Lenkrad, und jede Geste läuft in diesem Raum: Würfe gehen von dort nach vorn ins Bild, Würfe nach hinten über die
+    // Schulter aus dem Bild hinaus. Oberkörper und Kopf bewegen sich dabei weniger mit – die Kamera sitzt im Kopf.
+    if (this.firstPerson && dp <= 0 && pp <= 0) {
+      out = COCKPIT_HOLD[0] + (out - HOLD[0]) * 0.5;
+      up = COCKPIT_HOLD[1] + (up - HOLD[1]) * 0.55;
+      fwd = COCKPIT_HOLD[2] + (fwd - HOLD[2]) * 0.7;
+      tx *= 0.5;
+      ty *= 0.5;
+      tz *= 0.5;
+      hx *= 0.4;
+    }
     this.hOut = damp(this.hOut, out, rate, dt);
     this.hUp = damp(this.hUp, up, rate, dt);
     this.hFwd = damp(this.hFwd, fwd, rate, dt);
@@ -6847,7 +6866,8 @@ export class KartVisual {
     if (item === I_GOLD && this.gFly >= 0) rx -= this.drinkTilt;
     _iq.setFromEuler(_ie.set(rx, this.propSpin, rz, 'XZY'));
     prop.quaternion.multiplyQuaternions(bn[B.torso].quaternion, _iq);
-    let s = Math.max(this.propS, 0) * mul;
+    // (Aus dem Cockpit ist der Gegenstand ganz nah vor der Kamera: dort kleiner – im Flug wächst er zurück.)
+    let s = Math.max(this.propS, 0) * mul * (this.firstPerson ? (this.gFly >= 0 ? 0.62 + 0.38 * Math.min(1, this.gFly * 4) : 0.62) : 1);
     if (item === I_GOLD && (this.drinkW > 0.001 || this.gFly >= 0)) {
       // Beim Trinken: in beiden Händen, Hals zum Mund geneigt (Übergang aus der Hand weich, so schnell wie die Hände).
       const w = this.gFly >= 0 ? 1 : this.drinkW;

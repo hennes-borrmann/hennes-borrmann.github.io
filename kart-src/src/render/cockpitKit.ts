@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import type { CockpitRig } from './kartModel';
-import { addSmoothNormals, outlineMaterial, rgb, toonMaterial, withOutline, withSkinnedOutline } from './toon';
+import { addSmoothNormals, outlineMaterial, rgb, setOutlinesVisible, toonMaterial, withSkinnedOutline } from './toon';
 
 // ───────────────────────────── Handschuh ─────────────────────────────
 
@@ -296,6 +296,9 @@ export class Glove {
   }
 }
 const XAXIS = new THREE.Vector3(1, 0, 0);
+const GOLD_TINT = new THREE.Color(0xffc93a);
+const GOLD_GLOW = new THREE.Color(0x4a2e00);
+
 
 // ───────────────────────────── Lenkrad, Armaturen, Spiegel ─────────────────────────────
 
@@ -385,6 +388,8 @@ export class CockpitKit {
   private readonly gauge: THREE.CanvasTexture;
   private rig: CockpitRig | null = null;
   private needleA = 0;
+  private goldK = 0;
+  private readonly tinted: THREE.MeshToonMaterial[] = [];
   private gripK = [1, 1];
   private readonly _m = new THREE.Matrix4();
   private readonly _q = new THREE.Quaternion();
@@ -410,16 +415,73 @@ export class CockpitKit {
     this.buildWheel(accent);
     this.buildDash(accent);
     this.buildMirror();
+    for (const g of [this.wheel, this.needle, this.dash.children[0], this.mirror]) this.flush(g);
   }
 
-  private mesh(geo: THREE.BufferGeometry, color: number, outline = 0, parent: THREE.Object3D = this.wheel): THREE.Mesh {
-    const mat = toonMaterial({ color });
+  /** Teile sammeln (je Gruppe) – flush() fügt sie zu einem Netz mit Eckenfarben zusammen: ein Aufruf plus Kontur. */
+  private readonly pending = new Map<THREE.Object3D, { geo: THREE.BufferGeometry; color: number; outline: boolean }[]>();
+
+  private mesh(geo: THREE.BufferGeometry, color: number, outline = 0, parent: THREE.Object3D = this.wheel): void {
+    let list = this.pending.get(parent);
+    if (!list) this.pending.set(parent, (list = []));
+    list.push({ geo, color, outline: outline > 0 });
+  }
+
+  private flush(parent: THREE.Object3D): void {
+    const list = this.pending.get(parent);
+    if (!list) return;
+    this.pending.delete(parent);
+    const pos: number[] = [];
+    const nor: number[] = [];
+    const col: number[] = [];
+    const idx: number[] = [];
+    const oPos: number[] = [];
+    const oIdx: number[] = [];
+    for (const part of list) {
+      const g = part.geo;
+      const p = g.getAttribute('position') as THREE.BufferAttribute;
+      if (!g.getAttribute('normal')) g.computeVertexNormals();
+      const n = g.getAttribute('normal') as THREE.BufferAttribute;
+      const c = rgb(part.color);
+      const base = pos.length / 3;
+      const oBase = oPos.length / 3;
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i), p.getY(i), p.getZ(i));
+        nor.push(n.getX(i), n.getY(i), n.getZ(i));
+        col.push(c[0], c[1], c[2]);
+        if (part.outline) oPos.push(p.getX(i), p.getY(i), p.getZ(i));
+      }
+      const ix = g.index;
+      const count = ix ? ix.count : p.count;
+      for (let i = 0; i < count; i++) {
+        const k = ix ? ix.getX(i) : i;
+        idx.push(base + k);
+        if (part.outline) oIdx.push(oBase + k);
+      }
+      g.dispose();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const mat = toonMaterial({ vertexColors: true });
     this.owned.push(geo);
     this.mats.push(mat);
+    this.tinted.push(mat);
     const m = new THREE.Mesh(geo, mat);
-    if (outline > 0) withOutline(m, outline);
     parent.add(m);
-    return m;
+    if (oIdx.length > 0) {
+      const og = new THREE.BufferGeometry();
+      og.setAttribute('position', new THREE.Float32BufferAttribute(oPos, 3));
+      og.setIndex(oIdx);
+      og.computeVertexNormals();
+      addSmoothNormals(og);
+      this.owned.push(og);
+      const o = new THREE.Mesh(og, outlineMaterial(0.01));
+      o.name = 'outline';
+      m.add(o);
+    }
   }
 
   /**
@@ -567,6 +629,18 @@ export class CockpitKit {
     this.needle.rotation.z = (225 * Math.PI) / 180 - Math.PI / 2 - this.needleA;
     for (let i = 0; i < 3; i++) this.leds[i].color.setHex(st.stage > i ? (this.leds[i].userData.on as number) : 0x3a3646);
     this.itemLamp.color.setHex(st.itemReady ? 0xffd23f : 0x3a3646);
+    this.paintGold(rig.gold);
+  }
+
+  /** Get Gold: Handschuhe, Lenkrad und Armaturen werden mit dem Kart gold (k = 0 … 1). */
+  private paintGold(k: number): void {
+    if (Math.abs(k - this.goldK) < 0.004) return;
+    this.goldK = k;
+    // (Alles mit Eckenfarben: die Materialfarbe wirkt als Faktor – Weiß bleibt Weiß, mit Gold wird alles gold getönt.)
+    for (const mat of [...this.tinted, ...this.gloves.map((g) => g.mesh.material as THREE.MeshToonMaterial)]) {
+      mat.color.set(0xffffff).lerp(GOLD_TINT, k);
+      mat.emissive.copy(GOLD_GLOW).multiplyScalar(k);
+    }
   }
 
   /**
@@ -630,6 +704,11 @@ export class CockpitKit {
     else g.pose(OPEN, HOLD, c / 0.6);
   }
 
+  /** Qualitätsstufe „niedrig“: ohne Konturen (wie die Karts). */
+  setOutlines(on: boolean): void {
+    for (const o of [this.wheel, this.dash, this.mirror, this.gloves[0].group, this.gloves[1].group]) setOutlinesVisible(o, on);
+  }
+
   setVisible(v: boolean): void {
     for (const o of [this.wheel, this.dash, this.mirror, this.gloves[0].group, this.gloves[1].group]) o.visible = v;
   }
@@ -643,6 +722,3 @@ export class CockpitKit {
     this.mirrorTarget.dispose();
   }
 }
-
-/** Kontur-Material, falls ein Aufrufer es teilen will. */
-export const cockpitOutline = (): THREE.ShaderMaterial => outlineMaterial(0.012);

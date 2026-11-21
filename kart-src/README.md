@@ -168,9 +168,22 @@ Gemessen (`tests/unit/kistufen.test.ts`, allein gefahren, drei Runden, alle 25 S
 
 Zahnrad in der Kopfzeile der Lobby oder „Einstellungen“ im Menü während des Rennens:
 
+- **Ansicht:** Verfolger (von hinten) oder Cockpit (aus dem Fahrersitz, siehe unten). Im Rennen auch über „Ansicht: …“ im Menü oder die Taste V. Gilt nur für diesen Bildschirm und bleibt gespeichert.
 - **Grafik:** Automatisch, Niedrig, Mittel, Hoch. „Automatisch“ senkt die Auflösung, sobald das Bild unter 50 Bilder pro Sekunde fällt, und geht notfalls eine Stufe herunter.
 - **Bildrate anzeigen:** blendet oben die gemessenen Bilder pro Sekunde ein – so lässt sich prüfen, ob ein Gerät 60 schafft.
 - **Musik / Geräusche / Ton aus.**
+
+### Cockpit-Ansicht
+
+Der Blick aus dem Fahrersitz des eigenen Karts – gleiche Physik wie von hinten, also ohne Vor- oder Nachteil im Rennen.
+
+- **Was man sieht:** das echte eigene Kart (Haube, Vorderräder, Lenkrad, Arme), dazu nur in dieser Ansicht Handschuhe mit Fingern (Stulpe und Knöchelpolster in der Spielerfarbe), ein ausgearbeitetes Lenkrad mit Griffwülsten und Nabe, Armaturen mit Tacho, drei Drift-Lampen (Türkis, Gelb, Magenta wie die Funken) und Item-Lampe sowie ein Rückspiegel. Die Hände greifen den Kranz von außen bei „zehn vor zwei“ und drehen mit; im Drift sieht man das Gegenlenken.
+- **Fahrgefühl:** Die Kamera sitzt im Kopf der Figur und macht dessen Bewegung gedämpft mit – sie schaut in die Kurve, wird beim Schub in den Sitz gedrückt, federt bei Landungen. Dazu: Rütteln auf losem Grund, im Grünstreifen und im Drift (je Turbo-Stufe stärker), ein Stoß beim Auslösen des Mini-Turbos, ein halb ausgeglichener Horizont (an der Wand und in der Trommel kippt er ganz mit) und Drift-Funken auch am äußeren Vorderrad, damit man sie aus dem Sitz sieht.
+- **Items:** Die Figur hält das Item vor der rechten Schulter über dem Lenkrad, jede Geste läuft in diesem Raum – Würfe gehen nach vorn ins Bild, Würfe nach hinten über die Schulter (dann zeigt sie der Spiegel). Get Gold: die Flasche kommt von unten an den Mund, danach sind Arme, Handschuhe, Lenkrad und Armaturen gold. Bohrer: der Blick geht zum Bohrer und folgt ihm in den Boden. Roboter: die Kamera hebt sich mit der Verwandlung und schaut von oben über Brust und Schultern des Mechs. Rakete: beim Verwandeln geht der Blick in den Himmel, im Flug sitzt sie außen an der Spitze und schaut in Flugrichtung – beim Sturz kommt das Ziel auf einen zu. Drache, Gleiter, Stoßfänger, Kurzschluss und Kleber sieht man mit ihrer eigenen Bewegung aus dem Sitz.
+- **Lenkrad näher:** Die Köpfe der Figuren sind groß (Comic). Aus ihrer Augenhöhe läge das Lenkrad unter dem Bildrand – in dieser Ansicht rückt es deshalb höher und näher, die Arme folgen.
+- **Zeichnen:** zwei Durchgänge – erst die Welt, dann (Tiefenpuffer geleert) das eigene Kart mit sehr naher Nahgrenze, damit nichts abgeschnitten wird. Gemessen in der Werkshof-Zielgeraden (Chromium ohne Grafikkarte, Grafik Hoch): von hinten rund 73 Zeichenaufrufe, aus dem Cockpit 83–92, in Bildern mit neuem Spiegelbild rund 130. Der Spiegel wird bei „Hoch“ jedes dritte, bei „Mittel“ jedes vierte Bild neu gezeichnet, bei „Niedrig“ gar nicht (dann auch ohne Konturen an Handschuhen und Armaturen).
+- **Ausprobieren ohne Rennen:** `vorschau-cockpit.html` (nur Entwicklungsserver, nicht im Build) zeigt das eigene Kart aus dem Cockpit und von außen, mit Items, Gesten, Gold, Bohrer, Roboter und Rakete (Bedienung über `window.H`, siehe Kopf der Datei).
+- **Grenzen:** Auf echten Geräten (iPad, Safari) nicht geprüft – weder Bildrate noch Lesbarkeit. Unter Wasser und im Raum fehlen Taucherbrille bzw. Helmrand im Bild (der Kopf mit seiner Ausrüstung ist ausgeblendet). Das eigene Kart liegt im zweiten Durchgang immer vor der Welt: Fährt ein Vorderrad in eine Bande, sieht man das Rad statt der Bande.
 
 ## Wie das Spiel auf die Website kommt
 
@@ -269,6 +282,7 @@ src/game/        sim.ts Fahrphysik (Ebene + Höhe, Sprünge, Abstürze, Gleitflu
                  · ai.ts KI-Fahrer · hostGame.ts Rennen auf dem Host (Ablauf, Items, Rempler, Hindernisse)
                  · clientGame.ts Vorhersage/Abgleich · interp.ts Interpolation
 src/render/      three.js-Szene: world.ts Fahrbahn, Gelände, Himmel · scenery.ts Kulissen · kartModel.ts Figuren
+                 · firstPerson.ts Cockpit-Ansicht (Kamera, zweiter Durchgang, Spiegel) · cockpitKit.ts Handschuhe, Lenkrad, Armaturen
                  · things.ts Items und Hindernisse · mechanics.ts (+ mechanics/) Verkehr, Lava, Maschinen, Gezeiten, Flug, Tauchen
                  · effects.ts Teilchen, Spuren, Comic-Wörter · toon.ts Farbstufen und Kontur
 src/audio/       Ton: Mischpult, Motoren, Geräusche, Musik – alles zur Laufzeit erzeugt

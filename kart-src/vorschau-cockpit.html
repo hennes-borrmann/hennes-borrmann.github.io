@@ -114,6 +114,15 @@ window.H = {
     st.kart.useItem(item);
     return true;
   },
+  /** Ein Feld der Haltung in t Sekunden gleichmäßig von a nach b führen (z. B. drink, plant, robot, rocket). */
+  ramp(field, a, b, t) {
+    const n = Math.max(1, Math.round(t * 60));
+    for (let i = 1; i <= n; i++) {
+      st.pose[field] = a + ((b - a) * i) / n;
+      H.run(1 / 60);
+    }
+    return true;
+  },
   /** t Sekunden weiterrechnen (60 Schritte je Sekunde). */
   run(t) {
     const n = Math.round(t * 60);

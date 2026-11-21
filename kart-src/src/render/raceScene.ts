@@ -770,6 +770,7 @@ export class RaceScene {
   private readonly color = new THREE.Color();
   private readonly v1 = new THREE.Vector3();
   private readonly v2 = new THREE.Vector3();
+  private readonly v3 = new THREE.Vector3();
   private readonly q1 = new THREE.Quaternion();
   private readonly e1 = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly flat = new THREE.Quaternion();
@@ -2751,7 +2752,7 @@ export class RaceScene {
     this.cockpit.active = !!meView && meView.visual.firstPerson;
     this.cockpit.setKart(this.cockpit.active && meView ? meView.visual : null, parseInt(PLAYER_COLORS[localSlot % PLAYER_COLORS.length].slice(1), 16));
     if (this.cockpit.active && me && meView) {
-      this.cockpit.mirrorEvery = this.level === 0 ? 0 : this.level === 1 ? 3 : 2;
+      this.cockpit.mirrorEvery = this.level === 0 ? 0 : this.level === 1 ? 4 : 3;
       this.cockpit.update(
         {
           speed: Math.hypot(me.vx, me.vz),
@@ -2987,6 +2988,29 @@ export class RaceScene {
           );
         }
       }
+      // Aus dem Cockpit sieht man die Hinterräder nicht: Dort sprühen auch an der Außenseite des Vorderrads Funken
+      // seitlich nach vorn ins Bild.
+      if (k.visual.firstPerson && Math.random() < n * 0.8) {
+        const outer = e.driftDir > 0 ? A.wheelFrontL : A.wheelFrontR;
+        const f = this.v3.copy(outer).applyMatrix4(root.matrixWorld);
+        const side = e.driftDir > 0 ? 1 : -1;
+        const sx = Math.cos(e.heading) * side;
+        const sz = -Math.sin(e.heading) * side;
+        this.sparks.emit(
+          f.x,
+          f.y + 0.05,
+          f.z,
+          e.vx * 0.55 + sx * (2 + Math.random() * 3),
+          1.2 + Math.random() * 2.5,
+          e.vz * 0.55 + sz * (2 + Math.random() * 3),
+          0.16 + Math.random() * 0.14,
+          0.22 + stage * 0.06,
+          this.color,
+          -0.5,
+          12,
+          1,
+        );
+      }
       if (lv.skid && k.hasTrail && dust === 0) {
         this.skids.add(k.rl.x, k.rl.y, k.rl.z, rl.x, rl.y, rl.z, 0.3);
         this.skids.add(k.rr.x, k.rr.y, k.rr.z, rr.x, rr.y, rr.z, 0.3);
@@ -3083,7 +3107,18 @@ export class RaceScene {
       return;
     }
     if (this.cockpit.active) {
-      this.cockpit.place(cam, k.visual.cockpit, k.char, Math.hypot(me.vx, me.vz) / V_MAX, me.boost > 0 || me.tow > 0, dt);
+      const seg = me.seg < t.total ? me.seg : 0;
+      const wall = me.respawn === 0 && (t.edge[seg] & (EDGE_TWIST | EDGE_DRUM)) !== 0;
+      this.cockpit.place(cam, k.visual.cockpit, k.char, Math.hypot(me.vx, me.vz) / V_MAX, me.boost > 0 || me.tow > 0, dt, {
+        drift: (me.flags & FLAG_AIR) !== 0 ? 0 : me.driftDir,
+        stage: k.driftStage,
+        loose: (me.flags & FLAG_AIR) === 0 && DUST[t.surf[seg]] !== 0,
+        offroad: (me.flags & (FLAG_OFFROAD | FLAG_AIR)) === FLAG_OFFROAD,
+        level: wall || me.spin > 0 ? 0 : 0.5,
+      });
+      if (me.rocket > 0 && race.phase !== RACE_RESULTS) {
+        this.cockpit.placeRocket(cam, k.visual.cockpit, Math.min(1, me.rocket / ROCKET_MORPH_TICKS), me.rocket > ROCKET_MORPH_TICKS, dt);
+      }
       this.applyShake(dt);
       return;
     }
