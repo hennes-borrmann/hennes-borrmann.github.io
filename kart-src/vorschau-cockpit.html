@@ -163,7 +163,7 @@ window.H = {
       camera.layers.set(0);
       st.cockpit.place(camera, k.cockpit, k.character, 0.8, false, 1);
       renderer.render(scene, camera);
-      st.cockpit.renderMirror(renderer, scene);
+      st.cockpit.renderMirror(renderer, scene, camera);
       st.cockpit.render(renderer, scene, camera);
     } else {
       const o = st.orbit;

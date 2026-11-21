@@ -1,9 +1,10 @@
 // Teile, die nur in der Cockpit-Ansicht zu sehen sind (firstPerson.ts): Handschuhe mit Fingern, ein ausgearbeitetes
-// Lenkrad, Armaturen mit Tacho und Drift-Lampen und der Rückspiegel. Alles prozedural im Comic-Stil der Karts – Farbstufen
+// Lenkrad und Armaturen mit Tacho und Drift-Lampen. (Der Rückspiegel ist kein Teil des Karts, sondern ein schmaler
+// Streifen oben in der Bildmitte – firstPerson.ts.) Alles prozedural im Comic-Stil der Karts – Farbstufen
 // und Tuschekontur (toon.ts) –, keine fremden Modelle oder Bilder.
 //
-// Die Teile hängen an den Knochen des eigenen Karts (kartModel.ts, CockpitRig): Lenkrad am Lenkrad-Knochen, Armaturen und
-// Spiegel an der Karosserie, die Handschuhe an der Karosserie neben den (ausgeblendeten) Kugelhänden. Jeder Handschuh ist
+// Die Teile hängen an den Knochen des eigenen Karts (kartModel.ts, CockpitRig): Lenkrad am Lenkrad-Knochen, Armaturen an
+// der Karosserie, die Handschuhe an der Karosserie neben den (ausgeblendeten) Kugelhänden. Jeder Handschuh ist
 // EIN Netz an einem eigenen kleinen Skelett (Gelenk, Handfläche, je drei Glieder für vier Finger und den Daumen): ein
 // Zeichenaufruf plus einer für die Kontur.
 //
@@ -300,7 +301,7 @@ const GOLD_TINT = new THREE.Color(0xffc93a);
 const GOLD_GLOW = new THREE.Color(0x4a2e00);
 
 
-// ───────────────────────────── Lenkrad, Armaturen, Spiegel ─────────────────────────────
+// ───────────────────────────── Lenkrad und Armaturen ─────────────────────────────
 
 /** Tachoscheibe als Bild (einmal gezeichnet): Skala bis 140 km/h, rote Zone ab 110. */
 function gaugeTexture(accent: string): THREE.CanvasTexture {
@@ -335,12 +336,6 @@ function gaugeTexture(accent: string): THREE.CanvasTexture {
   return t;
 }
 
-function flipU(g: THREE.BufferGeometry): THREE.BufferGeometry {
-  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
-  for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
-  return g;
-}
-
 /** Am Lenkrad: so weit kippen die Knöchel von „gerade nach vorn“ nach innen über den Kranz (rad). */
 export let GRIP_LEAN = 0.45;
 /** Anteil des Unterarms an der Richtung der Faust am Lenkrad (0 = nur Lenkrad). */
@@ -352,9 +347,8 @@ export function setGrip(lean: number, arm: number): void {
 const _fa = new THREE.Vector3();
 const _qi = new THREE.Quaternion();
 
-/** Armaturen und Spiegel relativ zur Lenkrad-Mitte: höher, weiter vorn (Meter), Neigung zur Figur (rad). */
+/** Armaturen relativ zur Lenkrad-Mitte: höher, weiter vorn (Meter), Neigung zur Figur (rad). */
 export const DASH: [number, number, number] = [-0.02, 0.17, 0.5];
-export const MIRROR: [number, number, number] = [0.21, 0.22, 0.12];
 
 export interface CockpitState {
   /** Tempo (m/s, Betrag) und Anteil des Höchsttempos. */
@@ -374,12 +368,6 @@ export class CockpitKit {
   readonly gloves: [Glove, Glove];
   readonly wheel = new THREE.Group();
   readonly dash = new THREE.Group();
-  readonly mirror = new THREE.Group();
-  /** Bild im Rückspiegel (vom Aufrufer gerendert). */
-  readonly mirrorTarget: THREE.WebGLRenderTarget;
-  readonly mirrorCam = new THREE.PerspectiveCamera(32, 3.2, 0.3, 160);
-  /** Mitte der Spiegelfläche im Raum der Karosserie (dort sitzt die Spiegelkamera, gedreht nach hinten). */
-  readonly mirrorAt = new THREE.Vector3();
   private readonly needle = new THREE.Group();
   private readonly leds: THREE.MeshBasicMaterial[] = [];
   private readonly itemLamp: THREE.MeshBasicMaterial;
@@ -404,18 +392,15 @@ export class CockpitKit {
     readonly character: number,
     readonly slot: number,
     accent: number,
-    mirrorRes: [number, number],
   ) {
     const glove = 0xf6f1e7;
     const palm = 0x4a4556;
     this.gloves = [new Glove(1, glove, accent, palm), new Glove(-1, glove, accent, palm)];
-    this.mirrorTarget = new THREE.WebGLRenderTarget(mirrorRes[0], mirrorRes[1], { depthBuffer: true });
     this.gauge = gaugeTexture(`#${accent.toString(16).padStart(6, '0')}`);
     this.itemLamp = new THREE.MeshBasicMaterial({ color: 0x3a3646 });
     this.buildWheel(accent);
     this.buildDash(accent);
-    this.buildMirror();
-    for (const g of [this.wheel, this.needle, this.dash.children[0], this.mirror]) this.flush(g);
+    for (const g of [this.wheel, this.needle, this.dash.children[0]]) this.flush(g);
   }
 
   /** Teile sammeln (je Gruppe) – flush() fügt sie zu einem Netz mit Eckenfarben zusammen: ein Aufruf plus Kontur. */
@@ -569,31 +554,10 @@ export class CockpitKit {
     this.mesh(trim, accent, 0, pod);
   }
 
-  /** Rückspiegel: Gehäuse, Glas mit dem Bild der Spiegelkamera (seitenverkehrt), kurzer Arm. Raum: Mitte des Glases. */
-  private buildMirror(): void {
-    const w = 0.22;
-    const h = 0.066;
-    const shell = roundBox(w + 0.022, h + 0.022, 0.034);
-    shell.translate(0, 0, -0.016);
-    this.mesh(shell, 0x2f2b38, 0.01, this.mirror);
-    const glassMat = new THREE.MeshBasicMaterial({ map: this.mirrorTarget.texture });
-    this.mats.push(glassMat);
-    const glassGeo = flipU(new THREE.PlaneGeometry(w, h));
-    this.owned.push(glassGeo);
-    const glass = new THREE.Mesh(glassGeo, glassMat);
-    glass.position.z = 0.002;
-    this.mirror.add(glass);
-    const arm = new THREE.CylinderGeometry(0.008, 0.008, 0.09, 6);
-    arm.translate(0, -0.06, -0.02);
-    this.mesh(arm, 0x5a6173, 0, this.mirror);
-    this.mirrorCam.aspect = w / h;
-    this.mirrorCam.updateProjectionMatrix();
-  }
-
   /** An die Knochen des eigenen Karts hängen (bzw. abnehmen mit null). */
   attach(rig: CockpitRig | null): void {
     if (this.rig === rig) return;
-    for (const o of [this.wheel, this.dash, this.mirror, this.gloves[0].group, this.gloves[1].group]) o.removeFromParent();
+    for (const o of [this.wheel, this.dash, this.gloves[0].group, this.gloves[1].group]) o.removeFromParent();
     this.rig = rig;
     if (!rig) return;
     // Lenkrad: Aufsatz in der Ebene des Kranzes, auf dessen Radius gebracht.
@@ -601,11 +565,9 @@ export class CockpitKit {
     this.wheel.scale.setScalar(R);
     this.wheel.position.set(0, 0, 0.004);
     rig.steer.add(this.wheel);
-    // Armaturen und Spiegel hinter dem Lenkrad (Lage je Bild in update), zur Figur gedreht.
+    // Armaturen hinter dem Lenkrad (Lage je Bild in update), zur Figur gedreht.
     this.dash.rotation.set(-DASH[2], Math.PI, 0);
     rig.chassis.add(this.dash);
-    this.mirror.rotation.set(-MIRROR[2], Math.PI, 0);
-    rig.chassis.add(this.mirror);
     // Handschuhe: an der Karosserie, Größe nach der Kugelhand der Figur.
     for (const g of this.gloves) {
       g.group.scale.setScalar(rig.hand / 0.068);
@@ -615,11 +577,9 @@ export class CockpitKit {
 
   /** Jedes Bild nach KartVisual.update: Handschuhe an Lenkrad bzw. Item, Tacho, Lampen. */
   update(rig: CockpitRig, st: CockpitState, dt: number): void {
-    // Armaturen und Spiegel folgen dem Lenkrad (es rückt in der Cockpit-Ansicht höher, kartModel.ts COCKPIT_STEER).
+    // Die Armaturen folgen dem Lenkrad (es rückt in der Cockpit-Ansicht höher, kartModel.ts COCKPIT_STEER).
     const sp = rig.steer.position;
     this.dash.position.set(sp.x, sp.y + DASH[0], sp.z + DASH[1]);
-    this.mirror.position.set(sp.x, sp.y + MIRROR[0], sp.z + MIRROR[1]);
-    this.mirrorAt.copy(this.mirror.position);
     this.placeGlove(0, rig, rig.handR, rig.holdR, dt);
     this.placeGlove(1, rig, rig.handL, rig.holdL, dt);
     // Tacho: 0 … 140 km/h über 270°, Nadel federt leicht nach.
@@ -706,11 +666,11 @@ export class CockpitKit {
 
   /** Qualitätsstufe „niedrig“: ohne Konturen (wie die Karts). */
   setOutlines(on: boolean): void {
-    for (const o of [this.wheel, this.dash, this.mirror, this.gloves[0].group, this.gloves[1].group]) setOutlinesVisible(o, on);
+    for (const o of [this.wheel, this.dash, this.gloves[0].group, this.gloves[1].group]) setOutlinesVisible(o, on);
   }
 
   setVisible(v: boolean): void {
-    for (const o of [this.wheel, this.dash, this.mirror, this.gloves[0].group, this.gloves[1].group]) o.visible = v;
+    for (const o of [this.wheel, this.dash, this.gloves[0].group, this.gloves[1].group]) o.visible = v;
   }
 
   dispose(): void {
@@ -719,6 +679,5 @@ export class CockpitKit {
     for (const m of this.mats) m.dispose();
     for (const g of this.gloves) g.dispose();
     this.gauge.dispose();
-    this.mirrorTarget.dispose();
   }
 }

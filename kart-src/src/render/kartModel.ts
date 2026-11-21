@@ -85,6 +85,13 @@ export interface KartPose {
 
 /** Cockpit-Ansicht: so weit rückt das Lenkrad höher und zur Figur (Meter) und so viel steiler steht es (rad). */
 export const COCKPIT_STEER: [number, number, number] = [0.2, -0.12, -0.42];
+/**
+ * Cockpit-Ansicht im Drift und in Kurven: welcher Anteil der sichtbaren Schrägstellung der Karosserie bleibt, welcher
+ * Anteil des Blicks in die Kurve und welcher Anteil der Neigung des Oberkörpers (von hinten jeweils 1). Wenig: Sonst
+ * dreht und verschiebt sich die ganze Sicht weit in die Driftrichtung.
+ */
+export const COCKPIT_DRIFT: [number, number, number] = [0, 0.15, 0.3];
+
 /** Cockpit-Ansicht: Grundhaltung mit Item (raus, hoch, vor – wie HOLD): vor der rechten Schulter, über dem Lenkrad. */
 export const COCKPIT_HOLD: [number, number, number] = [0.08, 0.12, 0.36];
 /** Cockpit-Ansicht: Hand-Ziel der Arme gegenüber dem Griff am Kranz – nach außen, zur Figur hin (Meter). */
@@ -5558,7 +5565,9 @@ export class KartVisual {
     this.spaceU = space ? Math.min(1, this.spaceU + dt / 0.3) : Math.max(0, this.spaceU - dt / 0.2);
     this.spaceS = damp(this.spaceS, space ? 1 : 0, 4, dt);
     this.spaceAir = damp(this.spaceAir, space && pose.air ? 1 : 0, 6, dt);
-    this.lean = damp(this.lean, steer * 0.2 * (0.3 + 0.7 * v1) + this.driftS * 0.22, 8, dt);
+    // In die Kurve legen – aus dem Cockpit viel weniger: Die Kamera sitzt im Kopf, mit der Neigung rutschte sie seitlich
+    // weg, und das Lenkrad stünde im Drift weit neben der Bildmitte.
+    this.lean = damp(this.lean, (steer * 0.2 * (0.3 + 0.7 * v1) + this.driftS * 0.22) * (1 - (1 - COCKPIT_DRIFT[2]) * this.fpSteerK), 8, dt);
 
     // Nachschwingen: seitlich (Kurve) und längs (Beschleunigung)
     const latT = -(steer * v1 + this.driftS * 0.5);
@@ -6246,8 +6255,9 @@ export class KartVisual {
       const h = 0.5 * Math.sin(bank);
       sb.position.set(h * Math.cos(spinYaw), 0.5 - 0.5 * Math.cos(bank), -h * Math.sin(spinYaw));
     } else sb.position.set(0, 0, 0);
-    // Drift: Drehung um einen Punkt vorn, damit das Heck ausbricht
-    const driftYaw = -driftS * (0.31 + 0.04 * this.fStage);
+    // Drift: Drehung um einen Punkt vorn, damit das Heck ausbricht. (Von hinten soll man das deutlich sehen; aus dem
+    // Cockpit drehte damit der ganze Blick weit in die Kurve – dort nur ein kleiner Teil, COCKPIT_DRIFT.)
+    const driftYaw = -driftS * (0.31 + 0.04 * this.fStage) * (1 - (1 - COCKPIT_DRIFT[0]) * this.fpSteerK);
     this.fDriftYaw = driftYaw;
     const dr = bn[B.drift];
     dr.rotation.y = driftYaw;
@@ -6337,8 +6347,10 @@ export class KartVisual {
     this.headX += this.headXV * dt;
     this.headZV += ((hzT - this.headZ) * 110 * soft - this.headZV * 9 * slow) * dt;
     this.headZ += this.headZV * dt;
+    // (Aus dem Cockpit schaut die Figur im Drift nur leicht in die Kurve – die Kamera sitzt im Kopf.)
+    const driftLook = 0.3 * (1 - (1 - COCKPIT_DRIFT[1]) * this.fpSteerK);
     const hyT =
-      (-steer * 0.32 - driftS * 0.3) * (1 - spinS) + stallS * 0.28 * Math.sin(t * 9.5) + loseS * 0.1 * Math.sin(t * 1.3);
+      (-steer * 0.32 - driftS * driftLook) * (1 - spinS) + stallS * 0.28 * Math.sin(t * 9.5) + loseS * 0.1 * Math.sin(t * 1.3);
     this.headY = damp(this.headY, hyT, 10, dt);
     bn[B.head].rotation.set(this.headX, this.headY, this.headZ);
 

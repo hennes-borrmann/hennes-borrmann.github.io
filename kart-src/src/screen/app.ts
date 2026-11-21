@@ -43,8 +43,8 @@ import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../re
 import { readCrash, setCareful } from '../render/gfxGuard';
 import { setPortraitRenderer } from '../render/portraits';
 import { RaceScene, type KartAudio, type Quality, type ViewMode } from '../render/raceScene';
-import { FP_EYE, FP_TUNE } from '../render/firstPerson';
-import { DASH, MIRROR } from '../render/cockpitKit';
+import { FP_EYE, FP_TUNE, MIRROR } from '../render/firstPerson';
+import { DASH } from '../render/cockpitKit';
 import { COCKPIT_ELBOW, COCKPIT_STEER } from '../render/kartModel';
 import { $, ms } from '../util/dom';
 import { keepAwake, wakeLockMode } from '../util/wakeLock';
@@ -1495,10 +1495,9 @@ export class App {
         COCKPIT_STEER.splice(0, 3, ...v);
         if (elbow) COCKPIT_ELBOW.splice(0, 3, ...elbow);
       },
-      fpDash: (dash?: [number, number, number], mirror?: [number, number, number]) => {
-        if (dash) DASH.splice(0, 3, ...dash);
-        if (mirror) MIRROR.splice(0, 3, ...mirror);
-      },
+      fpDash: (dash: [number, number, number]) => DASH.splice(0, 3, ...dash),
+      fpMirror: (o: Partial<typeof MIRROR>) => Object.assign(MIRROR, o),
+      fpYaw: () => (this.scene ? { ...this.scene.fpYaw } : null),
       lobby: () => this.lobbyState(),
       slot: () => this.localSlot(),
       pairUrl: () => this.pairUrl(),
