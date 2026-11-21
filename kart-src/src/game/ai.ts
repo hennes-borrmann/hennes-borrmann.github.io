@@ -9,6 +9,14 @@
 // Innenseite versetzt. Vor engen Kurven wird gebremst, in engen Kurven
 // gedriftet und danach der Mini-Turbo mitgenommen. Vor Sprüngen, auf Stegen
 // ohne Geländer und vor pendelnden Hindernissen fahren sie vorsichtiger.
+//
+// Fünf Stärken. „Sehr leicht“ fährt gemütlich (gut 80 % Tempo, vorsichtig in
+// Kurven, kein Drift, wartet lange mit Items). „Profi“ fährt wie ein guter
+// Mensch: volles Tempo, eine Ideallinie (außen anfahren, innen am Scheitel),
+// Bremspunkt so spät wie möglich, Boost-Felder und Kisten gezielt, längere
+// Drifts bis zur nächsten Turbo-Stufe, den schnelleren Weg an Gabelungen und
+// Abwehr-Items in Führung als Schutz nach hinten. In Führung bremst ihn kein
+// Gummiband, von hinten holt er nur sanft auf.
 
 import {
   BTN_BRAKE,
@@ -31,6 +39,8 @@ import {
   ITEM_ROBOT,
   ITEM_GLUE,
   GLUE_RANGE,
+  TURBO_AT,
+  turboStage,
   ITEM_TIRE,
   ITEM_TOP,
   ITEM_WING,
@@ -56,7 +66,12 @@ import {
   railOf,
   EDGE_OPEN_L,
   EDGE_OPEN_R,
+  EDGE_DRUM,
+  EDGE_RIVER,
+  EDGE_FLOAT,
+  EDGE_BROKEN,
   TRACK,
+  type Track,
   hazardLat,
   pathAhead,
   proj,
@@ -71,11 +86,19 @@ import {
 
 export const BOT_NAMES = ['Kolben-Kalle', 'Vera Vergaser', 'Bremsen-Bert', 'Zünd-Zoe'];
 
-/** Stärke der KI-Gegner. */
-export const AI_EASY = 0;
-export const AI_MEDIUM = 1;
-export const AI_HARD = 2;
-export const AI_LEVEL_NAMES = ['Leicht', 'Mittel', 'Schwer'];
+/** Stärke der KI-Gegner (aufsteigend). */
+export const AI_VERY_EASY = 0;
+export const AI_EASY = 1;
+export const AI_MEDIUM = 2;
+export const AI_HARD = 3;
+export const AI_PRO = 4;
+export const AI_LEVEL_NAMES = ['Sehr leicht', 'Leicht', 'Mittel', 'Schwer', 'Profi'];
+export const AI_LEVEL_COUNT = AI_LEVEL_NAMES.length;
+
+/** Gültige Stärke aus einer beliebigen Zahl. */
+export function cleanAiLevel(level: number): number {
+  return Math.max(0, Math.min(AI_LEVEL_COUNT - 1, Math.round(Number(level)) || 0));
+}
 
 export interface BotBrain {
   level: number;
@@ -116,6 +139,8 @@ export interface BotBrain {
   patience: number;
   drifting: number;
   itemPressed: boolean;
+  /** Vor einem Sprung: braucht Anlauf (siehe botSpeed). */
+  runUp: boolean;
   /** Einfacher Zufallsgenerator, damit jeder Bot sich anders, aber wiederholbar verhält. */
   rand: number;
 }
@@ -132,30 +157,38 @@ export interface BotContext {
   smoke: boolean;
   /** Bohrer: Der Führende (ohne dieses Kart) ist gerade geschützt – Stoßfänger oder Get Gold. */
   leaderSafe?: boolean;
+  /** Item-Kisten: Wartezeit je Kiste, bis sie wieder steht (0 = steht da – das sieht jeder Mensch auch); ohne Angabe gelten alle als da. */
+  boxes?: Uint16Array;
 }
 
 const SKILL = [0.95, 0.91, 0.93, 0.89];
-const SKILL_SHIFT = [-0.09, 0, 0.055];
+// Die Tabellen hier und weiter unten haben je einen Wert pro Stärke: sehr leicht, leicht, mittel, schwer, Profi.
+// (Der Profi fährt wie ein Mensch mit vollem Tempo – Grundtempo 1, siehe newBrain.)
+const SKILL_SHIFT = [-0.17, -0.09, 0, 0.055, 0];
 const DRIFT_FROM = [
+  [1, 1, 1, 1],
   [1, 1, 1, 1],
   [1 / 30, 1 / 19, 1 / 22, 1],
   [1 / 36, 1 / 26, 1 / 30, 1 / 22],
+  [1 / 45, 1 / 45, 1 / 45, 1 / 45],
 ];
-const PATIENCE_FACTOR = [1.6, 1, 0.7];
-/** So oft steuert die KI ein Portal an, das vorwärts führt (leicht, mittel, schwer). */
-const PORTAL_DARE = [0.2, 0.55, 0.9];
-/** Wie oft die KI auf der Schiene die Seite nach dem Takt der Schubmagnete wählt (je Stärke). */
-const KICK_DARE = [0.15, 0.55, 0.95];
-/** So oft fährt die KI von hinten auf einen Zug auf, um über die Dächer zu fahren (leicht, mittel, schwer). */
-const TRAIN_DARE = [0.1, 0.5, 0.9];
-/** So oft fährt die KI durch einen Größenring, um die Abkürzung dahinter zu nehmen (leicht, mittel, schwer). */
-const SIZE_DARE = [0.15, 0.55, 0.9];
+/** Vor Kurven: welcher Anteil des möglichen Kurventempos angesteuert wird (die sehr leichte KI geht es gemütlich an). */
+const CORNER_SAFE = [0.8, 0.92, 0.92, 0.92, 0.92];
+const PATIENCE_FACTOR = [2.5, 1.6, 1, 0.7, 0.7];
+/** So oft steuert die KI ein Portal an, das vorwärts führt. */
+const PORTAL_DARE = [0.05, 0.2, 0.55, 0.9, 0.95];
+/** Wie oft die KI auf der Schiene die Seite nach dem Takt der Schubmagnete wählt. */
+const KICK_DARE = [0.05, 0.15, 0.55, 0.95, 1];
+/** So oft fährt die KI von hinten auf einen Zug auf, um über die Dächer zu fahren. */
+const TRAIN_DARE = [0.05, 0.1, 0.5, 0.9, 0.95];
+/** So oft fährt die KI durch einen Größenring, um die Abkürzung dahinter zu nehmen. */
+const SIZE_DARE = [0.05, 0.15, 0.55, 0.9, 0.95];
 
 export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
-  const l = Math.max(0, Math.min(2, level | 0));
+  const l = cleanAiLevel(level);
   return {
     level: l,
-    skill: SKILL[slot % 4] + SKILL_SHIFT[l],
+    skill: l === AI_PRO ? 1 : SKILL[slot % 4] + SKILL_SHIFT[l],
     driftFrom: DRIFT_FROM[l][slot % 4],
     line: [-1.6, 1.4, 0.2, -0.6][slot % 4],
     route: 0,
@@ -175,6 +208,7 @@ export function newBrain(slot: number, level = AI_MEDIUM): BotBrain {
     patience: 240,
     drifting: 0,
     itemPressed: false,
+    runUp: false,
     rand: 12345 + slot * 7919,
   };
 }
@@ -232,6 +266,194 @@ function maxCurvatureAhead(toM: number): number {
     max = Math.max(max, Math.abs(c) / (bankGrip(t, i, c > 0 ? 1 : -1) * (SURFACES[t.surf[i]] ?? SURFACES[0]).grip));
   }
   return max;
+}
+
+/**
+ * Stellschrauben des Profis – abgestimmt mit Messläufen über alle Strecken (siehe tests/unit/kistufen.test.ts).
+ * Bremsen: decel (m/s², mit Reserve unter der echten Bremse), react (m Reaktionsweg), ahead (m, so weit über den
+ * Bremsweg hinaus wird geschaut), corner/drift/open (Anteil des möglichen Kurventempos ohne Drift, im Drift, ohne
+ * Bande), brakeOver (so weit über dem Soll wird erst gebremst, m/s). Drift: turn (Mindest-Kurvenwinkel der nächsten
+ * 30 m, rad), stretch/stretchR (so knapp vor der nächsten Turbo-Stufe wird der Drift bis zu dieser Kurvenweite
+ * gehalten). Linie: margin/openMargin (Abstand zum Fahrbahnrand bzw. zusätzlich zu einer Kante ohne Bande), own
+ * (Anteil der eigenen Spur), lineK/lineIt (Glätten). Boost-Felder und Kisten: padReach (m voraus), padIn/boxIn (so
+ * weit innerhalb des Feldes bzw. so nah an der Kiste).
+ */
+const PRO = {
+  decel: 34,
+  react: 4,
+  ahead: 20,
+  corner: 0.97,
+  drift: 0.9,
+  open: 0.85,
+  brakeOver: 1.5,
+  turn: 0.45,
+  stretch: 20,
+  stretchR: 250,
+  margin: 1.6,
+  openMargin: 1.2,
+  own: 0.15,
+  lineK: [30, 20, 12, 6],
+  lineIt: 60,
+  padReach: 40,
+  padIn: 0.7,
+  boxIn: 0.8,
+};
+
+/**
+ * Profi: das Tempo, das jetzt höchstens sein darf, damit jede Stelle voraus noch rechtzeitig erreicht wird –
+ * Kurventempo an der Stelle plus der Weg, auf dem bis dahin gebremst werden kann. So bremst die KI so spät wie
+ * ein guter Fahrer, statt schon langsam zu werden, sobald eine enge Kurve in Sichtweite ist.
+ */
+function brakingLimit(v: number, driftFrom: number, mayDrift: boolean, openAhead: boolean, aLat: number): number {
+  const t = TRACK;
+  const reach = (v * v) / (2 * PRO.decel) + PRO.ahead;
+  let cap = 99;
+  for (let d = 0; d <= reach; d += 2) {
+    const i = aheadSeg(d);
+    const c = curvSeen(t, i);
+    const eff = Math.abs(c) / (bankGrip(t, i, c > 0 ? 1 : -1) * (SURFACES[t.surf[i]] ?? SURFACES[0]).grip);
+    if (eff < 1e-4) continue;
+    const cornering = eff > driftFrom && mayDrift ? aLat * DRIFT_TIGHT * PRO.drift : aLat * (openAhead ? PRO.open : PRO.corner);
+    const vc = Math.sqrt(cornering / eff);
+    const room = Math.max(0, d - PRO.react);
+    cap = Math.min(cap, Math.sqrt(vc * vc + 2 * PRO.decel * room));
+  }
+  return cap;
+}
+
+/**
+ * Profi: bevorzugter Weg je Strecke (Bit k = Abzweigung k nehmen) – der schnellste feste Weg des Profis ohne
+ * Streckenmechanik, gemessen in tests/unit/kistufen.test.ts (der Test meldet, wenn ein Eintrag nicht mehr stimmt).
+ * Strecken ohne Abzweigung fehlen.
+ */
+export const PRO_ROUTE: Record<string, number> = {
+  werkshof: 2,
+  klippe: 1,
+  glut: 3,
+  nacht: 3,
+  wolken: 1,
+  riff: 3,
+  eis: 0,
+  mond: 1,
+  hafen: 1,
+  vulkan: 3,
+  ruine: 3,
+  kamm: 0,
+  zimmer: 3,
+  gipfel: 2,
+  neon: 1,
+  talsperre: 3,
+  kristall: 3,
+  baum: 3,
+  daecher: 3,
+  rampe: 1,
+};
+
+// --- Ideallinie (Profi) ---------------------------------------------------------
+// Einmal je Strecke berechnet: Die Linie wird wie ein Gummiband innerhalb der Fahrbahn glattgezogen – jeder Punkt
+// rückt zur Mitte zwischen seinen Nachbarn ein Stück voraus und zurück, erst mit weitem, dann mit engem Abstand.
+// Heraus kommt eine Linie, die Kurven schneidet wie ein guter Fahrer: außen anfahren, innen am Scheitel, außen
+// hinaus. (botCmd begrenzt sie danach wie jede Wunschlage auf maxLat.) Wo die Spur nicht frei ist (Sprung, Flug,
+// Schiene, Trommel, Wand, Fluss, Ponton, Bruchzone), bleibt sie in der Mitte – dort entscheiden die Regeln weiter unten.
+
+const LINES = new WeakMap<Track, Float64Array>();
+const LINE_FIXED = EDGE_GAP | EDGE_GLIDE | EDGE_RAIL | EDGE_DRUM | EDGE_TWIST | EDGE_RIVER | EDGE_FLOAT | EDGE_BROKEN;
+
+export function racingLine(t: Track): Float64Array {
+  const have = LINES.get(t);
+  if (have) return have;
+  const n = t.total;
+  const lat = new Float64Array(n);
+  const lo = new Float64Array(n);
+  const hi = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const e = t.edge[i];
+    if ((e & LINE_FIXED) !== 0) continue;
+    const room = t.rh[i] - PRO.margin;
+    lo[i] = -Math.max(0, room - ((e & EDGE_OPEN_L) !== 0 ? PRO.openMargin : 0));
+    hi[i] = Math.max(0, room - ((e & EDGE_OPEN_R) !== 0 ? PRO.openMargin : 0));
+  }
+  // Was knapp vor und hinter einer festen Stelle liegt, läuft sanft auf die Mitte zu.
+  const ease = 14;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < n; i++) {
+      if ((t.edge[i] & LINE_FIXED) === 0) continue;
+      let a = i;
+      let z = i;
+      for (let k = 1; k <= ease; k++) {
+        a = pass === 0 ? t.prev[a] : t.next[a];
+        z = pass === 0 ? t.next[z] : t.prev[z];
+        const f = k / ease;
+        for (const j of [a, z]) {
+          lo[j] = Math.max(lo[j], lo[j] * f);
+          hi[j] = Math.min(hi[j], hi[j] * f);
+        }
+      }
+    }
+  }
+  const back = new Int32Array(n);
+  const ahead = new Int32Array(n);
+  for (const k of PRO.lineK) {
+    for (let i = 0; i < n; i++) {
+      let a = i;
+      let z = i;
+      for (let j = 0; j < k; j++) {
+        a = t.prev[a];
+        z = t.next[z];
+      }
+      back[i] = a;
+      ahead[i] = z;
+    }
+    for (let it = 0; it < PRO.lineIt; it++) {
+      for (let i = 0; i < n; i++) {
+        const a = back[i];
+        const z = ahead[i];
+        const qx = (t.px[a] + rightX(t, a) * lat[a] + t.px[z] + rightX(t, z) * lat[z]) / 2;
+        const qz = (t.pz[a] + rightZ(t, a) * lat[a] + t.pz[z] + rightZ(t, z) * lat[z]) / 2;
+        const want = (qx - t.px[i]) * rightX(t, i) + (qz - t.pz[i]) * rightZ(t, i);
+        lat[i] = Math.max(lo[i], Math.min(hi[i], lat[i] + 0.5 * (want - lat[i])));
+      }
+    }
+  }
+  LINES.set(t, lat);
+  return lat;
+}
+
+/**
+ * Profi: Boost-Feld oder (ohne Item) Item-Kiste auf dem eigenen Weg voraus? Dann die gewünschte Lage so weit
+ * dorthin verschieben, dass es sicher getroffen wird – mehr nicht, die Linie bleibt sonst, wie sie ist.
+ * look: Abstand des Zielpunkts; was weiter weg liegt, zieht schwächer.
+ */
+function aimForPickups(s: KartState, lat: number, ctx: BotContext, look: number): number {
+  const t = TRACK;
+  const reach = Math.min(PATH.length - 1, Math.round(PRO.padReach / t.step));
+  for (let k = 1; k < reach; k++) {
+    const seg = PATH[k];
+    for (const pad of t.pads) {
+      const d = segDelta(t, pad.seg, seg);
+      if (d < 0 || d > pad.length) continue;
+      const half = Math.max(0.2, pad.halfWidth - PRO.padIn);
+      return Math.max(pad.lat - half, Math.min(pad.lat + half, lat));
+    }
+  }
+  if (s.item !== ITEM_NONE || s.roulette > 0) return lat;
+  let best = Number.NaN;
+  for (let k = 3; k < reach; k++) {
+    const seg = PATH[k];
+    for (let i = 0; i < t.boxes.length; i++) {
+      const box = t.boxes[i];
+      if (box.seg !== seg || (ctx.boxes && ctx.boxes[i] > 0) || Math.abs(box.y - s.y) > 3) continue;
+      const bl = (box.x - t.px[seg]) * rightX(t, seg) + (box.z - t.pz[seg]) * rightZ(t, seg);
+      if (!(Math.abs(bl - lat) >= Math.abs(best - lat))) best = bl;
+    }
+    if (best === best) {
+      // Weit voraus nur ein Stück hinüber, nah heran genau drauf.
+      const pull = Math.min(1, look / Math.max(look, k * t.step));
+      const half = PRO.boxIn;
+      return lat + (Math.max(best - half, Math.min(best + half, lat)) - lat) * pull;
+    }
+  }
+  return lat;
 }
 
 // --- Ausweichen: gesperrte Streifen quer zur Fahrbahn ---------------------------
@@ -311,6 +533,7 @@ export const AI_TRACE = { here: 0, lat: 0, want: 0, jam: false, blocks: '' };
 
 export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: boolean, ctx: BotContext): Cmd {
   const t = TRACK;
+  b.runUp = false;
   if (!racing || s.respawn > 0) {
     b.stuck = 0;
     b.reverse = 0;
@@ -327,6 +550,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const vf = forwardSpeed(s);
   const v = Math.abs(vf);
   const air = (s.flags & FLAG_AIR) !== 0;
+  const pro = b.level >= AI_PRO;
 
   // --- Welcher Weg? Rechtzeitig vor jeder Gabelung wird gewürfelt. ---
   const on = t.branchOf[s.seg];
@@ -337,7 +561,10 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     else if (on < 0) {
       const d = segDelta(t, s.seg, t.branches[k].from);
       if (d > DECIDE_AT && d <= DECIDE_AT + 2) {
-        let take = random(b) < 0.5;
+        // Der Profi kennt die Strecke: Er nimmt meistens den Weg, der ohne Streckenmechanik schneller ist
+        // (PRO_ROUTE); was Flut, Tore und Lava gerade verlangen, entscheiden die Regeln darunter.
+        const known = pro ? PRO_ROUTE[t.def.id] : undefined;
+        let take = known === undefined ? random(b) < 0.5 : random(b) < (((known >> k) & 1) === 1 ? 0.9 : 0.1);
         // Abkürzung über ein Zugdach (Neonhochbahn): nur, wenn das Tor bei der Ankunft offen ist (dann hält ein Zug) –
         // ohne Zug wäre dort ein Graben. Ob sie es wagt, hängt an der Stärke (wie beim Aufspringen auf den Wüstenexpress).
         // Ebenso ein Zeitfenster nach Fahrplan (Talsperre: die Schleuse): Die KI rechnet aus, ob das Tor bei ihrer
@@ -347,7 +574,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         if (timed) take = false;
         // Liegt auf der Abzweigung ein Stück, durch das im Takt Lava läuft? Wer aufpasst,
         // nimmt sie genau dann, wenn sie bei der Durchfahrt frei ist (die Ampel zeigt es an).
-        if (b.level > 0) {
+        if (b.level >= AI_MEDIUM) {
           for (const f of t.floods) {
             if (f.branch !== k) continue;
             const arrive = ctx.time + f.lead + (DECIDE_AT * t.step * 60) / 25;
@@ -378,7 +605,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
           if (!planActive(g.plan, arrive) && !planActive(g.plan, arrive + 30)) {
             // Offen – und das ist es nicht immer: Wer aufpasst, nimmt den Weg meistens, solange es ihn gibt.
             if (timed && t.branchOf[g.first] === k) take = random(b) < TRAIN_DARE[b.level];
-            else if (t.branchOf[g.first] === k && b.level > 0 && !take) take = random(b) < 0.6;
+            else if (t.branchOf[g.first] === k && b.level >= AI_MEDIUM && !take && known === undefined) take = random(b) < 0.6;
             continue;
           }
           if (t.branchOf[g.first] === k) take = false;
@@ -417,6 +644,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const near = curvatureAhead(0, 14);
   const edges = edgesAhead(46);
   const gapAhead = (edges & EDGE_GAP) !== 0;
+  b.runUp = gapAhead && !air;
   const openAhead = (edgesAhead(24) & (EDGE_OPEN_L | EDGE_OPEN_R)) !== 0;
 
   // --- Zielpunkt voraus, in Kurven zur Innenseite versetzt ---
@@ -428,9 +656,15 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const golden = goldOn(s);
   const maxLat = golden && !openAhead && !gapAhead ? Math.max(0.5, t.wh[target] - 1.7) : Math.max(0.5, t.rh[target] - (openAhead ? 3.2 : 2.2));
   let lat = gapAhead ? 0 : (b.line * 0.6 * t.rh[target]) / 6.5 + bend * 110;
+  // Profi: auf der Ideallinie – außen anfahren, innen am Scheitel, außen hinaus (mit einem Hauch eigener Spur).
+  if (pro && !gapAhead) {
+    lat = racingLine(t)[target] + b.line * PRO.own;
+    // Ein Boost-Feld voraus nimmt er mit – so knapp, wie es die Linie erlaubt. Ohne Item fährt er eine Kiste an.
+    lat = aimForPickups(s, lat, ctx, look);
+  }
   // Flugstrecke voraus oder schon in der Luft: wer aufpasst, hält auf den nächsten Aufwind oder Ring zu.
   const flying = (s.flags & FLAG_GLIDE) !== 0;
-  if (b.level > 0 && (flying || (edges & EDGE_GLIDE) !== 0)) {
+  if (b.level >= AI_MEDIUM && (flying || (edges & EDGE_GLIDE) !== 0)) {
     let best = PATH.length;
     for (const list of [t.thermals, t.rings]) {
       for (const th of list) {
@@ -446,7 +680,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   }
   // Schwebeband: Wer aufpasst, fährt auf einer Magnetlinie – auf der, die bei der Ankunft am Zielpunkt näher liegt.
   // (Nicht in engen Kurven: dort zählt die Innenseite mehr als der Zug der Linie.)
-  if (b.level > 0 && !air && (t.edge[target] & EDGE_BAND) !== 0 && Math.abs(bend) < 1 / 70) {
+  if (b.level >= AI_MEDIUM && !air && (t.edge[target] & EDGE_BAND) !== 0 && Math.abs(bend) < 1 / 70) {
     const band = bandOf(t, target);
     if (band) {
       const m = bandMeters(t, band, target, 0);
@@ -472,7 +706,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     lat = hl > 0 ? Math.min(lat, hl - 4.6) : Math.max(lat, hl + 4.6);
   }
   // Böen: wer aufpasst, zieht schon zur Windseite, während sie sich ankündigt (im Windschatten ist das nicht nötig).
-  if (b.level > 0) {
+  if (b.level >= AI_MEDIUM) {
     for (const w of t.winds) {
       if (target < w.first || target >= w.first + w.count) continue;
       const k = Math.max(gustStrength(w, ctx.time + 12), gustWarning(w, ctx.time) * 0.7);
@@ -655,7 +889,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       if (p.kind === PULSE_BUBBLE) {
         // Ein Blasenschlot ist kein Hindernis, sondern ein Sprungbrett: wer aufpasst, hält auf den nächsten zu,
         // der bei der Ankunft sicher bläst (darüber hängt ein Schubring).
-        if (b.level > 0 && d < bubbleAt && c0 < p.on && c1 < p.on && c1 > c0) {
+        if (b.level >= AI_MEDIUM && d < bubbleAt && c0 < p.on && c1 < p.on && c1 > c0) {
           bubbleAt = d;
           lat = p.lat;
         }
@@ -687,7 +921,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       let fast: (typeof r.lanes)[number] | null = null;
       for (const l of r.lanes) {
         if (l.gap <= 0) {
-          if (b.level > 0 && a0 >= -12 && (!fast || l.speed > fast.speed)) fast = l;
+          if (b.level >= AI_MEDIUM && a0 >= -12 && (!fast || l.speed > fast.speed)) fast = l;
           continue;
         }
         let soon = Infinity;
@@ -703,7 +937,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         // Gesperrt ist eine Bahn erst, wenn die Lücke nahe ist (0,7 s: so lange dauert der Wechsel zur Mitte);
         // wer aufpasst, fährt auf eine schnelle Bahn, die noch eine gute Sekunde trägt.
         if (soon <= 42) block(l.lat0 - 0.3, l.lat1 + 0.3, 1);
-        else if (b.level > 0 && a0 >= -12 && (soon > 66 || l === mine)) {
+        else if (b.level >= AI_MEDIUM && a0 >= -12 && (soon > 66 || l === mine)) {
           // (Wer schon auf einem schnellen Floß fährt, bleibt, bis die Sperre kommt.)
           const mid = (l.lat0 + l.lat1) / 2;
           if (!fast || l.speed > fast.speed || (l.speed === fast.speed && Math.abs(mid - here) < Math.abs((fast.lat0 + fast.lat1) / 2 - here))) fast = l;
@@ -878,7 +1112,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   if (t.winds.length > 0) {
     projectOnTrack(t, s.x, s.z, s.seg);
     const blow = windPush(t, proj.seg, proj.along, proj.lat, ctx.time);
-    if (blow !== 0) err += Math.atan2(blow * (air ? 1.4 : 1), Math.max(v, 10)) * (b.level > 0 ? 1 : 0.7);
+    if (blow !== 0) err += Math.atan2(blow * (air ? 1.4 : 1), Math.max(v, 10)) * (b.level >= AI_MEDIUM ? 1 : 0.7);
   }
   // Rechts lenken verkleinert die Blickrichtung → Vorzeichen umdrehen. (Auf dem Schwebeband an der Wand dreht das Band
   // selbst mit – den Teil muss die Lenkung nicht mehr leisten.)
@@ -907,12 +1141,16 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   const slowGround = (SURFACES[t.surf[s.seg < t.total ? s.seg : 0]]?.speed ?? 1) < 0.8;
   const mayDrift = !openAhead && !gapAhead && !close && !slowGround;
   // Wer driftet, kommt enger herum als mit normaler Lenkung und darf schneller hinein.
-  const cornering = tight > b.driftFrom && mayDrift ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * (openAhead ? 0.8 : 0.92);
-  const limit = tight > 1e-4 ? Math.sqrt(cornering / tight) : 99;
+  const cornering = tight > b.driftFrom && mayDrift ? A_LAT * DRIFT_TIGHT * 0.86 : A_LAT * (openAhead ? 0.8 : CORNER_SAFE[b.level]);
+  const limit = pro
+    ? brakingLimit(v, b.driftFrom, mayDrift, openAhead, A_LAT)
+    : tight > 1e-4
+      ? Math.sqrt(cornering / tight)
+      : 99;
   let buttons = 0;
   // Vor einem Sprung zählt nur Anlauf.
   if (gapAhead || v < limit + 0.5) buttons |= BTN_GAS;
-  else if (v > limit + 5) buttons |= BTN_BRAKE;
+  else if (v > limit + (pro ? PRO.brakeOver : 5)) buttons |= BTN_BRAKE;
   // Kein Durchkommen im Verkehr: bremsen, bis sich eine Lücke auftut.
   if (jam && !gapAhead) buttons = (buttons & ~BTN_GAS) | (v > haltSpeed ? BTN_BRAKE : 0);
 
@@ -931,6 +1169,12 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     const stillTurning = near * s.driftDir > 1 / 55;
     // Mindestens bis Stufe 1 halten, sofern die Kurve nicht schon vorbei ist.
     if (mayDrift && (stillTurning || (b.drifting < 40 && near * s.driftDir > 1 / 120))) buttons |= BTN_DRIFT;
+    // Profi: Steht die nächste Stufe kurz bevor und biegt die Bahn noch etwas, wird sie noch mitgenommen.
+    if (pro && mayDrift && !stillTurning) {
+      const stage = turboStage(s.driftCharge, s.char);
+      const next = stage < 3 ? TURBO_AT[stage] * (CHARACTERS[s.char] ?? CHARACTERS[0]).charge : Infinity;
+      if (next - s.driftCharge <= PRO.stretch && near * s.driftDir > 1 / PRO.stretchR) buttons |= BTN_DRIFT;
+    }
     const k = yawMax > 0 ? (wantYaw * s.driftDir) / yawMax : 0;
     // Ein Drift dreht immer weiter nach innen. Will die Ziellinie weiter hinaus, als selbst der weiteste Driftbogen
     // erlaubt, und ist der Innenrand schon nah, hilft nur loslassen – sonst zieht es das Kart in den Seitenstreifen
@@ -952,7 +1196,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     if (
       mayDrift &&
       Math.abs(near) > b.driftFrom &&
-      turnAhead > 0.55 &&
+      turnAhead > (pro ? PRO.turn : 0.55) &&
       vf > 14 &&
       Math.sign(steer) === dir &&
       Math.abs(err) < 0.6
@@ -974,6 +1218,8 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     if (b.holding++ === 0) b.patience = Math.round((150 + Math.floor(random(b) * 330)) * PATIENCE_FACTOR[b.level]);
     const aligned = Math.abs(err) < 0.2;
     const straight = maxCurvatureAhead(45) < 1 / 70;
+    // Der Profi hält in Führung ein Abwehr-Item als Schutz nach hinten, statt es aus Ungeduld loszuwerden.
+    const shield = pro && ctx.place === 1;
     const late = b.holding > b.patience;
     projectOnTrack(t, s.x, s.z, s.seg);
     const myLat = proj.lat;
@@ -995,17 +1241,19 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
         press = s.boost === 0 && v > 12 && straight && b.holding > 30 && !openAhead;
         break;
       case ITEM_TIRE:
-        press = (aligned && inLine) || (late && aligned);
+        // (Der Profi wirft ihn nur mit Ziel – oder nach doppelter Wartezeit.)
+        press = (aligned && inLine) || (late && aligned && (!pro || b.holding > 2 * b.patience));
         break;
       case ITEM_OIL:
       case ITEM_SMOKE:
-        press = (behind > 2 && behind < 16) || late;
+        press = (behind > 2 && behind < 16) || (late && !shield);
         break;
       case ITEM_TOP:
         press = b.holding > 40 && ((ahead > 6 && ahead < 110) || late);
         break;
       case ITEM_GUARD:
-        press = b.holding > 50;
+        // Der Profi in Führung schaltet ihn erst ein, wenn jemand nah dahinter ist (der könnte schießen).
+        press = b.holding > 50 && (!shield || behind < 35);
         break;
       case ITEM_EMP:
         press = b.holding > 50 && (ctx.place > 1 || late);
@@ -1058,7 +1306,7 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       }
       case ITEM_GLUE:
         // Abwehr: abfeuern, sobald jemand dicht dahinter fährt (in Reichweite); wer zu lange wartet, schießt auf gut Glück.
-        press = s.glueShot === 0 && b.holding > 30 && ((behind > 2 && behind < GLUE_RANGE - 5) || late);
+        press = s.glueShot === 0 && b.holding > 30 && ((behind > 2 && behind < GLUE_RANGE - 5) || (late && !shield));
         break;
     }
   }
@@ -1132,8 +1380,21 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
   return { steer: Math.round(steer * 127), buttons };
 }
 
-const BAND_AHEAD = [0.2, 0.14, 0.07];
-const BAND_BEHIND = [0.03, 0.06, 0.1];
+// Der Profi wird in Führung nicht langsamer (ein Mensch tut das auch nicht) und holt von hinten nur sanft auf.
+/** Tempo-Faktor, den die sehr leichte KI vor einem Sprung mindestens bekommt. */
+export const RUN_UP = 0.9;
+
+/**
+ * Tempo-Faktor eines KI-Fahrers für diesen Schritt (nach botCmd). Die sehr leichte KI ist so gemütlich, dass sie
+ * ohne Anlauf in die Lücke fiele (gemessen: Ladeluke im Sturmhafen, Schlucht am Eiszapfen-Pass) – vor einem
+ * Sprung bekommt sie deshalb mindestens RUN_UP. Die anderen Stufen bleiben, wie sie sind.
+ */
+export function botSpeed(b: BotBrain, factor: number): number {
+  return b.runUp && b.level === AI_VERY_EASY ? Math.max(factor, RUN_UP) : factor;
+}
+
+const BAND_AHEAD = [0.25, 0.2, 0.14, 0.07, 0];
+const BAND_BEHIND = [0.02, 0.03, 0.06, 0.1, 0.05];
 
 /**
  * Milder Tempo-Ausgleich: liegt ein KI-Fahrer weit vor den Menschen, wird er
@@ -1142,7 +1403,7 @@ const BAND_BEHIND = [0.03, 0.06, 0.1];
  * @param aheadMeters Vorsprung auf den besten Menschen (negativ = Rückstand)
  */
 export function rubberBand(aheadMeters: number, level = AI_MEDIUM): number {
-  const l = Math.max(0, Math.min(2, level | 0));
+  const l = cleanAiLevel(level);
   const k = Math.max(-1, Math.min(1, aheadMeters / 80));
   return k > 0 ? 1 - k * BAND_AHEAD[l] : 1 - k * BAND_BEHIND[l];
 }

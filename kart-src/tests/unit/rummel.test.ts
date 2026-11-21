@@ -226,13 +226,13 @@ describe('Schienen', () => {
 
   it('die KI fährt die Achterbahn: niemand stürzt, die gute erwischt die Schubmagnete viel öfter', () => {
     const t = setTrack(RUMMEL);
-    const kicked = [0, 0, 0];
-    const time = [0, 0, 0];
+    const kicked = [0, 0, 0, 0, 0];
+    const time = [0, 0, 0, 0, 0];
     let falls = 0;
     for (let slot = 0; slot < 4; slot++) {
       for (const level of [AI_EASY, AI_MEDIUM, AI_HARD]) {
         const s = gridState(slot);
-        const brain = newBrain(slot + level * 4, level);
+        const brain = newBrain(slot + (level - AI_EASY) * 4, level);
         let progress = progDelta(t, 0, s.seg);
         let tick = 1;
         for (; tick < 60 * 300 && progress < 3 * t.n; tick++) {
@@ -249,12 +249,12 @@ describe('Schienen', () => {
       }
     }
     console.log(
-      `Achterbahn-Rummel, KI in je 12 Runden: Schubmagnete erwischt leicht/mittel/schwer ${kicked.join('/')} (von 72 Stellen), Stürze ${falls}; Rundenzeit ${time.map((x) => (x / 4).toFixed(1)).join('/')} s`,
+      `Achterbahn-Rummel, KI in je 12 Runden: Schubmagnete erwischt leicht/mittel/schwer ${kicked.slice(AI_EASY, AI_HARD + 1).join('/')} (von 72 Stellen), Stürze ${falls}; Rundenzeit ${time.slice(AI_EASY, AI_HARD + 1).map((x) => (x / 4).toFixed(1)).join('/')} s`,
     );
     expect(falls).toBe(0);
     // sechs Stellen je Runde, zwölf Runden: Die gute nimmt die meisten, die vorsichtige nur, was ihr zufällt.
-    expect(kicked[2]).toBeGreaterThan(50);
-    expect(kicked[2]).toBeGreaterThan(kicked[0] + 15);
-    expect(time[2]).toBeLessThan(time[0]);
+    expect(kicked[AI_HARD]).toBeGreaterThan(50);
+    expect(kicked[AI_HARD]).toBeGreaterThan(kicked[AI_EASY] + 15);
+    expect(time[AI_HARD]).toBeLessThan(time[AI_EASY]);
   }, 120000);
 });

@@ -840,8 +840,8 @@ async function main() {
     check('Mitspieler kann Strecke und KI-Stärke nicht ändern', (await c6.page.locator('.track-card').first().isDisabled()) && (await c6.page.locator('#ai-level button').first().isDisabled()));
     await pickTrack(h6.page, 1);
     await lobbyStep(h6.page, 3);
-    await h6.page.locator('#ai-level button[data-level="2"]').click();
-    await c6.page.waitForFunction(() => window.__kart.lobby().track === 1 && window.__kart.lobby().aiLevel === 2, null, { timeout: 5000 });
+    await h6.page.locator('#ai-level button[data-level="3"]').click();
+    await c6.page.waitForFunction(() => window.__kart.lobby().track === 1 && window.__kart.lobby().aiLevel === 3, null, { timeout: 5000 });
     check('Wahl des Hosts kommt beim Mitspieler an', (await c6.page.locator('.track-card[data-on="true"] .track-name').textContent()) === 'Möwenklippe' && (await c6.page.locator('#ai-level button[aria-pressed="true"]').textContent()) === 'Schwer');
     check('Mitspieler sieht die gewählte Strecke im Detail', (await c6.page.textContent('#td-name')) === 'Möwenklippe' && (await c6.page.textContent('#sum-track-name')) === 'Möwenklippe');
     // Rundenzahl: Vorgabe 3, nur der Host stellt um

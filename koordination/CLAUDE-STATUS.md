@@ -1,14 +1,16 @@
 # Stand Claude
 
-Zuletzt aktualisiert: 2026-11-19 16:00 UTC · geschrieben nur von Claude
+Zuletzt aktualisiert: 2026-11-21 15:40 UTC · geschrieben nur von Claude
 
 ## Woran gerade gearbeitet wird
 
 | Wer | Aufgabe | Bereich (für Codex gesperrt) |
 | --- | --- | --- |
-| Claude | Auftrag vom 2026-11-18 (Nutzer schläft, autonom weiter): Menü/Lobby als Schrittfolge neu (Agent im Hauptordner), danach Strecken 21–25 nacheinander, je veröffentlichen – abgeschlossen. | – |
+| Claude | Auftrag vom 2026-11-21: Ansicht aus der ersten Person (Cockpit, Hände, Rückspiegel, Item-Animationen) – in Arbeit. | `kart-src/src/render/` (Kamera, Cockpit) |
 
 ## Veröffentlicht
+
+- Schritt 27 (2026-11-21, Version 261121-1533, Protokoll 29): fünf KI-Stärken statt drei (Rückmeldung: „Schwer“ ist zu leicht zu schlagen). Neu „Sehr leicht“ (Grundtempo −0,17, vorsichtiger in Kurven, Anlauf vor Sprüngen) und „Profi“ (Tempo 1, Ideallinie, Bremspunkt-Rechnung, Boost-Felder und Kisten gezielt, längere Drifts, bevorzugter Weg je Strecke `PRO_ROUTE`, Abwehr-Items in Führung, kein Gummiband nach vorn). Alte Stufen unverändert (Messläufe aufs Zehntel gleich); gespeicherte Lobby-Stärke wird umgerechnet. Gemessen allein, 3 Runden, 25 Strecken: 5488 / 5008 / 4496 / 4224 / 3995 s; in 100 Host-Rennen gewinnt eine KI wie „Schwer“ mit vollem Tempo gegen 3× Schwer 59-mal, gegen 3× Profi 7-mal. Geprüft: 791 Unit-Tests (neu `kistufen.test.ts`); Browser-Test Abschnitte phase3, race, cup 107/108 (Bohrer-Momentaufnahme; Wiederholung phase3 81/81). Nicht geprüft: Safari/iPad, Spielgefühl mit Menschen.
 
 - Schritt 26d (2026-11-19, Version 261119-1546, Protokoll 28): Roboter neu (Rückmeldung „sieht generisch aus, kaum Gelenke“). Humanoider Mech: Becken → Oberschenkel → Knie → Sprunggelenk → Fuß mit Ballen, Schulter → Ellbogen → Handgelenk → Faust; Gelenke mit Grenzen, Panzerplatten, Chrombolzen, Kolben, auf „hoch“ Hydraulikschläuche. Laufzyklus wie ein Sprinter mit Zwei-Knochen-IK (Fersenaufsatz, Abrollen, Abdruck, Flugphase, Schwungbein), Füße stehen in der Standphase fest (≤ 4 mm), 6,4 Schritte/s, Arme gegengleich ~90°; Verwandlung Teil für Teil, Ducken/Absprung/Einklappen in Abfolge. Nur Darstellung (kartModel.ts, raceScene.ts); Physik unverändert. Knochen 63 → 72; Zusatz-Netz 2828/5177/5845 Ecken (vorher 2130/3587/4075), nur gezeichnet, solange sichtbar. Geprüft: 785 Unit-Tests, Browser phase3 81 von 81. Offen: iPad; von genau vorn verdeckt die Brust teils Kalles und Berts Gesicht; Roboter ~3 m hoch.
 - Schritt 26c (2026-11-19, Version 261119-1438, Protokoll 28): Startaufstellung. Einzelrennen (auch „Nochmal“) und erstes Turnierrennen: Startplätze gelost (bisher nach Platznummer, Host vorn). Turnier ab Rennen 2: gespiegelt zum Vorrennen – Letzter vorn, Sieger hinten; wer neu auf einem Platz ist, startet vorn. Nur beim Host (lobby/cup.ts gridOrder, HostGame.setGrid, HostLobby.lastStandings); nach einem Neuladen des Hosts mitten im Turnier wird wieder gelost. ?grid=fest stellt nach Platznummer auf (e2e nutzt es außer im Turnier). Geprüft: 785 Unit-Tests (neu startaufstellung.test.ts), Browser sync/race/phase3/mechanics 196 von 196, cup 42 von 42 (prüft die Spiegelung in Rennen 2 und 3).
