@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>Vorschau Cockpit</title>
+<style>
+  html, body { margin: 0; background: #bfe6fb; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// Nur zur Entwicklung (nicht im Build – vite.config.ts nennt nur index.html und c/index.html): das eigene Kart in der
+// Cockpit-Ansicht (firstPerson.ts, cockpitKit.ts) auf einer Fahrbahn mit Querstreifen. Aufruf über den Entwicklungsserver
+// (npx vite, dann /vorschau-cockpit.html?w=1280&h=720), Bedienung über window.H, z. B. mit Playwright:
+//   H.init({ c: 0, s: 0 }); H.set({ steer: 0.4, held: 2 }); H.run(1); H.cam('fp'); H.draw();
+//   H.cam('orbit', { yaw: 0.6, pitch: 0.3, dist: 0.8, at: [0, 0.8, 0.1] })  – von außen, alle Ebenen sichtbar
+//   H.use(item)  – Item-Geste auslösen (wie im Spiel beim Einsatz)
+import * as THREE from 'three';
+import { KartVisual, COCKPIT_ELBOW, COCKPIT_STEER } from './src/render/kartModel.ts';
+import { Cockpit, COCKPIT_LAYER } from './src/render/firstPerson.ts';
+import { Glove, GRIP, HOLD, OPEN, setGrip } from './src/render/cockpitKit.ts';
+import { FP_EYE, FP_TUNE } from './src/render/firstPerson.ts';
+
+const q = new URLSearchParams(location.search);
+const W = Number(q.get('w') ?? 1280);
+const Hh = Number(q.get('h') ?? 720);
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, Hh);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe6fb);
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(40, 90, 70);
+const hemi = new THREE.HemisphereLight(0xcfe9ff, 0x8a7a68, 1.3);
+sun.layers.enable(COCKPIT_LAYER);
+hemi.layers.enable(COCKPIT_LAYER);
+scene.add(sun, hemi);
+const camera = new THREE.PerspectiveCamera(74, W / Hh, 0.3, 600);
+scene.add(camera);
+
+const tc = document.createElement('canvas');
+tc.width = 64;
+tc.height = 320;
+const g = tc.getContext('2d');
+g.fillStyle = '#5c5a66';
+g.fillRect(0, 0, 64, 320);
+for (let i = 0; i < 5; i++) {
+  g.fillStyle = i === 0 ? '#f4f1ea' : '#77757f';
+  g.fillRect(0, i * 64, 64, i === 0 ? 10 : 4);
+}
+const tex = new THREE.CanvasTexture(tc);
+tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+tex.repeat.set(1, 120);
+tex.colorSpace = THREE.SRGBColorSpace;
+const road = new THREE.Mesh(new THREE.PlaneGeometry(9, 600), new THREE.MeshLambertMaterial({ map: tex }));
+road.rotation.x = -Math.PI / 2;
+road.position.z = 250;
+scene.add(road);
+const grass = new THREE.Mesh(new THREE.PlaneGeometry(400, 600), new THREE.MeshLambertMaterial({ color: 0x8fc46a }));
+grass.rotation.x = -Math.PI / 2;
+grass.position.set(0, -0.01, 250);
+scene.add(grass);
+// Pfosten am Rand, damit man im Spiegel etwas sieht.
+for (let i = -20; i < 60; i++) {
+  const p = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.2, 0.3), new THREE.MeshLambertMaterial({ color: i % 2 ? 0xffd23f : 0x2d2a36 }));
+  p.position.set(i % 4 < 2 ? 5 : -5, 0.6, i * 6);
+  scene.add(p);
+}
+
+const REST = {
+  speed: 20, steer: 0, driftDir: 0, driftStage: 0, boost: false, air: false, spin: 0, guard: false, stall: false,
+  offroad: false, emote: 'none', held: 0, tow: false, glide: false, dive: false, space: false,
+};
+const ACCENT = [0xff5a4e, 0x1fc8b6, 0xffd23f, 0x9b87ff];
+const st = { kart: null, pose: { ...REST }, z: 0, mode: 'fp', orbit: {}, cockpit: new Cockpit(), state: { speed: 20, speed01: 0.77, driftDir: 0, stage: 0, boost: false, itemReady: false } };
+
+window.H = {
+  init(o = {}) {
+    if (st.kart) {
+      st.cockpit.setKart(null, 0);
+      scene.remove(st.kart.root);
+      st.kart.dispose();
+    }
+    st.kart = new KartVisual(o.c ?? 0, 2, o.s ?? o.c ?? 0);
+    st.kart.root.rotation.order = 'YXZ';
+    st.kart.firstPerson = true;
+    scene.add(st.kart.root);
+    st.pose = { ...REST };
+    st.cockpit.active = true;
+    st.cockpit.setKart(st.kart, ACCENT[o.s ?? o.c ?? 0]);
+    window.V = st.kart;
+    return true;
+  },
+  /** Haltung des Karts (KartPose-Felder) und Anzeige (CockpitState-Felder: stage, boost, itemReady). */
+  set(o = {}) {
+    Object.assign(st.pose, o);
+    for (const k of ['stage', 'boost', 'itemReady', 'speed']) if (k in o) st.state[k] = o[k];
+    return true;
+  },
+  /** Einstellen: steer/elbow (kartModel.ts), grip [lean, arm] (cockpitKit.ts), eye/tune (firstPerson.ts). */
+  tune(o = {}) {
+    if (o.steer) COCKPIT_STEER.splice(0, 3, ...o.steer);
+    if (o.elbow) COCKPIT_ELBOW.splice(0, 3, ...o.elbow);
+    if (o.grip) setGrip(o.grip[0], o.grip[1]);
+    if (o.eye) FP_EYE[st.kart.character] = o.eye;
+    if (o.cam) Object.assign(FP_TUNE, o.cam);
+    return true;
+  },
+  use(item) {
+    st.kart.useItem(item);
+    return true;
+  },
+  /** t Sekunden weiterrechnen (60 Schritte je Sekunde). */
+  run(t) {
+    const n = Math.round(t * 60);
+    for (let i = 0; i < n; i++) {
+      st.z += (st.pose.speed ?? 0) / 60;
+      st.kart.root.position.set(0, 0, st.z);
+      st.kart.update(1 / 60, st.pose);
+      st.cockpit.update(st.state, 1 / 60);
+    }
+    return true;
+  },
+  /** Einzelner Handschuh vor grünem Grund (side 1 rechts, −1 links), Haltung zwischen OPEN, HOLD, GRIP; mit Stange durch die Faustmitte. */
+  glove(side = 1, pose = 'GRIP') {
+    if (st.glove) scene.remove(st.glove.group, st.bar, st.axes);
+    const gl = new Glove(side, 0xf6f1e7, 0xff5a4e, 0x4a4556);
+    gl.pose({ OPEN, HOLD, GRIP }[pose], { OPEN, HOLD, GRIP }[pose], 1);
+    gl.group.position.set(0, 1, st.z + 3);
+    st.glove = gl;
+    st.bar = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 12), new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    st.bar.rotation.z = Math.PI / 2;
+    st.bar.position.copy(gl.gripCenter).add(gl.group.position);
+    st.axes = new THREE.AxesHelper(0.15);
+    st.axes.position.copy(gl.group.position);
+    scene.add(gl.group, st.bar, st.axes);
+    st.orbit = { at: [0, 1.05 - 0.8, 3], dist: 0.45, yaw: 0.5, pitch: 0.3, fov: 40 };
+    st.mode = 'orbit';
+    return { grip: gl.gripCenter.toArray().map((x) => +x.toFixed(3)) };
+  },
+  cam(mode = 'fp', o = {}) {
+    st.mode = mode;
+    st.orbit = o;
+    return true;
+  },
+  draw() {
+    const k = st.kart;
+    k.root.updateMatrixWorld(true);
+    if (st.mode === 'fp') {
+      camera.layers.set(0);
+      st.cockpit.place(camera, k.cockpit, k.character, 0.8, false, 1);
+      renderer.render(scene, camera);
+      st.cockpit.renderMirror(renderer, scene);
+      st.cockpit.render(renderer, scene, camera);
+    } else {
+      const o = st.orbit;
+      const at = new THREE.Vector3(...(o.at ?? [0, 0.8, 0.1])).add(k.root.position);
+      const d = o.dist ?? 1;
+      const yaw = o.yaw ?? 0.6;
+      const pitch = o.pitch ?? 0.3;
+      camera.position.set(at.x + Math.sin(yaw) * Math.cos(pitch) * d, at.y + Math.sin(pitch) * d, at.z + Math.cos(yaw) * Math.cos(pitch) * d);
+      camera.near = 0.02;
+      camera.fov = o.fov ?? 40;
+      camera.updateProjectionMatrix();
+      camera.lookAt(at);
+      camera.layers.enableAll();
+      renderer.render(scene, camera);
+      camera.near = 0.3;
+      camera.updateProjectionMatrix();
+    }
+    return true;
+  },
+};
+window.H.init({ c: Number(q.get('c') ?? 0) });
+window.H.run(0.5);
+window.H.draw();
+window.__ready = true;
+</script>
+</body>
+</html>

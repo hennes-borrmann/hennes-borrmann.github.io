@@ -42,7 +42,10 @@ import {
 import { DebugOverlay, type DebugRow, type DebugSection, type Tone } from '../render/debugOverlay';
 import { readCrash, setCareful } from '../render/gfxGuard';
 import { setPortraitRenderer } from '../render/portraits';
-import { RaceScene, type KartAudio, type Quality } from '../render/raceScene';
+import { RaceScene, type KartAudio, type Quality, type ViewMode } from '../render/raceScene';
+import { FP_EYE, FP_TUNE } from '../render/firstPerson';
+import { DASH, MIRROR } from '../render/cockpitKit';
+import { COCKPIT_ELBOW, COCKPIT_STEER } from '../render/kartModel';
 import { $, ms } from '../util/dom';
 import { keepAwake, wakeLockMode } from '../util/wakeLock';
 import { ControllerPairing } from './pairing';
@@ -112,6 +115,14 @@ function createAudio(): AudioEngine | null {
   } catch (err) {
     console.warn('[audio] Ton nicht verfügbar:', err);
     return null;
+  }
+}
+
+function loadView(): ViewMode {
+  try {
+    return localStorage.getItem('kart.view') === 'first' ? 'first' : 'third';
+  } catch {
+    return 'third';
   }
 }
 
@@ -192,6 +203,8 @@ export class App {
   /** Zuletzt gewählte Figur, -1 = noch keine Wahl (dann gilt die Standardfigur des Platzes). */
   private character = loadCharacter();
   private showFps = loadFlag('kart.fps');
+  /** Ansicht im Rennen (Verfolger oder Cockpit), je Bildschirm gemerkt. */
+  private viewMode: ViewMode = loadView();
   private readonly sound: Sound;
   private readonly kartAudio: KartAudio[] = [];
   /** Bis wann "Letzte Runde!" eingeblendet bleibt (ms). */
@@ -303,7 +316,9 @@ export class App {
           /* gilt dann nur für diese Sitzung */
         }
       },
-      settings: () => ({ quality: this.quality, ...this.sound.volumes(), muted: this.sound.muted, showFps: this.showFps }),
+      setView: (v) => this.setView(v),
+      toggleView: () => this.setView(this.viewMode === 'first' ? 'third' : 'first'),
+      settings: () => ({ quality: this.quality, view: this.viewMode, ...this.sound.volumes(), muted: this.sound.muted, showFps: this.showFps }),
       click: (kind) => {
         this.sound.unlock();
         this.sound.ui(kind);
@@ -864,6 +879,8 @@ export class App {
     this.scene.setTrack();
     this.scene.reset();
     this.ui.setCameraLabel(false);
+    this.ui.setViewLabel(this.viewMode === 'first');
+    this.scene.view = this.viewMode;
     this.scene.onEvent = (e) => this.sound.sceneEvent(e);
     this.scene.setRoster(this.drivers(state));
     this.sound.music(TRACK.def.theme as MusicName);
@@ -916,6 +933,17 @@ export class App {
     this.sound.music('menu');
     this.overlay.visible = this.debug.debugOverlay;
     this.sendHud(true);
+  }
+
+  private setView(v: ViewMode): void {
+    this.viewMode = v;
+    try {
+      localStorage.setItem('kart.view', v);
+    } catch {
+      /* ohne Speicher gilt die Wahl nur für diese Sitzung */
+    }
+    if (this.scene) this.scene.view = v;
+    this.ui.setViewLabel(v === 'first');
   }
 
   private setQuality(q: Quality): void {
@@ -993,6 +1021,7 @@ export class App {
         view.entities(alpha, t, dt, this.ents);
         const race = view.race(t);
         const things = view.things(t);
+        this.scene.view = this.viewMode;
         this.scene.frame(this.ents, view.localSlot, dt, race, things);
         this.updateRaceUi(race, now);
         this.sound.update(dt, race.phase === RACE_RESULTS ? null : this.scene.kartAudio(this.kartAudio));
@@ -1458,6 +1487,18 @@ export class App {
     (window as unknown as Record<string, unknown>).__kart = {
       role: () => this.role,
       view: () => this.ui.view,
+      // Cockpit-Ansicht: umschalten und Kamera einstellen (zum Ausprobieren in der Konsole und für Bildvergleiche).
+      setView: (v: ViewMode) => this.setView(v),
+      fpTune: (o: Partial<typeof FP_TUNE>) => Object.assign(FP_TUNE, o),
+      fpEye: (character: number, xyz: [number, number, number]) => (FP_EYE[character] = xyz),
+      fpSteer: (v: [number, number, number], elbow?: [number, number, number]) => {
+        COCKPIT_STEER.splice(0, 3, ...v);
+        if (elbow) COCKPIT_ELBOW.splice(0, 3, ...elbow);
+      },
+      fpDash: (dash?: [number, number, number], mirror?: [number, number, number]) => {
+        if (dash) DASH.splice(0, 3, ...dash);
+        if (mirror) MIRROR.splice(0, 3, ...mirror);
+      },
       lobby: () => this.lobbyState(),
       slot: () => this.localSlot(),
       pairUrl: () => this.pairUrl(),
