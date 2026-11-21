@@ -629,6 +629,8 @@ export class RaceScene {
   view: ViewMode = 'third';
   /** Cockpit-Ansicht: Kamera im Kopf, zweiter Durchgang fürs eigene Kart (firstPerson.ts). */
   private readonly cockpit = new Cockpit();
+  /** Cockpit-Ansicht, für Tests: Gierwinkel von Kamera, Nase und Fahrtrichtung im letzten Bild. */
+  readonly fpYaw = { cam: 0, nose: 0, travel: 0 };
   /** Im letzten Bild aus dem Cockpit gesehen (beim Wechsel setzt die Verfolgerkamera neu an). */
   private fpWas = false;
   /** Fotokamera: fester Standort, Blickpunkt und Bildwinkel – null = normale Kamera. */
@@ -2793,7 +2795,7 @@ export class RaceScene {
     this.stats.calls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
     if (this.cockpit.active) {
-      this.stats.calls += this.cockpit.renderMirror(this.renderer, this.scene);
+      this.stats.calls += this.cockpit.renderMirror(this.renderer, this.scene, this.camera);
       this.stats.calls += this.cockpit.render(this.renderer, this.scene, this.camera);
       this.stats.triangles += this.renderer.info.render.triangles;
     }
@@ -3115,7 +3117,13 @@ export class RaceScene {
         loose: (me.flags & FLAG_AIR) === 0 && DUST[t.surf[seg]] !== 0,
         offroad: (me.flags & (FLAG_OFFROAD | FLAG_AIR)) === FLAG_OFFROAD,
         level: wall || me.spin > 0 ? 0 : 0.5,
+        slip: (me.flags & FLAG_AIR) === 0 && Math.hypot(me.vx, me.vz) > 5 ? wrapAngle(Math.atan2(me.vx, me.vz) - me.heading) : 0,
       });
+      // (Für Tests: Blickrichtung der Kamera, Nase und Fahrtrichtung des Karts, alle als Gierwinkel.)
+      this.v3.set(0, 0, -1).applyQuaternion(cam.quaternion);
+      this.fpYaw.cam = Math.atan2(this.v3.x, this.v3.z);
+      this.fpYaw.nose = me.heading;
+      this.fpYaw.travel = Math.atan2(me.vx, me.vz);
       if (me.rocket > 0 && race.phase !== RACE_RESULTS) {
         this.cockpit.placeRocket(cam, k.visual.cockpit, Math.min(1, me.rocket / ROCKET_MORPH_TICKS), me.rocket > ROCKET_MORPH_TICKS, dt);
       }

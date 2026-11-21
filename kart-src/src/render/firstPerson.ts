@@ -11,11 +11,15 @@
 // vor der Welt liegt, sieht man aus dem Sitz nicht.
 //
 // Dazu kommen eigene Teile, die nur in dieser Ansicht zu sehen sind: Handschuhe mit Fingern statt der Kugelhände,
-// Armaturen und der Rückspiegel.
+// Lenkrad und Armaturen (cockpitKit.ts) – und der Rückspiegel: kein Teil des Karts, sondern ein schmaler Streifen oben in
+// der Bildmitte unter der Rundenanzeige, im Stil der Anzeigen (Tuscherand, versetzter Schatten). Sein Bild kommt aus einer
+// Kamera im Kopf, die nach hinten schaut, und wird nur jedes mirrorEvery-te Bild neu gezeichnet; der Streifen selbst kostet
+// je Bild drei kleine Zeichenaufrufe.
 
 import * as THREE from 'three';
 import type { CockpitRig, KartVisual } from './kartModel';
 import { CockpitKit, type CockpitState } from './cockpitKit';
+import { INK } from './toon';
 
 export type { CockpitState };
 
@@ -42,6 +46,8 @@ export const FP_TUNE = {
   fov: 74,
   fovSpeed: 5,
   fovBoost: 7,
+  /** Querstellung: Anteil, um den der Blick der Nase des Karts folgt statt der Fahrtrichtung. */
+  slipKeep: 0.3,
   /** Roboter: so weit höher und nach vorn sitzt die Kamera (Meter), so viel steiler blickt sie abwärts (rad). */
   robotUp: 0.45,
   robotFwd: 0.35,
@@ -49,6 +55,24 @@ export const FP_TUNE = {
   /** Rakete: so weit entlang der Achse sitzt die Kamera (Meter). */
   rocketNose: 2.9,
   rocketSide: 0.8,
+};
+
+/**
+ * Rückspiegel: Auflösung des Bilds, senkrechter Bildwinkel (Grad; bei 7 : 1 rund 75° waagerecht), Kamera höher als der
+ * Kopf (Meter) und Neigung abwärts (rad); Streifen: Anteil der Bildbreite, höchstens so breit, Seitenverhältnis, Abstand
+ * von oben (CSS-Pixel bzw. Anteil der Bildhöhe – unter der Rundenanzeige), Rahmen.
+ */
+export const MIRROR = {
+  res: [512, 72] as [number, number],
+  fov: 12,
+  up: 0.12,
+  tilt: 0.05,
+  width: 0.3,
+  maxW: 460,
+  aspect: 7,
+  top: 72,
+  topShare: 0.095,
+  border: 3,
 };
 
 /** Was man im Sitz spürt (für Rütteln, Horizont, Turbo-Stoß). */
@@ -61,10 +85,13 @@ export interface CockpitFeel {
   offroad: boolean;
   /** Anteil, um den der Horizont gerade gehalten wird (0 = Kamera kippt ganz mit dem Kart). */
   level: number;
+  /** Fahrtrichtung minus Blickrichtung des Karts (rad, links positiv) – im Drift steht das Kart quer. */
+  slip: number;
 }
-const NO_FEEL: CockpitFeel = { drift: 0, stage: 0, loose: false, offroad: false, level: 0 };
+const NO_FEEL: CockpitFeel = { drift: 0, stage: 0, loose: false, offroad: false, level: 0, slip: 0 };
 const _f = new THREE.Vector3();
 const _x = new THREE.Vector3(1, 0, 0);
+const _yUp = new THREE.Vector3(0, 1, 0);
 const _t = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 
@@ -91,16 +118,39 @@ export class Cockpit {
   /** Rückspiegel: 0 aus, sonst alle wie viele Bilder er neu gezeichnet wird (Qualitätsstufe, siehe raceScene.ts). */
   mirrorEvery = 2;
   private mirrorTick = 0;
+  /** Rückspiegel: Bild, Kamera nach hinten, Streifen über dem Bild (eigene Szene mit Kamera in CSS-Pixeln). */
+  private readonly mirrorTarget = new THREE.WebGLRenderTarget(MIRROR.res[0], MIRROR.res[1], { depthBuffer: true });
+  private readonly mirrorCam = new THREE.PerspectiveCamera(MIRROR.fov, MIRROR.res[0] / MIRROR.res[1], 0.3, 220);
+  private readonly hud = new THREE.Scene();
+  private readonly hudCam = new THREE.OrthographicCamera(0, 1, 0, -1, -1, 1);
+  private readonly glass: THREE.Mesh;
+  private readonly frame: THREE.Mesh;
+  private readonly shadow: THREE.Mesh;
+  /** Hat der Spiegel schon ein Bild? (Vorher bleibt er aus.) */
+  private mirrorReady = false;
   private kart: KartVisual | null = null;
   private kit: CockpitKit | null = null;
   private time = 0;
   private glance = 0;
+  private slip = 0;
   private rumble = 0;
   private kick = 0;
   private driftWas = 0;
 
   constructor() {
     this.cam.layers.set(COCKPIT_LAYER);
+    const quad = (): THREE.PlaneGeometry => new THREE.PlaneGeometry(1, 1);
+    const glassGeo = quad();
+    // Seitenverkehrt wie ein Spiegel.
+    const uv = glassGeo.getAttribute('uv') as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+    this.glass = new THREE.Mesh(glassGeo, new THREE.MeshBasicMaterial({ map: this.mirrorTarget.texture, depthTest: false }));
+    this.frame = new THREE.Mesh(quad(), new THREE.MeshBasicMaterial({ color: INK, depthTest: false }));
+    this.shadow = new THREE.Mesh(quad(), new THREE.MeshBasicMaterial({ color: INK, transparent: true, opacity: 0.45, depthTest: false }));
+    this.shadow.renderOrder = 0;
+    this.frame.renderOrder = 1;
+    this.glass.renderOrder = 2;
+    this.hud.add(this.shadow, this.frame, this.glass);
   }
 
   /**
@@ -116,7 +166,7 @@ export class Cockpit {
       this.kit.dispose();
       this.kit = null;
     }
-    if (kart && !this.kit) this.kit = new CockpitKit(kart.character, kart.slot, accent, [256, 80]);
+    if (kart && !this.kit) this.kit = new CockpitKit(kart.character, kart.slot, accent);
     this.kart = kart;
     if (!kart) return;
     this.kit!.attach(kart.cockpit);
@@ -124,6 +174,7 @@ export class Cockpit {
   }
 
   /** Nach KartVisual.update: Handschuhe, Tacho, Lampen. */
+  // (Der Spiegel braucht kein Update: renderMirror und render erledigen alles.)
   update(state: CockpitState, dt: number): void {
     if (!this.kart || !this.kit) return;
     this.kit.setOutlines(this.mirrorEvery > 0);
@@ -153,6 +204,11 @@ export class Cockpit {
     camera.quaternion.copy(_qa);
     camera.up.set(0, 1, 0).applyQuaternion(_qa);
     camera.rotateX(-FP_TUNE.pitch - FP_TUNE.robotPitch * rob);
+    // Querstellung (Drift, Rutschen): Der Blick geht vor allem dorthin, wohin das Kart fährt, nur ein kleiner Teil in die
+    // Richtung, in die seine Nase zeigt (FP_TUNE.slipKeep). Das Kart sieht man dann leicht schräg zur Kurve stehen.
+    const slipWant = feel.level > 0 ? Math.max(-0.6, Math.min(0.6, feel.slip)) : 0;
+    this.slip += (slipWant - this.slip) * Math.min(1, dt * 8);
+    if (Math.abs(this.slip) > 1e-4) camera.quaternion.premultiply(_qa.setFromAxisAngle(_yUp, this.slip * (1 - FP_TUNE.slipKeep)));
     // Bohrer: Beim Einstecken schaut die Figur hin – die Kamera dreht sich zum Bohrer neben dem Kart und folgt ihm in
     // den Boden (Gewicht: hinschauen bis zur Hälfte, beim Hineinrammen am stärksten, danach zurück auf die Strecke).
     const p = rig.plant;
@@ -231,32 +287,63 @@ export class Cockpit {
   }
 
   /**
-   * Rückspiegel: die Welt nach hinten, klein und nur jedes mirrorEvery-te Bild. Vor dem zweiten Durchgang aufrufen.
-   * Gibt die Zahl der Zeichenaufrufe zurück.
+   * Rückspiegel: die Welt nach hinten aus Kopfhöhe (das eigene Kart liegt auf der Cockpit-Ebene und fehlt darin), klein
+   * und nur jedes mirrorEvery-te Bild. Nach place() und vor render() aufrufen. Gibt die Zahl der Zeichenaufrufe zurück.
    */
-  renderMirror(renderer: THREE.WebGLRenderer, scene: THREE.Scene): number {
-    const kit = this.kit;
-    if (!this.active || !kit || !this.kart || this.mirrorEvery <= 0) return 0;
-    kit.mirror.visible = true;
-    if (++this.mirrorTick % this.mirrorEvery !== 0) return 0;
+  renderMirror(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera): number {
+    if (!this.active || !this.kart || this.mirrorEvery <= 0) return 0;
+    if (++this.mirrorTick % this.mirrorEvery !== 0 && this.mirrorReady) return 0;
     const rig = this.kart.cockpit;
-    const cam = kit.mirrorCam;
-    rig.chassis.localToWorld(cam.position.copy(kit.mirrorAt));
-    // Nach hinten (die Kamera schaut entlang −z; das Kart nach +z) und eine Spur abwärts.
+    const cam = this.mirrorCam;
+    // Am Kopf, eine Handbreit höher; Blick nach hinten (die Kamera schaut entlang −z, das Kart nach +z), leicht abwärts.
     rig.chassis.getWorldQuaternion(cam.quaternion);
-    cam.rotateX(-0.05);
+    cam.position.copy(camera.position).add(_v.set(0, MIRROR.up, 0).applyQuaternion(cam.quaternion));
+    cam.rotateX(-MIRROR.tilt);
     cam.updateMatrixWorld();
     const before = renderer.getRenderTarget();
-    renderer.setRenderTarget(kit.mirrorTarget);
+    renderer.setRenderTarget(this.mirrorTarget);
     renderer.render(scene, cam);
     renderer.setRenderTarget(before);
+    this.mirrorReady = true;
+    return renderer.info.render.calls;
+  }
+
+  /** Spiegelstreifen über das fertige Bild legen: oben mittig unter der Rundenanzeige (Maße in CSS-Pixeln). */
+  private renderMirrorStrip(renderer: THREE.WebGLRenderer): number {
+    if (this.mirrorEvery <= 0 || !this.mirrorReady) return 0;
+    const el = renderer.domElement;
+    const W = el.clientWidth || 1;
+    const H = el.clientHeight || 1;
+    const w = Math.min(MIRROR.maxW, W * MIRROR.width);
+    const h = w / MIRROR.aspect;
+    const top = Math.max(MIRROR.top, H * MIRROR.topShare);
+    const cx = W / 2;
+    const cy = -(top + h / 2);
+    const b = MIRROR.border;
+    this.glass.position.set(cx, cy, 0);
+    this.glass.scale.set(w, h, 1);
+    this.frame.position.set(cx, cy, 0);
+    this.frame.scale.set(w + 2 * b, h + 2 * b, 1);
+    this.shadow.position.set(cx + 4, cy - 4, 0);
+    this.shadow.scale.set(w + 2 * b, h + 2 * b, 1);
+    const c = this.hudCam;
+    if (c.right !== W || c.bottom !== -H) {
+      c.left = 0;
+      c.right = W;
+      c.top = 0;
+      c.bottom = -H;
+      c.updateProjectionMatrix();
+    }
+    const auto = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(this.hud, c);
+    renderer.autoClear = auto;
     return renderer.info.render.calls;
   }
 
   /** Zweiter Durchgang: Tiefenpuffer leeren, nur das eigene Kart zeichnen. Gibt die Zahl der Zeichenaufrufe zurück. */
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera): number {
     if (!this.active || !this.kart) return 0;
-    if (this.kit) this.kit.mirror.visible = this.mirrorEvery > 0;
     const cam = this.cam;
     cam.position.copy(camera.position);
     cam.quaternion.copy(camera.quaternion);
@@ -274,12 +361,13 @@ export class Cockpit {
     renderer.render(scene, cam);
     renderer.autoClear = auto;
     scene.background = bg;
-    return renderer.info.render.calls;
+    return renderer.info.render.calls + this.renderMirrorStrip(renderer);
   }
 
   dispose(): void {
     this.setKart(null, 0);
     this.kit?.dispose();
     this.kit = null;
+    this.mirrorTarget.dispose();
   }
 }
