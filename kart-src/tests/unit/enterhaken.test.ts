@@ -1,4 +1,4 @@
-// Enterhaken: Die Figur schwingt ihn zwei Sekunden wie ein Lasso, wirft ihn in hohem Bogen auf den Fahrer vor ihr und zieht
+// Enterhaken: Die Figur schwingt ihn zwei Sekunden wie ein Lasso, wirft ihn in hohem Bogen auf den vordersten Fahrer in Reichweite und zieht
 // sich Zug um Zug an ihn heran – der Gezogene fährt unverändert weiter. Direkt hinter ihm lässt sie von selbst los: aufgeholt,
 // nicht überholt. Ohne Ziel in Reichweite krallt er sich voraus in die Fahrbahn (ein kleiner Zeitgewinn). Am häufigsten auf
 // Platz 2, dann 3 und 4, nie auf Platz 1.
@@ -83,7 +83,7 @@ interface Verlauf {
  * Metern, Platz 1 (KI) gap Meter davor, die beiden anderen weit dahinter. Niemand sonst bekommt Items. Nach FIRE_AT Ticks
  * drückt der Auslöser die Taste (mit hook = false nicht – der Vergleichslauf). each läuft nach jedem Schritt.
  */
-function lauf(track: number, start: number, gap: number, hook = true, ticks = 700, each?: (host: HostGame, i: number) => void): Verlauf {
+function lauf(track: number, start: number, gap: number, hook = true, ticks = 700, each?: (host: HostGame, i: number) => void, mid = -70): Verlauf {
   setTrack(track);
   const host = new HostGame(0);
   host.setRoster([0], true);
@@ -93,7 +93,7 @@ function lauf(track: number, start: number, gap: number, hook = true, ticks = 70
   brain.skill = 1;
   host.debugPlace(0, start);
   host.debugPlace(1, start + gap, 1.2);
-  host.debugPlace(2, start - 70);
+  host.debugPlace(2, start + mid, mid > 0 ? 1.2 : 0);
   host.debugPlace(3, start - 90);
   const ctx = { tick: 0, time: 0, place: 2, smoke: false };
   const r: Verlauf = { host, aim: -9, pulled: 0, gapThrow: 0, gapLatch: 0, gapMin: Infinity, gapEnd: 0, gapLater: 0, vEnd: 0, fell: 0, released: -1, way: 0 };
@@ -189,7 +189,7 @@ describe('Enterhaken', () => {
     });
   });
 
-  it('Wen er trifft: den Nächsten voraus zwischen HOOK_MIN und der Reichweite – nicht, wer neu aufgesetzt wird oder als Rakete fliegt', () => {
+  it('Wen er trifft: den vordersten Fahrer zwischen HOOK_MIN und der Reichweite – nicht, wer neu aufgesetzt wird oder als Rakete fliegt', () => {
     const t = TRACK;
     const at = (meters: number): KartState => {
       const s = newState();
@@ -207,17 +207,21 @@ describe('Enterhaken', () => {
     const hinten = at(80);
     expect(hookTarget(t, me, [hinten, fern], HOOK_RANGE)).toBe(-1);
     expect(hookTarget(t, me, [hinten, nah], HOOK_RANGE)).toBe(-1);
-    expect(hookTarget(t, me, [me, hinten, weit, mitte, fern], HOOK_RANGE)).toBe(3);
+    // Mehrere in Reichweite: der vorderste (weit), nicht der nächste (mitte) – und keiner außerhalb (fern).
+    expect(hookTarget(t, me, [me, hinten, weit, mitte, fern], HOOK_RANGE)).toBe(2);
+    expect(hookTarget(t, me, [mitte, nah, weit], HOOK_RANGE)).toBe(2);
     expect(hookTarget(t, me, [weit, fern], HOOK_RANGE)).toBe(0);
+    expect(hookTarget(t, me, [mitte, fern], HOOK_RANGE)).toBe(0);
     // Beim Wurf reicht er etwas weiter als das Fadenkreuz.
     const knapp = at(100 + HOOK_RANGE + 5);
     expect(hookTarget(t, me, [knapp], HOOK_RANGE)).toBe(-1);
     expect(hookTarget(t, me, [knapp], HOOK_REACH)).toBe(0);
-    mitte.respawn = 20;
-    expect(hookTarget(t, me, [mitte, weit], HOOK_RANGE)).toBe(1);
-    mitte.respawn = 0;
-    mitte.rocket = 5;
-    expect(hookTarget(t, me, [mitte, weit], HOOK_RANGE)).toBe(1);
+    // Ist der vorderste gerade nicht zu fassen, gilt der nächstvordere.
+    weit.respawn = 20;
+    expect(hookTarget(t, me, [mitte, weit], HOOK_RANGE)).toBe(0);
+    weit.respawn = 0;
+    weit.rocket = 5;
+    expect(hookTarget(t, me, [mitte, weit], HOOK_RANGE)).toBe(0);
     expect(HOOK_REACH).toBeGreaterThan(HOOK_RANGE);
   });
 
@@ -239,6 +243,25 @@ describe('Enterhaken', () => {
     // Losgelassen wird mit dem gewöhnlichen Höchsttempo, nicht mit dem der Leine.
     expect(r.vEnd).toBeLessThanOrEqual(V_MAX * CHARACTERS[0].vmax + 1);
     expect(r.fell).toBe(0);
+  });
+
+  it('zwei Fahrer in Reichweite: Er zieht zum vorderen und fegt den dazwischen beiseite – an ihm vorbei, hinter den vorderen', () => {
+    // Platz 1 fährt 40 m voraus, Platz 2 dazwischen (18 m voraus, auf derselben Spur).
+    let passed = -1;
+    const r = lauf(0, 100, 40, true, 700, (host, i) => {
+      const a = host.authoritative(0)!;
+      if (passed < 0 && a.hook > 0 && gapOf(a, host.authoritative(2)!) < -2) passed = i;
+    }, 18);
+    expect(r.aim).toBe(1);
+    expect(r.released).toBeGreaterThan(0);
+    // Am Mittleren vorbeigezogen, am Vorderen nicht.
+    expect(passed).toBeGreaterThan(0);
+    expect(passed).toBeLessThan(r.released);
+    expect(r.gapEnd).toBeLessThanOrEqual(HOOK_STOP + 1.2);
+    expect(r.gapMin).toBeGreaterThan(1.5);
+    expect(r.fell).toBe(0);
+    // Der Mittlere wurde nur beiseitegeschoben, nicht umgehauen.
+    expect(r.host.authoritative(2)!.respawn).toBe(0);
   });
 
   it('der Gezogene fährt unverändert weiter: Er merkt von Haken und Leine nichts', () => {

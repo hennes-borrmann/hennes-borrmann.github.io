@@ -1544,6 +1544,16 @@ export class HostGame implements GameView {
           if (other.state.tow === 0 && !goldOn(other.state)) this.sweepAside(tower, other);
           continue;
         }
+        // Am Enterhaken: Wer zwischen dem Ziehenden und seinem Ziel fährt, wird beiseitegeschoben wie vom Drachen – die Leine
+        // zieht am vorderen vorbei. (Das Ziel selbst wird nur gewöhnlich angerempelt; ein Gold-Kart lässt sich nicht schieben.)
+        const ha = a.state.hook > HOOK_LATCH && a.state.hookAim !== b.slot;
+        const hb = b.state.hook > HOOK_LATCH && b.state.hookAim !== a.slot;
+        if (ha !== hb) {
+          const puller = ha ? a : b;
+          const other = ha ? b : a;
+          if (!goldOn(other.state)) this.sweepAside(puller, other);
+          continue;
+        }
         // Get Gold: das Gold-Kart fährt durch, das andere wird umgehauen (zwei Gold-Karts rempeln wie zwei Riesen).
         const ga = goldOn(a.state);
         if (ga !== goldOn(b.state)) {
