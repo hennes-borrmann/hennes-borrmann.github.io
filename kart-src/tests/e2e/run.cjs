@@ -1121,6 +1121,59 @@ async function main() {
     const glueGone = await c6.page.evaluate(() => ({ hidden: document.getElementById('glue-veil').hidden, glue: window.__kart.scene().glue }));
     check('Kleber: nach gut vier Sekunden ist Bens Sicht wieder frei', glueGone.hidden && glueGone.glue === 0, `Schleier ${glueGone.hidden ? 'weg' : 'noch da'}`);
 
+    // Enterhaken: Ben steht 30 m vor Anna. Solange Anna den Haken hält, sitzt auf ihrem Bildschirm das Fadenkreuz auf Ben.
+    // Sie holt aus (zwei Sekunden Lasso), wirft, und die Leine zieht sie bis direkt hinter ihn – nicht an ihm vorbei.
+    // Beide Bildschirme sehen ihre Hände am Haken und an der Leine. Jede Seite schreibt selbst mit.
+    const recordHook = () => {
+      window.__hook = { ticks: 0, aim: -9, handR: 0, handL: 0, lock: -1, endGap: null, minGap: 1e9, was: 0 };
+      window.__hookTimer = setInterval(() => {
+        const k = window.__kart;
+        const h = window.__hook;
+        const list = k.entities();
+        const anna = list.find((x) => x.slot === 0);
+        const ben = list.find((x) => x.slot === 1);
+        const look = k.look(0);
+        if (look) {
+          h.handR = Math.max(h.handR, look.hook[0]);
+          h.handL = Math.max(h.handL, look.hook[1]);
+        }
+        const sc = k.scene();
+        if (sc && sc.hookLock >= 0) h.lock = sc.hookLock;
+        if (!anna || !ben) return;
+        h.ticks = Math.max(h.ticks, anna.hook);
+        if (anna.hook > 120) h.aim = anna.hookAim;
+        const gap = Math.hypot(ben.x - anna.x, ben.z - anna.z);
+        if (anna.hook > 150) h.minGap = Math.min(h.minGap, gap);
+        if (h.was > 150 && anna.hook === 0 && h.endGap === null) h.endGap = gap;
+        h.was = anna.hook;
+      }, 16);
+    };
+    await kart(h6.page, 'place(2, 40, -2)');
+    await kart(h6.page, 'place(3, 60, 2)');
+    await kart(h6.page, 'place(0, 318, 0)');
+    await kart(h6.page, 'place(1, 348, 0)');
+    await sleep(400);
+    await Promise.all([h6, c6].map((s) => s.page.evaluate(recordHook)));
+    await kart(h6.page, 'giveItem(0, 15)');
+    const lockSeen = await h6.page.waitForFunction(() => window.__hook.lock === 1, null, { timeout: 15000 }).then(() => true, () => false);
+    const hookHud = await h6.page.textContent('#rh-item-name');
+    check('Enterhaken: Anna hält ihn – Name im Bild, das Fadenkreuz sitzt auf Ben (30 m voraus)', lockSeen && /enterhaken/i.test(hookHud || ''), `Fadenkreuz ${lockSeen ? 'auf Ben' : 'fehlt'}, Anzeige „${hookHud}“`);
+    const hookAt = await kart(h6.page, 'race().time');
+    await useItem(15);
+    await h6.page.waitForFunction((t) => window.__kart.race().time > t + 135, hookAt, { timeout: 60000 }).catch(() => {});
+    const thrown = await kart(h6.page, 'authoritative(0)');
+    check('Enterhaken: nach zwei Sekunden Lasso fliegt er – auf Ben', thrown.hook > 120 && thrown.hookAim === 1, `Ticks ${thrown.hook}, Ziel ${thrown.hookAim}`);
+    await h6.page.waitForFunction(() => window.__hook.endGap !== null, null, { timeout: 60000 }).catch(() => {});
+    await sleep(700);
+    const hookEnd = await kart(h6.page, 'authoritative(0)');
+    const hookBen = await kart(h6.page, 'authoritative(1)');
+    const [hookH, hookC] = await Promise.all([h6, c6].map((s) => s.page.evaluate(() => {
+      clearInterval(window.__hookTimer);
+      return window.__hook;
+    })));
+    check('Enterhaken: Anna zieht sich an Ben heran – beide Bildschirme sehen den Zug und ihre Hände an der Leine', [hookH, hookC].every((h) => h.ticks > 150 && h.aim === 1 && h.handR > 0.9 && h.handL > 0.9), `Host ${hookH.ticks} Ticks / Hände ${hookH.handR.toFixed(2)} ${hookH.handL.toFixed(2)}, Ben ${hookC.ticks} Ticks / Hände ${hookC.handR.toFixed(2)} ${hookC.handL.toFixed(2)}`);
+    check('Enterhaken: direkt hinter Ben lässt sie los – herangezogen, nicht vorbei, ohne Absturz', hookH.endGap !== null && hookH.endGap < 6 && hookH.minGap > 1.8 && hookEnd.hook === 0 && hookEnd.respawn === 0 && hookBen.spin === 0, `losgelassen bei ${hookH.endGap === null ? '–' : hookH.endGap.toFixed(1)} m, kleinster Abstand ${hookH.minGap.toFixed(1)} m`);
+
     // Rakete: Anna (Letzte) verwandelt sich, fliegt in hohem Bogen über die Karte und schlägt bei Ben (einen Platz weiter
     // vorn) ein. Ben schleudert so lange wie nach einem Kreisel, Anna taucht vor ihm auf; Ben wird vorher gewarnt.
     // Ohne Grafikkarte dauert jede Abfrage von außen lange; deshalb schreibt jede Seite selbst mit.

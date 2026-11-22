@@ -30,6 +30,13 @@ export type SfxName =
   | 'glue-shot' // Kleber: der Klumpen verlässt die Düse – nasses „Pflopp“ (~0,3 s)
   | 'glue-hit' // Kleber: er klatscht auf – „Platsch“, dann zwei Tropfen (~0,45 s)
   | 'use-kite' // Abschleppdrache steigt auf (Flattern, Sirren der Schnur)
+  | 'use-hook' // Enterhaken: die Figur holt aus – die Leine rauscht aus der Hand, der Haken klirrt leise (~0,3 s)
+  | 'hook-swing' // Enterhaken: ein Umlauf des Lassos – weiches „Wuuf“ der Leine; die Tonhöhe kommt beim Aufruf mit (pitch, steigt mit dem Tempo;
+  //               wird rund viermal in zwei Sekunden aufgerufen, immer dichter) (~0,25 s)
+  | 'hook-throw' // Enterhaken: Wurf – ein Peitschen, dann sirrt die auslaufende Leine nach oben (~0,5 s)
+  | 'hook-latch' // Enterhaken: der Haken sitzt – helles, metallisches „Zack“ mit dumpfem Schlag, die Leine schnarrt straff nach (~0,4 s)
+  | 'hook-tug' // Enterhaken: ein Griff beim Heranziehen – kurzes Knarzen der Leine mit einem Ruck (wird alle 0,4 s aufgerufen) (~0,16 s)
+  | 'hook-off' // Enterhaken: die Leine ist los – sie schnalzt zurück, ein kleines Klirren (~0,25 s)
   | 'use-rocket' // das Kart verwandelt sich in eine Rakete: Servos surren, sieben Teile rasten metallisch ein, zum Schluss zischt die Düse an (~1,1 s)
   | 'use-wing' // Gleiter: Absprung – Luftstoß nach oben, ein steigender Pfiff, Stoff flattert kurz (~0,6 s)
   | 'use-gold' // Get Gold: Korken ploppt, dann gluckert es fünfmal, immer tiefer, zum Schluss ein zufriedenes „Ah“ (~0,85 s)

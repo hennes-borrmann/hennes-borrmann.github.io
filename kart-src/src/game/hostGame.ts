@@ -61,6 +61,13 @@ import {
   GLUE_HIT,
   GLUE_RANGE,
   glueKart,
+  ITEM_HOOK,
+  HOOK_ANCHOR,
+  HOOK_LATCH,
+  HOOK_REACH,
+  HOOK_SWING_TICKS,
+  dropHook,
+  hookTarget,
   ITEM_DRILL,
   ITEM_TIRE,
   ITEM_TOP,
@@ -108,6 +115,7 @@ import {
   rightZ,
   addProgress,
   progDelta,
+  routeSeg,
   segDelta,
   sideLimit,
   walk,
@@ -160,6 +168,15 @@ const GOLD_WEIGHT_LAST = 11;
 const GOLD_SHOVE = 5;
 /** Bohrer: Gewicht in der Auslosung des Letzten; davor weniger, je weiter vorn (siehe pickItem) – der Erste bekommt ihn nie. */
 const DRILL_WEIGHT_LAST = 12;
+/**
+ * Enterhaken: Gewicht in der Auslosung je Platz (Stelle = Platz; ab Platz 4 das letzte). Am häufigsten für den Zweiten
+ * (bei rund 117 insgesamt: gut jede siebte Kiste), dann für den Dritten (jede zehnte) und Vierten (jede vierzehnte); der
+ * Erste bekommt ihn nie – vor ihm fährt niemand, an den er sich heranziehen könnte. Seinen Anteil nimmt er den
+ * gewöhnlichen Items (HOOK_FROM, anteilig): Rakete, Get Gold, Bohrer und Drache bleiben so häufig wie ohne ihn.
+ */
+const HOOK_WEIGHT = [0, 0, 18, 12, 8];
+/** Stellen der Auslosungstabelle, die dem Enterhaken Platz machen: alles außer Drache, Rakete, Get Gold und Bohrer. */
+const HOOK_FROM = [0, 1, 2, 3, 4, 5, 6, 7, 10, 13];
 /**
  * Bohrer: Zeit unter der Erde bis zum Auftauchen (Sekunden) – Grundzeit plus ein Anteil, der mit der Wurzel aus dem
  * Abstand zum Ziel wächst (bezogen auf DRILL_SPAN_AT Meter). Höchstens bis DRILL_ARRIVE_MAX nach dem Einstecken.
@@ -479,6 +496,7 @@ export class HostGame implements GameView {
 
     this.stepItems();
     this.aimRockets();
+    this.aimHooks();
     this.collideKarts();
     this.rank();
     this.checkRaceEnd();
@@ -696,7 +714,11 @@ export class HostGame implements GameView {
     const flying = k.state.rocket > 0;
     const drinking = k.state.gold > GOLD_TICKS;
     const planting = k.state.plant > 0;
+    const hook = k.state.hook;
     const ev = stepKart(k.state, cmd, this.env);
+    // Enterhaken: Er verlässt die Hand – jetzt steht fest, wen oder was er trifft. Sitzt er, ruckt es an der Leine.
+    if (hook > 0 && hook <= HOOK_SWING_TICKS && k.state.hook > HOOK_SWING_TICKS) this.aimHook(k, true);
+    if (hook > 0 && hook <= HOOK_LATCH && k.state.hook > HOOK_LATCH) this.fx(k, 'boost');
     // Eingesteckt: der Bohrer sitzt jetzt neben dem Kart im Boden.
     if (planting && k.state.plant === 0) this.spawnDrill(k);
     // Ausgetrunken: jetzt ist das Kart gold.
@@ -745,25 +767,35 @@ export class HostGame implements GameView {
   /** Wer vorn liegt, bekommt eher Abwehr; wer hinten liegt, eher Schub und Angriff. */
   private pickItem(place: number, count: number, behind = 0): number {
     let table: number[];
-    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Roboter, Abschleppdrache, Rakete, Gleiter, Get Gold, Bohrer, Kleber
+    // Reihenfolge: Zisch, Rollreifen, Ölfleck, Brummkreisel, Stoßfänger, Kurzschluss, Nebelkerze, Roboter, Abschleppdrache, Rakete, Gleiter, Get Gold, Bohrer, Kleber, Enterhaken
     // (Den Gleiter bekommt jeder; vorn etwas seltener. Get Gold auch – vorn selten, hinten etwa jede zehnte Kiste.
     // Den Bohrer nie auf Platz 1; dahinter mit (Platzanteil)^1,5 steigend bis DRILL_WEIGHT_LAST auf dem letzten Platz –
     // bei vier Fahrern auf Platz 2 in knapp 2 %, auf Platz 3 in gut 5 %, hinten in jeder neunten Kiste. Den Kleber
     // – Abwehr wie Öl, er trifft den Nächsten dahinter – eher vorn und in der Mitte, hinten selten, allein gar nicht.)
     const drill = count > 1 && place > 1 ? DRILL_WEIGHT_LAST * Math.pow((place - 1) / (count - 1), 1.5) : 0;
-    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5, 0, 0];
-    else if (place === 1) table = [14, 8, 21, 0, 21, 0, 17, 8, 0, 0, 7, 3, 0, 10];
+    // Den Enterhaken nie auf Platz 1 (und nie allein), am häufigsten auf Platz 2, dann 3 und 4 – nach dem Platz, nicht nach
+    // der Zahl der Fahrer: Auch im Duell ist der Zweite der, der am ehesten jemanden dicht vor sich hat.
+    const hook = count > 1 ? HOOK_WEIGHT[Math.min(place, HOOK_WEIGHT.length - 1)] : 0;
+    if (count <= 1) table = [37, 14, 8, 0, 10, 0, 6, 20, 0, 0, 12, 5, 0, 0, 0];
+    else if (place === 1) table = [14, 8, 21, 0, 21, 0, 17, 8, 0, 0, 7, 3, 0, 10, 0];
     // (Hinten machen Zisch, Rollreifen, Brummkreisel, Kurzschluss und Roboter dem Bohrer Platz.)
-    else if (place === count) table = [15, 9, 0, 19, 6, 12, 0, 6, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST, drill, 2];
-    else table = [16, 16, 8, 15, 10, 6, 8, 9, 0, 0, 12, 7, drill, 8];
+    else if (place === count) table = [15, 9, 0, 19, 6, 12, 0, 6, 0, ROCKET_WEIGHT, 10, GOLD_WEIGHT_LAST, drill, 2, hook];
+    else table = [16, 16, 8, 15, 10, 6, 8, 9, 0, 0, 12, 7, drill, 8, hook];
     // Der Abschleppdrache ist die Aufholhilfe für Abgehängte: nur auf dem letzten Platz
     // (bei vier Fahrern auch dem vorletzten), und nur mit deutlichem Rückstand.
     if (count > 1 && behind > KITE_MIN_GAP) {
       if (place === count) table[8] = 22;
       else if (count >= 4 && place === count - 1) table[8] = 8;
     }
+    // Der Enterhaken macht sich bei den gewöhnlichen Items Platz (die Summe der Tabelle bleibt, wie sie ohne ihn wäre).
+    if (hook > 0) {
+      let plain = 0;
+      for (const i of HOOK_FROM) plain += table[i];
+      const keep = Math.max(0, (plain - hook) / plain);
+      for (const i of HOOK_FROM) table[i] *= keep;
+    }
     // Die Rakete gibt es nur auf dem letzten Platz, und selten (etwa jede elfte Kiste) – unabhängig vom Drachen, der dort auch drin bleibt.
-    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_ROBOT, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD, ITEM_DRILL, ITEM_GLUE];
+    const items = [ITEM_BOOST, ITEM_TIRE, ITEM_OIL, ITEM_TOP, ITEM_GUARD, ITEM_EMP, ITEM_SMOKE, ITEM_ROBOT, ITEM_KITE, ITEM_ROCKET, ITEM_WING, ITEM_GOLD, ITEM_DRILL, ITEM_GLUE, ITEM_HOOK];
     let total = 0;
     for (const w of table) total += w;
     let r = this.random() * total;
@@ -1203,6 +1235,63 @@ export class HostGame implements GameView {
     const r = glueKart(o);
     if (r === HIT_BLOCKED) this.fx(target, 'block');
     else if (r !== HIT_NONE) this.fx(target, 'glue');
+  }
+
+  /** Enterhaken in der Luft oder im Zug: das Ziel jeden Tick dem Gezogenen nachführen. */
+  private aimHooks(): void {
+    for (const k of this.karts.values()) if (k.state.hook > HOOK_SWING_TICKS && k.state.hookAim >= 0) this.aimHook(k, false);
+  }
+
+  /**
+   * Enterhaken: Ziel setzen. Beim Wurf (choose) wird gewählt: der nächste Fahrer voraus, der noch fährt, bis HOOK_REACH Meter
+   * – sonst krallt sich der Haken HOOK_ANCHOR Meter voraus in die Fahrbahn, auf der eigenen Spur (über einer Lücke ein
+   * Stück dahinter, wo wieder Boden ist). Danach folgt das Ziel dem Gezogenen; ist der nicht mehr zu halten (im Ziel,
+   * abgestürzt, als Rakete davon), ist der Haken los.
+   */
+  private aimHook(k: HostKart, choose: boolean): void {
+    const t = TRACK;
+    const s = k.state;
+    if (choose) {
+      const slots: number[] = [];
+      const states: KartState[] = [];
+      for (const o of this.karts.values()) {
+        if (o === k || o.finished) continue;
+        slots.push(o.slot);
+        states.push(o.state);
+      }
+      const i = hookTarget(t, s, states, HOOK_REACH);
+      s.hookAim = i >= 0 ? slots[i] : -1;
+      if (i < 0) {
+        projectOnTrack(t, s.x, s.z, s.seg);
+        const lat = proj.lat;
+        const kb = t.branchOf[proj.seg];
+        const route = kb >= 0 ? 1 << kb : 0;
+        let seg = walk(t, routeSeg(t, proj.seg, route), Math.round(HOOK_ANCHOR / t.step), route);
+        const time = this.tick - this.goTick;
+        const latAt = (g: number): number => Math.max(-Math.max(0, t.rh[g] - 1.5), Math.min(Math.max(0, t.rh[g] - 1.5), lat));
+        for (let n = 0; n < 60 && groundNow(t, seg, 0, latAt(seg), time) === NO_GROUND; n++) seg = walk(t, seg, 1, route);
+        const l = latAt(seg);
+        const g = groundNow(t, seg, 0, l, time);
+        s.aimSeg = seg;
+        s.aimX = t.px[seg] + rightX(t, seg) * l;
+        s.aimZ = t.pz[seg] + rightZ(t, seg) * l;
+        s.aimY = g === NO_GROUND ? centerHeight(t, seg, 0) + l * t.bank[seg] : g;
+        s.aimV = 0;
+        return;
+      }
+    }
+    const target = this.karts.get(s.hookAim);
+    if (!target || target.finished || target.state.respawn > 0 || target.state.rocket > 0) {
+      dropHook(s);
+      return;
+    }
+    const o = target.state;
+    s.aimSeg = o.seg;
+    s.aimX = o.x;
+    s.aimY = o.y;
+    s.aimZ = o.z;
+    // (Tempo längs der Strecke: damit rechnet jeder Schritt – und die Vorhersage eines Mitspielers – das Ziel weiter.)
+    s.aimV = o.seg < t.total ? o.vx * t.tx[o.seg] + o.vz * t.tz[o.seg] : 0;
   }
 
   private applyHit(k: HostKart): void {

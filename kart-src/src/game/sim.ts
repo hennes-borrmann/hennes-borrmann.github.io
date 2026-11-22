@@ -140,6 +140,7 @@ import {
   railOf,
   rightX,
   rightZ,
+  routeSeg,
   samePath,
   segDelta,
   sideLimit,
@@ -203,7 +204,15 @@ export const ITEM_DRILL = 13;
  * (bis GLUE_RANGE Meter) – ihm klebt vier Sekunden lang Kleber auf dem Bildschirm. Kein Tempoverlust; der Stoßfänger fängt ihn ab.
  */
 export const ITEM_GLUE = 14;
-export const ITEM_COUNT = 15;
+/**
+ * "Enterhaken": Die Figur schwingt den Haken zwei Sekunden lang wie ein Lasso über dem Kopf, wirft ihn dann in hohem Bogen
+ * auf den Fahrer vor ihr und zieht sich Zug um Zug an ihn heran – der andere fährt dabei unverändert weiter. Direkt hinter
+ * ihm lässt sie von selbst los: aufgeholt, aber nicht überholt. Ist niemand in Reichweite, krallt sich der Haken ein Stück
+ * voraus in die Fahrbahn, und das Kart zieht sich dorthin (ein kleiner Zeitgewinn). Am häufigsten auf Platz 2, dann 3 und 4;
+ * nie für den Ersten.
+ */
+export const ITEM_HOOK = 15;
+export const ITEM_COUNT = 16;
 
 /** Eine Eingabe für genau einen Simulationsschritt. */
 export interface Cmd {
@@ -321,6 +330,23 @@ export interface KartState {
    * steckt der Bohrer neben dem Kart im Boden – der Host setzt ihn dort ab.
    */
   plant: number;
+  /**
+   * Enterhaken: Ticks seit dem Auslösen (0 = keiner). Bis HOOK_SWING_TICKS schwingt die Figur ihn (das Kart fährt normal
+   * weiter), bis HOOK_LATCH fliegt er, danach zieht sich das Kart an ihm entlang der Strecke zum Ziel (aimX/aimY/aimZ,
+   * aimSeg) – bis es dort ist, längstens HOOK_PULL_MAX Ticks.
+   */
+  hook: number;
+  /**
+   * Enterhaken: Platz des Karts, an dem er hängt (−1 = keins: er krallt sich bei aim* in die Fahrbahn). Setzt der Host beim
+   * Wurf; solange der Haken an einem Kart hängt, führt er aim* jeden Tick dessen Lage nach.
+   */
+  hookAim: number;
+  /**
+   * Enterhaken: Tempo des Gezogenen längs der Strecke (m/s; 0 = der Haken steckt in der Fahrbahn). Damit rechnet jeder
+   * Schritt das Ziel selbst weiter, bis der Host es wieder setzt – beim Mitspieler liegt dessen letzter Stand eine
+   * Umlaufzeit zurück, und ohne das käme seine Vorhersage zu früh „an“.
+   */
+  aimV: number;
 }
 
 // --- Ereignisse eines Schritts (Rückgabewert von stepKart) -------------------
@@ -481,6 +507,47 @@ export const DRILL_WARN_TICKS = 66;
 /** Bohrer: so weit rechts neben und vor der Mitte des Karts steckt die Figur ihn in den Boden (Meter). */
 export const DRILL_SIDE = 1.1;
 export const DRILL_FORE = 0.35;
+/**
+ * Enterhaken: so lange schwingt die Figur ihn (2 s), so lange fliegt er (0,5 s); HOOK_LATCH = er sitzt, der Zug beginnt.
+ * Der Zug dauert höchstens HOOK_PULL_MAX. HOOK_RANGE: so weit voraus (Meter auf der Strecke) wird ein Fahrer angezielt;
+ * beim Wurf selbst darf er noch bis HOOK_REACH weg sein (wer beim Auslösen im Visier war, entkommt nicht um Haaresbreite).
+ * Näher als HOOK_MIN ist niemand ein Ziel – da ist man schon dran. HOOK_STOP: mit diesem Abstand hinter dem Gezogenen lässt
+ * die Figur los (Mitte zu Mitte; zwei Karts berühren sich bei 2 m). Reißt der Abstand über HOOK_SNAP auf, reißt die Leine.
+ */
+export const HOOK_SWING_TICKS = 120;
+export const HOOK_FLY_TICKS = 30;
+export const HOOK_LATCH = HOOK_SWING_TICKS + HOOK_FLY_TICKS;
+export const HOOK_PULL_MAX = 270;
+export const HOOK_RANGE = 45;
+export const HOOK_REACH = 58;
+export const HOOK_MIN = 6;
+export const HOOK_STOP = 3.4;
+export const HOOK_SNAP = 95;
+/** Enterhaken ohne Ziel: so weit voraus krallt er sich in die Fahrbahn; so weit davor lässt die Figur los. */
+export const HOOK_ANCHOR = 46;
+export const HOOK_ANCHOR_STOP = 5;
+/**
+ * Enterhaken, Zug: Tempo direkt am Ziel, Zuschlag je Meter Leine, Höchsttempo; Beschleunigung. Dazu ruckt es im Takt der
+ * Hände (HOOK_TUG_TICKS je Griff, ± HOOK_TUG m/s) – man kommt Stück für Stück heran. HOOK_LOOK: so weit voraus zielt die
+ * Nase; HOOK_NUDGE: so weit verschiebt die eigene Lenkung die Spur (Meter).
+ */
+const HOOK_V_NEAR = 34;
+const HOOK_V_PER_M = 0.4;
+const HOOK_V_MAX = 48;
+const HOOK_ACCEL = 55;
+export const HOOK_TUG_TICKS = 24;
+const HOOK_TUG = 6;
+const HOOK_LOOK = 8;
+const HOOK_NUDGE = 1.7;
+/**
+ * Enterhaken und das, was voraus liegt: Näher als HOOK_GAP_AHEAD vor einer Lücke lässt die Leine nicht mehr los (ohne
+ * Anlauf fiele das Kart hinein) – sie trägt es hinüber. Vor einer Flugstrecke dagegen lässt sie rechtzeitig los, sobald
+ * eine in HOOK_GLIDE_AHEAD Metern beginnt: Dort trägt nur der eigene Gleitflug, und der braucht den Absprung.
+ */
+const HOOK_GAP_AHEAD = 26;
+const HOOK_GLIDE_AHEAD = 60;
+/** Enterhaken: Nimmt der Verkehr dem Kart im Zug so viel Tempo (m/s unter dem, was die Leine will), lässt die Figur los. */
+const HOOK_STALLED = 12;
 const SHIELD_TICKS = 130;
 export const KART_RADIUS = 1.0;
 
@@ -634,6 +701,9 @@ export function newState(): KartState {
     glueShot: 0,
     glueAim: -1,
     plant: 0,
+    hook: 0,
+    hookAim: -1,
+    aimV: 0,
   };
 }
 
@@ -676,6 +746,9 @@ export function copyState(dst: KartState, src: KartState): KartState {
   dst.glueShot = src.glueShot;
   dst.glueAim = src.glueAim;
   dst.plant = src.plant;
+  dst.hook = src.hook;
+  dst.hookAim = src.hookAim;
+  dst.aimV = src.aimV;
   return dst;
 }
 
@@ -732,6 +805,8 @@ export function hitKart(s: KartState): number {
   // Getroffen klappen die Flügel zu, und ein Roboter fällt in sich zusammen (er ist wieder ein Kart).
   s.wing = 0;
   s.robot = 0;
+  // … und der Enterhaken ist weg (im Schwung fällt er aus der Hand, im Zug reißt die Leine).
+  dropHook(s);
   s.driftDir = 0;
   s.driftCharge = 0;
   s.boost = 0;
@@ -751,6 +826,7 @@ export function flattenKart(s: KartState): number {
   s.flat = FLAT_TICKS;
   s.shield = FLAT_TICKS + 40;
   s.robot = 0;
+  dropHook(s);
   s.driftDir = 0;
   s.driftCharge = 0;
   s.boost = 0;
@@ -788,6 +864,34 @@ export function glueKart(s: KartState): number {
   }
   s.glue = GLUE_TICKS;
   return HIT_SPIN;
+}
+
+/** Enterhaken: Er ist weg – fallen gelassen, gerissen oder eingeholt. */
+export function dropHook(s: KartState): void {
+  s.hook = 0;
+  s.hookAim = -1;
+  s.aimV = 0;
+}
+
+/**
+ * Enterhaken: Wen trifft er? Den nächsten Fahrer voraus auf der Strecke, mindestens HOOK_MIN und höchstens range Meter weg
+ * (gemessen am Abschnitt) – nicht, wer gerade neu aufgesetzt wird oder als Rakete fliegt. others darf s selbst enthalten;
+ * wer im Ziel ist, lässt der Aufrufer weg. Rückgabe: Stelle in others oder −1. (Dieselbe Regel rechnet der Host beim Wurf
+ * und jeder Bildschirm für sein Fadenkreuz.)
+ */
+export function hookTarget(t: Track, s: KartState, others: readonly KartState[], range: number): number {
+  let best = -1;
+  let bestGap = Infinity;
+  if (!(s.seg >= 0 && s.seg < t.total)) return -1;
+  for (let i = 0; i < others.length; i++) {
+    const o = others[i];
+    if (o === s || o.respawn > 0 || o.rocket > 0 || !(o.seg >= 0 && o.seg < t.total)) continue;
+    const gap = segDelta(t, s.seg, o.seg) * t.step;
+    if (gap < HOOK_MIN || gap > range || gap >= bestGap) continue;
+    best = i;
+    bestGap = gap;
+  }
+  return best;
 }
 
 function wrapAngle(a: number): number {
@@ -1310,6 +1414,17 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.flat > 0) s.flat--;
   // Bohrer: wird gerade eingesteckt (der Host setzt ihn ab, sobald der Zähler auf 0 springt).
   if (s.plant > 0) s.plant--;
+  // Enterhaken: Die Zeit läuft (Schwingen, Flug, Zug). Wer nicht mehr fahren darf (im Ziel), lässt ihn fallen.
+  if (s.hook > 0) {
+    if (env.canDrive) s.hook++;
+    else dropHook(s);
+    // Hängt er an einem Kart, läuft das Ziel mit dessen Tempo die Strecke entlang weiter (der Host setzt es jeden Tick neu).
+    if (s.hook > HOOK_SWING_TICKS && s.hookAim >= 0 && s.aimV !== 0 && s.aimSeg < t.total) {
+      s.aimX += t.tx[s.aimSeg] * s.aimV * DT;
+      s.aimZ += t.tz[s.aimSeg] * s.aimV * DT;
+      s.aimSeg = projectOnTrack(t, s.aimX, s.aimZ, s.aimSeg).seg;
+    }
+  }
   // Get Gold: ausgetrunken – eine Größe aus dem Ring endet hier (Gold hat Vorrang; solange es läuft, wirkt kein Ring).
   if (s.gold > 0) {
     s.gold--;
@@ -1343,6 +1458,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   // --- Nach einem Absturz: das Kart wird über der Strecke abgesetzt ---
   if (s.respawn > 0) {
     s.respawn--;
+    dropHook(s);
     s.vx = 0;
     s.vy = 0;
     s.vz = 0;
@@ -1359,6 +1475,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   if (s.tow > 0 && !env.canDrive) s.tow = 0;
   if (s.tow > 0) {
     s.tow--;
+    dropHook(s);
     s.driftDir = 0;
     s.driftCharge = 0;
     s.spin = 0;
@@ -1419,6 +1536,11 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
     return ev;
   }
+
+  // --- Enterhaken: Der Haken sitzt – das Kart zieht sich an der Leine die Strecke entlang zum Ziel ---
+  // (In und vor einer Flugstrecke fasst er gar nicht erst: Die Leine ist los, das Kart fährt bzw. gleitet einfach weiter.)
+  if (s.hook === HOOK_LATCH + 1 && hookAhead(t, s.seg, 0) >= 2) dropHook(s);
+  if (s.hook > HOOK_LATCH) return ev | stepHook(s, cmd, env, itemBtn);
 
   // --- Schiene (Achterbahn-Rummel): das Kart sitzt auf einer Schiene und rollt wie ein Achterbahnwagen ---
   // Bergab schießt es los, bergauf verliert es Schwung, den Lifthügel zieht die Kette hinauf. Lenken wechselt die
@@ -2046,6 +2168,7 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
     s.stall = 0;
     s.wing = 0;
     s.robot = 0;
+    dropHook(s);
     s.shield = RESPAWN_TICKS + 70;
     s.flags = FLAG_AIR | (itemBtn ? FLAG_ITEM_HELD : 0);
     return ev | EV_FALL;
@@ -2183,6 +2306,159 @@ export function stepKart(s: KartState, cmd: Cmd, env: StepEnv): number {
   return ev;
 }
 
+/** Enterhaken: Ruck der Leine im Takt der Hände – ein kräftiger Zug in der ersten Hälfte jedes Griffs, im Mittel 0. */
+function hookTug(k: number): number {
+  const p = (((k - 1) % HOOK_TUG_TICKS) + HOOK_TUG_TICKS) % HOOK_TUG_TICKS / HOOK_TUG_TICKS;
+  return HOOK_TUG * ((p < 0.5 ? Math.sin(p * 2 * Math.PI) : 0) - 1 / Math.PI);
+}
+
+/**
+ * Enterhaken: Darf das Kart dem Ziel in dessen Abzweigung folgen? Nicht, wenn dort ein Tor für es zu ist (Zeitplan oder
+ * Größe – ins Mauseloch kommt nur, wer winzig ist): Dann bleibt es auf seinem Weg, und die Leine läuft quer hinüber.
+ */
+function hookMayEnter(t: Track, branch: number, time: number, size: number): boolean {
+  for (const g of t.gates) if (t.branchOf[g.first] === branch && gateShut(t, g.first, time, size)) return false;
+  return true;
+}
+
+/**
+ * Enterhaken: Was liegt auf dem Weg route voraus? Bit 0: eine Lücke in den nächsten HOOK_GAP_AHEAD Metern; Bit 1: eine
+ * Flugstrecke – hier oder in den nächsten HOOK_GLIDE_AHEAD Metern.
+ */
+function hookAhead(t: Track, seg: number, route: number): number {
+  let out = seg < t.total && (t.edge[seg] & EDGE_GLIDE) !== 0 ? 2 : 0;
+  const near = Math.round(HOOK_GAP_AHEAD / t.step);
+  const far = Math.round(HOOK_GLIDE_AHEAD / t.step);
+  for (let i = 1, g = seg; i <= far && g < t.total; i++) {
+    const f = t.fork[g];
+    g = f >= 0 && (route >> t.branchOf[f]) & 1 ? f : t.next[g];
+    const e = t.edge[g];
+    if (i <= near && (e & EDGE_GAP) !== 0) out |= 1;
+    if ((e & EDGE_GLIDE) !== 0) out |= 2;
+  }
+  return out;
+}
+
+/**
+ * Enterhaken, ein Schritt des Zugs. Wie am Drachen fährt das Kart von selbst die Strecke entlang (die eigene Lenkung
+ * verschiebt nur die Spur) – aber am Boden, auf das Ziel zu (aim*: der Gezogene, dessen Lage der Host nachführt, oder die
+ * Stelle, an der der Haken in der Fahrbahn steckt) und nur so schnell, wie die Leine hergibt: weit weg schneller, direkt
+ * dahinter kaum schneller als der andere, dazu der Ruck jedes Griffs. Über Lücken trägt die Leine auf Höhe der Fahrbahn.
+ * Ende: am Ziel angekommen (HOOK_STOP dahinter – dann fällt das Tempo auf das gewöhnliche Höchsttempo: aufgeholt, nicht
+ * überholt), Leine gerissen, Zeit um oder eine Flugstrecke voraus (hookAhead) – aber wie beim Drachen nie über einem
+ * Abgrund oder kurz vor einer Lücke. (Anders als der Drache setzt die Leine das Kart mit gewöhnlichem Tempo ab und fragt
+ * nach dem Boden von jetzt – auf Pontons und in der Magnettrommel darf sie deshalb loslassen, nur nicht über einer Platte,
+ * die gerade fehlt.) Geysire, Bomben und Pressen, Schubfelder, Sprungplatten und Portale wirken im Zug nicht; Verkehr,
+ * Items und Pendel-Hindernisse schon – ein Treffer nimmt den Haken (hitKart).
+ */
+function stepHook(s: KartState, cmd: Cmd, env: StepEnv, itemBtn: boolean): number {
+  const t = TRACK;
+  s.driftDir = 0;
+  s.driftCharge = 0;
+  s.draft = 0;
+  s.robot = 0;
+  s.wing = 0;
+  const k = s.hook - HOOK_LATCH;
+  const anchored = s.hookAim < 0;
+  const stop = anchored ? HOOK_ANCHOR_STOP : HOOK_STOP;
+  const nudge = Math.max(-1, Math.min(1, cmd.steer / 127));
+
+  // Wo das Kart und das Ziel auf der Strecke sind – und wie viel Leine dazwischen liegt.
+  projectOnTrack(t, s.aimX, s.aimZ, s.aimSeg < t.total ? s.aimSeg : s.seg);
+  const aimSeg = proj.seg;
+  const aimLat = proj.lat;
+  const aimAlong = proj.along;
+  projectOnTrack(t, s.x, s.z, s.seg);
+  let gap = segDelta(t, proj.seg, aimSeg) * t.step + aimAlong - proj.along;
+  const dist = Math.hypot(s.aimX - s.x, s.aimZ - s.z);
+  // Fährt das Ziel auf einem anderen Weg (Abzweigung), stimmt das Streckenmaß nur ungefähr: Dann zählt die Entfernung mit,
+  // höchstens aber ein paar Meter – auf getrennten Wegen käme man sonst nie „an“ und zöge sich am anderen vorbei.
+  if (t.branchOf[proj.seg] !== t.branchOf[aimSeg]) gap = Math.max(gap, Math.min(dist, gap + 6));
+  // Angekommen: der Abstand auf der Strecke ist aufgebraucht (den Weg dieses Schritts eingerechnet – losgelassen wird
+  // erst nach ihm) – oder man hängt dem anderen schon an der Stoßstange.
+  const arrived = gap <= stop + HOOK_V_NEAR * DT || (!anchored && dist < KART_RADIUS * 2 + 0.6 && Math.abs(s.aimY - s.y) < 2);
+  const over = k > HOOK_PULL_MAX || gap > HOOK_SNAP;
+
+  // Voraus zielen: auf dem Weg des Ziels (an einer Gabelung dessen Abzweigung, wenn sie offen ist), seitlich auf seine Spur zu.
+  const kb = t.branchOf[aimSeg];
+  const route = kb >= 0 && hookMayEnter(t, kb, env.time, s.gold > 0 ? 0 : s.size) ? 1 << kb : 0;
+  const ahead = walk(t, routeSeg(t, proj.seg, route), Math.round(HOOK_LOOK / t.step), route);
+  const room = Math.max(0.5, t.rh[ahead] - 1.5);
+  const wantLat = aimLat + nudge * HOOK_NUDGE;
+  const lane = Math.max(-room, Math.min(room, proj.lat + (wantLat - proj.lat) * Math.min(1, HOOK_LOOK / Math.max(gap, HOOK_LOOK))));
+  const want = Math.atan2(t.px[ahead] + rightX(t, ahead) * lane - s.x, t.pz[ahead] + rightZ(t, ahead) * lane - s.z);
+  s.heading = wrapAngle(s.heading + wrapAngle(want - s.heading) * Math.min(1, 9 * DT));
+  const hx = Math.sin(s.heading);
+  const hz = Math.cos(s.heading);
+
+  // Tempo: Das ruhige Tempo folgt der Leinenlänge, der Ruck der Hände kommt obendrauf (und wird hier erst wieder abgezogen).
+  // Wer angekommen ist, aber noch nicht loslassen darf, oder dessen Leine weg ist, rollt verhalten weiter.
+  const calm = Math.max(8, s.vx * hx + s.vz * hz - (k > 1 && !over ? hookTug(k - 1) : 0));
+  const wantV = over ? V_MAX : arrived ? V_MAX - 4 : Math.min(HOOK_V_MAX, HOOK_V_NEAR + HOOK_V_PER_M * (gap - stop));
+  const base = calm < wantV ? Math.min(wantV, calm + HOOK_ACCEL * DT) : Math.max(wantV, calm - HOOK_ACCEL * 0.7 * DT);
+  const v = base + (over ? 0 : hookTug(k));
+  s.vx = hx * v;
+  s.vz = hz * v;
+  s.x += s.vx * DT;
+  s.z += s.vz * DT;
+  projectOnTrack(t, s.x, s.z, s.seg);
+  s.seg = proj.seg;
+  let lat = proj.lat;
+  const side = lat > 0 ? 1 : -1;
+  const limit = sideLimit(t, s.seg, side) - KART_RADIUS;
+  if (Math.abs(lat) > limit) {
+    s.x -= rightX(t, s.seg) * side * (Math.abs(lat) - limit);
+    s.z -= rightZ(t, s.seg) * side * (Math.abs(lat) - limit);
+    lat = side * limit;
+  }
+  // Verkehr bleibt, was er ist: An Bus und Raupe streift man entlang – wer mit Schwung auffährt, schleudert (die Leine ist
+  // dann los, siehe hitKart), und wer hinter einem Fahrzeug hängen bleibt (es nimmt ihm das Tempo), lässt los und fährt
+  // selbst weiter: Die Leine lenkt um kein Hindernis herum.
+  let ev = 0;
+  if (t.crawler) ev |= stepCrawler(t, s, env.time);
+  if (t.vehicles.length > 0) ev |= stepTraffic(t, s, env.time);
+  if (ev & TRAFFIC_MOVED) {
+    projectOnTrack(t, s.x, s.z, s.seg);
+    s.seg = proj.seg;
+    lat = proj.lat;
+    const left = s.vx * hx + s.vz * hz;
+    if (left < v - 0.5 && left < wantV - HOOK_STALLED) dropHook(s);
+  }
+  ev &= ~TRAFFIC_MOVED;
+  if (s.hook === 0) {
+    s.flags = itemBtn ? FLAG_ITEM_HELD : 0;
+    return ev;
+  }
+  // Höhe: auf der Fahrbahn (wer im Sprung eingehakt hat, sinkt zügig hinunter) – auch dort, wo gerade keine ist.
+  const road = centerHeight(t, s.seg, proj.along) + lat * bankAt(t, s.seg, proj.along) + heaveAt(t, s.seg, proj.along, env.time);
+  s.y = s.y > road ? Math.max(road, s.y - Math.max(5 * DT, (s.y - road) * 9 * DT)) : road;
+  s.vy = 0;
+  const ground = groundNow(t, s.seg, proj.along, lat, env.time);
+  let flags = itemBtn ? FLAG_ITEM_HELD : 0;
+  if (ground === NO_GROUND || s.y > road + AIR_EPS) flags |= FLAG_AIR;
+  if (t.deep[s.seg] !== 0 && s.y < t.sea) flags |= FLAG_DIVE;
+
+  const coming = hookAhead(t, s.seg, route);
+  if (arrived || over || (coming & 2) !== 0) {
+    if ((coming & 1) !== 0 || ground === NO_GROUND) {
+      // Noch nicht: weiter an der Leine (der Zähler bleibt stehen, sobald die Zeit um ist).
+      if (k > HOOK_PULL_MAX) s.hook = HOOK_LATCH + HOOK_PULL_MAX + 1;
+    } else {
+      if (!anchored) {
+        // Direkt hinter dem anderen: nicht schneller als ohne Leine – sonst rauschte man an ihm vorbei.
+        const cap = V_MAX * (CHARACTERS[s.char] ?? CHARACTERS[0]).vmax * env.speedFactor;
+        if (v > cap) {
+          s.vx *= cap / v;
+          s.vz *= cap / v;
+        }
+      }
+      dropHook(s);
+    }
+  }
+  s.flags = flags;
+  return ev;
+}
+
 /** Bogenhöhe über der Verbindungslinie beim Flug-Anteil u (0..1). */
 function rocketArc(u: number): number {
   return ROCKET_HEIGHT * 4 * u * (1 - u);
@@ -2212,6 +2488,7 @@ function stepRocket(s: KartState, itemBtn: boolean): number {
   s.draft = 0;
   s.flat = 0;
   s.wing = 0;
+  dropHook(s);
   const held = itemBtn ? FLAG_ITEM_HELD : 0;
   const k = s.rocket - 1;
   if (k <= ROCKET_MORPH_TICKS) {
@@ -2299,9 +2576,10 @@ function useItem(s: KartState, air: boolean, onRail = false): number {
       s.tow = 0;
       s.boost = 0;
       s.stall = 0;
-      // Als Rakete ist das Kart kein Gold mehr (und kein Roboter).
+      // Als Rakete ist das Kart kein Gold mehr (und kein Roboter) – und ein Enterhaken im Schwung ist weg (er teilt sich aim*).
       s.gold = 0;
       s.robot = 0;
+      dropHook(s);
       ev |= EV_USE_ROCKET;
       break;
     case ITEM_SMOKE:
@@ -2354,7 +2632,22 @@ function useItem(s: KartState, air: boolean, onRail = false): number {
       s.boost = 0;
       s.stall = 0;
       s.robot = 0;
+      dropHook(s);
       ev |= EV_USE_KITE;
+      break;
+    case ITEM_HOOK:
+      // Ausholen beginnt (das Kart fährt weiter). Wen oder was der Haken trifft, trägt der Host beim Wurf ein – bis dahin
+      // gilt die eigene Stelle. Ein zweiter Haken bleibt aufgehoben, solange einer unterwegs ist.
+      if (s.hook > 0) used = false;
+      else {
+        s.hook = 1;
+        s.hookAim = -1;
+        s.aimV = 0;
+        s.aimX = s.x;
+        s.aimY = s.y;
+        s.aimZ = s.z;
+        s.aimSeg = s.seg;
+      }
       break;
     case ITEM_DRILL:
       // Einstecken beginnt (das Kart fährt weiter). Ein zweiter Bohrer bleibt aufgehoben, bis der erste im Boden steckt.

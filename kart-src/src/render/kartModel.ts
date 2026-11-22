@@ -11,7 +11,8 @@
 // höchstens 6. Items kommen nur bei Bedarf dazu: der Gegenstand in der Hand
 // (2 Aufrufe samt Kontur), im Drachenzug Drache (2) und Leine (1), als
 // Roboter, mit ausgeklappter Klebepistole oder mit Kleber im Gesicht ein
-// eigenes Netz am selben Skelett (2 samt Kontur).
+// eigenes Netz am selben Skelett (2 samt Kontur). Haken und Leine des
+// Enterhakens zeichnet grapple.ts (in der Welt); hier bewegen sich nur die Hände.
 //
 // Die Kontur ist eine umgestülpte Hülle (siehe toon.ts). Ihr Netz enthält nur
 // die Teile, die eine Linie bekommen sollen; die Dicke steckt je Ecke in der
@@ -21,7 +22,7 @@
 // „Links“ ist +x, „rechts“ −x.
 
 import * as THREE from 'three';
-import { DRILL_FORE, DRILL_SIDE } from '../game/sim';
+import { DRILL_FORE, DRILL_SIDE, HOOK_LATCH, HOOK_SWING_TICKS, HOOK_TUG_TICKS } from '../game/sim';
 import { INK, outlineMaterial, rgb, toonMaterial, withSkinnedOutline } from './toon';
 
 export interface KartPose {
@@ -81,6 +82,35 @@ export interface KartPose {
   glue?: number;
   /** Bohrer: Fortschritt des Einsteckens 0..1 (0 = es wird gerade keiner eingesteckt; bei 1 steckt er im Boden). */
   plant?: number;
+  /**
+   * Enterhaken: Sekunden seit dem Auslösen (0 = keiner) – bis HOOK_SWING schwingt die Figur ihn wie ein Lasso, wirft ihn,
+   * und ab HOOK_PULL zieht sie sich Hand über Hand an der Leine heran.
+   */
+  hook?: number;
+  /** Enterhaken: wohin die Leine führt – Punkt im Raum von root (null = noch kein Ziel: geradeaus). */
+  hookAim?: THREE.Vector3 | null;
+}
+
+/** Enterhaken: Zeitpunkte in Sekunden (wie im Spiel) – Wurf, der Haken sitzt, Dauer eines Griffs beim Ziehen. */
+export const HOOK_SWING = HOOK_SWING_TICKS / 60;
+export const HOOK_PULL = HOOK_LATCH / 60;
+export const HOOK_GRIP = HOOK_TUG_TICKS / 60;
+/** Enterhaken: so lange hebt die Figur die Hand, bevor der Haken kreist; so früh vor dem Wurf holt sie aus. */
+const HOOK_RISE = 0.22;
+const HOOK_WINDUP = 0.14;
+/** Enterhaken: Umläufe des Lassos bis zum Wurf (ganzzahlig: Beim Loslassen fliegt der Haken gerade nach vorn). */
+const HOOK_TURNS = 4;
+/** Enterhaken: Radius des Lassos (Meter), wenn die Leine ausgegeben ist. */
+const HOOK_LASSO = 1.05;
+
+/**
+ * Enterhaken: Winkel des Lassos (rad) nach sec Sekunden – erst gemächlich, dann immer schneller, zum Wurf genau HOOK_TURNS
+ * Umläufe. Bei 0 (und jedem vollen Umlauf) steht der Haken links und fliegt nach vorn.
+ */
+export function hookSwingAngle(sec: number): number {
+  const all = HOOK_SWING - HOOK_RISE;
+  const u = clamp(sec - HOOK_RISE, 0, all);
+  return TAU * (u + ((HOOK_TURNS - all) / (all * all)) * u * u);
 }
 
 /** Cockpit-Ansicht: so weit rückt das Lenkrad höher und zur Figur (Meter) und so viel steiler steht es (rad). */
@@ -125,6 +155,8 @@ export interface CockpitRig {
   drink: number;
   plant: number;
   robot: number;
+  /** Enterhaken: Sekunden seit dem Auslösen (0 = keiner). */
+  hook: number;
   /** Wie weit das Kart gerade ein Roboter ist (0 … 1) und wie gold es ist (0 … 1). */
   robotLook: number;
   rocket: number;
@@ -3527,7 +3559,8 @@ const I_ROCKET = 10;
 const I_GOLD = 12;
 const I_DRILL = 13;
 // (14 ist der Kleber.)
-const I_COUNT = 15;
+const I_HOOK = 15;
+const I_COUNT = 16;
 
 // Farben des Brummkreisels auf der Strecke (things.ts) – auch sonst die Item-Farben.
 const I_RED = 0xff5a4e;
@@ -4029,6 +4062,84 @@ function buildDrill(b: Builder): void {
   );
 }
 
+/** Seil des Enterhakens: Hanf, mit dunkleren Schlägen. */
+export const ROPE = 0xe6c078;
+const ROPE_D = 0xb98a45;
+
+/**
+ * Enterhaken, der Kopf: Öse unten (dort ist die Leine angeknotet – der Ursprung), Schaft, rote Manschette, gelber Knauf
+ * und drei geschwungene Krallen mit Stahlspitzen. Die Achse ist +y: so fliegt er, Krallen voran.
+ */
+function buildHookHead(b: Builder, at: V3 = [0, 0, 0]): void {
+  const STEEL_L = 0xd3dbe6;
+  const [x, y, z] = at;
+  b.put(new THREE.TorusGeometry(0.04, 0.014, b.s(6), b.s(12)), { bone: 0, color: CHROME, pos: [x, y + 0.03, z], outline: 0.6 });
+  b.put(cyl(0.021, 0.024, 0.27, b.s(8)), { bone: 0, color: STEEL, pos: [x, y + 0.2, z], outline: 0.7 });
+  b.put(cyl(0.036, 0.036, 0.05, b.s(10)), { bone: 0, color: I_RED, pos: [x, y + 0.3, z], outline: 0.7 });
+  b.put(sphere(0.04, 0.034, 0.04, b.s(10), 6), { bone: 0, color: I_YEL, pos: [x, y + 0.345, z], outline: 0.6 });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * TAU + 0.5;
+    const c = Math.cos(a);
+    const sn = Math.sin(a);
+    // Kralle: aus dem Knauf heraus, im Bogen nach außen und wieder zurück zur Öse hin
+    const arc: [number, number][] = [
+      [0.0, 0.33],
+      [0.075, 0.355],
+      [0.15, 0.31],
+      [0.185, 0.225],
+      [0.17, 0.15],
+    ];
+    b.put(
+      sweep(
+        arc.map(([r, h]): V3 => [x + c * r, y + h, z + sn * r]),
+        (t) => 0.024 - 0.008 * t,
+        b.s(6, 5),
+        10,
+      ),
+      { bone: 0, color: STEEL_L, outline: 0.75 },
+    );
+    b.put(cone(0.021, 0.07, b.s(6, 5)), { bone: 0, color: STEEL, pos: [x + c * 0.172, y + 0.156, z + sn * 0.172], aim: [-c * 0.25, -1, -sn * 0.25], outline: 0.6 });
+  }
+}
+
+/** Enterhaken in der Hand: der Kopf am Schaft gefasst, daneben hängt die aufgeschossene Leine (drei Buchten). */
+function buildHookProp(b: Builder): void {
+  buildHookHead(b, [0, 0.04, 0]);
+  for (let i = 0; i < 3; i++) {
+    b.put(new THREE.TorusGeometry(0.092 - i * 0.004, 0.02, b.s(6), b.s(14)), {
+      bone: 0,
+      color: i === 1 ? ROPE_D : ROPE,
+      pos: [-0.105 + (i - 1) * 0.012, 0.02 - i * 0.004, (i - 1) * 0.034],
+      rot: [0, (i - 1) * 0.22, 0.12 * (i - 1)],
+      outline: 0.6,
+    });
+  }
+  // Das Ende der Leine läuft von den Buchten zur Öse.
+  b.put(
+    sweep(
+      [
+        [-0.06, 0.1, 0],
+        [-0.035, 0.085, 0.005],
+        [-0.012, 0.072, 0],
+      ],
+      0.016,
+      5,
+      6,
+    ),
+    { bone: 0, color: ROPE, outline: 0.5 },
+  );
+}
+
+let hookShared: ItemGeo | null = null;
+
+/** Netz des fliegenden Enterhakens (nur der Kopf; Ursprung an der Öse, Krallen nach +y) – für grapple.ts. */
+export function getHookGeo(): ItemGeo {
+  if (hookShared) return hookShared;
+  const b = new Builder(ONE_BONE, 2, true);
+  buildHookHead(b);
+  return (hookShared = finishItem(b));
+}
+
 /** Bohrer: Länge vom Griff bis zur Spitze (Maßstab 1) – und so groß wird er beim Einstecken (siehe things.ts). */
 export const DRILL_LEN = 0.56;
 export const DRILL_GROW = 2.2;
@@ -4284,6 +4395,7 @@ function getItemGeos(): ItemGeo[] {
     buildGoldBottle,
     buildDrill,
     buildGlueTube,
+    buildHookProp,
   ];
   const out: ItemGeo[] = [];
   for (let i = 0; i < I_COUNT; i++) {
@@ -4562,6 +4674,8 @@ const GESTURES: (Gesture | null)[] = [
   null,
   // Kleber: die Tube über die Schulter nach hinten werfen – hinten klappt die Klebepistole aus
   G_BACK,
+  // Enterhaken: keine Geste – Schwingen, Wurf und Ziehen folgen dem Spielstand (pose.hook, siehe planItem und hookHands).
+  null,
 ];
 
 // ───────────────────────────── Get Gold ─────────────────────────────
@@ -4661,6 +4775,7 @@ const _rx = new THREE.Vector3();
 const _ry = new THREE.Vector3();
 const _rz = new THREE.Vector3();
 const _rk = new THREE.Vector3();
+const _hk = new THREE.Vector3();
 
 export class KartVisual {
   /** Wurzel: Position/Ausrichtung setzt das Spiel. */
@@ -4676,7 +4791,13 @@ export class KartVisual {
     head: new THREE.Vector3(),
     /** Kleber: Mündung der Klebepistole (nur gültig, solange sie ausgeklappt ist). */
     gunMuzzle: new THREE.Vector3(),
+    /** Enterhaken: wo die Leine die Hand verlässt (gültig, solange einer unterwegs ist). */
+    hookHand: new THREE.Vector3(),
+    /** Enterhaken: wo der Haken am Lasso gerade ist (gültig bis zum Wurf – danach steht hier der Punkt des Loslassens). */
+    hookTip: new THREE.Vector3(),
   };
+  /** Enterhaken: wohin der Haken am Lasso zeigt (Raum von root, Länge 1). */
+  readonly hookDir = new THREE.Vector3(0, 1, 0);
   /** Roboter: zählt die Schritte (jeder aufgesetzte Fuß) – das Spiel lässt dort Staub aufwirbeln. */
   robotSteps = 0;
   /**
@@ -4913,6 +5034,17 @@ export class KartVisual {
   private readonly robQ2 = new THREE.Quaternion();
   private readonly robTmp = new Float32Array(4 * SWING_N);
 
+  // Enterhaken: Sekunden seit dem Auslösen laut Spiel (0 = keiner) und wohin die Leine führt (Raum von root); Gewichte der
+  // Haltung für rechte und linke Hand (geglättet), ihre Ziele und das Ende der Leine an der Hand (Raum der Karosserie).
+  private fHook = 0;
+  private fHookAim: THREE.Vector3 | null = null;
+  private hookWR = 0;
+  private hookWL = 0;
+  private readonly hookHR = new THREE.Vector3();
+  private readonly hookHL = new THREE.Vector3();
+  private readonly hookEnd = new THREE.Vector3();
+  private hookEndSet = false;
+
   // Kleber: Pistole (Sekunden seit dem Auslösen, Ziel, wie weit ausgeklappt, Ausrichtung) und Kleckse (Restzeit, Aufploppen).
   private fGun = 0;
   private fGunAim: THREE.Vector3 | null = null;
@@ -5071,8 +5203,8 @@ export class KartVisual {
    * welcher Gegenstand fliegt, kommt deshalb von hier.
    */
   useItem(item: number): void {
-    // (Get Gold und der Bohrer haben keine Geste: Austrinken und Einstecken kommen aus dem Spielstand.)
-    if (!(item >= 1 && item < I_COUNT) || item === I_GOLD || item === I_DRILL) return;
+    // (Get Gold, Bohrer und Enterhaken haben keine Geste: Austrinken, Einstecken und Schwingen kommen aus dem Spielstand.)
+    if (!(item >= 1 && item < I_COUNT) || item === I_GOLD || item === I_DRILL || item === I_HOOK) return;
     this.gItem = Math.floor(item);
     this.gT = 0;
     this.gDone = false;
@@ -5100,6 +5232,11 @@ export class KartVisual {
 
   get glueLook(): number {
     return clamp(this.bones[B.glueHead].scale.x, 0, 1);
+  }
+
+  /** Enterhaken: wie weit die rechte bzw. linke Hand gerade an Haken und Leine ist (0 … 1) – für Tests. */
+  get hookLook(): [number, number] {
+    return [clamp(this.hookWR, 0, 1), clamp(this.hookWL, 0, 1)];
   }
 
   setDetail(detail: KartDetail): void {
@@ -5531,6 +5668,9 @@ export class KartVisual {
     this.fGunAim = pose.glueAim ?? null;
     const gl = pose.glue ?? 0;
     this.fGlue = gl === gl ? Math.max(0, gl) : 0;
+    const hk = pose.hook ?? 0;
+    this.fHook = hk === hk ? Math.max(0, hk) : 0;
+    this.fHookAim = pose.hookAim ?? null;
 
     // — geglättete Größen —
     if (dt > 0) this.accel = damp(this.accel, clamp((speed - this.lastSpeed) / dt, -45, 45), 7, dt);
@@ -5640,13 +5780,14 @@ export class KartVisual {
       hand: sp.hand,
       hip: sp.hip,
       torsoLen: sp.torsoLen,
-      holdR: this.holdW,
-      holdL: Math.max(this.drinkW, this.armsUp, this.swimS),
+      holdR: Math.max(this.holdW, this.hookWR),
+      holdL: Math.max(this.drinkW, this.armsUp, this.swimS, this.hookWL),
       held: this.fHeld,
       gesture: this.gT >= 0 ? this.gItem : 0,
       drink: this.fDrink,
       plant: this.fPlant,
       robot: this.fRobot,
+      hook: this.fHook,
       robotLook: this.robotLook,
       rocket: this.fRocket,
       gold: this.goldLook,
@@ -6382,9 +6523,112 @@ export class KartVisual {
       .applyMatrix4(torso.matrix);
     if (this.drinkW > 0.001 || this.fDrink > 0) this.drinkHands();
     if (this.plantW > 0.001 || this.fPlant > 0) this.plantHands();
+    if (this.hookWR > 0.001 || this.hookWL > 0.001 || this.fHook > 0) this.hookHands();
     this.solveArm(1);
     this.solveArm(-1);
     this.handP.copy(bn[B.handR].position);
+  }
+
+  /**
+   * Enterhaken: wohin die Hände greifen (Raum der Karosserie) und wo der Haken am Lasso ist (anchors.hookTip, hookDir).
+   * Schwingen: Die rechte Hand geht über den Kopf und kreist klein mit, der Haken läuft am immer längeren Seil um sie herum.
+   * Wurf: ausholen und nach vorn peitschen; danach hält die Rechte die auslaufende Leine vor sich, die Linke greift dazu.
+   * Ziehen: Hand über Hand – jede Hand fasst vorn zu, zieht zur Brust, lässt los und greift wieder nach vorn; die beiden
+   * laufen um einen halben Takt versetzt. Die Leine endet an der hinteren Hand, die gerade hält.
+   */
+  private hookHands(): void {
+    const sp = this.spec;
+    const torso = this.bones[B.torso];
+    const hk = this.fHook;
+    const dt = this.fDt;
+    const reach = (sp.upper + sp.fore) / 0.5;
+    const sx = sp.shoulder[0];
+    const sy = sp.shoulder[1];
+    const sz = sp.shoulder[2];
+    if (hk <= 0) {
+      // Vorbei: Die Hände gehen zurück ans Lenkrad.
+      this.hookWR = damp(this.hookWR, 0, 11, dt);
+      this.hookWL = damp(this.hookWL, 0, 11, dt);
+      this.hookEndSet = false;
+      return;
+    }
+    let wl = 0;
+    if (hk < HOOK_PULL) {
+      // Rechte Hand: raus, hoch, vor (wie HOLD) – über dem Kopf kreisend, dann der Wurf.
+      const k = smooth01(hk / HOOK_RISE);
+      const ph = hookSwingAngle(hk);
+      const r = 0.075 * k;
+      let out = HOLD[0] + (0.12 - HOLD[0]) * k - r * Math.cos(ph + 0.5);
+      let up = HOLD[1] + (0.62 - HOLD[1]) * k;
+      let fwd = HOLD[2] + (0.02 - HOLD[2]) * k + r * Math.sin(ph + 0.5);
+      const w = (hk - (HOOK_SWING - HOOK_WINDUP)) / 0.36;
+      if (w > 0) {
+        // Schlüsselstellen des Wurfs: hinten ausgeholt (w = 0,3), vorn durchgezogen (0,62), Leine in der Hand (ab 1).
+        const a = smooth01(w / 0.3);
+        const b = smooth01((w - 0.3) / 0.32);
+        const c = smooth01((w - 0.62) / 0.5);
+        out += (0.2 - out) * a + (0.1 - 0.2) * b + (0.1 - 0.1) * c;
+        up += (0.5 - up) * a + (0.5 - 0.5) * b + (0.26 - 0.5) * c;
+        fwd += (-0.24 - fwd) * a + (0.44 + 0.24) * b + (0.42 - 0.44) * c;
+        wl = smooth01((hk - HOOK_SWING - 0.12) / 0.25);
+      }
+      this.hookHR.set(-(sx + out), sy + up * reach, sz + fwd * reach).applyMatrix4(torso.matrix);
+      this.hookHL.set(sx * 0.35, sy - 0.02 * reach, sz + 0.3 * reach).applyMatrix4(torso.matrix);
+      // Der Haken am Lasso: ein Kreis über der Hand, vorn etwas höher; das Seil wird in der ersten halben Sekunde länger.
+      if (hk <= HOOK_SWING) {
+        const len = 0.22 + (HOOK_LASSO - 0.22) * smooth01((hk - HOOK_RISE) / 0.55);
+        const cx = Math.cos(ph);
+        const cz = Math.sin(ph);
+        _hk.set(-(sx + 0.12), sy + 0.62 * reach + 0.14, sz + 0.02 * reach).applyMatrix4(torso.matrix);
+        // (Deutlich über dem Kopf: Die Leine läuft von der Hand schräg nach oben – sonst striche der Haken am Helm vorbei.
+        // Aus dem Cockpit sähe man ihn dort nie: Da liegt der Kreis weiter vorn und nach vorn geneigt – bei jedem Umlauf
+        // zieht der Haken einmal oben durchs Bild.)
+        _hk.x += cx * len;
+        _hk.y += (this.firstPerson ? 0.26 - 0.52 * cz : 0.42 + 0.12 * cz) * len;
+        _hk.z += cz * len + (this.firstPerson ? 0.4 : 0);
+        this.toRoot(_hk);
+        this.anchors.hookTip.copy(_hk);
+        // Er zeigt nach außen und etwas in Laufrichtung (die Krallen voran).
+        this.hookDir.set(cx * 0.75 - cz * 0.66, 0.1, cz * 0.75 + cx * 0.66).normalize();
+      }
+      this.hookEndSet = false;
+    } else {
+      // Ziehen: Die Leine läuft von der Brust (B) nach vorn-oben zum Ziel; A liegt eine Unterarmlänge weiter vorn auf ihr.
+      const aim = this.fHookAim;
+      const ax = aim ? clamp(aim.x / Math.max(4, Math.hypot(aim.x, aim.z)), -0.5, 0.5) : 0;
+      const ay = aim ? clamp((aim.y - 1) / Math.max(4, Math.hypot(aim.x, aim.z)), -0.25, 0.45) : 0.1;
+      const n = (hk - HOOK_PULL) / (2 * HOOK_GRIP);
+      let back = 1e9;
+      for (let i = 0; i < 2; i++) {
+        const side = i === 0 ? -1 : 1;
+        const q = n + (i === 0 ? 0 : 0.5) - Math.floor(n + (i === 0 ? 0 : 0.5));
+        // 0 … 0,3 ziehen (A → B), bis 0,5 halten, bis 0,85 loslassen und wieder nach vorn greifen, dann vorn warten.
+        const f = q < 0.3 ? 1 - smooth01(q / 0.3) : q < 0.5 ? 0 : q < 0.85 ? smooth01((q - 0.5) / 0.35) : 1;
+        const lift = q >= 0.5 && q < 0.85 ? Math.sin(((q - 0.5) / 0.35) * Math.PI) : 0;
+        // (Aus dem Cockpit greifen die Hände höher und weiter vorn: über dem Lenkradkranz, wo man sie und die Leine sieht.)
+        const fp = this.firstPerson ? 1 : 0;
+        const tgt = i === 0 ? this.hookHR : this.hookHL;
+        tgt
+          .set(
+            side * (sx * 0.2 + (0.06 + 0.05 * fp) * (1 - f) + 0.06 * lift) + ax * 0.34 * f,
+            sy + (-0.1 + 0.17 * fp + (0.22 + ay * 0.3) * f + 0.07 * lift) * reach,
+            sz + (0.2 + 0.1 * fp + 0.32 * f) * reach,
+          )
+          .applyMatrix4(torso.matrix);
+        const grips = q < 0.5 || q >= 0.85;
+        if (grips && tgt.z < back) {
+          back = tgt.z;
+          _hk.copy(tgt);
+        }
+      }
+      // Ende der Leine: an der hinteren haltenden Hand – wechselt sie, gleitet es zügig hinüber statt zu springen.
+      if (this.hookEndSet) this.hookEnd.lerp(_hk, 1 - Math.exp(-34 * dt));
+      else this.hookEnd.copy(_hk);
+      this.hookEndSet = true;
+      wl = 1;
+    }
+    this.hookWR = damp(this.hookWR, 1, 26, dt);
+    this.hookWL = damp(this.hookWL, wl, wl > 0 ? 22 : 12, dt);
   }
 
   /**
@@ -6716,13 +6960,45 @@ export class KartVisual {
       want = 1;
       rate = 30;
     }
+    // Enterhaken: Die Hände führt hookHands; hier Oberkörper und Kopf. Schwingen: hochschauen, der Oberkörper kreist dem
+    // Haken entgegen. Wurf: ausholen (rechte Schulter zurück), dann mit dem ganzen Oberkörper nach vorn. Ziehen: bei jedem
+    // Griff lehnt sie sich zurück (im Takt des Rucks im Spiel), die Schulter der ziehenden Hand geht mit.
+    const hk = this.fHook;
+    if (hk > 0) {
+      if (hk < HOOK_SWING - HOOK_WINDUP) {
+        const k = smooth01(hk / HOOK_RISE);
+        const ph = hookSwingAngle(hk);
+        tx = -0.1 * k + 0.05 * k * Math.sin(ph);
+        ty = -0.05 * k * Math.sin(ph + 0.8);
+        tz = -0.07 * k * Math.cos(ph);
+        hx = -0.2 * k;
+      } else if (hk < HOOK_PULL) {
+        const w = (hk - (HOOK_SWING - HOOK_WINDUP)) / 0.36;
+        const back = 1 - smooth01((w - 0.3) / 0.25);
+        const fwd = smooth01((w - 0.32) / 0.3) * (1 - 0.55 * smooth01((w - 0.9) / 0.5));
+        tx = -0.14 * back + 0.28 * fwd;
+        ty = -0.4 * back + 0.36 * fwd;
+        tz = 0;
+        hx = -0.18 * back + 0.06 * fwd;
+      } else {
+        const n = (hk - HOOK_PULL) / HOOK_GRIP;
+        const q = n - Math.floor(n);
+        const pull = q < 0.5 ? Math.sin(q * TAU) : 0;
+        tx = 0.1 - 0.26 * pull;
+        ty = (Math.floor(n) % 2 === 0 ? -1 : 1) * 0.16 * pull;
+        tz = 0;
+        hx = -0.05 + 0.1 * pull;
+      }
+      want = 0;
+      rate = 30;
+    }
     this.plantW = damp(this.plantW, pp > 0 ? 1 : 0, pp > 0 ? 18 : 14, dt);
     this.drinkW = damp(this.drinkW, dp > 0 && dp < DRINK_THROW - 0.04 ? 1 : 0, dp > 0 ? 22 : 12, dt);
     if (dp <= 0) this.drinkThrown = false;
     // Cockpit-Ansicht: Neben dem Kopf sähe man das Item nicht. Dort hält die Figur es vor der rechten Schulter über dem
     // Lenkrad, und jede Geste läuft in diesem Raum: Würfe gehen von dort nach vorn ins Bild, Würfe nach hinten über die
     // Schulter aus dem Bild hinaus. Oberkörper und Kopf bewegen sich dabei weniger mit – die Kamera sitzt im Kopf.
-    if (this.firstPerson && dp <= 0 && pp <= 0) {
+    if (this.firstPerson && dp <= 0 && pp <= 0 && hk <= 0) {
       out = COCKPIT_HOLD[0] + (out - HOLD[0]) * 0.5;
       up = COCKPIT_HOLD[1] + (up - HOLD[1]) * 0.55;
       fwd = COCKPIT_HOLD[2] + (fwd - HOLD[2]) * 0.7;
@@ -6739,6 +7015,13 @@ export class KartVisual {
     this.gTz = damp(this.gTz, tz, rate * 0.6, dt);
     this.gHx = damp(this.gHx, hx, rate * 0.6, dt);
     this.holdW = damp(this.holdW, want, g || pp > 0 ? 30 : 9, dt);
+    if (this.firstPerson && hk > 0) {
+      // (Aus dem Cockpit bewegen sich Oberkörper und Kopf weniger mit – die Kamera sitzt im Kopf.)
+      this.gTx *= 0.5;
+      this.gTy *= 0.5;
+      this.gTz *= 0.5;
+      this.gHx *= 0.4;
+    }
   }
 
   /** Der Gegenstand verlässt die Hand: Flug starten – beim Drachen steigt stattdessen der große auf. */
@@ -6816,6 +7099,8 @@ export class KartVisual {
       // ebenso den Bohrer.
       if (this.fDrink > 0 && !this.drinkThrown) want = I_GOLD;
       if (this.fPlant > 0) want = I_DRILL;
+      // Enterhaken unterwegs: Die Hände sind an Haken und Leine (grapple.ts zeichnet beide) – ein neues Item wartet solange.
+      if (this.fHook > 0) want = 0;
       if (want !== this.propItem) {
         if (this.propItem !== 0 && this.propS > 0.02) {
           // erst schnell verschwinden, dann tauschen
@@ -6902,6 +7187,17 @@ export class KartVisual {
     }
     prop.scale.set(s, s * sy, s);
     prop.visible = item > 0 && s > 0.01;
+
+    // — Enterhaken: wo die Leine die Hand verlässt (bis der Haken sitzt, die rechte Faust; im Zug die haltende Hand) —
+    if (this.fHook > 0) {
+      const a = this.anchors.hookHand;
+      if (this.fHook >= HOOK_PULL && this.hookEndSet) a.copy(this.hookEnd);
+      else {
+        _iv.set(0, 1, 0).applyQuaternion(bn[B.handR].quaternion);
+        a.copy(this.handP).addScaledVector(_iv, sp.hand * 0.5);
+      }
+      this.toRoot(a);
+    }
 
     // — Abschleppdrache —
     const kb = this.kiteBones;
@@ -7156,7 +7452,7 @@ export class KartVisual {
     else if (pose.stall) eye = EYE.STUN;
     else if (pose.emote === 'win') eye = EYE.HAPPY;
     else if (pose.emote === 'lose') eye = EYE.SAD;
-    else if (pose.boost) eye = EYE.FIERCE;
+    else if (pose.boost || this.fHook > 0) eye = EYE.FIERCE;
     else if (pose.air) eye = EYE.WOW;
     else {
       this.blinkT -= this.fDt;
@@ -7215,6 +7511,9 @@ export class KartVisual {
     if (side < 0 && this.holdW > 0.001) _hd.lerp(this.handT, this.holdW * (this.gT >= 0 || this.fDrink > 0 || this.fPlant > 0 ? 1 : 1 - up));
     // … oder (links) mit an der Goldflasche.
     if (side > 0 && this.drinkW > 0.001) _hd.lerp(this.handTL, this.drinkW);
+    // … oder am Enterhaken: rechts schwingen und werfen, dann beide Hand über Hand an der Leine.
+    if (side < 0 && this.hookWR > 0.001) _hd.lerp(this.hookHR, this.hookWR);
+    if (side > 0 && this.hookWL > 0.001) _hd.lerp(this.hookHL, this.hookWL);
     _u.subVectors(_hd, _sh);
     let d = _u.length();
     if (d < 1e-4) {

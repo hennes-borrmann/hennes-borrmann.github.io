@@ -6,7 +6,7 @@
 import { type Cmd, type KartState } from '../game/sim';
 
 /** Wird bei jeder inkompatiblen Änderung erhöht; steckt auch in den Peer-Kennungen. */
-export const PROTOCOL_VERSION = 29;
+export const PROTOCOL_VERSION = 30;
 const ID_PREFIX = `hbkart${PROTOCOL_VERSION}`;
 
 export const roomPeerId = (code: string): string => `${ID_PREFIX}-r-${code}`;
@@ -247,7 +247,7 @@ export function decodeCmds(view: DataView): { newestSeq: number; cmds: Cmd[]; ti
 //
 // Kopf:  [u8 typ][u32 host-tick][u8 rennen-nr][u8 phase][u32 start-tick][u8 runden]
 //        [u32 kisten-bitfeld][u8 strecke][u8 anzahl karts][u8 anzahl dinge]
-// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 72 Byte]
+// Kart:  [u8 slot (Bit 7 = KI)][u32 ptick][u32 ack][Zustand 79 Byte]
 //        [u8 runde][u8 platz][u8 im ziel][u32 zielzeit in ticks]
 //   ptick = wie viele Simulationsschritte dieses Kart insgesamt gemacht hat
 //           (seine eigene Zeitachse – darüber wird es bei anderen interpoliert)
@@ -267,7 +267,7 @@ export const THING_TOP = 3;
 export const THING_SMOKE = 4;
 export const THING_DRILL = 5;
 
-const STATE_SIZE = 72;
+const STATE_SIZE = 79;
 const SNAP_HEADER = 19;
 const SNAP_KART_SIZE = 9 + STATE_SIZE + 7;
 const SNAP_THING_SIZE = 29;
@@ -360,6 +360,9 @@ function writeState(v: DataView, o: number, s: KartState): void {
   v.setUint8(o + 69, s.glueShot);
   v.setInt8(o + 70, s.glueAim);
   v.setUint8(o + 71, s.plant);
+  v.setUint16(o + 72, s.hook);
+  v.setInt8(o + 74, s.hookAim);
+  v.setFloat32(o + 75, s.aimV);
 }
 
 function readState(v: DataView, o: number): KartState {
@@ -403,6 +406,9 @@ function readState(v: DataView, o: number): KartState {
     glueShot: v.getUint8(o + 69),
     glueAim: v.getInt8(o + 70),
     plant: v.getUint8(o + 71),
+    hook: v.getUint16(o + 72),
+    hookAim: v.getInt8(o + 74),
+    aimV: v.getFloat32(o + 75),
   };
 }
 

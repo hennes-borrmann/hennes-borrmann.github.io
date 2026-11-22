@@ -39,6 +39,10 @@ import {
   ITEM_ROBOT,
   ITEM_GLUE,
   GLUE_RANGE,
+  ITEM_HOOK,
+  HOOK_LATCH,
+  HOOK_MIN,
+  HOOK_RANGE,
   TURBO_AT,
   turboStage,
   ITEM_TIRE,
@@ -546,6 +550,13 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
     b.drifting = 0;
     b.itemPressed = false;
     return { steer: 0, buttons: 0 };
+  }
+  // Am Enterhaken (im Zug): ebenso – die Leine lenkt.
+  if (s.hook > HOOK_LATCH) {
+    b.stuck = 0;
+    b.drifting = 0;
+    b.itemPressed = false;
+    return { steer: 0, buttons: BTN_GAS };
   }
   const vf = forwardSpeed(s);
   const v = Math.abs(vf);
@@ -1307,6 +1318,12 @@ export function botCmd(s: KartState, b: BotBrain, others: KartState[], racing: b
       case ITEM_GLUE:
         // Abwehr: abfeuern, sobald jemand dicht dahinter fährt (in Reichweite); wer zu lange wartet, schießt auf gut Glück.
         press = s.glueShot === 0 && b.holding > 30 && ((behind > 2 && behind < GLUE_RANGE - 5) || (late && !shield));
+        break;
+      case ITEM_HOOK:
+        // Ausholen, sobald jemand in Reichweite vor einem fährt – mit etwas Luft nach beiden Seiten: Bis zum Wurf vergehen
+        // zwei Sekunden, in denen der Abstand sich noch ändert. Wer zu lange niemanden vor sich hat, zieht sich eben an
+        // der Fahrbahn ein Stück nach vorn.
+        press = s.hook === 0 && b.holding > 30 && ((ahead > HOOK_MIN + 6 && ahead < HOOK_RANGE - 4) || late);
         break;
     }
   }
