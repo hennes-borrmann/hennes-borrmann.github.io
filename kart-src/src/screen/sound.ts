@@ -54,6 +54,12 @@ const HEARD_FROM_OTHERS = new Set<SceneEvent['kind']>([
   'use-glue',
   'glue-shot',
   'glue-hit',
+  // Enterhaken: man hört andere das Lasso schwingen, werfen und einhaken – und wie die Leine wieder losgeht
+  'use-hook',
+  'hook-swing',
+  'hook-throw',
+  'hook-latch',
+  'hook-off',
   // Get Gold: man hört andere trinken, golden werden, umhauen und Items abprallen lassen
   'use-gold',
   'gold',

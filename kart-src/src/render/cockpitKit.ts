@@ -656,7 +656,8 @@ export class CockpitKit {
     _fa.set(0, 1, 0).applyQuaternion(hand.quaternion).applyQuaternion(_qi.copy(this._q).invert());
     g.bones[0].quaternion.setFromUnitVectors(Y, _fa);
     // Finger: am Lenkrad geschlossen, mit Item gehalten, sonst locker.
-    const holding = i === 0 && rig.held > 0;
+    // (Am Enterhaken halten beide Hände Haken bzw. Leine.)
+    const holding = (i === 0 && rig.held > 0) || rig.hook > 0;
     const target = k < 0.5 ? 1 : holding ? 0.6 : 0;
     this.gripK[i] += (target - this.gripK[i]) * Math.min(1, dt * 14);
     const c = this.gripK[i];

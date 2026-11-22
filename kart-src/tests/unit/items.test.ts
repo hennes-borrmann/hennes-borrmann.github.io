@@ -448,7 +448,8 @@ describe('Neue Items', () => {
     expect(first[ITEM_EMP]).toBe(0);
     expect(last[3]).toBe(0);
     expect(last[ITEM_SMOKE]).toBe(0);
-    expect(last[ITEM_TOP]).toBeGreaterThan(600);
+    // (Der häufigste hinten – seit dem Enterhaken, der sich bei den gewöhnlichen Items Platz macht, gut 15 % statt 17 %.)
+    expect(last[ITEM_TOP]).toBeGreaterThan(520);
     for (let item = 1; item <= 8; item++) expect(first[item] + last[item] + count(2)[item]).toBeGreaterThan(0);
   });
 

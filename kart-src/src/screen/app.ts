@@ -1866,7 +1866,8 @@ export class App {
         const t = TRACK.tide;
         return t ? { time, phase: tidePhase(t, time), level: tideLevel(t, time), period: t.period, wall: performance.timeOrigin + performance.now() } : null;
       },
-      scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke, glue: this.scene.glue, glueHits: this.scene.glueHits } : null),
+      // (hookLock: Platz des Karts, auf dem das Fadenkreuz des Enterhakens sitzt; −1 = keins)
+      scene: () => (this.scene ? { ...this.scene.stats, smoke: this.scene.smoke, glue: this.scene.glue, glueHits: this.scene.glueHits, hookLock: this.scene.hookLock } : null),
       // Wie ein Kart auf diesem Bildschirm gezeigt wird: Maßstab, wie gold (0 … 1), sichtbar.
       look: (slot: number) => this.scene?.kartLook(slot) ?? null,
       tree: () => this.scene?.debugTree() ?? [],

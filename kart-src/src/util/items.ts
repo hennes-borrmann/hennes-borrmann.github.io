@@ -7,6 +7,7 @@ import {
   ITEM_GLUE,
   ITEM_GOLD,
   ITEM_GUARD,
+  ITEM_HOOK,
   ITEM_KITE,
   ITEM_OIL,
   ITEM_ROCKET,
@@ -111,6 +112,20 @@ export const ITEMS: Record<number, ItemInfo> = {
     hint: 'Bohrt sich zum Ersten',
     // Griff, Motorgehäuse mit ausgespartem Band, darunter der Bohrkopf als Kegel mit schrägen Spiralfugen.
     icon: '<rect x="6" y="1.4" width="12" height="2.8" rx="1.4" fill="currentColor"/><rect x="10.6" y="3.6" width="2.8" height="2.4" fill="currentColor"/><path fill-rule="evenodd" d="M8.5 5.5h7a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2zM8.6 8.1h6.8v1.3H8.6z" fill="currentColor"/><rect x="9.6" y="11" width="4.8" height="1.8" fill="currentColor"/><path d="M7.5 12.5H16.5L15.72 14.4 8.77 15.6zM9.34 17 15.15 15.8 14.21 18.1 10.28 19.3zM10.85 20.7 13.64 19.5 12 23.5z" fill="currentColor"/>',
+  },
+  [ITEM_HOOK]: {
+    name: 'Enterhaken',
+    hint: 'Zieht dich an den Fahrer vor dir',
+    // Enterhaken: Schaft mit Spitze, links und rechts je eine Kralle, die im Bogen nach unten greift (Spitzen als Dreiecke),
+    // unten die Öse (ausgespart) – durch sie läuft ein Stück Leine.
+    icon:
+      `<path d="M12 5v9.800" ${STROKE}/>` +
+      '<path d="M12 1 13.700 4.600h-3.400z" fill="currentColor"/>' +
+      `<path d="M12 5.600C9.300 2.300 4.400 3.700 4.400 8.200v1.600" ${STROKE}/>` +
+      `<path d="M12 5.600c2.700-3.300 7.600-1.900 7.600 2.600v1.600" ${STROKE}/>` +
+      '<path d="M2.100 9.200h4.600l-2.300 4z" fill="currentColor"/><path d="M17.300 9.200h4.600l-2.300 4z" fill="currentColor"/>' +
+      '<circle cx="12" cy="17.900" r="2.500" fill="none" stroke="currentColor" stroke-width="2.200"/>' +
+      '<path d="M9.800 19.600c-1.900 1.500-3.700.3-5.600 2.500" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linecap="round"/>',
   },
 };
 

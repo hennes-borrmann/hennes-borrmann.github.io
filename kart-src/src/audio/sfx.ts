@@ -19,6 +19,9 @@ const MIN_GAP: Partial<Record<SfxName, number>> = {
   warn: 0.22,
   // (Bohrgeräusch: mehrere Bohrer und dichte Folge – nur doppelte Aufrufe im selben Augenblick zusammenfassen.)
   drill: 0.03,
+  // (Enterhaken: Umläufe und Griffe folgen dicht aufeinander – auch von zwei Karts zugleich.)
+  'hook-swing': 0.03,
+  'hook-tug': 0.03,
 };
 const DEFAULT_GAP = 0.04;
 
@@ -182,6 +185,14 @@ const LEVEL: Record<SfxName, number> = {
   'glue-shot': 3.4,
   'glue-hit': 3.4,
   'use-kite': 4.5,
+  // Enterhaken: Ausholen und Umläufe leise (sie wiederholen sich), Wurf und Einhaken so kräftig wie die anderen Items,
+  // die Griffe beim Ziehen als leiser Takt darunter.
+  'use-hook': 4.2,
+  'hook-swing': 2.6,
+  'hook-throw': 3.4,
+  'hook-latch': 4.2,
+  'hook-tug': 2.8,
+  'hook-off': 3.6,
   'use-rocket': 3.2,
   'rocket-launch': 3.6,
   'use-wing': 3.4,
@@ -737,6 +748,51 @@ export class SfxPlayer {
           .noise(1800, 1200, 0.07, 0.16, { q: 4, at: 0.1 })
           .noise(1800, 1200, 0.07, 0.14, { q: 4, at: 0.22 })
           .tone('sine', 110, 70, 0.2, 0.3);
+        break;
+      case 'use-hook':
+        // Ausholen: Die Leine rauscht aus der Hand (Rauschen, das heller wird), der Haken klirrt leise am Schaft.
+        v.noise(500, 2400, 0.24, 0.2, { q: 1.3, attack: 0.04 })
+          .tone('triangle', 1480, 1380, 0.07, 0.07, { at: 0.03 })
+          .tone('triangle', 1960, 1840, 0.06, 0.05, { at: 0.09 })
+          .tone('sine', 150, 110, 0.12, 0.14);
+        break;
+      case 'hook-swing': {
+        // Ein Umlauf des Lassos: Die Leine schneidet durch die Luft – ein Rauschband, das an- und wieder abschwillt, darunter
+        // ein tiefer, mitziehender Ton. Je schneller das Lasso, desto höher (pitch).
+        const p = this.pitch;
+        v.noise(420 * p, 1500 * p, 0.13, 0.24, { q: 1.5, attack: 0.07 })
+          .noise(1500 * p, 520 * p, 0.14, 0.2, { q: 1.5, at: 0.11, attack: 0.01 })
+          .tone('sine', 120 * p, 190 * p, 0.24, 0.1, { attack: 0.08 });
+        break;
+      }
+      case 'hook-throw':
+        // Wurf: ein Peitschen (kurzer, harter Luftstoß), dann sirrt die auslaufende Leine nach oben davon.
+        v.noise(900, 5200, 0.12, 0.34, { q: 1.1, attack: 0.008 })
+          .tone('sine', 170, 90, 0.1, 0.22)
+          .noise(1400, 3800, 0.42, 0.14, { q: 2.2, attack: 0.05, at: 0.08 })
+          .tone('triangle', 520, 1720, 0.42, 0.11, { attack: 0.04, at: 0.08, vibHz: 31, vibDepth: 0.03 });
+        break;
+      case 'hook-latch':
+        // Er sitzt: helles „Zack“ von Stahl auf Stahl (zwei kurze, verstimmte Töne), ein dumpfer Schlag – und die Leine
+        // schnarrt straff nach (tiefer Sägezahn mit schnellem Zittern, der rasch verklingt).
+        v.noise(3400, 2400, 0.045, 0.34, { q: 3.5, attack: 0.002 })
+          .tone('triangle', 1320, 1260, 0.16, 0.16, { attack: 0.002 })
+          .tone('triangle', 1975, 1900, 0.12, 0.1, { attack: 0.002 })
+          .tone('square', 190, 105, 0.07, 0.14)
+          .tone('sine', 96, 58, 0.16, 0.34)
+          .tone('sawtooth', 168, 132, 0.3, 0.09, { at: 0.05, attack: 0.01, vibHz: 43, vibDepth: 0.06 });
+        break;
+      case 'hook-tug':
+        // Ein Griff: Die Leine knarzt unter Zug (kurzer, rauer Ton, der leicht absinkt), dazu ein dumpfer Ruck.
+        v.tone('sawtooth', 142, 118, 0.12, 0.1, { attack: 0.012, vibHz: 52, vibDepth: 0.08 })
+          .noise(1100, 620, 0.1, 0.16, { q: 2.6, attack: 0.01 })
+          .tone('sine', 84, 60, 0.11, 0.22, { at: 0.01 });
+        break;
+      case 'hook-off':
+        // Los: Die Leine schnalzt zurück (Rauschen, das schnell dunkler wird, ein fallender Pfiff), der Haken klirrt einmal.
+        v.noise(3600, 700, 0.18, 0.22, { q: 1.4, attack: 0.004 })
+          .tone('sine', 980, 360, 0.14, 0.12, { attack: 0.004 })
+          .tone('triangle', 1660, 1560, 0.08, 0.08, { at: 0.12 });
         break;
       case 'use-rocket': {
         // Verwandlung: zwei Servos surren hoch (Räder einklappen, aufstellen), dann rasten sieben Teile ein –

@@ -13,8 +13,15 @@ import {
   FLAG_OFFROAD,
   FLAG_WALL,
   ITEM_EMP,
+  ITEM_HOOK,
   ITEM_KITE,
   ITEM_NONE,
+  HOOK_LATCH,
+  HOOK_RANGE,
+  HOOK_REACH,
+  HOOK_SWING_TICKS,
+  HOOK_TUG_TICKS,
+  hookTarget,
   ITEM_OIL,
   ITEM_ROCKET,
   ITEM_SMOKE,
@@ -93,9 +100,10 @@ import { RACE_COUNTDOWN, RACE_RESULTS, THING_DRILL, THING_SMOKE, THING_TIRE, THI
 import { PLAYER_COLORS } from '../util/players';
 import { BlobShadows, Bolts, ComicPops, LightPools, Particles, SkidMarks, SpeedLines } from './effects';
 import type { FxSink } from './fxApi';
-import { KartVisual, type KartDetail, type KartPose } from './kartModel';
+import { HOOK_GRIP, HOOK_PULL, HOOK_SWING, KartVisual, hookSwingAngle, type KartDetail, type KartPose } from './kartModel';
 import { Cockpit, COCKPIT_LAYER } from './firstPerson';
 import { GlueShots } from './glueShots';
+import { Grapples } from './grapple';
 import { ThingVisuals } from './things';
 import { setOutlinesVisible } from './toon';
 import { World } from './world';
@@ -145,6 +153,17 @@ export interface SceneEvent {
     | 'use-glue'
     | 'glue-shot'
     | 'glue-hit'
+    /**
+     * Enterhaken: Die Figur holt aus (die Leine beginnt zu sirren) / ein Umlauf des Lassos (wiederholt, immer schneller –
+     * die Tonhöhe kommt mit, siehe pitch) / Wurf / der Haken sitzt (am Kart davor oder in der Fahrbahn) / ein Griff beim
+     * Heranziehen (wiederholt) / die Leine ist los.
+     */
+    | 'use-hook'
+    | 'hook-swing'
+    | 'hook-throw'
+    | 'hook-latch'
+    | 'hook-tug'
+    | 'hook-off'
     /**
      * Get Gold: Austrinken beginnt (Gluckern) / ausgetrunken, das Kart wird gold und groß / es ist abgelaufen / ein Gold-Kart
      * haut ein anderes um (am Getroffenen gemeldet) / ein Item prallt an einem Gold-Kart ab.
@@ -402,6 +421,19 @@ interface KartView {
   shotMiss: THREE.Vector3;
   /** Bohrer: Einstecken im letzten Bild (Ticks, wie KartState.plant). */
   plant: number;
+  /**
+   * Enterhaken: Ticks seit dem Auslösen im letzten Bild, dieselbe Zeit weich in Sekunden, Ziel im letzten Bild; zuletzt
+   * gemeldeter Umlauf des Lassos und Griff; Lage von Haken und Hand im letzten Bild (Welt); Einholen nach dem Loslassen
+   * (Sekunden, −1 = keins).
+   */
+  hook: number;
+  hookT: number;
+  hookAim: number;
+  hookTurn: number;
+  hookGrip: number;
+  hookTip: THREE.Vector3;
+  hookHand: THREE.Vector3;
+  hookBack: number;
   roulette: number;
   item: number;
   flags: number;
@@ -609,6 +641,46 @@ function labelSprite(name: string, color: string): THREE.Sprite {
   return sprite;
 }
 
+/**
+ * Enterhaken: das rote Fadenkreuz – Ring mit vier Lücken, vier Striche nach innen, Punkt in der Mitte; dunkel umrandet,
+ * damit es vor jedem Hintergrund steht. Es liegt immer obenauf (keine Tiefenprüfung): Man sieht es auch durch Kuppen.
+ */
+function reticleSprite(): THREE.Sprite {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  const draw = (color: string, width: number): void => {
+    g.strokeStyle = color;
+    g.fillStyle = color;
+    g.lineWidth = width;
+    g.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 2;
+      g.beginPath();
+      g.arc(128, 128, 88, a + 0.24, a + Math.PI / 2 - 0.24);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(128 + Math.cos(a) * 112, 128 + Math.sin(a) * 112);
+      g.lineTo(128 + Math.cos(a) * 52, 128 + Math.sin(a) * 52);
+      g.stroke();
+    }
+    g.beginPath();
+    g.arc(128, 128, width * 0.62, 0, Math.PI * 2);
+    g.fill();
+  };
+  draw('#16131c', 26);
+  draw('#ff2b2b', 14);
+  draw('#ff8a7a', 4);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false, fog: false }));
+  sprite.name = 'fadenkreuz';
+  sprite.renderOrder = 16;
+  sprite.visible = false;
+  return sprite;
+}
+
 const Y_UP = new THREE.Vector3(0, 1, 0);
 /**
  * Schwebeband an der Fassade: Um diesen Anteil der Verdrehung kippt „oben“ der Kamera mit (1 = ganz). Ganz: Das Band liegt
@@ -786,6 +858,20 @@ export class RaceScene {
   /** Kleber auf dem eigenen Bildschirm: Restzeit in Sekunden und wie oft es das eigene Kart schon erwischt hat (neue Kleckse). */
   glue = 0;
   glueHits = 0;
+  /** Enterhaken: Haken und Leinen in der Welt; Hilfsgrößen; das Fadenkreuz auf dem Fahrer, den der eigene Haken träfe. */
+  private grapples: Grapples | null = null;
+  private readonly hookA = new THREE.Vector3();
+  private readonly hookB = new THREE.Vector3();
+  private readonly hookC = new THREE.Vector3();
+  private readonly hookD = new THREE.Vector3();
+  private readonly hookAimL = new THREE.Vector3();
+  private readonly q1v = new THREE.Vector3();
+  private readonly hookList: RenderEntity[] = [];
+  private reticle: THREE.Sprite | null = null;
+  /** Fadenkreuz: Platz des angezielten Karts (−1 = keins), wie fest es sitzt (0 = sucht, 1 = eingerastet), Einblenden (0 … 1). */
+  hookLock = -1;
+  private reticleLock = 0;
+  private reticleShow = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -883,7 +969,8 @@ export class RaceScene {
     this.stats.buildMs = Math.round(performance.now() - started);
     this.things = new ThingVisuals(TRACK, this.level > 0);
     this.glueShots = new GlueShots(this.level > 0);
-    this.scene.add(this.world.group, this.things.group, this.glueShots.group);
+    this.grapples = new Grapples(this.level > 0);
+    this.scene.add(this.world.group, this.things.group, this.glueShots.group, this.grapples.group);
     this.mechanics = buildMechanics(TRACK, this.level > 0, this.world);
     this.passSide = new Int8Array(TRACK.vehicles.length);
     for (const m of this.mechanics) this.scene.add(m.group);
@@ -939,6 +1026,11 @@ export class RaceScene {
       this.glueShots.dispose();
       this.glueShots = null;
     }
+    if (this.grapples) {
+      this.scene.remove(this.grapples.group);
+      this.grapples.dispose();
+      this.grapples = null;
+    }
     for (const m of this.mechanics) {
       this.scene.remove(m.group);
       m.dispose();
@@ -968,9 +1060,19 @@ export class RaceScene {
     this.things?.clear();
     this.glueShots?.clear();
     this.glue = 0;
+    this.grapples?.clear();
+    this.hookLock = -1;
+    this.reticleShow = 0;
+    if (this.reticle) this.reticle.visible = false;
     this.bolts.clear();
     this.threat = 0;
-    for (const k of this.karts.values()) k.fresh = true;
+    for (const k of this.karts.values()) {
+      k.fresh = true;
+      // (Ein Haken aus dem vorigen Rennen ist damit weg – ohne Abschiedston.)
+      k.hook = 0;
+      k.hookT = 0;
+      k.hookBack = -1;
+    }
   }
 
   setRoster(drivers: SceneDriver[]): void {
@@ -1007,6 +1109,7 @@ export class RaceScene {
     this.needsCompile = true;
     if (this.things) setOutlinesVisible(this.things.group, this.level > 0);
     if (this.glueShots) setOutlinesVisible(this.glueShots.group, this.level > 0);
+    if (this.grapples) setOutlinesVisible(this.grapples.group, this.level > 0);
     // Fällt die Qualität mitten im Rennen, verlieren auch Verkehr und Lava ihre Konturen.
     for (const m of this.mechanics) setOutlinesVisible(m.group, this.level > 0);
     this.skids.mesh.visible = lv.skid;
@@ -1124,6 +1227,14 @@ export class RaceScene {
       shotFrom: new THREE.Vector3(),
       shotMiss: new THREE.Vector3(),
       plant: 0,
+      hook: 0,
+      hookT: 0,
+      hookAim: -1,
+      hookTurn: 0,
+      hookGrip: 0,
+      hookTip: new THREE.Vector3(),
+      hookHand: new THREE.Vector3(),
+      hookBack: -1,
       roulette: 0,
       item: ITEM_NONE,
       flags: 0,
@@ -1846,6 +1957,227 @@ export class RaceScene {
     // (Wer gerade getroffen ist, sieht Kleber auf dem Bildschirm – siehe glue.)
     this.glue = me && me.respawn === 0 ? me.glue / 60 : 0;
     shots.update(dt);
+  }
+
+  /**
+   * Enterhaken: wo der Haken sitzt bzw. hinfliegt (Welt) – am Heck des Gezogenen (so, wie er auf diesem Bildschirm gerade
+   * steht) oder dort, wo er sich in die Fahrbahn krallt.
+   */
+  private hookPoint(e: RenderEntity, out: THREE.Vector3): THREE.Vector3 {
+    const tv = e.hookAim >= 0 ? this.karts.get(e.hookAim) : undefined;
+    if (tv && tv.seen && !tv.fresh) {
+      const r = tv.visual.root;
+      r.updateMatrixWorld();
+      return r.localToWorld(out.set(0, 0.55, -1.05));
+    }
+    out.set(e.aimX, e.aimY + 0.06, e.aimZ);
+    const t = this.track;
+    if (e.aimSeg < t.total && (t.edge[e.aimSeg] & EDGE_TWIST) !== 0 && this.twistTurn(e.aimX, e.aimZ, e.aimSeg)) this.twistApply(out);
+    return out;
+  }
+
+  /**
+   * Enterhaken: Haken und Leine jedes Karts für dieses Bild, aus dem Spielstand (Ticks seit dem Auslösen, Ziel) und der Figur
+   * (Hand, Lasso). Bis zum Wurf kreist der Haken über dem Kopf; dann fliegt er in hohem Bogen zum Ziel (die Leine läuft
+   * ihm auf seiner Bahn nach); sitzt er, spannt sich die Leine – bei jedem Griff straff, dazwischen hängt sie kurz durch.
+   * Ist er los, schnellt er zur Hand zurück. Dazu Töne, Wörter und Funken – und das Fadenkreuz für den eigenen Haken.
+   */
+  private hookRopes(entities: RenderEntity[], me: RenderEntity | null, dt: number): void {
+    const gr = this.grapples;
+    if (!gr) return;
+    const swing = HOOK_SWING_TICKS;
+    const fly = (HOOK_LATCH - HOOK_SWING_TICKS) / 60;
+    for (const e of entities) {
+      const k = this.karts.get(e.slot);
+      if (!k || !k.seen) continue;
+      const local = e.slot === this.localSlot;
+      const root = k.visual.root;
+      const was = k.hook;
+      const now = e.respawn > 0 ? 0 : e.hook;
+      const a = k.visual.anchors;
+      const layer = local && k.visual.firstPerson ? COCKPIT_LAYER : 0;
+      if (now > 0) root.updateMatrixWorld();
+      // — Was ist passiert? —
+      if (now > 0 && was === 0) {
+        k.hookTurn = 0;
+        k.hookGrip = 0;
+        k.hookBack = -1;
+        this.emit('use-hook', k, local);
+      }
+      if (now > swing && was <= swing && was > 0) {
+        // (Klein und über dem Kart: Ein großes Wort voraus verdeckte den Bogen, den der Haken gerade fliegt.)
+        this.pop('HEPP!', e, 'warm', 2.3);
+        k.visual.squash(-0.5);
+        this.emit('hook-throw', k, local);
+      }
+      if (now > HOOK_LATCH && was <= HOOK_LATCH && was > 0) {
+        // Er sitzt: Funken am Heck des anderen bzw. Splitter aus der Fahrbahn, die Leine schnappt straff.
+        const p = this.hookPoint(e, this.hookA);
+        const tv = e.hookAim >= 0 ? this.karts.get(e.hookAim) : undefined;
+        if (tv) {
+          this.pops.show('ZACK!', p.x, p.y + 1.9, p.z, 'hot', 3.4);
+          this.burst(p.x, p.y, p.z, 12, 8, 0xffe9a8, true, 0.35, 0.3, 4);
+          tv.visual.squash(0.35);
+          if (tv.slot === this.localSlot) this.shake = Math.max(this.shake, 0.2);
+        } else {
+          this.pops.show('KRALL!', p.x, p.y + 1.7, p.z, 'warm', 3.2);
+          this.burst(p.x, p.y + 0.1, p.z, 12, 6, 0xd9cfc0, false, 0.45, 0.45, 3);
+          this.burst(p.x, p.y + 0.1, p.z, 6, 6, 0xffe9a8, true, 0.3, 0.25, 4);
+        }
+        this.emit('hook-latch', k, local || (!!tv && tv.slot === this.localSlot));
+        k.visual.squash(-0.8);
+        if (local) this.shake = Math.max(this.shake, 0.24);
+      }
+      if (now > 0 && now <= swing) {
+        // Jeder Umlauf des Lassos sirrt – immer schneller, immer höher.
+        const turn = Math.floor(hookSwingAngle(k.hookT) / (Math.PI * 2) + 0.25);
+        if (turn > k.hookTurn) {
+          k.hookTurn = turn;
+          if (this.onEvent) {
+            const gain = local ? 1 : Math.max(0, 1 - k.audio.distance / 55);
+            if (gain > 0.02) this.onEvent({ kind: 'hook-swing', slot: e.slot, local, pan: local ? 0 : k.audio.pan, gain, pitch: 0.8 + 0.5 * Math.min(1, k.hookT / HOOK_SWING) });
+          }
+        }
+      }
+      if (now > HOOK_LATCH) {
+        const grip = Math.floor((now - HOOK_LATCH - 1) / HOOK_TUG_TICKS) + 1;
+        if (grip > k.hookGrip) {
+          k.hookGrip = grip;
+          this.emit('hook-tug', k, local);
+          if (local) this.shake = Math.max(this.shake, 0.07);
+        }
+      }
+      if (now === 0 && was > 0) {
+        if (was > HOOK_LATCH) this.emit('hook-off', k, local);
+        k.hookBack = 0;
+      }
+      k.hook = now;
+      k.hookAim = e.hookAim;
+
+      // — Haken und Leine —
+      const hand = this.hookB;
+      const tip = this.hookC;
+      const dir = this.hookD;
+      const bend = this.v2;
+      if (now > 0) {
+        root.localToWorld(hand.copy(a.hookHand));
+        if (now <= swing) {
+          // Lasso: der Haken, wo ihn die Figur schwingt; die Leine leicht gebaucht. Anfangs so klein wie in der Hand.
+          root.localToWorld(tip.copy(a.hookTip));
+          dir.copy(k.visual.hookDir).transformDirection(root.matrixWorld);
+          bend.set(0, 0.05, 0);
+          // (Am Lasso etwas kleiner als im Flug: Er kreist dicht vor der Kamera.)
+          gr.set(e.slot, hand, tip, dir, bend, 0.45 + 0.33 * Math.min(1, k.hookT / 0.5) + 0.22 * Math.max(0, Math.min(1, (k.hookT - HOOK_SWING + 0.25) / 0.25)), 0, layer);
+        } else {
+          const to = this.hookPoint(e, this.hookA);
+          if (now <= HOOK_LATCH) {
+            // Wurf: von der Stelle des Loslassens (sie fährt mit dem Kart mit, wandert aber rasch zur Hand) in hohem Bogen.
+            const u = Math.max(0.001, Math.min(1, (k.hookT - HOOK_SWING) / fly));
+            const from = root.localToWorld(this.v1.copy(a.hookTip)).lerp(hand, Math.min(1, u * 2.5));
+            const dist = from.distanceTo(to);
+            const high = Math.max(3, Math.min(9.5, 2.2 + dist * 0.17));
+            tip.lerpVectors(from, to, u);
+            tip.y += high * 4 * u * (1 - u);
+            dir.subVectors(to, from);
+            dir.y += high * 4 * (1 - 2 * u);
+            // Die Leine folgt der Bahn: ihre Mitte liegt dort, wo der Haken auf halbem Weg war.
+            const h = u / 2;
+            bend.lerpVectors(from, to, h);
+            bend.y += high * 4 * h * (1 - h);
+            bend.sub(this.q1v.addVectors(hand, tip).multiplyScalar(0.5));
+            gr.set(e.slot, hand, tip, dir, bend, 1, u * 13, layer);
+          } else {
+            // Zug: Der Haken sitzt. Bei jedem Griff ist die Leine straff, dazwischen hängt sie kurz durch; frisch
+            // eingehakt schwirrt sie nach.
+            tip.copy(to);
+            dir.subVectors(to, hand);
+            const dist = dir.length();
+            if (e.hookAim < 0) {
+              // In der Fahrbahn: schräg nach unten verkrallt.
+              dir.multiplyScalar(0.5 / Math.max(dist, 0.01));
+              dir.y -= 0.85;
+            }
+            const since = k.hookT - HOOK_PULL;
+            const q = since / HOOK_GRIP - Math.floor(since / HOOK_GRIP);
+            const slack = q < 0.5 ? 0.12 : 0.12 + 0.88 * Math.sin((q - 0.5) * Math.PI * 2);
+            const twang = Math.exp(-7 * since) * Math.sin(since * 58);
+            bend.set(Math.sin(this.time * 9.3 + e.slot) * 0.05 * slack, -(0.06 + 0.42 * slack) * Math.min(1, dist / 22) + 0.3 * twang, 0);
+            gr.set(e.slot, hand, tip, dir, bend, 1, 0, layer);
+          }
+        }
+        k.hookTip.copy(tip);
+        k.hookHand.copy(hand);
+      } else if (k.hookBack >= 0) {
+        // Los: Der Haken schnellt zur Figur zurück und verschwindet.
+        k.hookBack += dt;
+        const u = k.hookBack / 0.24;
+        if (u >= 1 || e.respawn > 0) k.hookBack = -1;
+        else {
+          root.updateMatrixWorld();
+          root.localToWorld(hand.copy(a.head)).y -= 0.25 * root.scale.y;
+          tip.lerpVectors(k.hookTip, hand, u * u);
+          dir.subVectors(k.hookTip, hand);
+          bend.set(0, 0.5 * Math.sin(u * Math.PI) * Math.min(1, dir.length() / 12), 0);
+          gr.set(e.slot, hand, tip, dir, bend, 1 - 0.8 * u, u * 9, layer);
+        }
+      }
+    }
+    gr.update();
+    this.aimReticle(entities, me, dt);
+  }
+
+  /**
+   * Enterhaken, Fadenkreuz: Hält das eigene Kart einen Enterhaken, sitzt ein rotes Fadenkreuz auf dem Fahrer, den er träfe
+   * (der Nächste voraus in Reichweite – dieselbe Regel wie beim Wurf im Spiel). Beim Ausholen rastet es ein und bleibt,
+   * bis der Haken sitzt. Nur auf dem eigenen Bildschirm.
+   */
+  private aimReticle(entities: RenderEntity[], me: RenderEntity | null, dt: number): void {
+    let slot = -1;
+    let locked = false;
+    if (me && !me.finished && me.respawn === 0) {
+      const holding = me.item === ITEM_HOOK && me.roulette === 0 && me.hook === 0;
+      if (me.hook > HOOK_SWING_TICKS) {
+        // Geworfen: Das Ziel steht fest.
+        if (me.hook <= HOOK_LATCH) slot = me.hookAim;
+        locked = true;
+      } else if (holding || me.hook > 0) {
+        const list = this.hookList;
+        list.length = 0;
+        for (const o of entities) if (o.slot !== me.slot && !o.finished) list.push(o);
+        const i = hookTarget(this.track, me, list, me.hook > 0 ? HOOK_REACH : HOOK_RANGE);
+        if (i >= 0) slot = list[i].slot;
+        locked = me.hook > 0;
+      }
+    }
+    const tv = slot >= 0 ? this.karts.get(slot) : undefined;
+    const on = !!tv && tv.seen;
+    this.hookLock = on ? slot : -1;
+    this.reticleShow += ((on ? 1 : 0) - this.reticleShow) * Math.min(1, dt * (on ? 14 : 10));
+    this.reticleLock += ((locked ? 1 : 0) - this.reticleLock) * Math.min(1, dt * 12);
+    if (!this.reticle) {
+      if (!on) return;
+      this.reticle = reticleSprite();
+      this.scene.add(this.reticle);
+    }
+    const sp = this.reticle;
+    if (this.reticleShow < 0.02 && !on) {
+      sp.visible = false;
+      return;
+    }
+    if (tv && on) {
+      const r = tv.visual.root;
+      sp.position.set(r.position.x, r.position.y + 0.85 * r.scale.y, r.position.z);
+    }
+    // Auf jede Entfernung etwa gleich groß; suchend dreht es sich langsam und atmet, eingerastet zieht es sich zusammen und pulst.
+    const dist = sp.position.distanceTo(this.camera.position);
+    const lock = this.reticleLock;
+    const pulse = lock > 0.5 ? 1 + 0.07 * Math.sin(this.time * 17) : 1 + 0.05 * Math.sin(this.time * 5);
+    const size = Math.max(2.2, Math.min(7, dist * 0.135)) * (1.5 - 0.5 * this.reticleShow) * (1.18 - 0.3 * lock) * pulse;
+    sp.scale.set(size, size, 1);
+    const mat = sp.material;
+    mat.rotation = lock > 0.5 ? Math.PI / 4 : (this.time * 0.9) % (Math.PI * 2);
+    mat.opacity = Math.min(1, this.reticleShow * 1.2) * (0.82 + 0.18 * lock);
+    sp.visible = true;
   }
 
   /** Kleber ohne Ziel: Klecks auf die Fahrbahn, nach ihrer Neigung gelegt (hint: Abschnitt in der Nähe). */
@@ -2640,6 +2972,17 @@ export class RaceScene {
         root.updateMatrix();
         pose.glueAim = this.gunAim.copy(aimed.visual.root.position).setY(aimed.visual.root.position.y + 1).applyMatrix4(this.m1.copy(root.matrix).invert());
       }
+      // Enterhaken: Zeit seit dem Auslösen (weich); ab dem Wurf schaut und greift die Figur dorthin, wohin die Leine führt
+      // (im Raum dieses Karts; das Ziel steht dort, wo es zuletzt gezeigt wurde).
+      k.hookT = followTicks(k.hookT, e.hook, dt);
+      pose.hook = k.hookT;
+      pose.hookAim = null;
+      if (e.hook > HOOK_SWING_TICKS) {
+        root.updateMatrix();
+        pose.hookAim = this.hookPoint(e, this.hookAimL).applyMatrix4(this.m1.copy(root.matrix).invert());
+        // (hookPoint kann die Verdrehung für eine andere Stelle eingestellt haben – der Schatten unten braucht die des Karts.)
+        if (twistK) this.twistTurn(e.x, e.z, e.seg);
+      }
       k.visual.update(dt, pose);
       // Roboter: jeder aufgesetzte Fuß wirbelt Staub auf und stampft.
       if (k.visual.robotSteps !== k.robotSteps) {
@@ -2718,6 +3061,7 @@ export class RaceScene {
     this.things.update(things, dt, this.time, this.fx);
     this.goldDeflect(things);
     this.glueFlights(entities, me, dt);
+    this.hookRopes(entities, me, dt);
     this.things.updateHazards(race.hostTick, this.time);
     for (const m of this.mechanics) {
       m.update(race.time, this.time, dt, this.camera.position, this.fx);
@@ -2772,7 +3116,8 @@ export class RaceScene {
     this.updateCamera(me, meView, race, dt);
     // Tempostriche: voll bei Schub, sonst bei hohem Tempo – und im Windschatten wachsen sie mit der Ladung.
     const wake = me ? (me.draft >= DRAFT_PULL_FROM ? 0.8 : (me.draft / DRAFT_FULL) * 0.5) : 0;
-    const fast = me ? Math.max(wake, me.boost > 0 || me.tow > 0 ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
+    // (Am Enterhaken: voll, solange die Leine zieht.)
+    const fast = me ? Math.max(wake, me.boost > 0 || me.tow > 0 || me.hook > HOOK_LATCH ? 1 : Math.hypot(me.vx, me.vz) > V_MAX * 1.08 ? 0.45 : 0) : 0;
     this.speedLines.update(dt, this.time, fast, this.camera.aspect);
     this.world.update(this.time, dt, this.camera.position, race.boxes, this.fx, this.mechTime);
     if (this.needsCompile) {
@@ -2787,8 +3132,10 @@ export class RaceScene {
       this.needsCompile = false;
       this.phase = 'beim Übersetzen der Grafikprogramme';
       this.glueShots?.park();
+      this.grapples?.park();
       this.renderer.compile(this.scene, this.camera);
       this.glueShots?.unpark();
+      this.grapples?.unpark();
     }
     this.phase = 'beim Zeichnen';
     this.renderer.render(this.scene, this.camera);
@@ -3111,7 +3458,7 @@ export class RaceScene {
     if (this.cockpit.active) {
       const seg = me.seg < t.total ? me.seg : 0;
       const wall = me.respawn === 0 && (t.edge[seg] & (EDGE_TWIST | EDGE_DRUM)) !== 0;
-      this.cockpit.place(cam, k.visual.cockpit, k.char, Math.hypot(me.vx, me.vz) / V_MAX, me.boost > 0 || me.tow > 0, dt, {
+      this.cockpit.place(cam, k.visual.cockpit, k.char, Math.hypot(me.vx, me.vz) / V_MAX, me.boost > 0 || me.tow > 0 || me.hook > HOOK_LATCH, dt, {
         drift: (me.flags & FLAG_AIR) !== 0 ? 0 : me.driftDir,
         stage: k.driftStage,
         loose: (me.flags & FLAG_AIR) === 0 && DUST[t.surf[seg]] !== 0,
@@ -3229,7 +3576,7 @@ export class RaceScene {
     cam.rotateZ(-k.steer * 0.035 * Math.min(1, frac) - me.driftDir * 0.03);
     this.applyShake(dt);
 
-    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : 0) + this.camGlide * 5;
+    const wantFov = 60 + frac * 7 + (me.tow > 0 ? 8 : me.boost > 0 ? 9 : me.hook > HOOK_LATCH ? 7 : 0) + this.camGlide * 5;
     this.camFov += (wantFov - this.camFov) * Math.min(1, dt * 5);
     if (Math.abs(cam.fov - this.camFov) > 0.05) {
       cam.fov = this.camFov;
@@ -3408,7 +3755,7 @@ export class RaceScene {
   }
 
   /** Für Tests: wie ein Kart gerade gezeigt wird – Maßstab und wie gold (0 … 1). */
-  kartLook(slot: number): { scale: number; gold: number; visible: boolean; robot: number; steps: number; gun: number; glue: number } | null {
+  kartLook(slot: number): { scale: number; gold: number; visible: boolean; robot: number; steps: number; gun: number; glue: number; hook: [number, number] } | null {
     const k = this.karts.get(slot);
     if (!k) return null;
     return {
@@ -3420,6 +3767,8 @@ export class RaceScene {
       steps: k.visual.robotSteps,
       gun: k.visual.gunLook,
       glue: k.visual.glueLook,
+      // Enterhaken: wie weit die rechte und die linke Hand an Haken und Leine sind (0 … 1)
+      hook: k.visual.hookLook,
     };
   }
 
