@@ -874,20 +874,20 @@ export function dropHook(s: KartState): void {
 }
 
 /**
- * Enterhaken: Wen trifft er? Den nächsten Fahrer voraus auf der Strecke, mindestens HOOK_MIN und höchstens range Meter weg
- * (gemessen am Abschnitt) – nicht, wer gerade neu aufgesetzt wird oder als Rakete fliegt. others darf s selbst enthalten;
+ * Enterhaken: Wen trifft er? Von allen Fahrern voraus, die mindestens HOOK_MIN und höchstens range Meter weg sind (gemessen
+ * am Abschnitt), den vordersten – wer dazwischen fährt, wird beim Heranziehen überholt. Nicht, wer, wer gerade neu aufgesetzt wird oder als Rakete fliegt. others darf s selbst enthalten;
  * wer im Ziel ist, lässt der Aufrufer weg. Rückgabe: Stelle in others oder −1. (Dieselbe Regel rechnet der Host beim Wurf
  * und jeder Bildschirm für sein Fadenkreuz.)
  */
 export function hookTarget(t: Track, s: KartState, others: readonly KartState[], range: number): number {
   let best = -1;
-  let bestGap = Infinity;
+  let bestGap = -Infinity;
   if (!(s.seg >= 0 && s.seg < t.total)) return -1;
   for (let i = 0; i < others.length; i++) {
     const o = others[i];
     if (o === s || o.respawn > 0 || o.rocket > 0 || !(o.seg >= 0 && o.seg < t.total)) continue;
     const gap = segDelta(t, s.seg, o.seg) * t.step;
-    if (gap < HOOK_MIN || gap > range || gap >= bestGap) continue;
+    if (gap < HOOK_MIN || gap > range || gap <= bestGap) continue;
     best = i;
     bestGap = gap;
   }
